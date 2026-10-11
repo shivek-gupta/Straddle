@@ -415,19 +415,21 @@ class StraddleManager:
                 try:
                     with open(STRADDLE_STRATEGIES_FILE, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        if isinstance(data, list) and len(data) > 0:
+                        if isinstance(data, list):
                             self._strategies = data
                         else:
-                            self._strategies = list(DEFAULT_STRATEGIES)
+                            self._strategies = []
                 except Exception as e:
                     logger.error(f"Failed to load straddle strategies: {e}")
-                    self._strategies = list(DEFAULT_STRATEGIES)
+                    self._strategies = []
             else:
-                self._strategies = list(DEFAULT_STRATEGIES)
+                self._strategies = []
                 self._save_strategies()
 
             if self._strategies:
                 self._active_strategy_id = self._strategies[0].get("strategy_id")
+            else:
+                self._active_strategy_id = None
 
     def _save_strategies(self):
         with _ENGINE_LOCK:

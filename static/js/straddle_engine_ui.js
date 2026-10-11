@@ -5304,3 +5304,63 @@ window.closeAddStraddleAlgoModal = closeAddStraddleAlgoModal;
 window.submitCreateNewStraddleAlgo = submitCreateNewStraddleAlgo;
 window.syncAndResetKotakNeoData = syncAndResetKotakNeoData;
 window.showStraddleToast = showStraddleToast;
+
+// Option chain & Logs exports
+window.openStraddleOptionChainModal = openStraddleOptionChainModal;
+window.closeStraddleOptionChainModal = closeStraddleOptionChainModal;
+window.onChangeOptChainUnderlying = onChangeOptChainUnderlying;
+window.loadStraddleOptionChain = loadStraddleOptionChain;
+window.openStraddleLogsModal = openStraddleLogsModal;
+window.closeStraddleLogsModal = closeStraddleLogsModal;
+window.renderStraddleAuditLogs = renderStraddleAuditLogs;
+
+// P&L Chart exports
+window.loadStraddlePnlChart = loadStraddlePnlChart;
+window.drawPnlCanvas = drawPnlCanvas;
+window.selectPnlEntity = selectPnlEntity;
+window.setPnlChartType = setPnlChartType;
+
+// Strategy Builder & Terminal exports
+window.toggleStraddleSettingsPanel = toggleStraddleSettingsPanel;
+window.saveStraddleStrategySettings = saveStraddleStrategySettings;
+window.saveAsNewStraddlePreset = saveAsNewStraddlePreset;
+window.saveAndStartStraddleTrade = saveAndStartStraddleTrade;
+window.toggleAlgoBuilderSection = toggleAlgoBuilderSection;
+window.addStraddleLegRow = addStraddleLegRow;
+window.removeStraddleLegRow = removeStraddleLegRow;
+window.onStraddleStrategySelect = onStraddleStrategySelect;
+window.straddleShowBrokerInfo = straddleShowBrokerInfo;
+window.straddleStartAlgo = straddleStartAlgo;
+window.straddleTerminateAlgo = straddleTerminateAlgo;
+window.straddleSquareOffAllAndTerminate = straddleSquareOffAllAndTerminate;
+window.straddleSquareOffSelectedLegs = straddleSquareOffSelectedLegs;
+
+// Bulk Algos actions
+window.toggleSelectAllStraddleAlgos = toggleSelectAllStraddleAlgos;
+window.bulkToggleSelectedAlgos = bulkToggleSelectedAlgos;
+window.bulkResetSelectedAlgos = bulkResetSelectedAlgos;
+window.bulkDuplicateSelectedAlgos = bulkDuplicateSelectedAlgos;
+window.bulkSetDaysSelectedAlgos = bulkSetDaysSelectedAlgos;
+window.bulkDeleteSelectedAlgos = bulkDeleteSelectedAlgos;
+window.clearAllSelectedAlgos = clearAllSelectedAlgos;
+
+// Direct Order modal exports
+window.openStraddleDirectOrderModal = openStraddleDirectOrderModal;
+window.closeStraddleDirectOrderModal = closeStraddleDirectOrderModal;
+window.submitStraddleDirectOrder = submitStraddleDirectOrder;
+window.adjustOrderQuantity = adjustOrderQuantity;
+window.setOrderModalSide = setOrderModalSide;
+window.setOrderModalType = setOrderModalType;
+window.setOrderModalProduct = setOrderModalProduct;
+window.onDirectOrderQuantityChange = onDirectOrderQuantityChange;
+window.updateOrderMarginSummary = updateOrderMarginSummary;
+window.syncDirectOrderFunds = syncDirectOrderFunds;
+
+// Positions exports
+window.loadStraddleOpenPositions = loadStraddleOpenPositions;
+window.renderStraddleOpenPositionsTable = renderStraddleOpenPositionsTable;
+window.setStraddlePositionsViewFilter = setStraddlePositionsViewFilter;
+window.confirmSquareOffAllOpenPositions = confirmSquareOffAllOpenPositions;
+window.clearStraddleClosedAndExpiredPositions = clearStraddleClosedAndExpiredPositions;
+window.loadStraddleMargin = loadStraddleMargin;
+
