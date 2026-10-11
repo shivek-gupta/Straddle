@@ -143,7 +143,7 @@
 
                     <div id="straddlePositionsSummaryControls" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                         <input type="text" id="openPositionsSearch" class="straddle-input" placeholder="Search symbol, product, algo..." style="width:200px; font-size:11.5px;" oninput="renderStraddleOpenPositionsTable()">
-                        <button type="button" class="straddle-btn btn-primary" id="btnSyncKotak NeoData" style="padding:5px 14px; font-size:11.5px; background:linear-gradient(135deg, #0284c7, #2563eb); border:none; box-shadow:0 0 10px rgba(37,99,235,0.4);" onclick="syncAndResetKotak NeoData()">⚡ Sync Kotak Neo Data</button>
+                        <button type="button" class="straddle-btn btn-primary" id="btnSyncKotakNeoData" style="padding:5px 14px; font-size:11.5px; background:linear-gradient(135deg, #0284c7, #2563eb); border:none; box-shadow:0 0 10px rgba(37,99,235,0.4);" onclick="syncAndResetKotakNeoData()">⚡ Sync Kotak Neo Data</button>
                         <button type="button" class="straddle-btn btn-outline" style="padding:5px 12px; font-size:11.5px;" onclick="loadStraddleOpenPositions()">🔄 Refresh</button>
                         <button type="button" class="straddle-btn btn-outline" style="padding:5px 12px; font-size:11.5px; border-color:#f59e0b; color:#f59e0b;" onclick="clearStraddleClosedAndExpiredPositions()">🧹 Clear Closed / Expired</button>
                         <button type="button" class="straddle-btn btn-danger" style="padding:5px 14px; font-size:11.5px; font-weight:700;" onclick="confirmSquareOffAllOpenPositions()">⏹ Square Off All</button>
@@ -1811,6 +1811,17 @@
             updateKotakAuthStatus();
             updateGitStatus();
             setInterval(updateKotakAuthStatus, 25000);
+
+            // Initialize Straddle Platform and render algos
+            if (typeof initStraddlePlatform === "function") {
+                initStraddlePlatform().then(() => {
+                    if (typeof switchStraddleSubView === "function") {
+                        switchStraddleSubView("algos");
+                    }
+                }).catch(err => {
+                    console.error("Straddle init failed:", err);
+                });
+            }
 
             setInterval(() => {
                 const state = window._straddleState;

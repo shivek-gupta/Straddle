@@ -2271,9 +2271,9 @@ function switchOrderbookSubTab(tab) {
     }
 }
 
-async function syncAndResetKotak NeoData() {
-    const btn1 = document.getElementById("btnSyncKotak NeoData");
-    const btn2 = document.getElementById("btnOrderbookSyncKotak Neo");
+async function syncAndResetKotakNeoData() {
+    const btn1 = document.getElementById("btnSyncKotakNeoData");
+    const btn2 = document.getElementById("btnOrderbookSyncKotakNeo");
     const orig1 = btn1 ? btn1.innerHTML : "";
     const orig2 = btn2 ? btn2.innerHTML : "";
 
@@ -5293,3 +5293,14 @@ window.onRectifyParamChange = onRectifyParamChange;
 window.applyRectifyAutoFitLots = applyRectifyAutoFitLots;
 window.submitRectifyLeg = submitRectifyLeg;
 window.refreshLiveWalletMarginInModal = refreshLiveWalletMarginInModal;
+
+// Core platform exports
+window.initStraddlePlatform = initStraddlePlatform;
+window.fetchStraddleState = fetchStraddleState;
+window.switchStraddleSubView = switchStraddleSubView;
+window.renderStraddleAlgosTable = renderStraddleAlgosTable;
+window.openAddStraddleAlgoModal = openAddStraddleAlgoModal;
+window.closeAddStraddleAlgoModal = closeAddStraddleAlgoModal;
+window.submitCreateNewStraddleAlgo = submitCreateNewStraddleAlgo;
+window.syncAndResetKotakNeoData = syncAndResetKotakNeoData;
+window.showStraddleToast = showStraddleToast;
