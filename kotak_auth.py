@@ -41,7 +41,14 @@ def today_ist_str() -> str:
 _AUTH_LOCK = threading.Lock()
 _ACTIVE_CLIENT: Optional[NeoAPI] = None
 _LAST_LOGIN_ATTEMPT: float = 0.0
-_COOLDOWN_SECONDS: float = 30.0
+_COOLDOWN_SECONDS: float = 10.0
+_LAST_AUTH_ERROR: str = ""
+
+
+def get_last_auth_error() -> str:
+    """Return the last authentication error message."""
+    global _LAST_AUTH_ERROR
+    return _LAST_AUTH_ERROR
 
 
 def send_telegram_notification(message: str) -> bool:
@@ -104,7 +111,7 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
     Retrieve authenticated NeoAPI client instance.
     If session is missing or expired, performs automated TOTP login.
     """
-    global _ACTIVE_CLIENT, _LAST_LOGIN_ATTEMPT
+    global _ACTIVE_CLIENT, _LAST_LOGIN_ATTEMPT, _LAST_AUTH_ERROR
 
     with _AUTH_LOCK:
         if not force and _ACTIVE_CLIENT is not None:
@@ -112,19 +119,35 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
 
         creds = config.get_kotak_credentials()
         consumer_key = creds.get("consumer_key", "").strip()
-        consumer_secret = creds.get("consumer_secret", "").strip()
         mobile = creds.get("mobile_number", "").strip()
         ucc = creds.get("ucc", "").strip()
         mpin = creds.get("mpin", "").strip()
         totp_key = creds.get("totp_key", "").strip()
         env = creds.get("environment", "prod").strip()
 
-        if not consumer_key or not consumer_secret:
-            logger.warning("[Kotak Auth] Consumer Key or Consumer Secret not configured.")
+        if not consumer_key:
+            _LAST_AUTH_ERROR = "Consumer Key is missing. Please enter your Kotak Neo Consumer Key."
+            logger.warning(f"[Kotak Auth] {_LAST_AUTH_ERROR}")
             return None
 
-        if not mobile or not mpin or not totp_key:
-            logger.warning("[Kotak Auth] Mobile, MPIN, or TOTP Key missing. Required for auto-login.")
+        if not mobile:
+            _LAST_AUTH_ERROR = "Registered Mobile Number is missing."
+            logger.warning(f"[Kotak Auth] {_LAST_AUTH_ERROR}")
+            return None
+
+        if not ucc:
+            _LAST_AUTH_ERROR = "UCC (Client Code) is missing."
+            logger.warning(f"[Kotak Auth] {_LAST_AUTH_ERROR}")
+            return None
+
+        if not mpin:
+            _LAST_AUTH_ERROR = "MPIN (6-digit) is missing."
+            logger.warning(f"[Kotak Auth] {_LAST_AUTH_ERROR}")
+            return None
+
+        if not totp_key:
+            _LAST_AUTH_ERROR = "TOTP Secret Key (Base32) is missing."
+            logger.warning(f"[Kotak Auth] {_LAST_AUTH_ERROR}")
             return None
 
         # Check cooldown to prevent hammering on repeated failures
@@ -134,14 +157,23 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
             return _ACTIVE_CLIENT
 
         _LAST_LOGIN_ATTEMPT = now_ts
+        _LAST_AUTH_ERROR = ""
 
-        print(f"[{now_ist().strftime('%H:%M:%S')}] [KOTAK-AUTH] Initiating automated TOTP login for UCC: {ucc or mobile}...")
+        # Format mobile number to ensure +91 prefix
+        clean_mobile = mobile.strip()
+        if clean_mobile.startswith("+91"):
+            pass
+        elif clean_mobile.startswith("91") and len(clean_mobile) == 12:
+            clean_mobile = "+" + clean_mobile
+        elif len(clean_mobile) == 10:
+            clean_mobile = "+91" + clean_mobile
+
+        print(f"[{now_ist().strftime('%H:%M:%S')}] [KOTAK-AUTH] Initiating automated TOTP login for UCC: {ucc} (Mobile: {clean_mobile})...")
 
         try:
-            # 1. Initialize NeoAPI
+            # 1. Initialize NeoAPI (v3 SDK only requires consumer_key and environment)
             client = NeoAPI(
                 consumer_key=consumer_key,
-                consumer_secret=consumer_secret,
                 environment=env
             )
 
@@ -151,17 +183,28 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
 
             # 3. Call totp_login
             login_res = client.totp_login(
-                mobile_number=mobile,
-                ucc=ucc if ucc else None,
+                mobile_number=clean_mobile,
+                ucc=ucc,
                 totp=totp_code
             )
             logger.info(f"[Kotak Auth] Step 1 totp_login response: {login_res}")
+
+            if isinstance(login_res, dict) and "error" in login_res:
+                err_items = login_res.get("error", [])
+                err_text = "; ".join([e.get("message", str(e)) for e in err_items]) if isinstance(err_items, list) else str(err_items)
+                raise RuntimeError(f"TOTP Login failed: {err_text}")
 
             # 4. Call totp_validate with MPIN
             val_res = client.totp_validate(mpin=mpin)
             logger.info(f"[Kotak Auth] Step 2 totp_validate response: {val_res}")
 
+            if isinstance(val_res, dict) and "error" in val_res:
+                err_items = val_res.get("error", [])
+                err_text = "; ".join([e.get("message", str(e)) for e in err_items]) if isinstance(err_items, list) else str(err_items)
+                raise RuntimeError(f"MPIN Validation failed: {err_text}")
+
             _ACTIVE_CLIENT = client
+            _LAST_AUTH_ERROR = ""
 
             session_data = {
                 "is_authenticated": True,
@@ -180,6 +223,7 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
             return _ACTIVE_CLIENT
 
         except Exception as e:
+            _LAST_AUTH_ERROR = str(e)
             logger.error(f"[Kotak Auth] Auto-login failed: {e}")
             err_msg = "Kotak Neo Auto-Login Failed\nError: " + str(e) + "\nTime: " + now_ist().strftime("%d-%b-%Y %H:%M:%S IST")
             send_telegram_notification(err_msg)
@@ -190,7 +234,7 @@ def get_auth_status() -> Dict[str, Any]:
     """Return comprehensive status for Web UI and health monitoring."""
     creds = config.get_kotak_credentials()
     session = get_cached_session()
-    has_creds = bool(creds.get("consumer_key") and creds.get("mobile_number") and creds.get("totp_key"))
+    has_creds = bool(creds.get("consumer_key") and creds.get("mobile_number") and creds.get("ucc") and creds.get("totp_key") and creds.get("mpin"))
     is_active = (_ACTIVE_CLIENT is not None) or (session.get("is_authenticated") and session.get("date") == today_ist_str())
 
     return {
@@ -202,32 +246,33 @@ def get_auth_status() -> Dict[str, Any]:
         "masked_mobile": (creds.get("mobile_number", "")[:2] + "****" + creds.get("mobile_number", "")[-4:]) if len(creds.get("mobile_number", "")) >= 6 else "Not set",
         "has_totp_key": bool(creds.get("totp_key")),
         "has_mpin": bool(creds.get("mpin")),
-        "environment": creds.get("environment", "prod")
+        "environment": creds.get("environment", "prod"),
+        "last_error": _LAST_AUTH_ERROR
     }
 
 
 def start_morning_scheduler():
-    """Background daemon thread for daily 08:45 AM token refresh."""
+    """Background daemon thread for daily 08:15 AM token refresh."""
     def _loop():
-        logger.info("[Scheduler] Kotak Neo 08:45 AM morning auth scheduler started.")
+        logger.info("[Scheduler] Kotak Neo 08:15 AM morning auth scheduler started.")
         while True:
             try:
                 now = now_ist()
-                if now.weekday() < 5:
-                    target_time = now.replace(hour=8, minute=45, second=0, microsecond=0)
+                if now.weekday() < 5:  # Monday to Friday
+                    target_time = now.replace(hour=8, minute=15, second=0, microsecond=0)
                     if now < target_time:
                         sleep_seconds = (target_time - now).total_seconds()
                     else:
                         if not is_session_active_for_today():
-                            logger.info("[Scheduler] Session missing for today. Triggering catch-up login...")
+                            logger.info("[Scheduler] Triggering daily 08:15 AM Kotak Neo automated login...")
                             get_authenticated_client(force=True)
                         tomorrow = now + datetime.timedelta(days=1)
-                        target_tomorrow = tomorrow.replace(hour=8, minute=45, second=0, microsecond=0)
+                        target_tomorrow = tomorrow.replace(hour=8, minute=15, second=0, microsecond=0)
                         sleep_seconds = (target_tomorrow - now).total_seconds()
                     
                     time.sleep(min(sleep_seconds, 300))
                 else:
-                    time.sleep(3600)
+                    time.sleep(3600)  # Weekend check every hour
             except Exception as e:
                 logger.error(f"[Scheduler] Exception in morning scheduler: {e}")
                 time.sleep(60)

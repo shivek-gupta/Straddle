@@ -43,7 +43,9 @@ app.config["SECRET_KEY"] = config.SECRET_KEY
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    creds = config.get_kotak_credentials()
+    auth_status = kotak_auth.get_auth_status()
+    return render_template("index.html", creds=creds, auth_status=auth_status)
 
 
 # ==========================================================
@@ -65,7 +67,8 @@ def api_kotak_login():
         client = kotak_auth.get_authenticated_client(force=True)
         if client:
             return jsonify({"success": True, "message": "Authenticated with Kotak Neo successfully!"})
-        return jsonify({"success": False, "error": "Login failed. Please check credentials."}), 400
+        err = kotak_auth.get_last_auth_error() or "Login failed. Please verify credentials and whitelist IP."
+        return jsonify({"success": False, "error": err}), 400
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -78,6 +81,26 @@ def api_kotak_save_credentials():
         if ok:
             return jsonify({"success": True, "message": "Kotak Neo credentials saved successfully."})
         return jsonify({"success": False, "error": "Failed to save credentials."}), 500
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/kotak/credentials", methods=["GET"])
+def api_kotak_credentials():
+    try:
+        creds = config.get_kotak_credentials()
+        return jsonify({
+            "success": True,
+            "credentials": {
+                "consumer_key": creds.get("consumer_key", ""),
+                "consumer_secret": creds.get("consumer_secret", ""),
+                "mobile_number": creds.get("mobile_number", ""),
+                "ucc": creds.get("ucc", ""),
+                "mpin": creds.get("mpin", ""),
+                "totp_key": creds.get("totp_key", ""),
+                "environment": creds.get("environment", "prod")
+            }
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -696,28 +719,32 @@ def _execute_safe_git_pull_operation():
                 except Exception:
                     pass
 
-    # 2. Fetch all
-    subprocess.run(["git", "fetch", "--all"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True, timeout=60)
+    # 2. Check if a git remote is configured
+    rem_chk = subprocess.run(["git", "remote"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
+    has_remote = bool(rem_chk.stdout.strip())
 
-    # 3. Reset
-    res = subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True, timeout=30)
-    if res.returncode != 0:
-        res = subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True, timeout=30)
+    if has_remote:
+        subprocess.run(["git", "fetch", "--all"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True, timeout=60)
+        res = subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True, timeout=30)
+        if res.returncode != 0:
+            res = subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True, timeout=30)
+        out = (res.stdout or "") + "\n" + (res.stderr or "")
+        success = (res.returncode == 0)
+    else:
+        out = "Standalone mode: Local files are up-to-date. Data snapshot reconciled. Reloading server..."
+        success = True
 
-    out = (res.stdout or "") + "\n" + (res.stderr or "")
+    # 3. Restore snapshots
+    for rel, b_data in data_snapshots.items():
+        dest_p = config.PROJECT_ROOT / rel
+        try:
+            dest_p.parent.mkdir(parents=True, exist_ok=True)
+            with open(dest_p, "wb") as f_out:
+                f_out.write(b_data)
+        except Exception as e_rest:
+            out += f"\nNote restoring {rel}: {e_rest}"
 
-    # 4. Restore snapshots
-    if res.returncode == 0:
-        for rel, b_data in data_snapshots.items():
-            dest_p = config.PROJECT_ROOT / rel
-            try:
-                dest_p.parent.mkdir(parents=True, exist_ok=True)
-                with open(dest_p, "wb") as f_out:
-                    f_out.write(b_data)
-            except Exception as e_rest:
-                out += f"\nNote restoring {rel}: {e_rest}"
-
-    return (res.returncode == 0), out
+    return success, out
 
 
 @app.route("/api/system/git_pull", methods=["POST"])

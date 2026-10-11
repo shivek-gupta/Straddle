@@ -20,9 +20,9 @@
 
         <div class="straddle-header-controls">
             <!-- Kotak Auth Status Pill -->
-            <div id="kotakAuthStatusPill" class="straddle-auth-pill" onclick="openKotakSettingsModal()" title="Click to view/edit Kotak Neo credentials">
-                <span id="kotakAuthDot">🟢</span>
-                <span id="kotakAuthLabel">Kotak Neo: Checking...</span>
+            <div id="kotakAuthStatusPill" class="straddle-auth-pill {% if not (auth_status and auth_status.is_authenticated) %}disconnected{% endif %}" onclick="openKotakSettingsModal()" title="Click to view/edit Kotak Neo credentials">
+                <span id="kotakAuthDot">{% if auth_status and auth_status.is_authenticated %}🟢{% elif auth_status and auth_status.configured %}🟡{% else %}🔴{% endif %}</span>
+                <span id="kotakAuthLabel">{% if auth_status and auth_status.is_authenticated %}Kotak Neo: Active ({{ auth_status.ucc or 'Live' }}){% elif auth_status and auth_status.configured %}Kotak Neo: Ready to Login{% else %}Kotak Neo: Not Configured{% endif %}</span>
             </div>
 
             <!-- Net MTM Pill -->
@@ -1503,37 +1503,41 @@
                 <button type="button" class="straddle-modal-close" onclick="closeKotakSettingsModal()">✕</button>
             </div>
             <div class="straddle-modal-body">
-                <p style="font-size:12px; color:#94a3b8; margin-bottom:14px; line-height:1.4;">
+                <p style="font-size:12px; color:#94a3b8; margin-bottom:12px; line-height:1.4;">
                     Configure your Kotak Neo Trade API credentials for automated headless login with TOTP.
-                    Session tokens are refreshed automatically every morning at <b>08:45 AM IST</b>.
+                    Session tokens are refreshed automatically every morning at <b>08:15 AM IST</b>.
                 </p>
+                <div style="background:rgba(56, 189, 248, 0.08); border:1px solid rgba(56, 189, 248, 0.25); border-radius:6px; padding:9px 12px; margin-bottom:12px; font-size:11.5px; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                    <span>🌐</span>
+                    <span>Your current Public IP is <strong style="color:#f8fafc;">183.83.158.134</strong>. Please whitelist this IP as <b>Primary IPv4</b> in your Kotak Neo Trade API dashboard!</span>
+                </div>
                 <div style="display:flex; flex-direction:column; gap:10px;">
                     <div>
-                        <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Consumer Key</label>
-                        <input type="text" id="cfgKotakConsumerKey" class="straddle-form-input" placeholder="e.g. your-consumer-key-token">
+                        <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Consumer Key <span style="color:#ef4444;">*</span></label>
+                        <input type="text" id="cfgKotakConsumerKey" class="straddle-form-input" value="{{ creds.consumer_key or '' }}" placeholder="e.g. c3db05a3-e6cd-4cde-90ae-66328a93b54c">
                     </div>
                     <div>
-                        <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Consumer Secret</label>
-                        <input type="password" id="cfgKotakConsumerSecret" class="straddle-form-input" placeholder="e.g. your-consumer-secret">
+                        <label style="font-size:11px; font-weight:700; color:#94a3b8;">Consumer Secret <span style="color:#64748b; font-weight:normal;">(Optional - Not needed in new Kotak Neo API)</span></label>
+                        <input type="password" id="cfgKotakConsumerSecret" class="straddle-form-input" value="{{ creds.consumer_secret or '' }}" placeholder="Leave empty for new Kotak Neo API">
                     </div>
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                         <div>
-                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Mobile Number</label>
-                            <input type="text" id="cfgKotakMobile" class="straddle-form-input" placeholder="e.g. 9999784319">
+                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Mobile Number <span style="color:#ef4444;">*</span></label>
+                            <input type="text" id="cfgKotakMobile" class="straddle-form-input" value="{{ creds.mobile_number or '' }}" placeholder="e.g. 9876543210">
                         </div>
                         <div>
-                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">UCC (Client Code)</label>
-                            <input type="text" id="cfgKotakUcc" class="straddle-form-input" placeholder="e.g. 144766">
+                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">UCC (Client Code) <span style="color:#ef4444;">*</span></label>
+                            <input type="text" id="cfgKotakUcc" class="straddle-form-input" value="{{ creds.ucc or '' }}" placeholder="e.g. 144766">
                         </div>
                     </div>
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                         <div>
-                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">MPIN (6-Digit PIN)</label>
-                            <input type="password" id="cfgKotakMpin" class="straddle-form-input" placeholder="6-digit MPIN">
+                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">MPIN (6-Digit PIN) <span style="color:#ef4444;">*</span></label>
+                            <input type="password" id="cfgKotakMpin" class="straddle-form-input" value="{{ creds.mpin or '' }}" placeholder="6-digit login MPIN">
                         </div>
                         <div>
-                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">TOTP Secret Key (Base32)</label>
-                            <input type="text" id="cfgKotakTotpKey" class="straddle-form-input" placeholder="e.g. 55U7MO4R2JMZALZ...">
+                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">TOTP Secret Key (Base32) <span style="color:#ef4444;">*</span></label>
+                            <input type="text" id="cfgKotakTotpKey" class="straddle-form-input" value="{{ creds.totp_key or '' }}" placeholder="32-char alphanumeric secret key">
                         </div>
                     </div>
                 </div>
@@ -1627,8 +1631,23 @@
             }
         }
 
-        function openKotakSettingsModal() {
+        async function openKotakSettingsModal() {
             document.getElementById("modalKotakSettings").style.display = "flex";
+            try {
+                const res = await fetch("/api/kotak/credentials");
+                const d = await res.json();
+                if (d.success && d.credentials) {
+                    const c = d.credentials;
+                    if (c.consumer_key) document.getElementById("cfgKotakConsumerKey").value = c.consumer_key;
+                    if (c.consumer_secret) document.getElementById("cfgKotakConsumerSecret").value = c.consumer_secret;
+                    if (c.mobile_number) document.getElementById("cfgKotakMobile").value = c.mobile_number;
+                    if (c.ucc) document.getElementById("cfgKotakUcc").value = c.ucc;
+                    if (c.mpin) document.getElementById("cfgKotakMpin").value = c.mpin;
+                    if (c.totp_key) document.getElementById("cfgKotakTotpKey").value = c.totp_key;
+                }
+            } catch (e) {
+                console.warn("Could not prefill credentials:", e);
+            }
         }
         function closeKotakSettingsModal() {
             document.getElementById("modalKotakSettings").style.display = "none";
@@ -1642,7 +1661,18 @@
             document.getElementById("modalSystemUpdate").style.display = "none";
         }
 
+        function safeStraddleToast(msg, type = "info") {
+            try {
+                if (typeof showStraddleToast === "function") {
+                    showStraddleToast(msg, type);
+                } else if (typeof window.showStraddleToast === "function") {
+                    window.showStraddleToast(msg, type);
+                }
+            } catch (_) {}
+        }
+
         async function saveKotakCredentials() {
+            const box = document.getElementById("kotakTestResultBox");
             const payload = {
                 consumer_key: document.getElementById("cfgKotakConsumerKey").value.trim(),
                 consumer_secret: document.getElementById("cfgKotakConsumerSecret").value.trim(),
@@ -1659,41 +1689,79 @@
                 });
                 const d = await res.json();
                 if (d.success) {
-                    showStraddleToast("Kotak Neo credentials saved successfully!", "success");
+                    if (box) {
+                        box.style.display = "block";
+                        box.style.background = "rgba(16, 185, 129, 0.15)";
+                        box.style.color = "#34d399";
+                        box.textContent = "✅ Credentials saved successfully! You can now click Login / Test Connection.";
+                    }
+                    safeStraddleToast("Kotak Neo credentials saved successfully!", "success");
                     updateKotakAuthStatus();
+                    return true;
                 } else {
-                    showStraddleToast(d.error || "Failed to save", "error");
+                    if (box) {
+                        box.style.display = "block";
+                        box.style.background = "rgba(239, 68, 68, 0.15)";
+                        box.style.color = "#f87171";
+                        box.textContent = "❌ " + (d.error || "Failed to save credentials");
+                    }
+                    safeStraddleToast(d.error || "Failed to save", "error");
+                    return false;
                 }
             } catch (e) {
-                showStraddleToast("Error saving credentials: " + e, "error");
+                if (box) {
+                    box.style.display = "block";
+                    box.style.background = "rgba(239, 68, 68, 0.15)";
+                    box.style.color = "#f87171";
+                    box.textContent = "❌ Error saving: " + e;
+                }
+                safeStraddleToast("Error saving credentials: " + e, "error");
+                return false;
             }
         }
 
         async function testKotakAuthConnection() {
             const box = document.getElementById("kotakTestResultBox");
-            box.style.display = "block";
-            box.style.background = "rgba(59, 130, 246, 0.15)";
-            box.style.color = "#60a5fa";
-            box.textContent = "Initiating automated TOTP authentication with Kotak Neo...";
+            if (box) {
+                box.style.display = "block";
+                box.style.background = "rgba(59, 130, 246, 0.15)";
+                box.style.color = "#60a5fa";
+                box.textContent = "Saving credentials and connecting to Kotak Neo...";
+            }
+
+            // Automatically save inputs first so user doesn't have to click save separately
+            const saved = await saveKotakCredentials();
+            if (!saved) return;
+
+            if (box) {
+                box.textContent = "Initiating automated TOTP authentication with Kotak Neo...";
+            }
+
             try {
                 const res = await fetch("/api/kotak/login", { method: "POST" });
                 const d = await res.json();
                 if (d.success) {
-                    box.style.background = "rgba(16, 185, 129, 0.15)";
-                    box.style.color = "#34d399";
-                    box.textContent = "✅ " + d.message;
-                    showStraddleToast("Kotak Neo logged in successfully!", "success");
+                    if (box) {
+                        box.style.background = "rgba(16, 185, 129, 0.15)";
+                        box.style.color = "#34d399";
+                        box.textContent = "✅ " + d.message;
+                    }
+                    safeStraddleToast("Kotak Neo logged in successfully!", "success");
                     updateKotakAuthStatus();
                 } else {
-                    box.style.background = "rgba(239, 68, 68, 0.15)";
-                    box.style.color = "#f87171";
-                    box.textContent = "❌ " + (d.error || "Login failed");
-                    showStraddleToast(d.error || "Login failed", "error");
+                    if (box) {
+                        box.style.background = "rgba(239, 68, 68, 0.15)";
+                        box.style.color = "#f87171";
+                        box.textContent = "❌ " + (d.error || "Login failed");
+                    }
+                    safeStraddleToast(d.error || "Login failed", "error");
                 }
             } catch (e) {
-                box.style.background = "rgba(239, 68, 68, 0.15)";
-                box.style.color = "#f87171";
-                box.textContent = "❌ Error: " + e;
+                if (box) {
+                    box.style.background = "rgba(239, 68, 68, 0.15)";
+                    box.style.color = "#f87171";
+                    box.textContent = "❌ Error: " + e;
+                }
             }
         }
 
@@ -1713,7 +1781,7 @@
                 const d = await res.json();
                 outBox.textContent = d.message + "\n" + (d.output || "");
                 if (d.success) {
-                    showStraddleToast("Pushed successfully to cloud!", "success");
+                    safeStraddleToast("Pushed successfully to cloud!", "success");
                     updateGitStatus();
                 }
             } catch (e) {
@@ -1732,7 +1800,7 @@
                 const res = await fetch("/api/system/git_pull", { method: "POST" });
                 const d = await res.json();
                 outBox.textContent = (d.message || "") + "\n" + (d.output || "");
-                showStraddleToast("Update applied! Server restarting...", "info");
+                safeStraddleToast("Update applied! Server restarting...", "info");
                 setTimeout(() => window.location.reload(), 3500);
             } catch (e) {
                 outBox.textContent = "Notice during update: " + e;

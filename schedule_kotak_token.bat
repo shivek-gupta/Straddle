@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ======================================================================
-echo KOTAK NEO 08:45 AM DAILY AUTOMATED TOKEN REFRESH
+echo KOTAK NEO 08:15 AM DAILY AUTOMATED TOKEN REFRESH
 echo ======================================================================
 echo Current Time: %DATE% %TIME%
 echo.
