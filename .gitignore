@@ -6,4 +6,5 @@ logs/
 .env
 data/*.tmp
 data/kotak_session.json
+data/kotak_credentials.json
 data/straddle_backups/

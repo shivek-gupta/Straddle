@@ -727,7 +727,16 @@ def _execute_safe_git_pull_operation():
                 except Exception:
                     pass
 
-    # 2. Check if a git remote is configured
+    # 2. Check and ensure git remote points to GitHub repository
+    try:
+        rem_get = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
+        if rem_get.returncode != 0 or not rem_get.stdout.strip():
+            subprocess.run(["git", "remote", "add", "origin", "https://github.com/shivek-gupta/Straddle.git"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
+        elif "github.com/shivek-gupta/Straddle" not in rem_get.stdout:
+            subprocess.run(["git", "remote", "set-url", "origin", "https://github.com/shivek-gupta/Straddle.git"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
+    except Exception:
+        pass
+
     rem_chk = subprocess.run(["git", "remote"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
     has_remote = bool(rem_chk.stdout.strip())
 
@@ -809,12 +818,44 @@ def api_system_restart():
 # SERVER INITIALIZATION
 # ==========================================================
 
+def _auto_git_sync_worker():
+    """Periodically check remote GitHub repository and auto-pull if updates exist."""
+    time.sleep(30)
+    while True:
+        try:
+            rem_chk = subprocess.run(["git", "remote"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
+            if rem_chk.stdout.strip():
+                subprocess.run(["git", "fetch", "origin", "main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True, timeout=30)
+                local_h = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True).stdout.strip()
+                remote_h = subprocess.run(["git", "rev-parse", "origin/main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True).stdout.strip()
+                if remote_h and local_h and remote_h != local_h:
+                    logger.info(f"[Auto-Updater] New version detected ({remote_h[:7]}). Pulling updates automatically...")
+                    success, _ = _execute_safe_git_pull_operation()
+                    if success:
+                        logger.info("[Auto-Updater] Update applied cleanly. Reloading server process...")
+                        time.sleep(2)
+                        try:
+                            subprocess.run(["sudo", "systemctl", "restart", "straddle"], timeout=10)
+                        except Exception:
+                            pass
+                        os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as e:
+            logger.debug(f"[Auto-Updater] Check notice: {e}")
+        time.sleep(300)
+
+
 def init_services():
     """Start background schedulers and auto-authentication."""
     try:
         kotak_auth.start_morning_scheduler()
     except Exception as e:
         logger.warning(f"Could not start morning scheduler: {e}")
+
+    try:
+        # Start automatic background git updater
+        Thread(target=_auto_git_sync_worker, daemon=True, name="AutoGitSyncWorker").start()
+    except Exception as e:
+        logger.warning(f"Could not start auto git sync worker: {e}")
 
     try:
         # Check authentication on startup
