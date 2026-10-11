@@ -18,6 +18,14 @@ from datetime import datetime
 from pathlib import Path
 from threading import Thread
 
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 from flask import Flask, jsonify, request, render_template, send_from_directory
 
 import config
@@ -820,7 +828,7 @@ def init_services():
 if __name__ == "__main__":
     init_services()
     print("=" * 70)
-    print("⚡ STRADDLE & STRANGLE ALGORITHMIC PLATFORM (KOTAK NEO)")
+    print("[STRADDLE PRO] STRADDLE & STRANGLE ALGORITHMIC PLATFORM (KOTAK NEO)")
     print(f"Server URL: http://{config.WEB_HOST}:{config.WEB_PORT}")
     print("=" * 70)
     app.run(host=config.WEB_HOST, port=config.WEB_PORT, debug=False, threaded=True)
