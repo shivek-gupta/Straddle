@@ -1,0 +1,1761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ STRADDLE PRO — Kotak Neo High-Speed Algorithmic Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/straddle.css">
+</head>
+<body>
+
+    <!-- TOPBAR NAVIGATION -->
+    <header class="straddle-topbar">
+        <div class="straddle-brand">
+            <span>⚡ STRADDLE PRO</span>
+            <span class="straddle-brand-badge">KOTAK NEO</span>
+        </div>
+
+        <div class="straddle-header-controls">
+            <!-- Kotak Auth Status Pill -->
+            <div id="kotakAuthStatusPill" class="straddle-auth-pill" onclick="openKotakSettingsModal()" title="Click to view/edit Kotak Neo credentials">
+                <span id="kotakAuthDot">🟢</span>
+                <span id="kotakAuthLabel">Kotak Neo: Checking...</span>
+            </div>
+
+            <!-- Net MTM Pill -->
+            <div id="topbarMtmPill" style="display:inline-flex; align-items:center; gap:6px; background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.12); padding:5px 14px; border-radius:6px; font-family:var(--font-mono); font-size:12.5px; font-weight:800;">
+                <span style="color:#94a3b8; font-size:11px;">NET MTM:</span>
+                <span id="topbarMtmVal" style="color:#38bdf8;">₹0.00</span>
+            </div>
+
+            <!-- Execution Mode Toggle -->
+            <button type="button" class="straddle-sys-btn" id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode()">
+                <span id="topbarModeIcon">⚡</span>
+                <span id="topbarModeLabel">Mode: Live Broker</span>
+            </button>
+
+            <!-- Emergency Square-Off Kill Switch -->
+            <button type="button" class="straddle-btn btn-danger" onclick="emergencySquareOffAllStraddles()" style="padding:6px 14px; font-size:11.5px; letter-spacing:0.02em;">
+                <span>🛑</span> SQUARE OFF ALL
+            </button>
+
+            <!-- Kotak Neo Credentials Modal Trigger -->
+            <button type="button" class="straddle-sys-btn" onclick="openKotakSettingsModal()" title="Configure Kotak Neo API Keys">
+                <span>⚙️</span> Kotak API
+            </button>
+
+            <!-- Git Status & Cloud Sync Trigger -->
+            <button type="button" class="straddle-sys-btn" id="gitStatusBtn" onclick="openSystemUpdateModal()" title="View Git Commits, Auto Push to GitHub & Pull Updates">
+                <span>🔄</span> <span id="gitBranchBadge">main</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN STRADDLE PLATFORM BODY -->
+    <main style="padding: 10px 16px; max-width: 1920px; margin: 0 auto;">
+<div id="straddle" class="tab-content" style="display:block">
+    <div class="straddle-wrap">
+
+        <!-- Master Sub-Navigation Bar -->
+        <div class="straddle-sub-nav">
+            <div class="straddle-sub-tabs-left">
+                <button type="button" class="straddle-sub-tab" id="straddleSubTab_open_positions" onclick="switchStraddleSubView('open_positions')">
+                    <span>⚡</span> Open Positions
+                </button>
+                <button type="button" class="straddle-sub-tab active" id="straddleSubTab_algos" onclick="switchStraddleSubView('algos')">
+                    <span>📊</span> Algos & Strategies
+                </button>
+                <button type="button" class="straddle-sub-tab" id="straddleSubTab_pnl" onclick="switchStraddleSubView('pnl')">
+                    <span>📈</span> P&L Chart
+                </button>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <!-- Underlying Live Spot & ATM Strike Ticker (Clickable to open Option Chain) -->
+                <div class="straddle-ticker-box" onclick="openStraddleOptionChainModal()" style="cursor:pointer; transition:all 0.15s ease;" title="Click to open NIFTY Option Chain">
+                    <span class="tick-label" id="straddleUnderlyingLabel" style="color:#60a5fa; text-decoration:underline;">NIFTY:</span>
+                    <span class="tick-val" id="straddleSpotPrice">₹--</span>
+                    <span style="color:rgba(255,255,255,0.2);">|</span>
+                    <span class="tick-label">ATM:</span>
+                    <span class="tick-val" id="straddleAtmStrike">--</span>
+                    <span style="font-size:10px; color:#38bdf8; margin-left:3px;">⛓️</span>
+                </div>
+
+                <!-- Total Day MTM Widget -->
+                <div class="straddle-ticker-box" style="background:#0c101a; border-color:rgba(255,255,255,0.12);">
+                    <span class="tick-label">Total MTM:</span>
+                    <span class="tick-val" id="straddleNavTotalMtm" style="color:#f43f5e; font-weight:800;">₹ 0.00</span>
+                </div>
+
+                <!-- Quick Action Buttons -->
+                <button type="button" class="straddle-btn btn-outline" style="padding:5px 12px; font-size:12px;" onclick="openStraddleLogsModal()">📜 Audit Logs</button>
+            </div>
+        </div>
+
+
+        <!-- ====================================================================
+             SUB-VIEW 0: OPEN POSITIONS & ORDERS (UNIFIED LIVE PORTFOLIO)
+             ==================================================================== -->
+        <div id="straddleSubView_open_positions" class="straddle-subview-panel" style="display:none;">
+            <!-- Top Summary Strip -->
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; gap:12px;">
+                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                    <!-- Filter Sub-Tabs -->
+                    <div style="display:flex; gap:4px; background:#111726; padding:3px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
+                        <button type="button" class="straddle-btn btn-outline active-toggle" id="btnPosFilterOpen" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('open')">
+                            🟢 Live Open (<span id="posSubCountOpen">0</span>)
+                        </button>
+                        <button type="button" class="straddle-btn btn-outline" id="btnPosFilterClosed" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('closed')">
+                            🔴 Closed Today (<span id="posSubCountClosed">0</span>)
+                        </button>
+                        <button type="button" class="straddle-btn btn-outline" id="btnPosFilterAll" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('all')">
+                            📑 All Positions (<span id="posSubCountAll">0</span>)
+                        </button>
+                        <button type="button" class="straddle-btn btn-outline" id="btnPosFilterOrders" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('orders')">
+                            📋 Orderbook Log
+                        </button>
+                        <button type="button" class="straddle-btn btn-outline" id="btnPosFilterMargin" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('margin')">
+                            💰 Funds & Margin
+                        </button>
+                    </div>
+
+                    <!-- Real-time Metrics Badges -->
+                    <div style="display:flex; align-items:center; gap:6px; background:#111726; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 10px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Open MTM:</span>
+                        <span id="openPositionsTotalMtm" style="color:#10b981; font-weight:800; font-family:var(--font-mono); font-size:12.5px;">₹ 0.00</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px; background:#111726; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 10px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Realised P&L:</span>
+                        <span id="positionsRealisedPnl" style="color:#10b981; font-weight:800; font-family:var(--font-mono); font-size:12.5px;">₹ 0.00</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px; background:#111726; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 10px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Total Net P&L:</span>
+                        <span id="positionsTotalPortfolioPnl" style="color:#10b981; font-weight:800; font-family:var(--font-mono); font-size:12.5px;">₹ 0.00</span>
+                    </div>
+                    <div id="openPositionsBrokerStatusBadge" class="straddle-mode-badge" onclick="straddleShowBrokerInfo()" style="padding:4px 12px; cursor:pointer;" title="Connected to Kotak Neo API Live Execution">
+                        <span style="width:8px; height:8px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981; display:inline-block;"></span>
+                        <span id="openPositionsBrokerText" style="font-weight:700; color:#38bdf8;">⚡ Kotak Neo Live Broker</span>
+                    </div>
+                </div>
+
+                    <div id="straddlePositionsSummaryControls" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <input type="text" id="openPositionsSearch" class="straddle-input" placeholder="Search symbol, product, algo..." style="width:200px; font-size:11.5px;" oninput="renderStraddleOpenPositionsTable()">
+                        <button type="button" class="straddle-btn btn-primary" id="btnSyncKotak NeoData" style="padding:5px 14px; font-size:11.5px; background:linear-gradient(135deg, #0284c7, #2563eb); border:none; box-shadow:0 0 10px rgba(37,99,235,0.4);" onclick="syncAndResetKotak NeoData()">⚡ Sync Kotak Neo Data</button>
+                        <button type="button" class="straddle-btn btn-outline" style="padding:5px 12px; font-size:11.5px;" onclick="loadStraddleOpenPositions()">🔄 Refresh</button>
+                        <button type="button" class="straddle-btn btn-outline" style="padding:5px 12px; font-size:11.5px; border-color:#f59e0b; color:#f59e0b;" onclick="clearStraddleClosedAndExpiredPositions()">🧹 Clear Closed / Expired</button>
+                        <button type="button" class="straddle-btn btn-danger" style="padding:5px 14px; font-size:11.5px; font-weight:700;" onclick="confirmSquareOffAllOpenPositions()">⏹ Square Off All</button>
+                    </div>
+                </div>
+
+            <!-- 1. Positions Table Card -->
+            <div id="straddleOpenPositionsCard" class="straddle-card" style="padding:0; overflow:hidden;">
+                <div class="straddle-table-wrap">
+                    <table class="straddle-table" id="straddleOpenPositionsTable">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Side</th>
+                                <th>Symbol / Contract</th>
+                                <th>Product</th>
+                                <th style="text-align:right;">Net Qty</th>
+                                <th style="text-align:right;">Buy Avg (₹)</th>
+                                <th style="text-align:right;">Sell Avg (₹)</th>
+                                <th style="text-align:right;">Net Avg (₹)</th>
+                                <th style="text-align:right;">LTP (₹)</th>
+                                <th style="text-align:right;">MTM / P&L (₹)</th>
+                                <th>Source / Strategy</th>
+                                <th style="text-align:center;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="straddleOpenPositionsTableBody">
+                            <!-- Rendered dynamically via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 2. Orderbook & Trades Section (Quantiply-Grade) -->
+            <div id="orderbookOrdersSection" style="display:none;">
+                <!-- Quantiply Orderbook Navigation Header & Tabs -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" style="padding:4px 8px; font-size:14px; border:none; background:transparent; color:#f8fafc; cursor:pointer;" title="Back to Algos">←</button>
+                        <h2 style="font-size:18px; font-weight:700; color:#f8fafc; margin:0; letter-spacing:0.3px;">Orderbook</h2>
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:6px; margin-bottom:14px;">
+                    <button type="button" class="orderbook-tab-btn active" id="btnSubTabOrderbook" onclick="switchOrderbookSubTab('orders')">Orderbook</button>
+                    <button type="button" class="orderbook-tab-btn" id="btnSubTabMargin" onclick="switchOrderbookSubTab('margin')">Margin</button>
+                </div>
+
+                <!-- Quantiply Action Strip -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:12px;">
+                    <div>
+                        <button type="button" class="orderbook-blue-btn" id="btnFetchOrderbook" onclick="loadStraddleOrderbook(true)">
+                            <span id="fetchOrderbookSpinner" style="display:none; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:middle;"></span>
+                            <span id="fetchOrderbookIcon">🔄</span> Fetch Orderbook
+                        </button>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <button type="button" class="orderbook-blue-btn" onclick="exportStraddleOrderbookCsv()">Export Orderbook</button>
+                        
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <label style="font-size:12px; color:#cbd5e1; font-weight:600; white-space:nowrap;">Select Client ID:</label>
+                            <select id="orderbookClientSelect" class="straddle-select" style="min-width:140px; background:#0f172a; border:1px solid rgba(255,255,255,0.15); color:#f8fafc; border-radius:4px; padding:5px 10px; font-size:12px;" onchange="onOrderbookClientIdChange(this.value)">
+                                <option value="ALL">All Client IDs</option>
+                                <option value="Kotak Neo Live">Kotak Neo Live</option>
+                            </select>
+                        </div>
+
+                        <div style="position:relative;">
+                            <input type="text" id="orderbookSearchInput" class="straddle-input" placeholder="🔍 Search" style="width:160px; background:#0f172a; border:1px solid rgba(255,255,255,0.15); border-radius:4px; padding:5px 10px; font-size:12px; color:#f8fafc;" oninput="renderStraddleOrderbookTable()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quantiply Orderbook Table -->
+                <div class="straddle-card" style="padding:0; overflow:hidden; border:1px solid rgba(255,255,255,0.08); background:#0b0f19;">
+                    <div class="straddle-table-wrap" style="overflow-x:auto;">
+                        <table class="straddle-table orderbook-table" id="straddleOrderbookTable">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortOrderbookBy('algo_name')">Algo name <span class="sort-icon" id="sort_algo_name">↑ ↓</span></th>
+                                    <th onclick="sortOrderbookBy('order_id')">Order ID <span class="sort-icon" id="sort_order_id">↑ ↓</span></th>
+                                    <th onclick="sortOrderbookBy('category')">Category <span class="sort-icon" id="sort_category">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('client_id')">Client ID / Broker <span class="sort-icon" id="sort_client_id">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('symbol')">Symbol <span class="sort-icon" id="sort_symbol">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('side')">Side <span class="sort-icon" id="sort_side">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('status')">Status <span class="sort-icon" id="sort_status">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('message')">Message <span class="sort-icon" id="sort_message">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('time')">Time <span class="sort-icon" id="sort_time">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('quantity')" style="text-align:right;">Qty <span class="sort-icon" id="sort_quantity">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('order_type')">Order type <span class="sort-icon" id="sort_order_type">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('source')">Source <span class="sort-icon" id="sort_source">↑ ↓</span> <span class="filter-icon">☷</span></th>
+                                    <th onclick="sortOrderbookBy('price')" style="text-align:right;">Price <span class="sort-icon" id="sort_price">↑ ↓</span></th>
+                                    <th onclick="sortOrderbookBy('trigger_price')" style="text-align:right;">Trigger Price <span class="sort-icon" id="sort_trigger_price">↑ ↓</span></th>
+                                </tr>
+                            </thead>
+                            <tbody id="straddleOrderbookTableBody">
+                                <!-- Rendered dynamically via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Kotak Neo Funds & Margin Section (Embedded) -->
+            <div id="orderbookMarginSection" class="straddle-card" style="display:none; padding:20px; background:#080c14; border:1px solid rgba(255,255,255,0.08); border-radius:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:12px;">
+                    <div>
+                        <div style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">Broker Funds & Margin Utilization</div>
+                        <div style="font-size:12px; color:#94a3b8; margin-top:2px;">Live synchronized with Kotak Neo API</div>
+                    </div>
+                    <button type="button" class="orderbook-blue-btn" onclick="loadStraddleMargin()">🔄 Refresh Funds</button>
+                </div>
+                <div id="straddleMarginCardsContainer">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ====================================================================
+             SUB-VIEW 1: ALGOS MASTER VIEW (Screenshots 4 & 5)
+             ==================================================================== -->
+        <div id="straddleSubView_algos" class="straddle-subview-panel">
+            <!-- Filter & Action Strip -->
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 14px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="display:flex; align-items:center; gap:6px; background:#111726; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 10px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Total MTM:</span>
+                        <span id="straddleAlgosTotalMtm" style="color:#f43f5e; font-weight:800; font-family:var(--font-mono); font-size:12.5px;">₹ 0.00</span>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <input type="text" id="straddleAlgosSearch" class="straddle-input" placeholder="Search by Algo name, Status..." style="width:260px;" oninput="renderStraddleAlgosTable()">
+                    <button type="button" class="straddle-btn btn-primary" onclick="openAddStraddleAlgoModal()">+ Add Algo</button>
+                </div>
+            </div>
+
+            <!-- Bulk Actions Floating Bar -->
+            <div id="straddleAlgosBulkActions" style="display:none; margin-bottom:12px; background:linear-gradient(90deg, #0f172a 0%, #1e1b4b 100%); border:1px solid #3b82f6; border-radius:8px; padding:10px 16px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; box-shadow:0 4px 14px rgba(59,130,246,0.15);">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <span id="straddleBulkSelectedCount" style="font-weight:800; font-size:12.5px; color:#60a5fa; background:rgba(59,130,246,0.18); padding:4px 12px; border-radius:12px; border:1px solid rgba(59,130,246,0.4);">0 algos selected</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <button type="button" class="straddle-btn btn-success" style="padding:4px 12px; font-size:11.5px; font-weight:700;" onclick="bulkToggleSelectedAlgos(true)">▶ Enable Selected</button>
+                    <button type="button" class="straddle-btn btn-outline" style="padding:4px 12px; font-size:11.5px; font-weight:700;" onclick="bulkToggleSelectedAlgos(false)">⏸ Disable Selected</button>
+                    <button type="button" class="straddle-btn" style="padding:4px 12px; font-size:11.5px; font-weight:700; background:#7c3aed; border-color:#8b5cf6; color:#ffffff;" onclick="bulkResetSelectedAlgos()" title="Reset selected algos to fresh clean READY state">🔄 Reset Selected</button>
+                    <button type="button" class="straddle-btn btn-primary" style="padding:4px 12px; font-size:11.5px; font-weight:700;" onclick="bulkDuplicateSelectedAlgos()">📑 Duplicate Selected</button>
+                    <button type="button" class="straddle-btn btn-outline" style="padding:4px 12px; font-size:11.5px; font-weight:700;" onclick="bulkSetDaysSelectedAlgos(['Monday','Tuesday','Wednesday','Thursday','Friday'])">📅 Set Mon-Fri</button>
+                    <button type="button" class="straddle-btn btn-danger" style="padding:4px 12px; font-size:11.5px; font-weight:700;" onclick="bulkDeleteSelectedAlgos()">🗑️ Delete Selected</button>
+                    <button type="button" class="straddle-btn btn-outline" style="padding:4px 10px; font-size:11.5px;" onclick="clearAllSelectedAlgos()">✕ Clear Selection</button>
+                </div>
+            </div>
+
+            <!-- Master Algos Table (Screenshots 4 & 5) -->
+            <div class="straddle-card" style="padding:0; overflow:hidden;">
+                <div class="straddle-table-wrap">
+                    <table class="straddle-table" id="straddleAlgosTable">
+                        <thead>
+                            <tr>
+                                <th style="width:30px; text-align:center;">
+                                    <input type="checkbox" id="straddleSelectAllAlgos" onchange="toggleSelectAllStraddleAlgos(this)">
+                                </th>
+                                <th>Enable</th>
+                                <th>Status</th>
+                                <th>Working Days</th>
+                                <th style="text-align:center;">Multiplier</th>
+                                <th style="text-align:right;">MTM (₹)</th>
+                                <th>Algo name</th>
+                                <th style="max-width:220px; min-width:120px;">Entry Error</th>
+                                <th style="max-width:220px; min-width:120px;">Exit Errors</th>
+                                <th>Start Time</th>
+                                <th>End Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="straddleAlgosTableBody">
+                            <!-- Rendered dynamically via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ====================================================================
+             SUB-VIEW 2: STRATEGY BUILDER & LIVE TERMINAL (Screenshots 1, 2, 3, 4)
+             ==================================================================== -->
+        <div id="straddleSubView_terminal" class="straddle-subview-panel" style="display:none;">
+            <!-- 1. Top Header Bar (Screenshot 1) -->
+            <div class="straddle-card straddle-header-card">
+                <div class="straddle-title-group">
+                    <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" title="Return to Algos List" style="padding:4px 10px; font-weight:800; font-size:13px; color:#93c5fd; border-color:#3b82f6; display:inline-flex; align-items:center; gap:6px;">
+                        <span>←</span>
+                    </button>
+                    <span class="straddle-title-text" id="straddleTerminalStrategyTitle">straddle</span>
+                    <span id="straddleStatusBadge" class="straddle-pill-badge straddle-badge-active">Trade Active</span>
+                    
+                    <!-- Strategy Selector Dropdown -->
+                    <div style="display:flex; align-items:center; gap:6px; margin-left:8px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">STRATEGY:</span>
+                        <select id="straddleStrategySelect" class="straddle-select" style="min-width:220px;" onchange="onStraddleStrategySelect(this.value)">
+                            <!-- Populated dynamically via JS -->
+                        </select>
+                    </div>
+
+                    <!-- Execution Mode Indicator -->
+                    <div id="straddleModeBadge" class="straddle-mode-badge" onclick="straddleShowBrokerInfo()" style="cursor:pointer;" title="Kotak Neo Live Broker Execution Active">
+                        <span id="straddleModeDot" style="width:8px; height:8px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981; display:inline-block;"></span>
+                        <span id="straddleModeText" style="font-weight:700; color:#38bdf8;">⚡ Kotak Neo Live Broker</span>
+                    </div>
+                </div>
+
+                <div class="straddle-indicators-group">
+                    <!-- Engine Running Badges (Screenshot 1) -->
+                    <span id="badgeOrderApi" class="straddle-running-badge">Order API: Running</span>
+                    <span id="badgeLiveFeed" class="straddle-running-badge">Live Feed: Running</span>
+                    <span id="badgeAlgoStatus" class="straddle-running-badge">Algo: Running</span>
+                </div>
+            </div>
+
+            <!-- 2. Live Positions Table (Screenshot 1) -->
+            <div class="straddle-card" style="padding:0; overflow:hidden;">
+                <div class="straddle-table-wrap">
+                    <table class="straddle-table" id="straddlePositionsTable">
+                        <thead>
+                            <tr>
+                                <th style="width:36px; text-align:center;">
+                                    <input type="checkbox" id="straddleSelectAllLegs" class="straddle-checkbox" onchange="toggleSelectAllStraddleLegs(this)">
+                                </th>
+                                <th>STATUS</th>
+                                <th>SIDE</th>
+                                <th>SYMBOL</th>
+                                <th>QUANTITY</th>
+                                <th>AVG ENT PRICE</th>
+                                <th>PER LEG TARGET</th>
+                                <th>PER LEG STOPLOSS</th>
+                                <th>AVG EXIT PRICE</th>
+                                <th>EXIT REASON</th>
+                                <th style="text-align:right;">LTP</th>
+                                <th style="text-align:right;">MTM (₹)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="straddlePositionsTableBody">
+                            <!-- Populated dynamically via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 3. MTM Banner Strip (Screenshot 1) -->
+            <div class="straddle-mtm-strip">
+                <div class="straddle-tgt-strip-left">
+                    <span>MTM TARGET (Total amount):</span>
+                    <span class="straddle-tgt-strip-val" id="straddleMtmTargetDisplay">₹ 4000.00</span>
+                </div>
+                <div class="straddle-mtm-strip-right">
+                    <div>
+                        <span style="color:#94a3b8; margin-right:6px;">Group MTM:</span>
+                        <span id="straddleGroupMtmDisplay" style="color:#38bdf8; font-weight:800;">0.00</span>
+                    </div>
+                    <div>
+                        <span style="color:#94a3b8; margin-right:6px;">TOTAL MTM:</span>
+                        <span id="straddleTotalMtmDisplay" style="color:#f43f5e; font-weight:800;">0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Action Control Buttons (Quantiply Multi-Strategy Action Terminal) -->
+            <div class="straddle-action-bar" id="straddleTerminalActionBar" style="margin-bottom:14px; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                <button type="button" class="straddle-btn btn-success" id="btnStraddleRetryErrors" onclick="retrySelectedStraddleLegs()" style="background:#15803d; border-color:#16a34a; font-weight:800; display:none;">🔄 Retry (1)</button>
+                <button type="button" class="straddle-btn" id="btnStraddleResetAlgo" onclick="resetCurrentStraddleAlgo()" title="Clear failed order errors and reset strategy to clean Ready state" style="background:#7c3aed; border-color:#8b5cf6; color:#ffffff; font-weight:800;">🔄 Reset Algo</button>
+                <button type="button" class="straddle-btn btn-primary" onclick="toggleStraddleSettingsPanel()" title="Open strategy parameters, execution rules & leg builder" style="background:#2563eb; border-color:#3b82f6; font-weight:800;">⚙️ Configure Settings</button>
+                <button type="button" class="straddle-btn btn-success" id="btnStraddleStartAlgo" onclick="straddleStartAlgo()" title="Start algorithm and execute strategy orders" style="font-weight:800;">▶ Start / Enable Algo</button>
+                <button type="button" class="straddle-btn btn-warning" onclick="straddleTerminateAlgo()" title="Halt strategy algorithm execution without squaring off broker positions" style="background:#b45309; border-color:#d97706; font-weight:800;">⏹ Terminate Algo</button>
+                <button type="button" class="straddle-btn btn-danger" onclick="straddleSquareOffAllAndTerminate()" title="Emergency: Square off all open broker positions immediately and stop algorithm" style="background:#ea580c; border-color:#f97316; font-weight:800;">🚨 Square Off All & Terminate</button>
+                <button type="button" class="straddle-btn btn-outline" onclick="openStraddleOptionChainModal()" title="View live option chain matrix">📊 Option Chain</button>
+                <button type="button" class="straddle-btn btn-outline" id="btnStraddleSquareOffSelected" style="margin-left:auto;" onclick="straddleSquareOffSelectedLegs()" title="Square off only the selected open leg positions">Square off selected legs</button>
+            </div>
+
+            <!-- 5. Strategy Settings & Builder Panel (Screenshots 2, 3, 4) -->
+            <div id="straddleSettingsPanel" class="straddle-settings-panel" style="display:none;">
+                <input type="hidden" id="cfgStrategyId" value="">
+                <!-- Strategy Name Header Bar -->
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:10px 14px; margin-bottom:14px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:280px;">
+                        <span style="font-size:12px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Algo Name:</span>
+                        <input type="text" id="cfgStrategyName" class="straddle-input" style="flex:1; max-width:400px; font-size:13px; font-weight:700; color:#60a5fa;" placeholder="e.g. NIFTY 9:20 Short Straddle">
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save strategy settings without placing orders">💾 Save Changes</button>
+                        <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings Drawer">✕ Close Settings</button>
+                    </div>
+                </div>
+                                      <!-- SECTION 1: POSITIONS & LEGS BUILDER (Collapsible) -->
+                <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_legs')">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="chevron_sec_builder_legs" class="chevron-icon">▼</span>
+                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">POSITIONS / LEGS</span>
+                    </div>
+                    <div style="display:flex; gap:8px;" onclick="event.stopPropagation()">
+                        <button type="button" class="straddle-btn btn-outline" style="padding:3px 8px; font-size:11px;" onclick="addStraddleLegRow()">+ Add Leg</button>
+                    </div>
+                </div>
+
+                <div id="sec_builder_legs">
+                    <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
+                        <div class="straddle-form-group" style="margin-bottom:0;">
+                            <label>Segment:</label>
+                            <select id="cfgSegment" class="straddle-select">
+                                <option value="Options" selected>Options</option>
+                                <option value="Futures">Futures</option>
+                            </select>
+                        </div>
+                        <div class="straddle-form-group" style="margin-bottom:0;">
+                            <label>Multiplier:</label>
+                            <input type="number" id="cfgMultiplier" class="straddle-input" style="width:80px;" value="1" min="1" max="100">
+                        </div>
+                        <div class="straddle-form-group" style="margin-bottom:0;">
+                            <label>Bulk edit:</label>
+                            <select id="cfgBulkEdit" class="straddle-select" onchange="applyStraddleBulkEdit(this.value)">
+                                <option value="" disabled selected>Bulk edit ▾</option>
+                                <option value="TGT_45">Set All Targets to 45%</option>
+                                <option value="SL_66">Set All Stoploss to 66%</option>
+                                <option value="EXP_WEEKLY">Set All to Weekly Expiry</option>
+                                <option value="EXP_NEXT_WEEKLY">Set All to Next Weekly Expiry</option>
+                                <option value="PROD_NRML">Set All to NRML</option>
+                                <option value="PROD_MIS">Set All to MIS (Intraday)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Dynamic Legs Table -->
+                    <div class="straddle-table-wrap" style="max-height:400px; overflow-y:auto;">
+                        <table class="straddle-legs-builder-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:30px;"></th>
+                                    <th>Side</th>
+                                    <th>Prod</th>
+                                    <th>Strike Selection</th>
+                                    <th>Type</th>
+                                    <th>Lots</th>
+                                    <th>Target</th>
+                                    <th>TGT Re-Exec</th>
+                                    <th>Stoploss</th>
+                                    <th>Trailing SL</th>
+                                    <th>SL Re-Exec</th>
+                                    <th>Action</th>
+                                    <th>Underlying</th>
+                                    <th>Expiry</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="straddleLegsBuilderBody">
+                                <!-- Leg rows generated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SECTION 2: TIMINGS & UNDERLYING SETTINGS (Collapsible) -->
+                <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_timings')">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="chevron_sec_builder_timings" class="chevron-icon">▼</span>
+                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">TIMINGS, UNDERLYING & STRATEGY TOGGLES</span>
+                    </div>
+                </div>
+
+                <div id="sec_builder_timings">
+                    <!-- Toggles Row (Screenshot 2) -->
+                    <div class="straddle-toggles-row" style="margin-bottom:12px;">
+                        <label class="straddle-checkbox-label">
+                            <input type="checkbox" id="cfgToggleMoveSlToCost"> Move SL to Cost 🔗
+                        </label>
+                        <label class="straddle-checkbox-label">
+                            <input type="checkbox" id="cfgToggleWaitAndTrade"> Wait & Trade 🔗
+                        </label>
+                        <label class="straddle-checkbox-label">
+                            <input type="checkbox" id="cfgToggleReEntry" checked> Re-Entry / Re-Cost / Re-Execute 🔗
+                        </label>
+                        <label class="straddle-checkbox-label">
+                            <input type="checkbox" id="cfgToggleRangeBreakout"> Range Breakout 🔗
+                        </label>
+                    </div>
+
+                    <!-- Underlying & Trade Type & Timings with Steppers (Screenshots 2 & 3) -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; background:#080c14; border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 16px;">
+                        <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
+                            <div class="straddle-form-group" style="margin-bottom:0;">
+                                <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Underlying:</label>
+                                <div style="display:flex; gap:4px;">
+                                    <button type="button" class="straddle-btn btn-outline active-toggle" id="btnUndSpot" onclick="setUnderlyingPriceSource('Spot')">Spot</button>
+                                    <button type="button" class="straddle-btn btn-outline" id="btnUndFutures" onclick="setUnderlyingPriceSource('Futures')">Futures</button>
+                                    <button type="button" class="straddle-btn btn-outline" id="btnUndSynthetic" onclick="setUnderlyingPriceSource('Synthetic Futures')">Synthetic Futures</button>
+                                </div>
+                            </div>
+                            <div class="straddle-form-group" style="margin-bottom:0;">
+                                <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Trade type:</label>
+                                <div style="display:flex; gap:4px;">
+                                    <button type="button" class="straddle-btn btn-outline active-toggle" id="btnTradeIntraday" onclick="setStraddleTradeType('Intraday')">Intraday</button>
+                                    <button type="button" class="straddle-btn btn-outline" id="btnTradePositional" onclick="setStraddleTradeType('Positional')">Positional</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Time Controls with Independent Hour, Minute, Second Up & Down Stepper Arrows -->
+                        <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+                            <div class="straddle-form-group" style="margin-bottom:0;">
+                                <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Start Time (HH:MM:SS):</label>
+                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:3px 6px; gap:4px;">
+                                    <!-- HH -->
+                                    <div style="display:flex; align-items:center; gap:2px;">
+                                        <input type="text" id="cfgStartTime_hh" maxlength="2" value="09" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 23)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Hour (00-23)">
+                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'hh', 1)" title="Hour +1">▲</button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'hh', -1)" title="Hour -1">▼</button>
+                                        </div>
+                                    </div>
+                                    <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
+                                    <!-- MM -->
+                                    <div style="display:flex; align-items:center; gap:2px;">
+                                        <input type="text" id="cfgStartTime_mm" maxlength="2" value="15" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 59)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Minute (00-59)">
+                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'mm', 1)" title="Minute +1">▲</button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'mm', -1)" title="Minute -1">▼</button>
+                                        </div>
+                                    </div>
+                                    <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
+                                    <!-- SS -->
+                                    <div style="display:flex; align-items:center; gap:2px;">
+                                        <input type="text" id="cfgStartTime_ss" maxlength="2" value="56" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 59)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Second (00-59)">
+                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'ss', 1)" title="Second +1">▲</button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'ss', -1)" title="Second -1">▼</button>
+                                        </div>
+                                    </div>
+                                    <input type="hidden" id="cfgStartTime" value="09:15:56">
+                                </div>
+                            </div>
+                            <div class="straddle-form-group" style="margin-bottom:0;">
+                                <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">End Time (HH:MM:SS):</label>
+                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:3px 6px; gap:4px;">
+                                    <!-- HH -->
+                                    <div style="display:flex; align-items:center; gap:2px;">
+                                        <input type="text" id="cfgEndTime_hh" maxlength="2" value="15" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 23)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Hour (00-23)">
+                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'hh', 1)" title="Hour +1">▲</button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'hh', -1)" title="Hour -1">▼</button>
+                                        </div>
+                                    </div>
+                                    <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
+                                    <!-- MM -->
+                                    <div style="display:flex; align-items:center; gap:2px;">
+                                        <input type="text" id="cfgEndTime_mm" maxlength="2" value="29" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 59)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Minute (00-59)">
+                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'mm', 1)" title="Minute +1">▲</button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'mm', -1)" title="Minute -1">▼</button>
+                                        </div>
+                                    </div>
+                                    <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
+                                    <!-- SS -->
+                                    <div style="display:flex; align-items:center; gap:2px;">
+                                        <input type="text" id="cfgEndTime_ss" maxlength="2" value="50" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 59)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Second (00-59)">
+                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'ss', 1)" title="Second +1">▲</button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'ss', -1)" title="Second -1">▼</button>
+                                        </div>
+                                    </div>
+                                    <input type="hidden" id="cfgEndTime" value="15:29:50">
+                                </div>
+                            </div>
+                        </div>
+
+                <!-- SECTION 3: MTM TARGET & MTM STOPLOSS (Collapsible) -->
+                <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_mtm')">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="chevron_sec_builder_mtm" class="chevron-icon">▼</span>
+                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">MTM TARGET & MTM STOPLOSS</span>
+                    </div>
+                </div>
+
+                <div id="sec_builder_mtm">
+                    <div class="straddle-grid-2col">
+                        <!-- MTM Target Box -->
+                        <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                            <div style="font-size:12px; font-weight:800; color:#38bdf8; margin-bottom:10px;">MTM TARGET</div>
+                            <div class="straddle-form-group">
+                                <label>Type:</label>
+                                <select id="cfgMtmTargetType" class="straddle-select">
+                                    <option value="MTM in total amount" selected>MTM in total amount</option>
+                                    <option value="MTM in %">MTM in %</option>
+                                    <option value="None">None</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Value (₹ / %):</label>
+                                <input type="number" id="cfgMtmTargetValue" class="straddle-input" value="10000">
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>MTM Re-entry:</label>
+                                <select id="cfgMtmTargetReEntry" class="straddle-select">
+                                    <option value="None" selected>None</option>
+                                    <option value="RE EXECUTE">RE EXECUTE</option>
+                                    <option value="RE ENTRY">RE ENTRY</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Action:</label>
+                                <select id="cfgMtmTargetAction" class="straddle-select">
+                                    <option value="Square off all positions" selected>Square off all positions</option>
+                                    <option value="Square off all positions & terminate algo">Square off all positions & terminate algo</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- MTM Stoploss Box -->
+                        <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                            <div style="font-size:12px; font-weight:800; color:#f43f5e; margin-bottom:10px;">MTM STOPLOSS</div>
+                            <div class="straddle-form-group">
+                                <label>Fixed Stoploss:</label>
+                                <select id="cfgMtmSlType" class="straddle-select">
+                                    <option value="None" selected>None</option>
+                                    <option value="Fixed Amount">Fixed Amount (₹)</option>
+                                    <option value="Fixed %">Fixed %</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Value (₹ / %):</label>
+                                <input type="number" id="cfgMtmSlValue" class="straddle-input" value="-5000">
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Profit lock and Trailing stoploss:</label>
+                                <select id="cfgMtmProfitLock" class="straddle-select">
+                                    <option value="None" selected>None</option>
+                                    <option value="Lock & Trail">Lock & Trail</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Action:</label>
+                                <select id="cfgMtmSlAction" class="straddle-select">
+                                    <option value="Square off all positions" selected>Square off all positions</option>
+                                    <option value="Square off all positions & terminate algo">Square off all positions & terminate algo</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 4: PREMIUM MATCHING (Collapsible) -->
+                <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_premium')">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="chevron_sec_builder_premium" class="chevron-icon">▶</span>
+                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">PREMIUM MATCHING & RANGE 🔗</span>
+                    </div>
+                </div>
+
+                <div id="sec_builder_premium" style="display:none;">
+                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                        <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
+                            <label class="straddle-checkbox-label">
+                                <input type="radio" name="prem_match_mode" id="radPremNone" value="No matching of premiums" checked> No matching of premiums 🔗
+                            </label>
+                            <label class="straddle-checkbox-label">
+                                <input type="radio" name="prem_match_mode" id="radPremMaxDiff" value="Match premiums with maximum difference"> Match premiums with max difference: 🔗
+                            </label>
+                            <input type="number" id="cfgPremMaxDiffVal" class="straddle-input" style="width:90px;" placeholder="₹ Diff">
+                            <label class="straddle-checkbox-label">
+                                <input type="radio" name="prem_match_mode" id="radPremCloseTo" value="Premium close to"> Premium close to: 🔗
+                            </label>
+                            <input type="number" id="cfgPremCloseToVal" class="straddle-input" style="width:90px;" placeholder="₹ Target">
+                            <label class="straddle-checkbox-label">
+                                <input type="radio" name="prem_match_mode" id="radPremRange" value="Premium range"> Premium range: 🔗
+                            </label>
+                            <input type="number" id="cfgPremRangeMin" class="straddle-input" style="width:70px;" placeholder="Min">
+                            <span>To</span>
+                            <input type="number" id="cfgPremRangeMax" class="straddle-input" style="width:70px;" placeholder="Max">
+                        </div>
+
+                        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">
+                            <label class="straddle-checkbox-label">
+                                <input type="checkbox" id="cfgToggleCombinedPrem"> Combined Premium: 🔗
+                            </label>
+                            <select id="cfgCombinedPremType" class="straddle-select" style="width:120px;">
+                                <option value="Lower than">Lower than</option>
+                                <option value="Higher than">Higher than</option>
+                            </select>
+                            <input type="number" id="cfgCombinedPremVal" class="straddle-input" style="width:90px;" placeholder="Value">
+                            <span style="font-size:11px; color:#94a3b8; font-weight:700;">Condition Matching Frequency:</span>
+                            <select id="cfgPremFrequency" class="straddle-select">
+                                <option value="LTP (Continuous Monitoring)" selected>LTP (Continuous Monitoring)</option>
+                                <option value="1 sec">1 sec</option>
+                                <option value="5 sec">5 sec</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 5: ADVANCED SETTINGS (Collapsible) -->
+                <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_advanced')">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="chevron_sec_builder_advanced" class="chevron-icon">▶</span>
+                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">ADVANCED SETTINGS & EXECUTION SEQUENCING 🔗</span>
+                    </div>
+                </div>
+
+                <div id="sec_builder_advanced" style="display:none;">
+                    <div class="straddle-grid-2col">
+                        <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                            <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:8px;">Entry Order Parameters</div>
+                            <div class="straddle-form-group">
+                                <label>Entry order type:</label>
+                                <select id="cfgEntryOrderType" class="straddle-select">
+                                    <option value="Limit (L) / Stoploss Limit (SL-L)" selected>Limit (L) / Stoploss Limit (SL-L)</option>
+                                    <option value="Market (MKT)">Market (MKT)</option>
+                                </select>
+                            </div>
+                            <div style="display:flex; gap:10px;">
+                                <div class="straddle-form-group" style="flex:1;">
+                                    <label>Trigger & Limit price buffer in:</label>
+                                    <select id="cfgEntryBufferType" class="straddle-select">
+                                        <option value="Percentage" selected>Percentage</option>
+                                        <option value="Points">Points</option>
+                                    </select>
+                                </div>
+                                <div class="straddle-form-group" style="width:110px;">
+                                    <label>Buffer value:</label>
+                                    <input type="number" id="cfgEntryBufferVal" class="straddle-input" value="5.0">
+                                </div>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Entry delay side (Hedge margin sequencing):</label>
+                                <select id="cfgEntryDelaySide" class="straddle-select">
+                                    <option value="Delay entry of Sell positions" selected>Delay entry of Sell positions (Buy Hedge first)</option>
+                                    <option value="Delay entry of Buy positions">Delay entry of Buy positions</option>
+                                    <option value="None">None (Simultaneous)</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Delay by (seconds):</label>
+                                <input type="number" id="cfgEntryDelaySec" class="straddle-input" value="3" min="0" max="60">
+                            </div>
+                        </div>
+
+                        <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                            <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:8px;">Exit Order Parameters</div>
+                            <div class="straddle-form-group">
+                                <label>Exit order type:</label>
+                                <select id="cfgExitOrderType" class="straddle-select">
+                                    <option value="Limit (L) / Stoploss Limit (SL-L)" selected>Limit (L) / Stoploss Limit (SL-L)</option>
+                                    <option value="Market (MKT)">Market (MKT)</option>
+                                </select>
+                            </div>
+                            <div style="display:flex; gap:10px;">
+                                <div class="straddle-form-group" style="flex:1;">
+                                    <label>Exit buffer in:</label>
+                                    <select id="cfgExitBufferType" class="straddle-select">
+                                        <option value="Percentage" selected>Percentage</option>
+                                        <option value="Points">Points</option>
+                                    </select>
+                                </div>
+                                <div class="straddle-form-group" style="width:110px;">
+                                    <label>Buffer value:</label>
+                                    <input type="number" id="cfgExitBufferVal" class="straddle-input" value="0.1">
+                                </div>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Exit delay side:</label>
+                                <select id="cfgExitDelaySide" class="straddle-select">
+                                    <option value="Delay exit of Buy positions" selected>Delay exit of Buy positions (Exit Sell first)</option>
+                                    <option value="Delay exit of Sell positions">Delay exit of Sell positions</option>
+                                    <option value="None">None</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Delay by (seconds):</label>
+                                <input type="number" id="cfgExitDelaySec" class="straddle-input" value="3" min="0" max="60">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Additional Execution Controls -->
+                    <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,0.06); padding-top:10px; margin-top:10px;">
+                        <label class="straddle-checkbox-label">
+                            <input type="checkbox" id="cfgAutoHandlingSl" checked> Auto handling of unexpected Stoploss order cancellations
+                        </label>
+                        <label class="straddle-checkbox-label">
+                            <input type="checkbox" id="cfgAutoExitMargin"> Auto exit on margin error (Exit all open positions)
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Action Save Bar -->
+                <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.1); padding-top:14px; margin-top:14px; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save all strategy settings without placing orders">💾 Save Changes</button>
+                        <button type="button" class="straddle-btn btn-outline" onclick="saveAsNewStraddlePreset()" title="Create and save as a new strategy preset clone">📑 Save as New Preset</button>
+                        <button type="button" class="straddle-btn btn-success" onclick="saveAndStartStraddleTrade()" title="Save configuration and punch live entry orders with broker">▶ Apply & Start Trade</button>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings Drawer">✕ Close Settings</button>
+                        <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" title="Return to Algos Master Table">← Back to Algos List</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ====================================================================
+             SUB-VIEW 3: P&L CHART (Screenshot 2)
+             ==================================================================== -->
+        <div id="straddleSubView_pnl" class="straddle-subview-panel" style="display:none;">
+            <!-- Header Filter Bar -->
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; gap:12px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" style="padding:4px 10px; font-size:12px;">← Algos</button>
+                    <span style="font-size:14px; font-weight:800; color:#f8fafc;">P&L Chart Analysis</span>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="display:flex; align-items:center; gap:4px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Chart type:</span>
+                        <div style="display:flex; gap:2px;">
+                            <button type="button" class="straddle-btn btn-outline active-toggle" id="btnPnlTypeLine" style="padding:3px 10px; font-size:11px;" onclick="setPnlChartType('line')">Line</button>
+                            <button type="button" class="straddle-btn btn-outline" id="btnPnlTypeCandle" style="padding:3px 10px; font-size:11px;" onclick="setPnlChartType('candle')">Candle</button>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:4px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Underlying:</span>
+                        <select id="pnlUnderlyingSelect" class="straddle-select" onchange="loadStraddlePnlChart()">
+                            <option value="None" selected>None</option>
+                            <option value="NIFTY">NIFTY</option>
+                            <option value="BANKNIFTY">BANKNIFTY</option>
+                            <option value="SENSEX">SENSEX</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Layout: Sidebar List + Canvas Chart Area -->
+            <div style="display:grid; grid-template-columns: 240px 1fr; gap:14px;">
+                <!-- Left Entity Selector Sidebar -->
+                <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; height:520px; overflow-y:auto;">
+                    <input type="text" id="pnlSearchEntities" class="straddle-input" placeholder="Search Strategy / Algo..." oninput="filterPnlEntitiesList()">
+                    <div id="pnlEntitiesList" style="display:flex; flex-direction:column; gap:4px;">
+                        <!-- List populated dynamically via JS -->
+                    </div>
+                </div>
+
+                <!-- Right Canvas & Summary -->
+                <div style="display:flex; flex-direction:column;">
+                    <div class="straddle-pnl-canvas-wrap">
+                        <div style="padding:10px 16px; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center;">
+                            <span id="pnlChartTitle" style="font-size:13px; font-weight:800; color:#f8fafc;">Overall Portfolio P&L</span>
+                            <span id="pnlLiveCursorValue" style="font-family:var(--font-mono); font-size:12px; color:#94a3b8;">Hover over chart for details</span>
+                        </div>
+                        <canvas id="straddlePnlCanvas" width="900" height="420" style="width:100%; height:420px; display:block; cursor:crosshair;"></canvas>
+                    </div>
+
+                    <!-- Bottom Metrics Strip (Matching Kotak Neo Analytics) -->
+                    <div class="straddle-pnl-stats-strip" style="background:#080c14; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px 18px; margin-top:10px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; width:100%;">
+                            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                                <div style="display:flex; flex-direction:column; gap:2px; background:#0f172a; border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:6px 12px;">
+                                    <span style="color:#94a3b8; font-size:11px; font-weight:700;">Max Profit:</span>
+                                    <div style="display:flex; align-items:baseline; gap:6px;">
+                                        <span id="pnlStatMax" style="color:#10b981; font-family:var(--font-mono); font-size:14px; font-weight:800;">₹ 0.00</span>
+                                        <span id="pnlStatMaxTime" style="color:#64748b; font-size:11px; font-family:var(--font-mono);">at --:--</span>
+                                    </div>
+                                </div>
+
+                                <div style="display:flex; flex-direction:column; gap:2px; background:#0f172a; border:1px solid rgba(244,63,94,0.25); border-radius:6px; padding:6px 12px;">
+                                    <span style="color:#94a3b8; font-size:11px; font-weight:700;">Max Loss:</span>
+                                    <div style="display:flex; align-items:baseline; gap:6px;">
+                                        <span id="pnlStatMin" style="color:#f43f5e; font-family:var(--font-mono); font-size:14px; font-weight:800;">₹ 0.00</span>
+                                        <span id="pnlStatMinTime" style="color:#64748b; font-size:11px; font-family:var(--font-mono);">at --:--</span>
+                                    </div>
+                                </div>
+
+                                <div style="display:flex; flex-direction:column; gap:2px; background:#0f172a; border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:6px 12px;">
+                                    <span style="color:#94a3b8; font-size:11px; font-weight:700;">Max Drawdown:</span>
+                                    <div style="display:flex; align-items:baseline; gap:6px;">
+                                        <span id="pnlStatDrawdown" style="color:#f59e0b; font-family:var(--font-mono); font-size:14px; font-weight:800;">₹ 0.00</span>
+                                        <span id="pnlStatDrawdownPeriod" style="color:#64748b; font-size:11px; font-family:var(--font-mono);">--</span>
+                                    </div>
+                                </div>
+
+                                <div style="display:flex; flex-direction:column; gap:2px; background:#0f172a; border:1px solid rgba(6,182,212,0.25); border-radius:6px; padding:6px 12px;">
+                                    <span style="color:#94a3b8; font-size:11px; font-weight:700;">Profit Kept:</span>
+                                    <div style="display:flex; align-items:baseline; gap:6px;">
+                                        <span id="pnlStatProfitKept" style="color:#06b6d4; font-family:var(--font-mono); font-size:14px; font-weight:800;">100%</span>
+                                        <span style="color:#64748b; font-size:11px;">of Max Profit</span>
+                                    </div>
+                                </div>
+
+                                <div style="display:flex; flex-direction:column; gap:2px; background:linear-gradient(135deg, rgba(16,185,129,0.15), rgba(6,182,212,0.1)); border:1px solid rgba(16,185,129,0.4); border-radius:6px; padding:6px 14px;">
+                                    <span style="color:#94a3b8; font-size:11px; font-weight:700;">Day's Net P&L:</span>
+                                    <span id="pnlStatTotal" style="color:#10b981; font-family:var(--font-mono); font-size:15px; font-weight:900;">₹ 0.00</span>
+                                </div>
+                            </div>
+
+                            <div style="display:flex; gap:8px;">
+                                <button type="button" class="straddle-btn btn-primary" onclick="exportStraddlePnlData()" style="padding:6px 14px; font-size:12px;">📥 Export Data</button>
+                                <button type="button" class="straddle-btn btn-success" onclick="captureStraddlePnlScreenshot()" style="padding:6px 14px; font-size:12px;">📸 Screenshot</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+
+
+
+        <!-- ====================================================================
+             MODALS: ADD ALGO, RENAME ALGO, OPTION CHAIN, AUDIT LOGS
+             ==================================================================== -->
+
+        <!-- Modal: Add / Create New Algo -->
+        <div id="modalAddStraddleAlgo" class="straddle-modal-backdrop" style="display:none;">
+            <div class="straddle-modal-dialog" style="max-width:580px;">
+                <div class="straddle-modal-header">
+                    <h3>➕ Add / Create New Trading Algo</h3>
+                    <button class="straddle-modal-close" onclick="closeAddStraddleAlgoModal()">×</button>
+                </div>
+                <div class="straddle-modal-body">
+                    <div class="straddle-form-group">
+                        <label>Algo Strategy Name:</label>
+                        <input type="text" id="newAlgoName" class="straddle-input" placeholder="e.g. Weekly Short Straddle 9:20">
+                    </div>
+                    <div class="straddle-form-group">
+                        <label>Preset Template:</label>
+                        <select id="newAlgoPreset" class="straddle-select">
+                            <option value="SHORT_STRADDLE" selected>Short Straddle (ATM CE + PE Sell)</option>
+                            <option value="SHORT_STRANGLE">Short Strangle (OTM CE + PE Sell)</option>
+                            <option value="IRON_CONDOR">Iron Condor (OTM Sell + Far OTM Buy Hedges)</option>
+                            <option value="IRON_FLY">Iron Fly (ATM Sell + OTM Wings Buy)</option>
+                            <option value="CUSTOM">Blank / Custom Strategy</option>
+                        </select>
+                    </div>
+                    <div class="straddle-form-group">
+                        <label>Underlying Asset:</label>
+                        <select id="newAlgoUnderlying" class="straddle-select">
+                            <option value="NIFTY" selected>NIFTY 50</option>
+                            <option value="BANKNIFTY">BANKNIFTY</option>
+                            <option value="FINNIFTY">FINNIFTY</option>
+                            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+                            <option value="SENSEX">SENSEX</option>
+                        </select>
+                    </div>
+                    <div class="straddle-form-group">
+                        <label>Execution Days of Week:</label>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+                            <label class="straddle-checkbox-label"><input type="checkbox" name="algo_days" value="Monday" checked> Mon</label>
+                            <label class="straddle-checkbox-label"><input type="checkbox" name="algo_days" value="Tuesday" checked> Tue</label>
+                            <label class="straddle-checkbox-label"><input type="checkbox" name="algo_days" value="Wednesday" checked> Wed</label>
+                            <label class="straddle-checkbox-label"><input type="checkbox" name="algo_days" value="Thursday" checked> Thu</label>
+                            <label class="straddle-checkbox-label"><input type="checkbox" name="algo_days" value="Friday" checked> Fri</label>
+                        </div>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                        <button type="button" class="straddle-btn btn-outline" onclick="closeAddStraddleAlgoModal()">Cancel</button>
+                        <button type="button" class="straddle-btn btn-primary" onclick="submitCreateNewStraddleAlgo()">Create & Edit Algo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Rename Algo -->
+        <div id="modalRenameStraddleAlgo" class="straddle-modal-backdrop" style="display:none;">
+            <div class="straddle-modal-dialog" style="max-width:460px;">
+                <div class="straddle-modal-header">
+                    <h3>✏️ Rename Algo Strategy</h3>
+                    <button class="straddle-modal-close" onclick="closeRenameStraddleAlgoModal()">×</button>
+                </div>
+                <div class="straddle-modal-body">
+                    <input type="hidden" id="renameAlgoTargetId">
+                    <div class="straddle-form-group">
+                        <label>New Strategy Name:</label>
+                        <input type="text" id="renameAlgoNewName" class="straddle-input" placeholder="Enter new algo name">
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                        <button type="button" class="straddle-btn btn-outline" onclick="closeRenameStraddleAlgoModal()">Cancel</button>
+                        <button type="button" class="straddle-btn btn-primary" onclick="submitRenameStraddleAlgo()">Save Name</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Rectify Leg & Margin Optimizer (Instant Leg Adjustment & Live Account Margin Verification) -->
+        <div id="modalRectifyLeg" class="straddle-modal-backdrop" style="display:none; z-index:10050;">
+            <div class="straddle-modal-dialog" style="max-width:560px; background:#111622; border:1px solid rgba(59,130,246,0.3); border-radius:12px; box-shadow:0 16px 48px rgba(0,0,0,0.85); overflow:hidden;">
+                <!-- Header -->
+                <div style="padding:16px 20px; background:linear-gradient(90deg, #0f172a 0%, #1e293b 100%); border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:20px;">🛠️</span>
+                        <div>
+                            <div style="font-size:15px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">Rectify Leg &amp; Margin Optimizer</div>
+                            <div id="rectifyLegSubtitle" style="font-size:11.5px; font-weight:600; color:#94a3b8; font-family:var(--font-mono);">-</div>
+                        </div>
+                    </div>
+                    <button type="button" class="straddle-modal-close" onclick="closeRectifyLegModal()" style="color:#94a3b8; font-size:22px; line-height:1; border:none; background:transparent; cursor:pointer; padding:2px 6px;">×</button>
+                </div>
+
+                <div class="straddle-modal-body" style="padding:18px 20px; display:flex; flex-direction:column; gap:14px; max-height:80vh; overflow-y:auto;">
+                    <!-- Hidden Tracking Inputs -->
+                    <input type="hidden" id="rectifyStrategyId" value="">
+                    <input type="hidden" id="rectifyLegId" value="">
+                    <input type="hidden" id="rectifyLegIndex" value="">
+                    <input type="hidden" id="rectifyLotSize" value="65">
+                    <input type="hidden" id="rectifyUnderlying" value="NIFTY">
+                    <input type="hidden" id="rectifyUnderlyingSpot" value="22250">
+
+                    <!-- Live Wallet Funds & Error Breakdown Strip -->
+                    <div style="background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.25); border-radius:8px; padding:12px 14px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                            <span style="font-size:11px; font-weight:800; color:#f87171; text-transform:uppercase; letter-spacing:0.5px;">⚠️ Broker RMS Rejection Reason:</span>
+                            <button type="button" onclick="refreshLiveWalletMarginInModal()" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:4px; cursor:pointer;" title="Fetch latest funds from Kotak Neo">🔄 Refresh Balance</button>
+                        </div>
+                        <div id="rectifyErrorRawText" style="font-size:11.5px; color:#fca5a5; font-weight:600; line-height:1.4; margin-bottom:10px; font-family:var(--font-mono); word-break:break-all;">-</div>
+
+                        <!-- Funds Summary Cards -->
+                        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
+                            <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; text-align:center;">
+                                <div style="font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase;">Available Balance</div>
+                                <div id="rectifyAvailFundsDisplay" style="font-size:13px; font-weight:800; color:#38bdf8; font-family:var(--font-mono); margin-top:2px;">₹ -</div>
+                            </div>
+                            <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; text-align:center;">
+                                <div style="font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase;">Order Required</div>
+                                <div id="rectifyPrevRequiredDisplay" style="font-size:13px; font-weight:800; color:#f59e0b; font-family:var(--font-mono); margin-top:2px;">₹ -</div>
+                            </div>
+                            <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; text-align:center;">
+                                <div style="font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase;">Initial Shortfall</div>
+                                <div id="rectifyPrevShortfallDisplay" style="font-size:13px; font-weight:800; color:#ef4444; font-family:var(--font-mono); margin-top:2px;">₹ -</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Adjustable Parameters Section -->
+                    <div style="background:#0d111a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:12px;">
+                        <div style="font-size:11px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:6px;">
+                            ⚙️ Adjust Leg Parameters to Fit Margin
+                        </div>
+
+                        <!-- Row 1: Lots / Quantity + Strike Price -->
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                            <!-- Lots Stepper -->
+                            <div>
+                                <label style="display:flex; justify-content:space-between; color:#cbd5e1; font-size:11.5px; font-weight:700; margin-bottom:5px;">
+                                    <span>Lots:</span>
+                                    <span id="rectifyQtySubtext" style="color:#38bdf8; font-family:var(--font-mono); font-weight:700;">(260 Qty)</span>
+                                </label>
+                                <div style="display:flex; align-items:center; gap:4px;">
+                                    <button type="button" class="straddle-btn btn-outline" style="padding:6px 12px; font-weight:800; font-size:14px;" onclick="adjustRectifyLots(-1)">−</button>
+                                    <input type="number" id="rectifyLotsInput" min="1" max="500" value="1" class="straddle-input" style="text-align:center; font-weight:800; font-size:13px; font-family:var(--font-mono); padding:6px;" onchange="onRectifyParamChange()" onkeyup="onRectifyParamChange()">
+                                    <button type="button" class="straddle-btn btn-outline" style="padding:6px 12px; font-weight:800; font-size:14px;" onclick="adjustRectifyLots(1)">+</button>
+                                </div>
+                            </div>
+
+                            <!-- Strike Price Selection -->
+                            <div>
+                                <label style="display:flex; justify-content:space-between; color:#cbd5e1; font-size:11.5px; font-weight:700; margin-bottom:5px;">
+                                    <span>Strike Selection:</span>
+                                    <span id="rectifySpotSubtext" style="color:#94a3b8; font-size:10.5px; font-family:var(--font-mono);">ATM: 22250</span>
+                                </label>
+                                <select id="rectifyStrikeSelect" class="straddle-select" style="width:100%; padding:7px 10px; font-size:12.5px; font-weight:700;" onchange="onRectifyParamChange()">
+                                    <!-- Populated dynamically via JS -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Row 2: Product Type & Option Type & Side -->
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+                            <!-- Product (NRML / MIS) -->
+                            <div>
+                                <label style="color:#cbd5e1; font-size:11.5px; font-weight:700; margin-bottom:5px; display:block;">Product:</label>
+                                <select id="rectifyProductSelect" class="straddle-select" style="width:100%; padding:7px 8px; font-size:12px; font-weight:700;" onchange="onRectifyParamChange()">
+                                    <option value="NRML">NRML (Overnight)</option>
+                                    <option value="MIS">MIS (Intraday -25%)</option>
+                                </select>
+                            </div>
+
+                            <!-- Option Type (CE / PE) -->
+                            <div>
+                                <label style="color:#cbd5e1; font-size:11.5px; font-weight:700; margin-bottom:5px; display:block;">Type:</label>
+                                <select id="rectifyOptionTypeSelect" class="straddle-select" style="width:100%; padding:7px 8px; font-size:12px; font-weight:700;" onchange="onRectifyParamChange()">
+                                    <option value="CE">CE (Call)</option>
+                                    <option value="PE">PE (Put)</option>
+                                </select>
+                            </div>
+
+                            <!-- Side (SELL / BUY) -->
+                            <div>
+                                <label style="color:#cbd5e1; font-size:11.5px; font-weight:700; margin-bottom:5px; display:block;">Side:</label>
+                                <select id="rectifySideSelect" class="straddle-select" style="width:100%; padding:7px 8px; font-size:12px; font-weight:700;" onchange="onRectifyParamChange()">
+                                    <option value="SELL">SELL (Short)</option>
+                                    <option value="BUY">BUY (Long)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Row 3: Target % and Stoploss % -->
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                            <div>
+                                <label style="color:#cbd5e1; font-size:11.5px; font-weight:700; margin-bottom:4px; display:block;">Target (%):</label>
+                                <input type="number" step="0.5" id="rectifyTargetValueInput" class="straddle-input" style="padding:6px 10px; font-size:12px; font-weight:700; width:100%; font-family:var(--font-mono);" placeholder="e.g. 10.0">
+                            </div>
+                            <div>
+                                <label style="color:#cbd5e1; font-size:11.5px; font-weight:700; margin-bottom:4px; display:block;">Stoploss (%):</label>
+                                <input type="number" step="0.5" id="rectifySlValueInput" class="straddle-input" style="padding:6px 10px; font-size:12px; font-weight:700; width:100%; font-family:var(--font-mono);" placeholder="e.g. 20.0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Live Real-Time Margin Impact & Sufficiency Analysis -->
+                    <div style="background:#090d16; border:1px solid rgba(56,189,248,0.25); border-radius:8px; padding:12px 14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <span style="font-size:11px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px;">⚡ Real-Time Margin Impact:</span>
+                            <span id="rectifyLiveCalcBadge" style="font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:4px; background:rgba(16,185,129,0.2); color:#10b981;">✓ Calculated</span>
+                        </div>
+
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:8px 10px;">
+                                <div style="font-size:10.5px; color:#94a3b8; font-weight:600;">Estimated Required Margin:</div>
+                                <div id="rectifyNewRequiredDisplay" style="font-size:15px; font-weight:800; color:#f8fafc; font-family:var(--font-mono); margin-top:2px;">₹ -</div>
+                            </div>
+                            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:8px 10px;">
+                                <div style="font-size:10.5px; color:#94a3b8; font-weight:600;">Margin Status / Surplus:</div>
+                                <div id="rectifyStatusSurplusDisplay" style="font-size:13px; font-weight:800; color:#10b981; font-family:var(--font-mono); margin-top:2px;">-</div>
+                            </div>
+                        </div>
+
+                        <!-- One-Click Auto Fit Recommendation -->
+                        <button type="button" id="btnRectifyAutoFit" onclick="applyRectifyAutoFitLots()" style="width:100%; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:11.5px; font-weight:700; padding:7px 10px; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.15s ease;">
+                            <span>💡 Auto-Set Max Affordable Lots</span>
+                        </button>
+                    </div>
+
+                    <!-- Modal Actions -->
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:6px; flex-wrap:wrap;">
+                        <button type="button" class="straddle-btn btn-outline" onclick="closeRectifyLegModal()" style="padding:8px 16px; font-weight:600;">Cancel</button>
+                        <button type="button" class="straddle-btn btn-primary" onclick="submitRectifyLeg(false)" style="background:#2563eb; border-color:#3b82f6; font-weight:700; padding:8px 16px;">💾 Save Leg Only</button>
+                        <button type="button" class="straddle-btn btn-success" id="btnRectifyAndRetry" onclick="submitRectifyLeg(true)" style="background:#16a34a; border-color:#22c55e; color:#ffffff; font-weight:800; padding:8px 22px; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 8px rgba(22,163,74,0.4);">
+                            <span>⚡ Rectify &amp; Place Order Now</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Settings: Legs (Strike & 500/100 Multiple Selection - Quantiply Screenshots 1 & 2) -->
+        <div id="modalLegSettings" class="straddle-modal-backdrop" style="display:none;">
+            <div class="straddle-modal-dialog" style="max-width:440px; background:#181d29; border:1px solid rgba(255,255,255,0.12); border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,0.7);">
+                <div style="padding:16px 20px 10px 20px; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <div style="font-size:16px; font-weight:800; color:#f8fafc; margin-bottom:2px;">Settings: Legs</div>
+                        <div id="legSettingsSubTitle" style="font-size:12px; font-weight:600; color:#94a3b8; font-family:var(--font-mono);">(NIFTY SELL NRML CE)</div>
+                    </div>
+                    <button class="straddle-modal-close" onclick="closeLegSettingsModal()" style="color:#94a3b8; font-size:22px; line-height:1; border:none; background:transparent; cursor:pointer;">×</button>
+                </div>
+                <div class="straddle-modal-body" style="padding:18px 20px; display:flex; flex-direction:column; gap:16px;">
+                    <input type="hidden" id="legSettingsTargetRowId" value="">
+                    
+                    <div class="straddle-form-group" style="margin-bottom:0;">
+                        <label style="color:#cbd5e1; font-size:12px; font-weight:700; margin-bottom:6px;">Strike:</label>
+                        <select id="legSettingsStrikeSelect" class="straddle-select" style="width:100%; padding:8px 12px; background:#121622; border:1px solid rgba(255,255,255,0.18); font-size:13px; font-weight:600; color:#f8fafc;">
+                            <!-- Dynamically populated OTM 40..1, ATM, ITM 1..40 -->
+                        </select>
+                    </div>
+
+                    <div class="straddle-form-group" style="margin-bottom:0;">
+                        <label style="color:#cbd5e1; font-size:12px; font-weight:700; margin-bottom:6px;">500/100 multiple strike selection:</label>
+                        <select id="legSettingsMultipleSelect" class="straddle-select" style="width:100%; padding:8px 12px; background:#121622; border:1px solid rgba(255,255,255,0.18); font-size:13px; font-weight:600; color:#f8fafc;">
+                            <option value="None">None</option>
+                            <option value="500/100 multiple">500/100 multiple</option>
+                        </select>
+                    </div>
+
+                    <!-- Callout Note matching Quantiply Screenshot 1 -->
+                    <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:12px; display:flex; gap:10px; align-items:flex-start; font-size:11.5px; color:#94a3b8; line-height:1.45;">
+                        <span style="font-size:14px; color:#60a5fa; flex-shrink:0;">ⓘ</span>
+                        <span>Only the strikes which occur in the multiples of 500 for Banknifty, 500 for Sensex, 100 for Nifty, 100 for Finnifty, 100 for Midcap Nifty &amp; 500 for Bankex will be selected. And, these strikes will be closer to the ATM than the originally selected strike.</span>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:14px; margin-top:6px;">
+                        <button type="button" class="straddle-btn btn-primary" onclick="saveLegSettingsModal()" style="padding:7px 20px; font-size:12.5px; font-weight:700; background:#2563eb; border:none; border-radius:6px;">Done</button>
+                        <a href="javascript:void(0)" onclick="closeLegSettingsModal()" style="color:#60a5fa; font-size:12.5px; font-weight:600; text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Cancel</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interactive Option Chain Modal (Expressive, Colourful Matrix with Greeks, PCR & Market Depth) -->
+        <div id="straddleOptionChainModal" class="straddle-modal-backdrop" style="display:none;">
+            <div class="straddle-modal-dialog opt-chain-modal-dialog">
+                <div class="straddle-modal-header" style="background:linear-gradient(90deg, #090e1a 0%, #172554 100%);">
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <span style="font-size:18px;">📊</span>
+                        <h3 style="margin:0; font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">Live Option Chain & Market Depth</h3>
+                        <span id="optChainSpotTicker" style="color:#38bdf8; font-family:var(--font-mono); font-size:13px; font-weight:700; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:6px; padding:2px 8px;">NIFTY: ₹-- • ATM: --</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <!-- Underlying Selector -->
+                        <select id="optChainUnderlyingSelect" class="straddle-select" style="min-width:120px; font-weight:700; color:#60a5fa;" onchange="onChangeOptChainUnderlying(this.value)">
+                            <option value="NIFTY" selected>NIFTY 50</option>
+                            <option value="BANKNIFTY">BANKNIFTY</option>
+                            <option value="FINNIFTY">FINNIFTY</option>
+                            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+                            <option value="SENSEX">SENSEX</option>
+                        </select>
+
+                        <!-- Expiry Selector -->
+                        <select id="optChainExpirySelect" class="straddle-select" style="min-width:170px;" onchange="loadStraddleOptionChain(this.value)">
+                            <!-- Expiries populated dynamically -->
+                        </select>
+
+                        <!-- Strike Range Selector -->
+                        <select id="optChainStrikeRangeSelect" class="straddle-select" style="min-width:120px;" onchange="loadStraddleOptionChain()">
+                            <option value="10">± 10 Strikes</option>
+                            <option value="15" selected>± 15 Strikes</option>
+                            <option value="20">± 20 Strikes</option>
+                            <option value="0">All Strikes</option>
+                        </select>
+
+                        <button type="button" class="straddle-btn btn-outline" style="padding:4px 10px; font-size:12px;" onclick="loadStraddleOptionChain()">🔄 Refresh</button>
+                        <button class="straddle-modal-close" onclick="closeStraddleOptionChainModal()">×</button>
+                    </div>
+                </div>
+
+                <!-- Live Market Insights Ribbon -->
+                <div class="opt-insights-bar" id="optChainInsightsBar">
+                    <div class="opt-insight-card">
+                        <span class="opt-insight-label">🎯 Underlying Spot</span>
+                        <span class="opt-insight-val" id="optInsightSpot" style="color:#38bdf8;">₹ --</span>
+                    </div>
+                    <div class="opt-insight-card">
+                        <span class="opt-insight-label">⚖️ Put-Call Ratio (PCR)</span>
+                        <div style="display:flex; align-items:baseline; gap:6px;">
+                            <span class="opt-insight-val" id="optInsightPcr" style="color:#10b981;">--</span>
+                            <span id="optInsightPcrTag" style="font-size:11px; font-weight:700; color:#34d399;">--</span>
+                        </div>
+                    </div>
+                    <div class="opt-insight-card">
+                        <span class="opt-insight-label">⚡ Max Pain Strike</span>
+                        <span class="opt-insight-val" id="optInsightMaxPain" style="color:#fbbf24;">--</span>
+                    </div>
+                    <div class="opt-insight-card">
+                        <span class="opt-insight-label">🟢 Major Support (Max PE OI)</span>
+                        <span class="opt-insight-val" id="optInsightSupport" style="color:#34d399;">--</span>
+                    </div>
+                    <div class="opt-insight-card">
+                        <span class="opt-insight-label">🔴 Major Resistance (Max CE OI)</span>
+                        <span class="opt-insight-val" id="optInsightResistance" style="color:#fb7185;">--</span>
+                    </div>
+                    <div class="opt-insight-card">
+                        <span class="opt-insight-label">📊 Total OI (Calls vs Puts)</span>
+                        <span class="opt-insight-val" id="optInsightTotalOi" style="font-size:12px; color:#cbd5e1;">--</span>
+                    </div>
+                </div>
+
+                <!-- Matrix Table -->
+                <div class="straddle-modal-body" style="padding:0; overflow-x:auto; max-height:calc(92vh - 160px);">
+                    <table class="straddle-table" id="straddleOptionChainTable" style="margin:0; font-size:12px;">
+                        <thead>
+                            <tr>
+                                <!-- CALLS HEADER -->
+                                <th colspan="5" class="opt-table-header-ce" style="text-align:center; font-size:12.5px; letter-spacing:0.5px;">
+                                    ▲ CALLS (CE) • BULLISH ACCUMULATION
+                                </th>
+                                <!-- STRIKE HEADER -->
+                                <th class="opt-table-header-strike" style="text-align:center; width:120px; font-size:12.5px;">
+                                    STRIKE
+                                </th>
+                                <!-- PUTS HEADER -->
+                                <th colspan="5" class="opt-table-header-pe" style="text-align:center; font-size:12.5px; letter-spacing:0.5px;">
+                                    ▼ PUTS (PE) • BEARISH ACCUMULATION
+                                </th>
+                                <!-- ACTION HEADER -->
+                                <th style="text-align:center; width:150px; background:#0f172a; color:#cbd5e1;">
+                                    QUICK ACTION
+                                </th>
+                            </tr>
+                            <tr style="background:#0c101a; border-bottom:1px solid rgba(255,255,255,0.1);">
+                                <!-- Calls Columns -->
+                                <th style="text-align:right; min-width:130px;">OI (Lakhs)</th>
+                                <th style="text-align:right; width:70px;">IV (%)</th>
+                                <th style="text-align:right; width:65px;">Delta (Δ)</th>
+                                <th style="text-align:right; min-width:85px; color:#34d399;">LTP (₹)</th>
+                                <th style="text-align:right; min-width:90px;">Bid / Ask</th>
+
+                                <!-- Center Strike -->
+                                <th style="text-align:center; background:#111c3a; color:#60a5fa; font-weight:800;">STRIKE</th>
+
+                                <!-- Puts Columns -->
+                                <th style="text-align:left; min-width:90px;">Bid / Ask</th>
+                                <th style="text-align:left; min-width:85px; color:#fb7185;">LTP (₹)</th>
+                                <th style="text-align:left; width:65px;">Delta (Δ)</th>
+                                <th style="text-align:left; width:70px;">IV (%)</th>
+                                <th style="text-align:left; min-width:130px;">OI (Lakhs)</th>
+
+                                <!-- Quick Action -->
+                                <th style="text-align:center; color:#38bdf8;">BUY / SELL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="straddleOptionChainBody">
+                            <!-- Option chain rows rendered dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audit Logs Modal -->
+        <div id="straddleLogsModal" class="straddle-modal-backdrop" style="display:none;">
+            <div class="straddle-modal-dialog" style="max-width:850px;">
+                <div class="straddle-modal-header">
+                    <h3>📜 Straddle Algorithmic Execution Audit Logs</h3>
+                    <button class="straddle-modal-close" onclick="closeStraddleLogsModal()">×</button>
+                </div>
+                <div class="straddle-modal-body" style="background:#090d15; max-height:65vh; overflow-y:auto; font-family:var(--font-mono); font-size:12px;">
+                    <div id="straddleAuditLogsContainer" style="display:flex; flex-direction:column; gap:6px;">
+                        <!-- Logs rendered dynamically -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Direct Buy / Sell Order Modal (Kotak Neo / Zerodha Grade) -->
+        <div id="straddleDirectOrderModal" class="straddle-modal-backdrop" style="display:none;">
+            <div class="straddle-modal-dialog" style="max-width:490px; border-radius:14px; box-shadow:0 25px 60px -15px rgba(0,0,0,0.9); overflow:hidden; border:1px solid rgba(255,255,255,0.15);">
+                <!-- Dynamic Colored Header -->
+                <div id="directOrderHeader" style="padding:16px 20px; background:linear-gradient(135deg, #0f172a, #1e293b); border-bottom:1px solid rgba(255,255,255,0.1); display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span id="directOrderSideBadge" style="background:#10b981; color:#fff; font-size:11px; font-weight:800; padding:2px 8px; border-radius:4px; text-transform:uppercase;">BUY</span>
+                            <span id="directOrderSymbolTitle" style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">NIFTY 22650 CE</span>
+                        </div>
+                        <div id="directOrderSubtitle" style="font-size:11.5px; color:#94a3b8; margin-top:3px; font-family:var(--font-mono);">NFO • EXPIRY</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:16px;">
+                        <div style="text-align:right;">
+                            <div id="directOrderLtp" style="font-size:17px; font-weight:800; color:#10b981; font-family:var(--font-mono);">₹100.55</div>
+                            <div id="directOrderChange" style="font-size:11px; color:#94a3b8; font-family:var(--font-mono);">+0.00 (0.0%)</div>
+                        </div>
+                        <button type="button" class="straddle-modal-close" style="font-size:22px; color:#94a3b8; cursor:pointer; background:none; border:none;" onclick="closeStraddleDirectOrderModal()">×</button>
+                    </div>
+                </div>
+
+                <!-- Modal Body -->
+                <div style="padding:20px; background:#0b0f19; display:flex; flex-direction:column; gap:16px;">
+                    <!-- Side Selector (BUY vs SELL) -->
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#070a11; padding:4px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                        <button type="button" id="btnOrderSideBuy" class="straddle-btn" style="padding:8px; font-weight:800; font-size:13px; border-radius:6px; background:#10b981; color:#fff; border:none; cursor:pointer;" onclick="setOrderModalSide('BUY')">
+                            ✓ BUY (LONG)
+                        </button>
+                        <button type="button" id="btnOrderSideSell" class="straddle-btn" style="padding:8px; font-weight:800; font-size:13px; border-radius:6px; background:transparent; color:#94a3b8; border:none; cursor:pointer;" onclick="setOrderModalSide('SELL')">
+                            ✕ SELL (SHORT)
+                        </button>
+                    </div>
+
+                    <!-- Product Type (MIS vs NRML) -->
+                    <div>
+                        <div style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; margin-bottom:6px; letter-spacing:0.5px;">Product Type</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                            <button type="button" id="btnProductDelivery" class="straddle-btn" style="padding:9px; font-size:12.5px; font-weight:700; border-radius:8px; background:#1e293b; color:#60a5fa; border:1px solid #3b82f6; cursor:pointer;" onclick="setOrderModalProduct('D')">
+                                Overnight (NRML / Delivery)
+                            </button>
+                            <button type="button" id="btnProductIntraday" class="straddle-btn" style="padding:9px; font-size:12.5px; font-weight:700; border-radius:8px; background:#0f172a; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalProduct('I')">
+                                Intraday (MIS / Same Day)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Order Type (Market, Limit, SL, SL-M) -->
+                    <div>
+                        <div style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; margin-bottom:6px; letter-spacing:0.5px;">Order Type</div>
+                        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;">
+                            <button type="button" id="btnTypeMarket" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0f172a; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('MARKET')">
+                                Market
+                            </button>
+                            <button type="button" id="btnTypeLimit" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#1e293b; color:#38bdf8; border:1px solid #0284c7; cursor:pointer;" onclick="setOrderModalType('LIMIT')">
+                                Limit
+                            </button>
+                            <button type="button" id="btnTypeSL" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0f172a; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('SL')">
+                                SL (Limit)
+                            </button>
+                            <button type="button" id="btnTypeSLM" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0f172a; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('SL-M')">
+                                SL-M
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Quantity & Stepper + Lot Info -->
+                    <div style="display:grid; grid-template-columns:1.2fr 1fr; gap:12px; align-items:flex-end;">
+                        <div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <label style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Quantity</label>
+                                <span id="directOrderLotBadge" style="font-size:11px; color:#38bdf8; font-weight:700; font-family:var(--font-mono);">1 lot = 65</span>
+                            </div>
+                            <div style="display:flex; align-items:center; background:#0f172a; border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden;">
+                                <button type="button" style="background:#1e293b; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderQuantity(-1)">−</button>
+                                <input type="number" id="directOrderQuantityInput" value="65" min="1" step="1" style="flex:1; width:100%; background:transparent; border:none; text-align:center; color:#fff; font-size:15px; font-weight:800; font-family:var(--font-mono); outline:none;" oninput="onDirectOrderQuantityChange()" />
+                                <button type="button" style="background:#1e293b; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderQuantity(1)">+</button>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <label style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Price (₹)</label>
+                                <span style="font-size:10px; color:#64748b; font-family:var(--font-mono);">Tick 0.05</span>
+                            </div>
+                            <input type="number" id="directOrderPriceInput" step="0.05" min="0.05" style="width:100%; box-sizing:border-box; background:#0f172a; border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:9px 12px; color:#fff; font-size:14px; font-weight:800; font-family:var(--font-mono); outline:none;" placeholder="Price" oninput="updateOrderMarginSummary()" />
+                        </div>
+                    </div>
+
+                    <!-- Trigger Price Row (Conditional for SL / SL-M) -->
+                    <div id="directOrderTriggerRow" style="display:none;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <label style="font-size:11px; font-weight:700; color:#f59e0b; text-transform:uppercase; letter-spacing:0.5px;">Trigger Price (₹)</label>
+                            <span style="font-size:10px; color:#64748b; font-family:var(--font-mono);">Must trigger order execution</span>
+                        </div>
+                        <input type="number" id="directOrderTriggerPriceInput" step="0.05" min="0.05" style="width:100%; box-sizing:border-box; background:#0f172a; border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:9px 12px; color:#f59e0b; font-size:14px; font-weight:800; font-family:var(--font-mono); outline:none;" placeholder="Trigger Price (₹)" />
+                    </div>
+
+                    <!-- Margin and Funds Breakdown -->
+                    <div style="background:#070a11; border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+                        <div>
+                            <span style="color:#94a3b8;">Required Margin:</span>
+                            <span id="directOrderReqMargin" style="color:#f8fafc; font-weight:800; font-family:var(--font-mono); margin-left:4px;">₹6,535.75</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="color:#94a3b8;">Available:</span>
+                            <span id="directOrderAvailMargin" style="color:#10b981; font-weight:800; font-family:var(--font-mono);">₹0.00</span>
+                            <button type="button" title="Sync live broker funds" style="background:none; border:none; color:#64748b; cursor:pointer; font-size:12px; padding:0 2px;" onclick="syncDirectOrderFunds()">🔄</button>
+                        </div>
+                    </div>
+
+                    <!-- Direct Order Execution Button -->
+                    <button type="button" id="directOrderSubmitBtn" class="straddle-btn" style="width:100%; padding:13px; font-size:14px; font-weight:800; letter-spacing:0.5px; border-radius:8px; background:linear-gradient(135deg, #10b981, #059669); color:#fff; border:none; cursor:pointer; box-shadow:0 4px 15px rgba(16,185,129,0.35); transition:transform 0.1s ease;" onclick="submitStraddleDirectOrder()">
+                        BUY NIFTY 22650 CE
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div> <!-- /#straddleSettingsPanel -->
+</div> <!-- /#straddleSubView_terminal -->
+</div> <!-- /.straddle-wrap -->
+</div>
+    </main>
+
+    <!-- KOTAK NEO SETTINGS MODAL -->
+    <div id="modalKotakSettings" class="straddle-modal-backdrop" style="display:none;">
+        <div class="straddle-modal-dialog">
+            <div class="straddle-modal-header">
+                <h3>⚙️ Kotak Neo API & Automated Login Configuration</h3>
+                <button type="button" class="straddle-modal-close" onclick="closeKotakSettingsModal()">✕</button>
+            </div>
+            <div class="straddle-modal-body">
+                <p style="font-size:12px; color:#94a3b8; margin-bottom:14px; line-height:1.4;">
+                    Configure your Kotak Neo Trade API credentials for automated headless login with TOTP.
+                    Session tokens are refreshed automatically every morning at <b>08:45 AM IST</b>.
+                </p>
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <div>
+                        <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Consumer Key</label>
+                        <input type="text" id="cfgKotakConsumerKey" class="straddle-form-input" placeholder="e.g. your-consumer-key-token">
+                    </div>
+                    <div>
+                        <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Consumer Secret</label>
+                        <input type="password" id="cfgKotakConsumerSecret" class="straddle-form-input" placeholder="e.g. your-consumer-secret">
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                        <div>
+                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Mobile Number</label>
+                            <input type="text" id="cfgKotakMobile" class="straddle-form-input" placeholder="e.g. 9999784319">
+                        </div>
+                        <div>
+                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">UCC (Client Code)</label>
+                            <input type="text" id="cfgKotakUcc" class="straddle-form-input" placeholder="e.g. 144766">
+                        </div>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                        <div>
+                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">MPIN (6-Digit PIN)</label>
+                            <input type="password" id="cfgKotakMpin" class="straddle-form-input" placeholder="6-digit MPIN">
+                        </div>
+                        <div>
+                            <label style="font-size:11px; font-weight:700; color:#cbd5e1;">TOTP Secret Key (Base32)</label>
+                            <input type="text" id="cfgKotakTotpKey" class="straddle-form-input" placeholder="e.g. 55U7MO4R2JMZALZ...">
+                        </div>
+                    </div>
+                </div>
+                <div id="kotakTestResultBox" style="margin-top:14px; font-size:12px; display:none; padding:10px; border-radius:6px;"></div>
+            </div>
+            <div class="straddle-modal-footer">
+                <button type="button" class="straddle-btn btn-outline" onclick="closeKotakSettingsModal()">Close</button>
+                <button type="button" class="straddle-btn btn-warning" onclick="testKotakAuthConnection()">⚡ Login / Test Connection</button>
+                <button type="button" class="straddle-btn btn-primary" onclick="saveKotakCredentials()">💾 Save Credentials</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SYSTEM GIT ACTIONS & CLOUD SYNC MODAL -->
+    <div id="modalSystemUpdate" class="straddle-modal-backdrop" style="display:none;">
+        <div class="straddle-modal-dialog">
+            <div class="straddle-modal-header">
+                <h3>🔄 Git Repository & Oracle Cloud Sync</h3>
+                <button type="button" class="straddle-modal-close" onclick="closeSystemUpdateModal()">✕</button>
+            </div>
+            <div class="straddle-modal-body">
+                <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; font-family:var(--font-mono); font-size:11.5px; margin-bottom:14px;">
+                    <div><b>Branch:</b> <span id="gitModalBranch">--</span></div>
+                    <div><b>Latest Commit:</b> <span id="gitModalCommit">--</span></div>
+                    <div style="margin-top:6px; color:#94a3b8;"><b>Recent Log:</b></div>
+                    <pre id="gitModalLog" style="margin-top:4px; font-size:10.5px; color:#cbd5e1; white-space:pre-wrap; max-height:100px; overflow-y:auto;">Loading...</pre>
+                </div>
+
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <div>
+                        <label style="font-size:11px; font-weight:700; color:#cbd5e1;">Commit & Push Message (Optional)</label>
+                        <input type="text" id="gitCommitMsg" class="straddle-form-input" placeholder="e.g. Added new BankNifty Iron Condor algo">
+                    </div>
+                </div>
+
+                <div id="gitActionOutput" style="margin-top:12px; font-size:11.5px; font-family:var(--font-mono); display:none; padding:10px; border-radius:6px; max-height:120px; overflow-y:auto;"></div>
+            </div>
+            <div class="straddle-modal-footer">
+                <button type="button" class="straddle-btn btn-outline" onclick="closeSystemUpdateModal()">Close</button>
+                <button type="button" class="straddle-btn btn-success" onclick="executeGitCommitPush()">🚀 Commit & Push to Cloud</button>
+                <button type="button" class="straddle-btn btn-primary" onclick="executeSafeGitPull()">📥 Fetch & Reload (Zero Data Loss)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
+    <script src="/static/js/straddle_engine_ui.js"></script>
+
+    <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
+    <script>
+        async function updateKotakAuthStatus() {
+            try {
+                const res = await fetch("/api/kotak/status");
+                const d = await res.json();
+                if (d.success && d.status) {
+                    const st = d.status;
+                    const pill = document.getElementById("kotakAuthStatusPill");
+                    const dot = document.getElementById("kotakAuthDot");
+                    const label = document.getElementById("kotakAuthLabel");
+                    if (st.is_authenticated) {
+                        pill.className = "straddle-auth-pill";
+                        dot.textContent = "🟢";
+                        label.textContent = `Kotak Neo: Active (${st.ucc || 'Live'})`;
+                    } else if (st.configured) {
+                        pill.className = "straddle-auth-pill disconnected";
+                        dot.textContent = "🟡";
+                        label.textContent = `Kotak Neo: Ready to Login`;
+                    } else {
+                        pill.className = "straddle-auth-pill disconnected";
+                        dot.textContent = "🔴";
+                        label.textContent = `Kotak Neo: Not Configured`;
+                    }
+                }
+            } catch (e) {
+                console.warn("Kotak status error:", e);
+            }
+        }
+
+        async function updateGitStatus() {
+            try {
+                const res = await fetch("/api/system/git_status");
+                const d = await res.json();
+                if (d && d.branch) {
+                    document.getElementById("gitBranchBadge").textContent = d.branch;
+                    document.getElementById("gitModalBranch").textContent = d.branch;
+                    document.getElementById("gitModalCommit").textContent = (d.head || "").slice(0, 8);
+                    document.getElementById("gitModalLog").textContent = d.log || "No recent commits.";
+                }
+            } catch (e) {
+                console.warn("Git status error:", e);
+            }
+        }
+
+        function openKotakSettingsModal() {
+            document.getElementById("modalKotakSettings").style.display = "flex";
+        }
+        function closeKotakSettingsModal() {
+            document.getElementById("modalKotakSettings").style.display = "none";
+        }
+
+        function openSystemUpdateModal() {
+            updateGitStatus();
+            document.getElementById("modalSystemUpdate").style.display = "flex";
+        }
+        function closeSystemUpdateModal() {
+            document.getElementById("modalSystemUpdate").style.display = "none";
+        }
+
+        async function saveKotakCredentials() {
+            const payload = {
+                consumer_key: document.getElementById("cfgKotakConsumerKey").value.trim(),
+                consumer_secret: document.getElementById("cfgKotakConsumerSecret").value.trim(),
+                mobile_number: document.getElementById("cfgKotakMobile").value.trim(),
+                ucc: document.getElementById("cfgKotakUcc").value.trim(),
+                mpin: document.getElementById("cfgKotakMpin").value.trim(),
+                totp_key: document.getElementById("cfgKotakTotpKey").value.trim()
+            };
+            try {
+                const res = await fetch("/api/kotak/save_credentials", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload)
+                });
+                const d = await res.json();
+                if (d.success) {
+                    showStraddleToast("Kotak Neo credentials saved successfully!", "success");
+                    updateKotakAuthStatus();
+                } else {
+                    showStraddleToast(d.error || "Failed to save", "error");
+                }
+            } catch (e) {
+                showStraddleToast("Error saving credentials: " + e, "error");
+            }
+        }
+
+        async function testKotakAuthConnection() {
+            const box = document.getElementById("kotakTestResultBox");
+            box.style.display = "block";
+            box.style.background = "rgba(59, 130, 246, 0.15)";
+            box.style.color = "#60a5fa";
+            box.textContent = "Initiating automated TOTP authentication with Kotak Neo...";
+            try {
+                const res = await fetch("/api/kotak/login", { method: "POST" });
+                const d = await res.json();
+                if (d.success) {
+                    box.style.background = "rgba(16, 185, 129, 0.15)";
+                    box.style.color = "#34d399";
+                    box.textContent = "✅ " + d.message;
+                    showStraddleToast("Kotak Neo logged in successfully!", "success");
+                    updateKotakAuthStatus();
+                } else {
+                    box.style.background = "rgba(239, 68, 68, 0.15)";
+                    box.style.color = "#f87171";
+                    box.textContent = "❌ " + (d.error || "Login failed");
+                    showStraddleToast(d.error || "Login failed", "error");
+                }
+            } catch (e) {
+                box.style.background = "rgba(239, 68, 68, 0.15)";
+                box.style.color = "#f87171";
+                box.textContent = "❌ Error: " + e;
+            }
+        }
+
+        async function executeGitCommitPush() {
+            const msg = document.getElementById("gitCommitMsg").value.trim();
+            const outBox = document.getElementById("gitActionOutput");
+            outBox.style.display = "block";
+            outBox.style.background = "rgba(15, 23, 42, 0.8)";
+            outBox.style.color = "#38bdf8";
+            outBox.textContent = "Committing and pushing updates to GitHub and Oracle Cloud...";
+            try {
+                const res = await fetch("/api/system/git_commit_push", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ message: msg })
+                });
+                const d = await res.json();
+                outBox.textContent = d.message + "\n" + (d.output || "");
+                if (d.success) {
+                    showStraddleToast("Pushed successfully to cloud!", "success");
+                    updateGitStatus();
+                }
+            } catch (e) {
+                outBox.textContent = "Error: " + e;
+            }
+        }
+
+        async function executeSafeGitPull() {
+            if (!confirm("Execute safe pull from origin/main? All active strategies, multipliers, and credentials will be preserved.")) return;
+            const outBox = document.getElementById("gitActionOutput");
+            outBox.style.display = "block";
+            outBox.style.background = "rgba(15, 23, 42, 0.8)";
+            outBox.style.color = "#fbbf24";
+            outBox.textContent = "Snapshotting data and executing zero-data-loss pull... Server will reload shortly.";
+            try {
+                const res = await fetch("/api/system/git_pull", { method: "POST" });
+                const d = await res.json();
+                outBox.textContent = (d.message || "") + "\n" + (d.output || "");
+                showStraddleToast("Update applied! Server restarting...", "info");
+                setTimeout(() => window.location.reload(), 3500);
+            } catch (e) {
+                outBox.textContent = "Notice during update: " + e;
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            updateKotakAuthStatus();
+            updateGitStatus();
+            setInterval(updateKotakAuthStatus, 25000);
+
+            setInterval(() => {
+                const state = window._straddleState;
+                if (state && typeof state.totalPortfolioPnl === "number") {
+                    const mtm = state.totalPortfolioPnl;
+                    const el = document.getElementById("topbarMtmVal");
+                    if (el) {
+                        el.textContent = (mtm >= 0 ? "+₹" : "-₹") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                        el.style.color = mtm > 0 ? "#10b981" : (mtm < 0 ? "#f43f5e" : "#38bdf8");
+                    }
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

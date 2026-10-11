@@ -1,0 +1,4472 @@
+{
+  "status": "TRADE_ACTIVE",
+  "algo_running": true,
+  "live_feed_running": true,
+  "order_api_running": true,
+  "active_strategy_id": "test_strat_001",
+  "positions": [
+    {
+      "id": "leg_1",
+      "status": "ERROR",
+      "side": "SELL",
+      "product": "D",
+      "symbol": "NIFTY26O1322450CE",
+      "instrument_key": "NSE_FO|44608",
+      "quantity": 65,
+      "entry_qty": 65,
+      "avg_ent_price": 140.7,
+      "entry_time": "14:59:40",
+      "target_type": "None",
+      "target_type_label": "None",
+      "target_value": 0.0,
+      "target_price": 0.0,
+      "sl_type": "None",
+      "sl_type_label": "None",
+      "sl_value": 0.0,
+      "sl_price": 0.0,
+      "original_sl_label": "",
+      "original_sl_price": 0.0,
+      "tsl_profit_pts": 0.0,
+      "tsl_trail_pts": 0.0,
+      "highest_profit_pts": 0.0,
+      "avg_exit_price": 0.0,
+      "exit_time": null,
+      "exit_qty": 0,
+      "exit_reason": "Exit Failed: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "is_re_entry": false,
+      "ltp": 172.65,
+      "mtm": -2076.75,
+      "strategy_id": "test_strat_001",
+      "strategy_name": "NIFTY Test 9:20 Straddle",
+      "date": "2026-10-09",
+      "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "error_message": "[EXIT FAILED] Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "repair_needed": true,
+      "order_id": "261008000945881"
+    }
+  ],
+  "group_mtm": -2408.25,
+  "total_mtm": -2408.25,
+  "max_mtm": 0.0,
+  "min_mtm": -4072.25,
+  "execution_mode": "LIVE_BROKER",
+  "underlying_spot": 22520.45,
+  "underlying_symbol": "NIFTY",
+  "underlying_atm_strike": 22500,
+  "last_tick_time": "22:43:12",
+  "logs": [
+    {
+      "timestamp": "22:43:12",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:39",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:35",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:35",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:31",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:30",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:26",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)' in clean READY state.",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:25",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1322450CE (BUY 65 Qty): Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154). Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 123
+      }
+    },
+    {
+      "timestamp": "22:42:25",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "End Time (15:29:50) reached for 'NIFTY Test 9:20 Straddle'. Auto squaring off.",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "22:42:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "22:40:51",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1322050PE (SELL 260 Qty): Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154). Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 82
+      }
+    },
+    {
+      "timestamp": "22:40:51",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1321300PE (SELL 65 Qty): Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154). Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 79
+      }
+    },
+    {
+      "timestamp": "22:40:51",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1322550PE (BUY 65 Qty): Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154). Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 108
+      }
+    },
+    {
+      "timestamp": "22:40:51",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "End Time (15:29:50) reached for 'Renamed Strategy V2'. Auto squaring off.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:45",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Batch deleted 1 strategies.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:45",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Delete By Name Strat'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Batch deleted 1 strategies.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:43",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'To Delete Strat' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:42",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'To Delete Strat'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:40",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:40",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:39",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:38",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1322450CE (BUY 65 Qty): Insufficient fund limit for trading. Required: 150000, Available: 450. Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:59:38",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:37",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:59:36",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:33",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 101
+      }
+    },
+    {
+      "timestamp": "14:59:35",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:33",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 62
+      }
+    },
+    {
+      "timestamp": "14:59:34",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:33",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:32",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:32",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 83
+      }
+    },
+    {
+      "timestamp": "14:59:31",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:31",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:27",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:23",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:20",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 109
+      }
+    },
+    {
+      "timestamp": "14:59:20",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22550 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 63
+      }
+    },
+    {
+      "timestamp": "14:59:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:14",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:13",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:12",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:12",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:11",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)' in clean READY state.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:09",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:59:08",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:53",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 85
+      }
+    },
+    {
+      "timestamp": "14:57:53",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 78
+      }
+    },
+    {
+      "timestamp": "14:57:55",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Batch deleted 1 strategies.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:54",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Delete By Name Strat' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:53",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Delete By Name Strat'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:51",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'To Delete Strat'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:52",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Batch deleted 1 strategies.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:51",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'To Delete Strat' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:50",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'To Delete Strat' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:49",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'To Delete Strat'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:47",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:46",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:45",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:45",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1322450CE (BUY 65 Qty): Insufficient fund limit for trading. Required: 150000, Available: 450. Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:57:44",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:57:42",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:40",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:39",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 86
+      }
+    },
+    {
+      "timestamp": "14:57:36",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:33",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22550 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 139
+      }
+    },
+    {
+      "timestamp": "14:57:33",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22550 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 73
+      }
+    },
+    {
+      "timestamp": "14:57:29",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:28",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:28",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:27",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:26",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:23",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:23",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)' in clean READY state.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:57:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b91.95) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:16",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:16",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:15",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1322450CE (BUY 65 Qty): Insufficient fund limit for trading. Required: 150000, Available: 450. Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:54:15",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1323300CE (SELL 65 Qty): Insufficient fund limit for trading. Required: 150000, Available: 450. Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:54:14",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 133
+      }
+    },
+    {
+      "timestamp": "14:54:14",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:54:14",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 137
+      }
+    },
+    {
+      "timestamp": "14:54:12",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:12",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b91.95) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:11",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:09",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:10",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:10",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b91.95) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:09",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:09",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:08",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 97
+      }
+    },
+    {
+      "timestamp": "14:54:08",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:54:04",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:58",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 194
+      }
+    },
+    {
+      "timestamp": "14:53:58",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22550 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 83
+      }
+    },
+    {
+      "timestamp": "14:53:55",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:55",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:46",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:46",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:45",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:45",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)' in clean READY state.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:42",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:53:35",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:26",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:26",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b92.05) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:26",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:25",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b92.05) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:23",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1322450CE (BUY 65 Qty): Insufficient fund limit for trading. Required: 150000, Available: 450. Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:31:23",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1323300CE (SELL 65 Qty): Insufficient fund limit for trading. Required: 150000, Available: 450. Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:31:22",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:31:20",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 76
+      }
+    },
+    {
+      "timestamp": "14:31:20",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 61
+      }
+    },
+    {
+      "timestamp": "14:31:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b92.05) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:19",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:19",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b92.05) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:18",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:17",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 67
+      }
+    },
+    {
+      "timestamp": "14:31:16",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:10",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:04",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:31:02",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22550 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 148
+      }
+    },
+    {
+      "timestamp": "14:31:02",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 135
+      }
+    },
+    {
+      "timestamp": "14:30:56",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:56",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:56",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:55",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:54",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:53",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:52",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:51",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)' in clean READY state.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:49",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:30:48",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:54",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:54",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b92.05) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:54",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:53",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:53",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b92.05) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:52",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1322450CE (BUY 65 Qty): Insufficient fund limit for trading. Required: 150000, Available: 450. Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:29:52",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "FAILED to exit NIFTY26O1323300CE (SELL 65 Qty): Insufficient fund limit for trading. Required: 150000, Available: 450. Algo marked EXIT_FAILED.",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:29:51",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:29:51",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:50",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:50",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b92.05) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:49",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:49",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 66
+      }
+    },
+    {
+      "timestamp": "14:29:49",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 133
+      }
+    },
+    {
+      "timestamp": "14:29:49",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:47",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:47",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 53
+      }
+    },
+    {
+      "timestamp": "14:29:47",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:46",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:43",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:39",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:38",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22550 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 1065
+      }
+    },
+    {
+      "timestamp": "14:29:38",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 1106
+      }
+    },
+    {
+      "timestamp": "14:29:32",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:32",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:32",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:31",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:31",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:30",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:30",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:29",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)' in clean READY state.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:27",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:27",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322550PE (Qty: -65 @ \u20b994.05) to strategy 'Renamed Strategy V2'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322050PE (Qty: 260 @ \u20b911.70) to strategy 'Renamed Strategy V2'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1322450CE (Qty: -65 @ \u20b9140.70) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1321300PE (Qty: 65 @ \u20b93.20) to strategy 'Renamed Strategy V2'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:29:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Reconciled live Upstox broker position NIFTY26O1323300CE (Qty: 65 @ \u20b92.05) to strategy 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:06",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'NIFTY Test 9:20 Straddle'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:06",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:06",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:03",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 165
+      }
+    },
+    {
+      "timestamp": "14:27:05",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "14:27:03",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 68
+      }
+    },
+    {
+      "timestamp": "14:27:03",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:02",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:02",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:01",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 58
+      }
+    },
+    {
+      "timestamp": "14:27:01",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:27:01",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:57",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:52",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'NIFTY Test 9:20 Straddle'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:49",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 68
+      }
+    },
+    {
+      "timestamp": "14:26:50",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:49",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 58
+      }
+    },
+    {
+      "timestamp": "14:26:46",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 2552
+      }
+    },
+    {
+      "timestamp": "14:26:43",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (122.252.235.119). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 128
+      }
+    },
+    {
+      "timestamp": "14:26:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:10",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:02",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:26:00",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "14:25:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'NIFTY Test 9:20 Straddle'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:25:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "14:25:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)' in clean READY state.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:25:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'NIFTY Test 9:20 Straddle' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:25:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:25:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:58",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 68
+      }
+    },
+    {
+      "timestamp": "13:33:58",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 99
+      }
+    },
+    {
+      "timestamp": "13:33:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'NIFTY Test 9:20 Straddle'...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:57",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "13:33:56",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:55",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:55",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:54",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:53",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 97
+      }
+    },
+    {
+      "timestamp": "13:33:53",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:51",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:48",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:46",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 1105
+      }
+    },
+    {
+      "timestamp": "13:33:46",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 87
+      }
+    },
+    {
+      "timestamp": "13:33:42",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:40",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:39",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:39",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)' in clean READY state.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:29",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:33:29",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'NIFTY Test 9:20 Straddle'...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:43",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:42",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:40",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 106
+      }
+    },
+    {
+      "timestamp": "13:11:40",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "13:11:40",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 103
+      }
+    },
+    {
+      "timestamp": "13:11:39",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:38",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:37",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:37",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 65
+      }
+    },
+    {
+      "timestamp": "13:11:37",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:36",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:34",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:30",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:28",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 179
+      }
+    },
+    {
+      "timestamp": "13:11:28",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 65
+      }
+    },
+    {
+      "timestamp": "13:11:27",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Renamed Strategy V2'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:25",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 266
+      }
+    },
+    {
+      "timestamp": "13:11:25",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 229
+      }
+    },
+    {
+      "timestamp": "13:11:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:23",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:22",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Renamed Strategy V2'...",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:18",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:16",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'NIFTY Test 9:20 Straddle (Copy)' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:10",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)'",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:09",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "13:11:00",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:43",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:42",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:39",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 68
+      }
+    },
+    {
+      "timestamp": "12:37:39",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 55
+      }
+    },
+    {
+      "timestamp": "12:37:40",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "12:37:37",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:37",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:36",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:35",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 56
+      }
+    },
+    {
+      "timestamp": "12:37:35",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:34",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:33",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:31",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:31",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'NIFTY Test 9:20 Straddle'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:28",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 74
+      }
+    },
+    {
+      "timestamp": "12:37:28",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 69
+      }
+    },
+    {
+      "timestamp": "12:37:28",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 188
+      }
+    },
+    {
+      "timestamp": "12:37:28",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 1108
+      }
+    },
+    {
+      "timestamp": "12:37:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'NIFTY Test 9:20 Straddle'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'NIFTY Test 9:20 Straddle' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:18",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:18",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)'",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:37:16",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:34",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:33",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:32",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "12:35:31",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:30",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:29",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 71
+      }
+    },
+    {
+      "timestamp": "12:35:29",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 53
+      }
+    },
+    {
+      "timestamp": "12:35:29",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:27",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:27",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:26",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 64
+      }
+    },
+    {
+      "timestamp": "12:35:26",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:20",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Renamed Strategy V2'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:15",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 86
+      }
+    },
+    {
+      "timestamp": "12:35:15",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 63
+      }
+    },
+    {
+      "timestamp": "12:35:12",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 261
+      }
+    },
+    {
+      "timestamp": "12:35:12",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 139
+      }
+    },
+    {
+      "timestamp": "12:35:11",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:10",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:08",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:08",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Renamed Strategy V2'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:06",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:06",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'NIFTY Test 9:20 Straddle (Copy)' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:06",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)'",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:05",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:35:05",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:48",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:47",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "12:31:46",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 62
+      }
+    },
+    {
+      "timestamp": "12:31:46",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 57
+      }
+    },
+    {
+      "timestamp": "12:31:45",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:43",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:43",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 58
+      }
+    },
+    {
+      "timestamp": "12:31:43",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:42",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:30",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:29",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Renamed Strategy V2'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:28",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 57
+      }
+    },
+    {
+      "timestamp": "12:31:27",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 1297
+      }
+    },
+    {
+      "timestamp": "12:31:27",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 57
+      }
+    },
+    {
+      "timestamp": "12:31:25",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 284
+      }
+    },
+    {
+      "timestamp": "12:31:25",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:22",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Renamed Strategy V2'...",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:22",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Renamed Strategy V2' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:15",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:14",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)'",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:04",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "12:31:04",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:01:14",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "10:01:13",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 58
+      }
+    },
+    {
+      "timestamp": "10:01:13",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 52
+      }
+    },
+    {
+      "timestamp": "10:01:13",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "10:01:02",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:01:01",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "10:01:01",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' completely reset to fresh READY state. All past orders and error history cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:01:01",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:57",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 98
+      }
+    },
+    {
+      "timestamp": "10:00:57",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:41",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:28",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:19",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 94
+      }
+    },
+    {
+      "timestamp": "10:00:19",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 54
+      }
+    },
+    {
+      "timestamp": "10:00:16",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Renamed Strategy V2'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:12",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 1083
+      }
+    },
+    {
+      "timestamp": "10:00:11",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+      "details": {
+        "success": false,
+        "error": "Access to this API is blocked due to static IP restrictions. Reason: The configured static IP (140.238.255.30) does not match the request origin IP (2406:b400:71:9ba8::1001). (UDAPI1154)",
+        "status_code": 403,
+        "latency_ms": 232
+      }
+    },
+    {
+      "timestamp": "10:00:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:03",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "10:00:03",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:59:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Renamed Strategy V2'...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:59:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "09:59:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "09:59:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'NIFTY Test 9:20 Straddle (Copy)' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:59:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)'",
+      "details": {}
+    },
+    {
+      "timestamp": "09:59:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:59:44",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:26",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'NIFTY Test 9:20 Straddle'...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:26",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 64
+      }
+    },
+    {
+      "timestamp": "09:46:26",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 64
+      }
+    },
+    {
+      "timestamp": "09:46:26",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:26",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "09:46:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' reset to fresh state. Old positions cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:24",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' reset successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:23",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:23",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 189
+      }
+    },
+    {
+      "timestamp": "09:46:23",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:21",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:17",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:16",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 243
+      }
+    },
+    {
+      "timestamp": "09:46:16",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 69
+      }
+    },
+    {
+      "timestamp": "09:46:16",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Renamed Strategy V2'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:15",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 92
+      }
+    },
+    {
+      "timestamp": "09:46:15",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 81
+      }
+    },
+    {
+      "timestamp": "09:46:14",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:14",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Blank Custom Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:14",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Straddle Mon 244' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:12",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Straddle Mon 244'.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:12",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Iron Condor Monday'.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:11",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Renamed Strategy V2'...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:12",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'Renamed Strategy V2' enabled set to False",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:11",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Renamed strategy 'NIFTY Test 9:20 Straddle (Copy)' -> 'Renamed Strategy V2'",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:11",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'NIFTY Test 9:20 Straddle (Copy)' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:11",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Duplicated strategy 'NIFTY Test 9:20 Straddle' -> 'NIFTY Test 9:20 Straddle (Copy)'",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:11",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Active strategy set to 'NIFTY Test 9:20 Straddle'.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:46:10",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' saved successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:09",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Algorithm 'NIFTY Test 9:20 Straddle' started manually. Punching entry orders...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:08",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 54
+      }
+    },
+    {
+      "timestamp": "09:43:08",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 60
+      }
+    },
+    {
+      "timestamp": "09:43:09",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22800 PE: Insufficient fund limit for trading. Required: 150000, Available: 450",
+      "details": {
+        "success": false,
+        "order_id": null,
+        "status": "REJECTED",
+        "error": "Insufficient fund limit for trading. Required: 150000, Available: 450",
+        "raw_response": {
+          "status": "error"
+        }
+      }
+    },
+    {
+      "timestamp": "09:43:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' reset to fresh state. Old positions cleared.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:07",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Strategy 'NIFTY Test 9:20 Straddle' reset successfully.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:06",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Live Nifty Test Strategy'...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:06",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Direct order failed for NIFTY 22650 CE: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 60
+      }
+    },
+    {
+      "timestamp": "09:43:06",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'Live Nifty Test Strategy' for Friday.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:05",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Created preset 'Live Nifty Test Strategy'.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:03",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Live Upstox Broker execution is active.",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:02",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:02",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:01",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:01",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:01",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:00",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:54",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 65
+      }
+    },
+    {
+      "timestamp": "09:43:00",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:00",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:43:00",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:59",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:58",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:49",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 155
+      }
+    },
+    {
+      "timestamp": "09:42:57",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:54",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 62
+      }
+    },
+    {
+      "timestamp": "09:42:57",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Renamed Strategy V2'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:54",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 56
+      }
+    },
+    {
+      "timestamp": "09:42:54",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 59
+      }
+    },
+    {
+      "timestamp": "09:42:54",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 53
+      }
+    },
+    {
+      "timestamp": "09:42:54",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 59
+      }
+    },
+    {
+      "timestamp": "09:42:54",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 61
+      }
+    },
+    {
+      "timestamp": "09:42:53",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 58
+      }
+    },
+    {
+      "timestamp": "09:42:56",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'NIFTY Test 9:20 Straddle'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:52",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 589
+      }
+    },
+    {
+      "timestamp": "09:42:52",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 61
+      }
+    },
+    {
+      "timestamp": "09:42:52",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 92
+      }
+    },
+    {
+      "timestamp": "09:42:52",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 70
+      }
+    },
+    {
+      "timestamp": "09:42:52",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 56
+      }
+    },
+    {
+      "timestamp": "09:42:51",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 61
+      }
+    },
+    {
+      "timestamp": "09:42:55",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:51",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 77
+      }
+    },
+    {
+      "timestamp": "09:42:50",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 796
+      }
+    },
+    {
+      "timestamp": "09:42:42",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 78
+      }
+    },
+    {
+      "timestamp": "09:42:49",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 174
+      }
+    },
+    {
+      "timestamp": "09:42:49",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 75
+      }
+    },
+    {
+      "timestamp": "09:42:55",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Live Nifty Test Strategy'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:49",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 78
+      }
+    },
+    {
+      "timestamp": "09:42:54",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:47",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 75
+      }
+    },
+    {
+      "timestamp": "09:42:47",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 96
+      }
+    },
+    {
+      "timestamp": "09:42:45",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 137
+      }
+    },
+    {
+      "timestamp": "09:42:45",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 51
+      }
+    },
+    {
+      "timestamp": "09:42:44",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 81
+      }
+    },
+    {
+      "timestamp": "09:42:44",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 62
+      }
+    },
+    {
+      "timestamp": "09:42:44",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 81
+      }
+    },
+    {
+      "timestamp": "09:42:44",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 76
+      }
+    },
+    {
+      "timestamp": "09:42:43",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'Straddle Mon 244'...",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:42",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 68
+      }
+    },
+    {
+      "timestamp": "09:42:49",
+      "date": "2026-10-09",
+      "level": "INFO",
+      "message": "Processed 2 strategy legs for 'Straddle Mon 244'. Status: ENTRY_FAILED",
+      "details": {}
+    },
+    {
+      "timestamp": "09:42:41",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 60
+      }
+    },
+    {
+      "timestamp": "09:42:41",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 80
+      }
+    },
+    {
+      "timestamp": "09:42:41",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 PE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 110
+      }
+    },
+    {
+      "timestamp": "09:42:41",
+      "date": "2026-10-09",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22600 CE 13 OCT 26: Invalid token used to access API (UDAPI100050)",
+      "details": {
+        "success": false,
+        "error": "Invalid token used to access API (UDAPI100050)",
+        "status_code": 401,
+        "latency_ms": 105
+      }
+    }
+  ],
+  "entry_error": "-",
+  "exit_error": "-",
+  "last_error": null,
+  "repair_needed": false,
+  "active_strategy": {
+    "strategy_id": "test_strat_001",
+    "name": "NIFTY Test 9:20 Straddle",
+    "enabled": false,
+    "execution_mode": "PAPER_TRADING",
+    "underlying": "NIFTY",
+    "underlying_price_type": "Spot",
+    "trade_type": "Intraday",
+    "multiplier": 1,
+    "start_time": "09:15:56",
+    "end_time": "15:29:50",
+    "schedule_days": [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday"
+    ],
+    "legs": [
+      {
+        "id": "leg_1",
+        "side": "Sell",
+        "status": "READY",
+        "error": null,
+        "entry_order_id": null,
+        "error_message": null,
+        "exit_order_id": null,
+        "entry_price": null,
+        "exit_price": null,
+        "order_status": null,
+        "entry_time": null,
+        "exit_time": null,
+        "re_execute_count": 0,
+        "journey": {},
+        "repair_needed": false
+      }
+    ],
+    "mtm_target": {
+      "type": "MTM in total amount",
+      "value": 10000.0,
+      "re_entry": "None",
+      "max_re_entries": "No max limit",
+      "action": "Square off all positions"
+    },
+    "mtm_stoploss": {
+      "type": "None",
+      "value": 0.0,
+      "profit_lock": "None",
+      "re_entry": "None",
+      "max_re_entries": "No max limit",
+      "action": "Square off all positions"
+    },
+    "advanced": {
+      "entry_order_type": "Limit (L) / Stoploss Limit (SL-L)",
+      "entry_buffer_type": "Percentage",
+      "entry_buffer_value": 5.0,
+      "entry_market_timeout_sec": 0,
+      "exit_order_type": "Limit (L) / Stoploss Limit (SL-L)",
+      "exit_buffer_type": "Percentage",
+      "exit_buffer_value": 0.1,
+      "exit_market_timeout_sec": 0,
+      "sl_order_placement": "Place in advance",
+      "sl_placement_delay_sec": 0,
+      "mtm_sl_delay_sec": 0,
+      "entry_order_delay_side": "Delay entry of Sell positions",
+      "entry_order_delay_sec": 3,
+      "exit_order_delay_side": "Delay exit of Buy positions",
+      "exit_order_delay_sec": 3,
+      "calc_base": "Average Entry Price",
+      "trail_freq_interval": 1,
+      "trail_freq_unit": "Minutes",
+      "re_execute_method": "Immediate",
+      "re_entry_after_time": "",
+      "re_entry_before_time": "",
+      "re_entry_max_count_legs": "Individual",
+      "re_entry_max_count_mtm": "Individual",
+      "re_execute_order_delay_sec": 0,
+      "re_entry_placement": "Place in advance",
+      "re_cost_activation": "Immediate",
+      "auto_handling_sl_cancellation": true,
+      "auto_exit_on_margin_error": false
+    },
+    "positions": [
+      {
+        "id": "leg_1",
+        "status": "OPEN",
+        "side": "SELL",
+        "product": "D",
+        "symbol": "NIFTY26O1322450CE",
+        "instrument_key": "NSE_FO|44608",
+        "quantity": 65,
+        "entry_qty": 65,
+        "avg_ent_price": 140.7,
+        "entry_time": "14:59:40",
+        "target_type": "None",
+        "target_type_label": "None",
+        "target_value": 0.0,
+        "target_price": 0.0,
+        "sl_type": "None",
+        "sl_type_label": "None",
+        "sl_value": 0.0,
+        "sl_price": 0.0,
+        "original_sl_label": "",
+        "original_sl_price": 0.0,
+        "tsl_profit_pts": 0.0,
+        "tsl_trail_pts": 0.0,
+        "highest_profit_pts": 0.0,
+        "avg_exit_price": 0.0,
+        "exit_time": null,
+        "exit_qty": 0,
+        "exit_reason": null,
+        "is_re_entry": false,
+        "ltp": 190.95,
+        "mtm": -3266.25,
+        "strategy_id": "test_strat_001",
+        "strategy_name": "NIFTY Test 9:20 Straddle",
+        "date": "2026-10-09"
+      }
+    ],
+    "status": "TRADE_ACTIVE",
+    "mtm": -3266.25,
+    "_manual_reset": false,
+    "entry_error": "-",
+    "repair_needed": false,
+    "_reset_generation": 3,
+    "max_mtm": 0.0,
+    "min_mtm": 0.0,
+    "exit_error": "-",
+    "last_error": null,
+    "_last_entry_attempt_ts": 0,
+    "_entry_in_progress": false,
+    "last_trade_date": null
+  }
+}

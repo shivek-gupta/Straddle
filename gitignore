@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+logs/
+.env
+data/*.tmp
+data/kotak_session.json
+data/straddle_backups/
