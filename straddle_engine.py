@@ -3968,8 +3968,10 @@ class StraddleManager:
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
-            # Reconcile any open positions from Kotak Neo broker with active strategies
-            if mode == "LIVE_BROKER":
+            # Reconcile any open positions from Kotak Neo broker with active strategies (throttled to 3s)
+            now_ts = time.time()
+            if mode == "LIVE_BROKER" and (now_ts - getattr(self, "_last_reconcile_ts", 0)) > 3.0:
+                self._last_reconcile_ts = now_ts
                 self._reconcile_broker_positions(broker)
 
             active_strat = self.get_strategy(self._active_strategy_id)
@@ -4236,10 +4238,6 @@ class StraddleManager:
 
     def get_full_state(self) -> Dict[str, Any]:
         with _ENGINE_LOCK:
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
-            if mode == "LIVE_BROKER":
-                self._reconcile_broker_positions()
-
             active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else {})
             active_positions = active_strat.get("positions", []) if active_strat else []
 
