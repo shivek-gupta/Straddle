@@ -45,6 +45,29 @@ _COOLDOWN_SECONDS: float = 10.0
 _LAST_AUTH_ERROR: str = ""
 
 
+def get_network_time_offset() -> float:
+    """Calculate time drift (in seconds) between system clock and Kotak Neo / NTP server."""
+    try:
+        r = requests.head("https://mis.kotaksecurities.com", timeout=3)
+        server_date = r.headers.get("Date")
+        if server_date:
+            import email.utils
+            server_ts = email.utils.parsedate_to_datetime(server_date).timestamp()
+            return server_ts - time.time()
+    except Exception:
+        pass
+    try:
+        r = requests.head("https://www.google.com", timeout=3)
+        server_date = r.headers.get("Date")
+        if server_date:
+            import email.utils
+            server_ts = email.utils.parsedate_to_datetime(server_date).timestamp()
+            return server_ts - time.time()
+    except Exception:
+        pass
+    return 0.0
+
+
 def get_last_auth_error() -> str:
     """Return the last authentication error message."""
     global _LAST_AUTH_ERROR
@@ -177,9 +200,13 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
                 environment=env
             )
 
-            # 2. Generate live TOTP code via pyotp
+            # 2. Generate live TOTP code via pyotp with network time synchronization
             totp_clean = totp_key.replace(" ", "").upper()
-            totp_code = pyotp.TOTP(totp_clean).now()
+            drift = get_network_time_offset()
+            if abs(drift) > 3.0:
+                logger.info(f"[Kotak Auth] Clock skew detected ({drift:+.1f}s). Synchronizing TOTP generation with real server time.")
+            synced_now = datetime.datetime.fromtimestamp(time.time() + drift, tz=datetime.timezone.utc)
+            totp_code = pyotp.TOTP(totp_clean).at(synced_now)
 
             # 3. Call totp_login
             login_res = client.totp_login(

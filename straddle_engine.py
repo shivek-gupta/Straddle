@@ -358,6 +358,38 @@ DEFAULT_STRATEGIES = [
 ]
 
 
+# High-Speed Spot Feed Memory Cache
+_SPOT_CACHE: Dict[str, float] = {}
+_LAST_SPOT_FETCH_TS: Dict[str, float] = {}
+_SPOT_FETCH_LOCK = threading.Lock()
+
+
+def _fetch_live_index_spot_network(und: str) -> float:
+    """Fetch real-time index price from live financial endpoint."""
+    clean_und = und.upper()
+    sym_map = {
+        "NIFTY": "%5ENSEI",
+        "BANKNIFTY": "%5ENSEBANK",
+        "SENSEX": "%5EBSESN",
+        "FINNIFTY": "NIFTY_FIN_SERVICE.NS",
+        "MIDCPNIFTY": "%5ENSEMDCP50",
+    }
+    sym = sym_map.get(clean_und, "%5ENSEI")
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1m"
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            meta = data["chart"]["result"][0]["meta"]
+            p = float(meta.get("regularMarketPrice") or 0.0)
+            if p > 0:
+                return round(p, 2)
+    except Exception:
+        pass
+    return 0.0
+
+
 class StraddleManager:
     """
     Core Straddle & Strangle Strategy Management, Live Feed Subscription,
@@ -424,6 +456,27 @@ class StraddleManager:
                     self._strategies = []
             else:
                 self._strategies = []
+                self._save_strategies()
+
+            # Ensure unique names across all strategies (resolve any existing duplicate names)
+            seen_names = set()
+            names_modified = False
+            for s in self._strategies:
+                name = (s.get("name") or "Strategy").strip()
+                if name.lower() in seen_names:
+                    counter = 1
+                    candidate = f"{name} ({counter})"
+                    while candidate.lower() in seen_names:
+                        counter += 1
+                        candidate = f"{name} ({counter})"
+                    s["name"] = candidate
+                    names_modified = True
+                    seen_names.add(candidate.lower())
+                else:
+                    s["name"] = name
+                    seen_names.add(name.lower())
+
+            if names_modified:
                 self._save_strategies()
 
             if self._strategies:
@@ -837,29 +890,69 @@ class StraddleManager:
             "rows": final_rows,
         }
 
+
     # ==========================================================
     # Live Quotes & Price Engine
     # ==========================================================
 
     def _get_underlying_spot_price(self, underlying: str = "NIFTY") -> float:
-        """Resolves live spot index price across Kotak Neo quotes and realistic defaults."""
+        """Resolves live continuous spot index price with sub-second caching."""
         clean_und = underlying.upper()
-        fallbacks = {
-            "NIFTY": 25000.0,
-            "BANKNIFTY": 51500.0,
-            "FINNIFTY": 23500.0,
-            "MIDCPNIFTY": 13000.0,
-            "SENSEX": 81500.0
-        }
-        fallback_val = fallbacks.get(clean_und, 25000.0)
+        now_ts = time.time()
+        
+        # Check high-speed memory cache (valid for 3 seconds)
+        with _SPOT_FETCH_LOCK:
+            if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 3.0:
+                return _SPOT_CACHE[clean_und]
+
+        # 1. Try Kotak Neo broker quotes if connected
         try:
             adapter = get_broker_adapter()
             quotes = adapter.get_live_quotes([clean_und])
             if clean_und in quotes and float(quotes[clean_und].get("ltp", 0)) > 0:
-                return float(quotes[clean_und]["ltp"])
+                p = float(quotes[clean_und]["ltp"])
+                with _SPOT_FETCH_LOCK:
+                    _SPOT_CACHE[clean_und] = p
+                    _LAST_SPOT_FETCH_TS[clean_und] = now_ts
+                return p
         except Exception:
             pass
-        return fallback_val
+
+        # 2. Try fast network live index feed
+        try:
+            p = _fetch_live_index_spot_network(clean_und)
+            if p > 0:
+                with _SPOT_FETCH_LOCK:
+                    _SPOT_CACHE[clean_und] = p
+                    _LAST_SPOT_FETCH_TS[clean_und] = now_ts
+                return p
+        except Exception:
+            pass
+
+        # 3. Return last cached price or realistic current market levels
+        with _SPOT_FETCH_LOCK:
+            if clean_und in _SPOT_CACHE and _SPOT_CACHE[clean_und] > 0:
+                return _SPOT_CACHE[clean_und]
+
+        fallbacks = {
+            "NIFTY": 22630.0,
+            "BANKNIFTY": 55300.0,
+            "FINNIFTY": 24200.0,
+            "MIDCPNIFTY": 13000.0,
+            "SENSEX": 72900.0,
+            "BANKEX": 60500.0,
+        }
+        return fallbacks.get(clean_und, 22630.0)
+
+    def get_underlying_atm_strike(self, underlying: str = "NIFTY") -> float:
+        """Calculate the nearest ATM strike based on live spot price."""
+        clean_und = underlying.upper()
+        spot = self._get_underlying_spot_price(clean_und)
+        step = STRIKE_STEPS.get(clean_und, 50)
+        return float(round(spot / step) * step)
+
+    def _get_underlying_atm_strike(self, underlying: str = "NIFTY") -> float:
+        return self.get_underlying_atm_strike(underlying)
 
     def _fetch_live_quotes(self, instrument_keys: List[str]) -> Tuple[Dict[str, float], Dict[str, Any]]:
         """Fetch quotes from Kotak Neo broker adapter."""
@@ -1172,6 +1265,16 @@ class StraddleManager:
                     strat_dict["mtm"] = existing["mtm"]
                 self._strategies[idx] = strat_dict
             else:
+                raw_name = (strat_dict.get("name") or "Strategy").strip()
+                existing_names = [s.get("name", "").strip().lower() for s in self._strategies if s.get("strategy_id") != sid]
+                if raw_name.lower() in existing_names:
+                    counter = 1
+                    candidate = f"{raw_name} ({counter})"
+                    while candidate.lower() in existing_names:
+                        counter += 1
+                        candidate = f"{raw_name} ({counter})"
+                    strat_dict["name"] = candidate
+
                 if "positions" not in strat_dict:
                     strat_dict["positions"] = []
                 if "status" not in strat_dict:
@@ -1192,7 +1295,19 @@ class StraddleManager:
             new_strat = json.loads(json.dumps(strat))
             new_id = f"strat_copy_{int(time.time()*1000)}"
             new_strat["strategy_id"] = new_id
-            new_strat["name"] = f"{strat.get('name', 'Strategy')} (Copy)"
+
+            base_name = f"{strat.get('name', 'Strategy')} (Copy)"
+            existing_names = [s.get("name", "").strip().lower() for s in self._strategies]
+            if base_name.lower() in existing_names:
+                counter = 2
+                candidate = f"{strat.get('name', 'Strategy')} (Copy {counter})"
+                while candidate.lower() in existing_names:
+                    counter += 1
+                    candidate = f"{strat.get('name', 'Strategy')} (Copy {counter})"
+                new_strat["name"] = candidate
+            else:
+                new_strat["name"] = base_name
+
             new_strat["enabled"] = False
             new_strat["positions"] = []
             if "closed_positions" in new_strat:
@@ -1355,11 +1470,19 @@ class StraddleManager:
             for sid in strategy_ids:
                 strat = self.get_strategy(sid)
                 if strat:
-                    new_strat = json.loads(json.dumps(strat))
-                    new_id = f"strat_copy_{int(time.time()*1000)}_{len(duplicated)}"
-                    new_strat["strategy_id"] = new_id
-                    new_strat["name"] = f"{strat.get('name', 'Strategy')} (Copy)"
-                    new_strat["enabled"] = True
+                    base_name = f"{strat.get('name', 'Strategy')} (Copy)"
+                    existing_names = [s.get("name", "").strip().lower() for s in self._strategies] + [d.get("name", "").strip().lower() for d in duplicated]
+                    if base_name.lower() in existing_names:
+                        counter = 2
+                        candidate = f"{strat.get('name', 'Strategy')} (Copy {counter})"
+                        while candidate.lower() in existing_names:
+                            counter += 1
+                            candidate = f"{strat.get('name', 'Strategy')} (Copy {counter})"
+                        new_strat["name"] = candidate
+                    else:
+                        new_strat["name"] = base_name
+
+                    new_strat["enabled"] = False
                     new_strat["positions"] = []
                     new_strat["status"] = "READY"
                     new_strat["mtm"] = 0.0
@@ -1903,11 +2026,22 @@ class StraddleManager:
             if "NIFTY 50" in clean_und:
                 clean_und = "NIFTY"
 
-            sid = f"strat_preset_{p_type.lower().replace(' ', '_')}_{int(time.time())}"
+            # Ensure unique strategy name (prevent duplicate algo names)
+            existing_names = [s.get("name", "").strip().lower() for s in self._strategies]
+            final_name = strat_name.strip()
+            if final_name.lower() in existing_names:
+                counter = 1
+                candidate = f"{final_name} ({counter})"
+                while candidate.lower() in existing_names:
+                    counter += 1
+                    candidate = f"{final_name} ({counter})"
+                final_name = candidate
+
+            sid = f"strat_preset_{p_type.lower().replace(' ', '_')}_{int(time.time()*1000)}"
             base_strat = DEFAULT_STRATEGIES[0]
             strat = json.loads(json.dumps(base_strat))
             strat["strategy_id"] = sid
-            strat["name"] = strat_name
+            strat["name"] = final_name
             strat["underlying"] = clean_und
             strat["schedule_days"] = raw_days if raw_days else ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 

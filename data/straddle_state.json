@@ -5,7 +5,15 @@
   "order_api_running": true,
   "active_strategy_id": null,
   "positions": [],
-  "all_strategies": [],
+  "group_mtm": 0.0,
+  "total_mtm": 0.0,
+  "max_mtm": 0.0,
+  "min_mtm": 0.0,
+  "execution_mode": "LIVE_BROKER",
+  "underlying_spot": 22630.0,
+  "underlying_symbol": "NIFTY",
+  "underlying_atm_strike": 22650.0,
+  "last_tick_time": "14:14:53",
   "logs": [
     {
       "timestamp": "08:15:00",
@@ -15,13 +23,5 @@
       "details": {}
     }
   ],
-  "group_mtm": 0.0,
-  "total_mtm": 0.0,
-  "max_mtm": 0.0,
-  "min_mtm": 0.0,
-  "execution_mode": "LIVE_BROKER",
-  "underlying_spot": 25000.0,
-  "underlying_symbol": "NIFTY",
-  "underlying_atm_strike": 25000,
-  "last_tick_time": "--:--:--"
+  "all_strategies": []
 }

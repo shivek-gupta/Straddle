@@ -192,17 +192,21 @@ async function initStraddlePlatform() {
 }
 
 async function pollStraddleCycle() {
-    if (typeof currentTab !== "undefined" && currentTab !== "straddle") {
-        if (window._straddleState.pollTimer) {
-            clearInterval(window._straddleState.pollTimer);
-            window._straddleState.pollTimer = null;
+    try {
+        await fetchStraddleState();
+        if (window._straddleState.currentSubView === "open_positions") {
+            await loadStraddleOpenPositions();
+        } else if (window._straddleState.currentSubView === "option_chain") {
+            if (typeof loadStraddleOptionChain === "function") {
+                await loadStraddleOptionChain();
+            }
+        } else if (window._straddleState.currentSubView === "pnl") {
+            if (typeof loadStraddlePnlChart === "function" && !window._straddleState._pnlHoverActive) {
+                await loadStraddlePnlChart();
+            }
         }
-        return;
-    }
-
-    await fetchStraddleState();
-    if (window._straddleState.currentSubView === "open_positions") {
-        await loadStraddleOpenPositions();
+    } catch (err) {
+        console.debug("Straddle poll tick note:", err);
     }
 }
 
@@ -1581,6 +1585,13 @@ async function submitCreateNewStraddleAlgo() {
     const underlying = document.getElementById("newAlgoUnderlying")?.value || "NIFTY";
     const name = rawName || `${underlying} 9:20 Strategy`;
 
+    const submitBtn = document.querySelector("#modalAddStraddleAlgo .btn-primary");
+    if (submitBtn) {
+        if (submitBtn.disabled) return;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating...";
+    }
+
     const days = [];
     document.querySelectorAll("input[name='algo_days']:checked").forEach(cb => days.push(cb.value));
 
@@ -1604,12 +1615,19 @@ async function submitCreateNewStraddleAlgo() {
             closeAddStraddleAlgoModal();
             await fetchStraddleState();
             openStrategyInTerminal(res.strategy.strategy_id);
-            toggleStraddleSettingsPanel();
+            toggleStraddleSettingsPanel(true);
+            showStraddleToast(`Strategy "${res.strategy.name}" created successfully!`, "success", 3000);
         } else {
-            alert("Error creating algo: " + (res.error || "Failed"));
+            showStraddleToast("Error creating algo: " + (res.error || "Failed"), "error", 4000);
         }
     } catch (e) {
-        alert("Error creating algo: " + e.message);
+        console.error("Error creating algo:", e);
+        showStraddleToast("Error creating algo: " + e.message, "error", 4000);
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Create Strategy";
+        }
     }
 }
 
@@ -3044,6 +3062,9 @@ function onStraddlePositionCheckboxChange(inputEl = null, idx = null, legId = nu
     const errorChecked = document.querySelectorAll(".straddle-leg-checkbox:checked[data-status='ERROR']");
     const totalChecked = allChecked.length;
     const errorCount = errorChecked.length;
+
+    const allErrorsInStrat = document.querySelectorAll(".straddle-leg-checkbox[data-status='ERROR']");
+    const totalErrorsInStrat = allErrorsInStrat.length;
 
     const openChecked = document.querySelectorAll(".straddle-leg-checkbox:checked[data-status='OPEN']");
     const openCount = openChecked.length;
@@ -4658,7 +4679,9 @@ async function loadStraddleOptionChain(expiryMs) {
     const spotLabel = document.getElementById("optChainSpotTicker");
     if (!tbody) return;
 
-    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:40px; color:#94a3b8;"><span style="font-size:16px;">⏳</span> Calculating Black-Scholes Greeks, PCR & Real-Time Option Depth...</td></tr>`;
+    if (!tbody.children.length || tbody.querySelector("td[colspan]")) {
+        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:40px; color:#94a3b8;"><span style="font-size:16px;">⏳</span> Calculating Black-Scholes Greeks, PCR & Real-Time Option Depth...</td></tr>`;
+    }
 
     try {
         let url = `/api/straddle/option_chain?underlying=${und}&strike_range=${strikeRange}`;

@@ -8390,3 +8390,55 @@ table .flag-cell {
     font-family: var(--font-mono);
 }
 
+/* ==========================================================
+   ALGO BUILDER COLLAPSIBLE ACCORDION ROWS
+   ========================================================== */
+.straddle-collapsible-header {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    background: #0d1527 !important;
+    border: 1px solid rgba(56, 189, 248, 0.18) !important;
+    border-radius: 8px !important;
+    padding: 11px 16px !important;
+    margin-top: 14px !important;
+    margin-bottom: 8px !important;
+    cursor: pointer !important;
+    user-select: none !important;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+}
+
+.straddle-collapsible-header:hover {
+    background: #142038 !important;
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.12) !important;
+}
+
+.straddle-collapsible-header .chevron-icon {
+    font-size: 11px !important;
+    color: #38bdf8 !important;
+    width: 16px !important;
+    display: inline-block !important;
+    text-align: center !important;
+    transition: transform 0.2s ease !important;
+}
+
+.straddle-collapsible-body {
+    width: 100% !important;
+    margin-bottom: 12px !important;
+    animation: fadeInCollapsible 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+@keyframes fadeInCollapsible {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+

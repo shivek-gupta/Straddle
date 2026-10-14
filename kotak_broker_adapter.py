@@ -124,16 +124,16 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 "status_code": 401
             }
 
-        # Normalize parameters for Kotak Neo
+        # Normalize parameters for Kotak Neo (Must adhere strictly to allowed canonical values)
         clean_tt = "B" if transaction_type.upper() in ("BUY", "B") else "S"
-        clean_ot = "LMT" if order_type.upper() in ("LIMIT", "LMT") else ("MKT" if order_type.upper() in ("MARKET", "MKT") else order_type.upper())
+        clean_ot = "L" if order_type.upper() in ("LIMIT", "LMT", "L") else ("MKT" if order_type.upper() in ("MARKET", "MKT") else ("SL-M" if "M" in order_type.upper() else "SL"))
         clean_prod = "MIS" if product.upper() in ("MIS", "I", "INTRADAY") else "NRML"
-        clean_price = str(round_to_tick(price)) if clean_ot != "MKT" else "0"
+        clean_price = str(round_to_tick(price)) if clean_ot in ("L", "SL") else "0"
         clean_trig = str(round_to_tick(trigger_price)) if trigger_price and trigger_price > 0 else "0"
         clean_qty = str(int(quantity))
 
-        # Detect segment
-        segment = "bfo" if any(b in symbol.upper() for b in ("SENSEX", "BANKEX")) else "nfo"
+        # Detect segment (Kotak Neo canonical values: nse_fo, bse_fo, nse_cm, bse_cm)
+        segment = "bse_fo" if any(b in symbol.upper() for b in ("SENSEX", "BANKEX")) else "nse_fo"
 
         try:
             res = client.place_order(
@@ -158,7 +158,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             if order_id:
                 return {"success": True, "order_id": str(order_id), "data": res}
             
-            err_msg = str(res.get("message") or res.get("error") or res)
+            err_msg = str(res.get("message") or res.get("error") or res.get("Error") or res)
             return {"success": False, "error": err_msg, "data": res}
 
         except Exception as e:
@@ -178,7 +178,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             return {"success": False, "error": "Kotak Neo client not authenticated."}
 
         try:
-            clean_ot = "LMT" if order_type and order_type.upper() in ("LIMIT", "LMT") else ("MKT" if order_type and order_type.upper() in ("MARKET", "MKT") else "LMT")
+            clean_ot = "L" if order_type and order_type.upper() in ("LIMIT", "LMT", "L") else ("MKT" if order_type and order_type.upper() in ("MARKET", "MKT") else "L")
             clean_price = str(round_to_tick(price)) if price is not None else "0"
             clean_qty = str(int(quantity)) if quantity is not None else "0"
             clean_trig = str(round_to_tick(trigger_price)) if trigger_price is not None else "0"
@@ -330,25 +330,50 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             return {}
 
         try:
-            # Map tokens to Kotak Neo format: [{"instrument_token": "...", "exchange_segment": "nfo"}]
+            import straddle_engine
             req_tokens = []
-            for tok in instrument_tokens:
-                seg = "bfo" if any(b in str(tok).upper() for b in ("SENSEX", "BANKEX")) else "nfo"
-                req_tokens.append({"instrument_token": str(tok), "exchange_segment": seg})
-            
-            res = client.quotes(instrument_tokens=req_tokens, quote_type="all")
             quotes_data = {}
-            raw_list = res.get("data") if isinstance(res, dict) else res
-            if isinstance(raw_list, list):
-                for q in raw_list:
-                    tok = str(q.get("instrument_token", q.get("tok", "")))
-                    quotes_data[tok] = {
-                        "ltp": float(q.get("ltp", 0.0) or 0.0),
-                        "bid": float(q.get("bid", 0.0) or 0.0),
-                        "ask": float(q.get("ask", 0.0) or 0.0),
-                        "oi": int(q.get("oi", 0) or 0),
-                        "volume": int(q.get("vol", 0) or 0)
-                    }
+            for tok in instrument_tokens:
+                raw_tok = str(tok).strip()
+                if not raw_tok:
+                    continue
+                clean_sym = raw_tok.split("|")[-1].strip().upper()
+                if clean_sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"):
+                    try:
+                        spot_p = straddle_engine._fetch_live_index_spot_network(clean_sym)
+                        if spot_p > 0:
+                            quotes_data[clean_sym] = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
+                    except Exception:
+                        pass
+                else:
+                    token_id = raw_tok.split("|")[-1].strip()
+                    seg = "bse_fo" if any(b in raw_tok.upper() for b in ("SENSEX", "BANKEX")) else "nse_fo"
+                    req_tokens.append({"instrument_token": token_id, "exchange_segment": seg})
+            
+            if req_tokens:
+                res = client.quotes(instrument_tokens=req_tokens, quote_type="all")
+                raw_list = res.get("data") if isinstance(res, dict) else res
+                if isinstance(raw_list, list):
+                    for q in raw_list:
+                        if not isinstance(q, dict):
+                            continue
+                        tok = str(q.get("exchange_token") or q.get("instrument_token") or q.get("tok", ""))
+                        best_bid = float(q.get("bid", 0.0) or (q.get("depth", {}).get("buy", [{}])[0].get("price", 0.0) if isinstance(q.get("depth"), dict) and q.get("depth", {}).get("buy") else 0.0))
+                        best_ask = float(q.get("ask", 0.0) or (q.get("depth", {}).get("sell", [{}])[0].get("price", 0.0) if isinstance(q.get("depth"), dict) and q.get("depth", {}).get("sell") else 0.0))
+                        entry = {
+                            "ltp": float(q.get("ltp", 0.0) or 0.0),
+                            "bid": best_bid,
+                            "ask": best_ask,
+                            "oi": int(q.get("open_int", q.get("oi", 0)) or 0),
+                            "volume": int(q.get("last_volume", q.get("vol", 0)) or 0)
+                        }
+                        if tok:
+                            quotes_data[tok] = entry
+                            quotes_data[f"NSE_FO|{tok}"] = entry
+                            quotes_data[f"BSE_FO|{tok}"] = entry
+                        sym = q.get("display_symbol")
+                        if sym:
+                            quotes_data[sym] = entry
             return quotes_data
         except Exception as e:
             logger.warning(f"[Kotak Neo] Exception fetching quotes: {e}")
