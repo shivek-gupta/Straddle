@@ -15,6 +15,7 @@ import io
 import os
 import gzip
 import re
+import uuid
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 
@@ -263,6 +264,10 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         # Detect segment (Kotak Neo canonical values: nse_fo, bse_fo, nse_cm, bse_cm)
         segment = "bse_fo" if any(b in canonical_symbol.upper() for b in ("SENSEX", "BANKEX")) else "nse_fo"
 
+        # Ensure tag is strictly unique to prevent Kotak Neo OMS "Client OrderID already exists" rejection
+        tag_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(tag or 'std'))[:6] or 'std'
+        unique_tag = f"{tag_prefix}_{int(time.time()*1000)%1000000}_{uuid.uuid4().hex[:4]}"
+
         try:
             res = client.place_order(
                 exchange_segment=segment,
@@ -274,16 +279,16 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 trading_symbol=canonical_symbol,
                 transaction_type=clean_tt,
                 trigger_price=clean_trig,
-                tag=tag or "straddle"
+                tag=unique_tag
             )
             logger.info(f"[Kotak Neo] Order response: {res}")
 
-            # Check for error status code from Kotak Neo
+            # Check for error status code from Kotak Neo gateway
             if isinstance(res, dict):
                 st_code = res.get("stCode")
                 if st_code and int(st_code) != 200:
                     err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
-                    logger.warning(f"[Kotak Neo] Order placement rejected: {err_msg} (response: {res})")
+                    logger.warning(f"[Kotak Neo] Order placement rejected at gateway: {err_msg} (response: {res})")
                     return {"success": False, "error": err_msg, "data": res}
             
             # Extract Order ID
@@ -292,7 +297,36 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 order_id = res.get("nOrdNo") or res.get("order_id") or (res.get("data") or {}).get("nOrdNo")
             
             if order_id:
-                return {"success": True, "order_id": str(order_id), "data": res}
+                # Kotak Neo gateway initially returns 200 upon queuing into OMS (ordSt: 'put order req received').
+                # RMS validation executes asynchronously right after. Verify whether RMS accepted or rejected it.
+                confirmed_status = "OPEN"
+                for attempt in range(3):
+                    time.sleep(0.2)
+                    try:
+                        hist = client.order_history(order_id=str(order_id))
+                        d = hist.get("data", {})
+                        items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
+                        if items and isinstance(items, list):
+                            latest = items[0]
+                            st = str(latest.get("ordSt", "")).lower()
+                            if st in ("rejected", "cancelled"):
+                                rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
+                                logger.warning(f"[Kotak Neo] Order {order_id} rejected by RMS: {rej_msg}")
+                                return {
+                                    "success": False,
+                                    "status": "REJECTED",
+                                    "order_id": str(order_id),
+                                    "error": rej_msg,
+                                    "status_message": rej_msg,
+                                    "data": latest
+                                }
+                            elif st in ("traded", "complete", "open", "trigger pending"):
+                                confirmed_status = st.upper()
+                                break
+                    except Exception as e_chk:
+                        logger.debug(f"[Kotak Neo] Note verifying order {order_id} status: {e_chk}")
+
+                return {"success": True, "status": confirmed_status, "order_id": str(order_id), "data": res}
             
             err_msg = str(res.get("errMsg") or res.get("message") or res.get("error") or res.get("Error") or res)
             return {"success": False, "error": err_msg, "data": res}

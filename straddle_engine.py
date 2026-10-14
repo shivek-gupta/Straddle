@@ -2407,7 +2407,11 @@ class StraddleManager:
                         if err_pos:
                             strat["entry_error"] = err_pos.get("error_message") or err_pos.get("error") or "Order placement rejected"
                     else:
-                        strat["status"] = "TRADE_ACTIVE"
+                        strat["status"] = "ENTRY_FAILED"
+                        strat["enabled"] = False
+                        err_pos = next((p for p in new_positions if p.get("status") == "ERROR"), None)
+                        if err_pos:
+                            strat["entry_error"] = err_pos.get("error_message") or err_pos.get("error") or "Partial order placement rejected"
 
                     if self._active_strategy_id == strat.get("strategy_id"):
                         self._state["positions"] = new_positions
@@ -2481,7 +2485,7 @@ class StraddleManager:
             product=prod,
             order_type="LIMIT" if "Limit" in order_type_cfg else "MARKET",
             price=limit_price if "Limit" in order_type_cfg else 0.0,
-            tag="straddle_entry",
+            tag=f"ent_{leg_cfg.get('id', 'leg')[:4]}",
         )
 
         entry_time = now_ist_str()
@@ -2980,10 +2984,10 @@ class StraddleManager:
             instrument_key=pos["instrument_key"],
             transaction_type=exit_side,
             quantity=qty,
-            product="I" if pos.get("product") == "MIS" else "D",
+            product=pos.get("product", "NRML"),
             order_type="MARKET",
             price=0.0,
-            tag="straddle_exit",
+            tag=f"exit_{pos.get('id', 'pos')[:4]}",
         )
 
         # Format Quantiply exit reason cleanly
