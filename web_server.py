@@ -128,6 +128,25 @@ def api_straddle_state():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/spot", methods=["GET"])
+def api_straddle_spot():
+    try:
+        und = request.args.get("underlying", "NIFTY").upper()
+        mgr = get_straddle_manager()
+        spot = mgr.get_cached_spot_price(und)
+        step = 50 if und == "NIFTY" else (100 if und in ("BANKNIFTY", "SENSEX") else 50)
+        atm = round(spot / step) * step if spot > 0 else 0
+        return jsonify({
+            "success": True,
+            "underlying": und,
+            "spot": spot,
+            "atm": atm,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/logs", methods=["GET"])
 def api_straddle_logs():
     try:

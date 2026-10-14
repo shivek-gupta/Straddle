@@ -11,6 +11,10 @@ import time
 import json
 import logging
 import threading
+import io
+import os
+import gzip
+import re
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 
@@ -19,6 +23,125 @@ import kotak_auth
 
 logger = logging.getLogger("kotak_broker_adapter")
 logger.setLevel(logging.INFO)
+
+MONTH_CODE_MAP = {
+    "01": "1", "JAN": "1",
+    "02": "2", "FEB": "2",
+    "03": "3", "MAR": "3",
+    "04": "4", "APR": "4",
+    "05": "5", "MAY": "5",
+    "06": "6", "JUN": "6",
+    "07": "7", "JUL": "7",
+    "08": "8", "AUG": "8",
+    "09": "9", "SEP": "9",
+    "10": "O", "OCT": "O",
+    "11": "N", "NOV": "N",
+    "12": "D", "DEC": "D",
+}
+
+_KOTAK_TOKEN_MAP: Dict[str, str] = {}
+_KOTAK_DISPLAY_MAP: Dict[str, str] = {}
+_MAP_LOCK = threading.Lock()
+_MAP_LOADED = False
+
+
+def _init_kotak_symbol_maps():
+    """Initializes high-speed token and symbol resolution cache."""
+    global _KOTAK_TOKEN_MAP, _KOTAK_DISPLAY_MAP, _MAP_LOADED
+    with _MAP_LOCK:
+        if _MAP_LOADED and len(_KOTAK_TOKEN_MAP) > 1000:
+            return
+
+        # 1. Populate from local instruments.json.gz (Immediate availability)
+        try:
+            inst_path = getattr(config, "DATA_DIR", Path("data")) / "instruments.json.gz"
+            if not inst_path.exists():
+                inst_path = Path("data/instruments.json.gz")
+            if inst_path.exists():
+                with gzip.open(inst_path, "rt", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for r in data:
+                        if r.get("segment") in ("NSE_FO", "BSE_FO") and r.get("exchange_token"):
+                            tok = str(r["exchange_token"]).strip()
+                            tsym = str(r.get("trading_symbol", "")).strip()
+                            is_w = bool(r.get("weekly", True))
+                            parts = tsym.split()
+                            if len(parts) >= 6:
+                                und = parts[0].upper()
+                                strike = parts[1]
+                                opt_type = parts[2].upper()
+                                day = parts[3].zfill(2)
+                                month = parts[4].upper()
+                                year = parts[5][-2:]
+                                if is_w:
+                                    canon = f"{und}{year}{MONTH_CODE_MAP.get(month, month[:1])}{day}{strike}{opt_type}"
+                                else:
+                                    canon = f"{und}{year}{month}{strike}{opt_type}"
+                                _KOTAK_TOKEN_MAP[tok] = canon
+                                _KOTAK_DISPLAY_MAP[tsym.upper()] = canon
+                                _KOTAK_DISPLAY_MAP[tsym.upper().replace(" ", "")] = canon
+        except Exception as e:
+            logger.warning(f"[Kotak Adapter] Note indexing instruments.json.gz: {e}")
+
+        # 2. Enrich from Kotak Neo Scrip Master CSV if cached
+        try:
+            import neo_api_client.utils.scrip_cache as sc
+            import pandas as pd
+            for seg in ("nse_fo", "bse_fo"):
+                csv_bytes = sc.read_csv(seg)
+                if csv_bytes:
+                    df = pd.read_csv(io.BytesIO(csv_bytes), usecols=["pSymbol", "pTrdSymbol"])
+                    for _, row in df.iterrows():
+                        tok = str(row["pSymbol"]).strip()
+                        trd = str(row["pTrdSymbol"]).strip()
+                        _KOTAK_TOKEN_MAP[tok] = trd
+                        _KOTAK_DISPLAY_MAP[trd.upper()] = trd
+        except Exception as e:
+            logger.debug(f"[Kotak Adapter] Note loading scrip cache: {e}")
+
+        _MAP_LOADED = True
+        logger.info(f"[Kotak Adapter] Initialized symbol resolution cache with {len(_KOTAK_TOKEN_MAP)} tokens.")
+
+
+def _resolve_kotak_trading_symbol(symbol: str, instrument_key: str = "") -> str:
+    """
+    Translates any input symbol (human display string, token, or Upstox format)
+    into Kotak Neo's exact canonical exchange trading symbol format (e.g. NIFTY26O1922600CE).
+    """
+    if not _MAP_LOADED:
+        _init_kotak_symbol_maps()
+
+    # Priority 1: Match by token in instrument_key
+    tok = str(instrument_key or "").split("|")[-1].strip()
+    if tok and tok in _KOTAK_TOKEN_MAP:
+        return _KOTAK_TOKEN_MAP[tok]
+
+    # Priority 2: Direct lookup in display map
+    clean_sym = str(symbol or "").strip().upper()
+    if clean_sym in _KOTAK_DISPLAY_MAP:
+        return _KOTAK_DISPLAY_MAP[clean_sym]
+
+    # Priority 3: Check if already in canonical format (no spaces, e.g. NIFTY26O1922600CE)
+    no_space = clean_sym.replace(" ", "")
+    if no_space in _KOTAK_DISPLAY_MAP:
+        return _KOTAK_DISPLAY_MAP[no_space]
+    if bool(re.match(r"^[A-Z]+[0-9]{2}[A-Z0-9]+$", no_space)):
+        return no_space
+
+    # Priority 4: Algorithmic transformation of space-separated display string
+    # e.g. "NIFTY 22600 CE 19 OCT 26" -> "NIFTY26O1922600CE"
+    parts = clean_sym.split()
+    if len(parts) >= 6:
+        und = parts[0].upper()
+        strike = parts[1]
+        opt_type = parts[2].upper()
+        day = parts[3].zfill(2)
+        month = parts[4].upper()
+        year = parts[5][-2:]
+        m_code = MONTH_CODE_MAP.get(month, month[:1])
+        return f"{und}{year}{m_code}{day}{strike}{opt_type}"
+
+    return no_space
 
 
 def round_to_tick(price: float, tick_size: float = 0.05) -> float:
@@ -89,6 +212,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
     def __init__(self):
         super().__init__(name="Kotak Neo")
         self._lock = threading.Lock()
+        _init_kotak_symbol_maps()
 
     def _get_client(self):
         return kotak_auth.get_authenticated_client(force=False)
@@ -124,6 +248,10 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 "status_code": 401
             }
 
+        # Resolve exact canonical trading symbol required by Kotak Neo
+        canonical_symbol = _resolve_kotak_trading_symbol(symbol, instrument_key)
+        logger.info(f"[Kotak Neo] Placing order: symbol='{symbol}', key='{instrument_key}' -> canonical='{canonical_symbol}'")
+
         # Normalize parameters for Kotak Neo (Must adhere strictly to allowed canonical values)
         clean_tt = "B" if transaction_type.upper() in ("BUY", "B") else "S"
         clean_ot = "L" if order_type.upper() in ("LIMIT", "LMT", "L") else ("MKT" if order_type.upper() in ("MARKET", "MKT") else ("SL-M" if "M" in order_type.upper() else "SL"))
@@ -133,7 +261,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         clean_qty = str(int(quantity))
 
         # Detect segment (Kotak Neo canonical values: nse_fo, bse_fo, nse_cm, bse_cm)
-        segment = "bse_fo" if any(b in symbol.upper() for b in ("SENSEX", "BANKEX")) else "nse_fo"
+        segment = "bse_fo" if any(b in canonical_symbol.upper() for b in ("SENSEX", "BANKEX")) else "nse_fo"
 
         try:
             res = client.place_order(
@@ -143,12 +271,20 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 order_type=clean_ot,
                 quantity=clean_qty,
                 validity="DAY",
-                trading_symbol=symbol,
+                trading_symbol=canonical_symbol,
                 transaction_type=clean_tt,
                 trigger_price=clean_trig,
                 tag=tag or "straddle"
             )
             logger.info(f"[Kotak Neo] Order response: {res}")
+
+            # Check for error status code from Kotak Neo
+            if isinstance(res, dict):
+                st_code = res.get("stCode")
+                if st_code and int(st_code) != 200:
+                    err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
+                    logger.warning(f"[Kotak Neo] Order placement rejected: {err_msg} (response: {res})")
+                    return {"success": False, "error": err_msg, "data": res}
             
             # Extract Order ID
             order_id = None
@@ -158,7 +294,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             if order_id:
                 return {"success": True, "order_id": str(order_id), "data": res}
             
-            err_msg = str(res.get("message") or res.get("error") or res.get("Error") or res)
+            err_msg = str(res.get("errMsg") or res.get("message") or res.get("error") or res.get("Error") or res)
             return {"success": False, "error": err_msg, "data": res}
 
         except Exception as e:

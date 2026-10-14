@@ -178,7 +178,9 @@ async function initStraddlePlatform() {
 
     await fetchStraddleState();
     await loadStraddleOpenPositions();
-    window._straddleState.pollTimer = setInterval(pollStraddleCycle, 1000);
+    fetchLiveSpotTick();
+    window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 1000);
+    window._straddleState.pollTimer = setInterval(pollStraddleCycle, 1500);
 
     // Attach global click listener to close dropdowns
     document.addEventListener("click", function (e) {
@@ -189,6 +191,43 @@ async function initStraddlePlatform() {
 
     // Attach mouse interaction for P&L Canvas crosshair
     setupPnlCanvasEvents();
+}
+
+window._lastKnownSpot = 0.0;
+
+function updateSpotPriceDisplay(spot, atm, und) {
+    const spotEl = document.getElementById("straddleSpotPrice");
+    const atmEl = document.getElementById("straddleAtmStrike");
+    const undLabel = document.getElementById("straddleUnderlyingLabel");
+    if (undLabel && und) undLabel.textContent = und + ":";
+    if (atmEl && atm) atmEl.textContent = atm;
+    if (spotEl && spot && Number(spot) > 0) {
+        const numSpot = Number(spot);
+        const prev = window._lastKnownSpot;
+        spotEl.textContent = "₹" + numSpot.toFixed(2);
+        if (prev > 0 && Math.abs(numSpot - prev) > 0.01) {
+            const isUp = numSpot > prev;
+            spotEl.classList.remove("tick-flash-up", "tick-flash-down");
+            spotEl.classList.add(isUp ? "tick-flash-up" : "tick-flash-down");
+            setTimeout(() => {
+                if (spotEl) spotEl.classList.remove("tick-flash-up", "tick-flash-down");
+            }, 450);
+        }
+        window._lastKnownSpot = numSpot;
+    }
+}
+
+async function fetchLiveSpotTick() {
+    try {
+        const und = (window._straddleState.activeStrategy && window._straddleState.activeStrategy.underlying) || "NIFTY";
+        const resp = await fetch(`/api/straddle/spot?underlying=${encodeURIComponent(und)}`);
+        const data = await resp.json();
+        if (data && data.success && data.spot > 0) {
+            updateSpotPriceDisplay(data.spot, data.atm, data.underlying);
+        }
+    } catch (e) {
+        // quiet for sub-second interval
+    }
 }
 
 async function pollStraddleCycle() {
@@ -299,12 +338,7 @@ function renderStraddleHeader(state) {
         modeDot.style.boxShadow = "0 0 8px #10b981";
     }
 
-    const spotEl = document.getElementById("straddleSpotPrice");
-    const atmEl = document.getElementById("straddleAtmStrike");
-    const undLabel = document.getElementById("straddleUnderlyingLabel");
-    if (spotEl) spotEl.textContent = "₹" + (state.underlying_spot ? state.underlying_spot.toFixed(2) : "--");
-    if (atmEl) atmEl.textContent = state.underlying_atm_strike || "--";
-    if (undLabel) undLabel.textContent = (state.underlying_symbol || "NIFTY") + ":";
+    updateSpotPriceDisplay(state.underlying_spot, state.underlying_atm_strike, state.underlying_symbol);
 
     // Top Nav Total MTM
     const navMtm = document.getElementById("straddleNavTotalMtm");

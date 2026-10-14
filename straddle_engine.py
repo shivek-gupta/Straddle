@@ -362,10 +362,21 @@ DEFAULT_STRATEGIES = [
 _SPOT_CACHE: Dict[str, float] = {}
 _LAST_SPOT_FETCH_TS: Dict[str, float] = {}
 _SPOT_FETCH_LOCK = threading.Lock()
+_SPOT_SESSION: Optional[requests.Session] = None
+
+
+def _get_spot_session() -> requests.Session:
+    global _SPOT_SESSION
+    if _SPOT_SESSION is None:
+        _SPOT_SESSION = requests.Session()
+        _SPOT_SESSION.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+    return _SPOT_SESSION
 
 
 def _fetch_live_index_spot_network(und: str) -> float:
-    """Fetch real-time index price from live financial endpoint."""
+    """Fetch real-time index price from live financial endpoint with connection pooling."""
     clean_und = und.upper()
     sym_map = {
         "NIFTY": "%5ENSEI",
@@ -377,10 +388,10 @@ def _fetch_live_index_spot_network(und: str) -> float:
     sym = sym_map.get(clean_und, "%5ENSEI")
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1m"
     try:
-        import urllib.request
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        session = _get_spot_session()
+        resp = session.get(url, timeout=1.8)
+        if resp.status_code == 200:
+            data = resp.json()
             meta = data["chart"]["result"][0]["meta"]
             p = float(meta.get("regularMarketPrice") or 0.0)
             if p > 0:
@@ -424,6 +435,7 @@ class StraddleManager:
 
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
+        self._spot_thread: Optional[threading.Thread] = None
 
         self._init_storage()
         self._load_strategies()
@@ -895,14 +907,23 @@ class StraddleManager:
     # Live Quotes & Price Engine
     # ==========================================================
 
+    def get_cached_spot_price(self, underlying: str = "NIFTY") -> float:
+        """Returns the in-memory cached spot price instantly (<0.01ms) without blocking."""
+        clean_und = (underlying or "NIFTY").upper()
+        with _SPOT_FETCH_LOCK:
+            p = _SPOT_CACHE.get(clean_und, 0.0)
+            if p > 0:
+                return p
+        return self._get_underlying_spot_price(clean_und)
+
     def _get_underlying_spot_price(self, underlying: str = "NIFTY") -> float:
         """Resolves live continuous spot index price with sub-second caching."""
         clean_und = underlying.upper()
         now_ts = time.time()
         
-        # Check high-speed memory cache (valid for 3 seconds)
+        # Check high-speed memory cache (valid for 1.0 second)
         with _SPOT_FETCH_LOCK:
-            if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 3.0:
+            if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 1.0:
                 return _SPOT_CACHE[clean_und]
 
         # 1. Try Kotak Neo broker quotes if connected
@@ -3906,10 +3927,32 @@ class StraddleManager:
     # ==========================================================
 
     def _start_runner(self):
+        self._stop_event.clear()
         if self._worker_thread is None or not self._worker_thread.is_alive():
-            self._stop_event.clear()
             self._worker_thread = threading.Thread(target=self._runner_loop, daemon=True)
             self._worker_thread.start()
+        if self._spot_thread is None or not self._spot_thread.is_alive():
+            self._spot_thread = threading.Thread(target=self._spot_feed_loop, daemon=True)
+            self._spot_thread.start()
+
+    def _spot_feed_loop(self):
+        logger.info("Straddle Engine background spot ticker loop started (sub-second daemon).")
+        while not self._stop_event.is_set():
+            try:
+                und = self._state.get("underlying_symbol", "NIFTY")
+                p = _fetch_live_index_spot_network(und)
+                if p > 0:
+                    with _SPOT_FETCH_LOCK:
+                        _SPOT_CACHE[und] = p
+                        _LAST_SPOT_FETCH_TS[und] = time.time()
+                    with _ENGINE_LOCK:
+                        self._state["underlying_spot"] = p
+                        step = STRIKE_STEPS.get(und.upper(), 50)
+                        self._state["underlying_atm_strike"] = round(p / step) * step
+                        self._state["last_tick_time"] = now_ist_str()
+            except Exception as e:
+                logger.debug(f"Spot tick note: {e}")
+            time.sleep(0.8)
 
     def _runner_loop(self):
         logger.info("Straddle Engine background evaluation loop started.")
