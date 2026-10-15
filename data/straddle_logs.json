@@ -1,5 +1,19 @@
 [
   {
+    "timestamp": "15:09:19",
+    "date": "2026-10-15",
+    "level": "INFO",
+    "message": "Updated live trade parameters for NIFTY 22550 PE 19 OCT 26: Lots=1, TGT=35.15, SL=20.15",
+    "details": {}
+  },
+  {
+    "timestamp": "15:09:19",
+    "date": "2026-10-15",
+    "level": "INFO",
+    "message": "Updated live trade parameters for NIFTY 22550 PE 19 OCT 26: Lots=1, TGT=32.7, SL=21.65",
+    "details": {}
+  },
+  {
     "timestamp": "08:15:00",
     "date": "2026-10-12",
     "level": "INFO",

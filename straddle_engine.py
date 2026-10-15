@@ -3141,76 +3141,87 @@ class StraddleManager:
 
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
+            adv = strat.get("advanced") or strat.get("advanced_settings") or {}
+            diff_lots = 0
             und = strat.get("underlying", pos.get("underlying", "NIFTY")).upper()
             lot_size = int(pos.get("lot_size") or (15 if und == "BANKNIFTY" else (25 if und == "FINNIFTY" else (50 if und == "MIDCPNIFTY" else (10 if und == "SENSEX" else 65)))))
 
-            current_strike = str(pos.get("strike_price") or "")
+            def _clean_strike_str(val):
+                if val is None:
+                    return ""
+                s = str(val).strip()
+                try:
+                    f = float(s)
+                    return f"{int(f)}" if f.is_integer() else f"{f}"
+                except Exception:
+                    return s
+
+            current_strike = _clean_strike_str(pos.get("strike_price"))
+            clean_new_strike = _clean_strike_str(new_strike)
             pos_side = str(pos.get("side", "SELL")).upper()
             curr_sym = pos.get("symbol", "")
 
             # 1. SHIFT STRIKE (If new strike provided and different from current)
-            if new_strike and str(new_strike).strip() and str(new_strike).strip() != current_strike:
-                clean_new_strike = str(new_strike).strip().upper()
-                if clean_new_strike not in curr_sym:
-                    self._log_event(f"Shifting trade for {curr_sym} to strike {clean_new_strike}...")
-                    # A. Square off current position
-                    res_exit = self._square_off_single_position(pos, broker, reason=f"SHIFT STRIKE TO {clean_new_strike}")
-                    exit_oid = (res_exit or {}).get("order_id") or pos.get("exit_order_id")
-                    if exit_oid and not str(exit_oid).startswith("ORD_") and not str(exit_oid).startswith("PAPER_"):
-                        broker.wait_for_order_fill(str(exit_oid), timeout_sec=20.0, poll_interval_sec=0.1)
+            if clean_new_strike and clean_new_strike != current_strike and clean_new_strike not in curr_sym:
+                self._log_event(f"Shifting trade for {curr_sym} to strike {clean_new_strike}...")
+                # A. Square off current position
+                res_exit = self._square_off_single_position(pos, broker, reason=f"SHIFT STRIKE TO {clean_new_strike}")
+                exit_oid = (res_exit or {}).get("order_id") or pos.get("exit_order_id")
+                if exit_oid and not str(exit_oid).startswith("ORD_") and not str(exit_oid).startswith("PAPER_"):
+                    broker.wait_for_order_fill(str(exit_oid), timeout_sec=20.0, poll_interval_sec=0.1)
 
-                    # B. Resolve new contract
-                    opt_type = pos.get("option_type") or ("PE" if "PE" in curr_sym else "CE")
-                    new_contract = self.resolve_strike_and_contract(
-                        underlying=und,
-                        strike_selection=clean_new_strike,
-                        option_type=opt_type,
-                        expiry_type=leg_cfg.get("expiry", "Weekly") if leg_cfg else "Weekly"
-                    )
-                    if not new_contract:
-                        return {"success": False, "error": f"Could not resolve new contract for strike {clean_new_strike}"}
+                # B. Resolve new contract
+                opt_type = pos.get("option_type") or ("PE" if "PE" in curr_sym else "CE")
+                new_contract = self.resolve_strike_and_contract(
+                    underlying=und,
+                    strike_selection=clean_new_strike,
+                    option_type=opt_type,
+                    expiry_type=leg_cfg.get("expiry", "Weekly") if leg_cfg else "Weekly"
+                )
+                if not new_contract:
+                    return {"success": False, "error": f"Could not resolve new contract for strike {clean_new_strike}"}
 
-                    # C. Punch entry for new strike
-                    target_lots = int(new_lots) if new_lots and int(new_lots) > 0 else int(pos.get("lots", 1))
-                    dummy_cfg = dict(leg_cfg or {})
-                    dummy_cfg.update({
-                        "id": pos.get("id") or f"leg_{pos_idx+1}",
-                        "underlying": und,
-                        "option_type": opt_type,
-                        "side": pos_side,
-                        "lots": target_lots,
-                        "lot_size": lot_size,
-                        "product": pos.get("product", "NRML"),
-                        "target_type": "TGT: %" if "%" in target_mode else "TGT: Pts",
-                        "target_value": float(target_val) if target_val is not None else float(pos.get("target_value", 25.0)),
-                        "sl_type": "SL: -%" if "%" in sl_mode else "SL: -Pts",
-                        "sl_value": float(sl_val) if sl_val is not None else float(pos.get("sl_value", 15.0)),
-                    })
-                    new_pos = self._place_leg_entry_order(
-                        dummy_cfg,
-                        new_contract,
-                        mult=int(strat.get("multiplier", 1)),
-                        broker=broker,
-                        adv=strat.get("advanced", {}),
-                        strategy=strat,
-                        is_re_entry=True
-                    )
-                    if new_pos and new_pos.get("status") == "OPEN":
-                        positions[pos_idx] = new_pos
-                        if leg_cfg:
-                            leg_cfg.update(dummy_cfg)
-                            leg_cfg["strike_selection"] = clean_new_strike
-                        self._save_strategies()
-                        self._save_state()
-                        return {
-                            "success": True,
-                            "message": f"Successfully shifted position from {curr_sym} to {new_contract['trading_symbol']}",
-                            "position": new_pos,
-                            "strategy": strat
-                        }
-                    else:
-                        err = (new_pos or {}).get("error", "Order placement failed on new strike")
-                        return {"success": False, "error": f"Exited previous strike, but new strike placement failed: {err}"}
+                # C. Punch entry for new strike
+                target_lots = int(new_lots) if new_lots and int(new_lots) > 0 else int(pos.get("lots", 1))
+                dummy_cfg = dict(leg_cfg or {})
+                dummy_cfg.update({
+                    "id": pos.get("id") or f"leg_{pos_idx+1}",
+                    "underlying": und,
+                    "option_type": opt_type,
+                    "side": pos_side,
+                    "lots": target_lots,
+                    "lot_size": lot_size,
+                    "product": pos.get("product", "NRML"),
+                    "target_type": "TGT: %" if "%" in target_mode else "TGT: Pts",
+                    "target_value": float(target_val) if target_val is not None else float(pos.get("target_value", 25.0)),
+                    "sl_type": "SL: -%" if "%" in sl_mode else "SL: -Pts",
+                    "sl_value": float(sl_val) if sl_val is not None else float(pos.get("sl_value", 15.0)),
+                })
+                new_pos = self._place_leg_entry_order(
+                    dummy_cfg,
+                    new_contract,
+                    mult=int(strat.get("multiplier", 1)),
+                    broker=broker,
+                    adv=adv,
+                    strategy=strat,
+                    is_re_entry=True
+                )
+                if new_pos and new_pos.get("status") == "OPEN":
+                    positions[pos_idx] = new_pos
+                    if leg_cfg:
+                        leg_cfg.update(dummy_cfg)
+                        leg_cfg["strike_selection"] = clean_new_strike
+                    self._save_strategies()
+                    self._save_state()
+                    return {
+                        "success": True,
+                        "message": f"Successfully shifted position from {curr_sym} to {new_contract['trading_symbol']}",
+                        "position": new_pos,
+                        "strategy": strat
+                    }
+                else:
+                    err = (new_pos or {}).get("error", "Order placement failed on new strike")
+                    return {"success": False, "error": f"Exited previous strike, but new strike placement failed: {err}"}
 
             # 2. LOT SIZE ADJUSTMENT (If lots changed on same strike)
             curr_lots = int(pos.get("lots", 1))

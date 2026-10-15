@@ -10,11 +10,25 @@
   "max_mtm": 0.0,
   "min_mtm": 0.0,
   "execution_mode": "LIVE_BROKER",
-  "underlying_spot": 22981.8,
+  "underlying_spot": 22951.35,
   "underlying_symbol": "NIFTY",
-  "underlying_atm_strike": 23000,
-  "last_tick_time": "14:53:02",
+  "underlying_atm_strike": 22950,
+  "last_tick_time": "15:09:19",
   "logs": [
+    {
+      "timestamp": "15:09:19",
+      "date": "2026-10-15",
+      "level": "INFO",
+      "message": "Updated live trade parameters for NIFTY 22550 PE 19 OCT 26: Lots=1, TGT=35.15, SL=20.15",
+      "details": {}
+    },
+    {
+      "timestamp": "15:09:19",
+      "date": "2026-10-15",
+      "level": "INFO",
+      "message": "Updated live trade parameters for NIFTY 22550 PE 19 OCT 26: Lots=1, TGT=32.7, SL=21.65",
+      "details": {}
+    },
     {
       "timestamp": "08:15:00",
       "date": "2026-10-12",

@@ -1,1 +1,46 @@
-[]
+[
+  {
+    "strategy_id": "test_strat_update",
+    "name": "Test Strategy",
+    "underlying": "NIFTY",
+    "status": "TRADE_ACTIVE",
+    "advanced": {
+      "sl_order_placement": "Keep with self",
+      "target_order_placement": "Keep with self"
+    },
+    "legs": [
+      {
+        "id": "leg_1",
+        "strike_selection": "22550",
+        "lots": 1,
+        "target_value": 10.0,
+        "target_type": "TGT: Pts",
+        "sl_value": 5.0,
+        "sl_type": "SL: -Pts"
+      }
+    ],
+    "positions": [
+      {
+        "id": "leg_1",
+        "symbol": "NIFTY 22550 PE 19 OCT 26",
+        "trading_symbol": "NIFTY26OCT22550PE",
+        "strike_price": 22550,
+        "option_type": "PE",
+        "side": "BUY",
+        "quantity": 65,
+        "lots": 1,
+        "lot_size": 65,
+        "avg_ent_price": 25.15,
+        "status": "OPEN",
+        "target_value": 10.0,
+        "target_type": "TGT: Pts",
+        "target_price": 35.15,
+        "sl_value": 5.0,
+        "sl_type": "SL: -Pts",
+        "sl_price": 20.15,
+        "target_type_label": "TGT: \u20b910.00",
+        "sl_type_label": "SL: -\u20b95.00"
+      }
+    ]
+  }
+]
