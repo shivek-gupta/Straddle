@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 import config
-from kotak_broker_adapter import get_broker_adapter, BaseBrokerAdapter, round_to_tick, KotakNeoBrokerAdapter, PaperBrokerAdapter
+from kotak_broker_adapter import get_broker_adapter, BaseBrokerAdapter, round_to_tick, KotakNeoBrokerAdapter, PaperBrokerAdapter, _resolve_kotak_trading_symbol
 import kotak_auth
 
 logger = logging.getLogger("straddle_engine")
@@ -61,6 +61,7 @@ STRADDLE_STATE_FILE = STRADDLE_DIR / "straddle_state.json"
 STRADDLE_LOGS_FILE = STRADDLE_DIR / "straddle_logs.json"
 STRADDLE_PNL_HISTORY_FILE = STRADDLE_DIR / "straddle_pnl_history.json"
 STRADDLE_ORDERBOOK_FILE = STRADDLE_DIR / "straddle_orderbook.json"
+STRADDLE_ORDER_REGISTRY_FILE = STRADDLE_DIR / "straddle_order_registry.json"
 STRADDLE_BACKUPS_DIR = STRADDLE_DIR / "straddle_backups"
 
 _ENGINE_LOCK = threading.RLock()
@@ -432,6 +433,7 @@ class StraddleManager:
         self._instruments_mtime: float = 0.0
         self._pnl_history: List[Dict[str, Any]] = []
         self._orderbook: List[Dict[str, Any]] = []
+        self._order_registry: Dict[str, Dict[str, Any]] = {}
 
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -443,6 +445,7 @@ class StraddleManager:
         self._load_logs()
         self._load_pnl_history()
         self._load_orderbook()
+        self._load_order_registry()
         self._start_runner()
 
     # ==========================================================
@@ -574,6 +577,54 @@ class StraddleManager:
     def _save_orderbook(self):
         with _ENGINE_LOCK:
             _safe_write_json(STRADDLE_ORDERBOOK_FILE, self._orderbook[-500:])
+
+    def _load_order_registry(self):
+        with _ENGINE_LOCK:
+            if STRADDLE_ORDER_REGISTRY_FILE.exists():
+                try:
+                    with open(STRADDLE_ORDER_REGISTRY_FILE, "r", encoding="utf-8") as f:
+                        self._order_registry = json.load(f)
+                except Exception:
+                    self._order_registry = {}
+            else:
+                self._order_registry = {}
+
+    def _save_order_registry(self):
+        with _ENGINE_LOCK:
+            try:
+                if len(self._order_registry) > 2000:
+                    keys = list(self._order_registry.keys())[-2000:]
+                    self._order_registry = {k: self._order_registry[k] for k in keys}
+                _safe_write_json(STRADDLE_ORDER_REGISTRY_FILE, self._order_registry)
+            except Exception as e:
+                logger.warning(f"Error saving order registry: {e}")
+
+    def _register_order_attribution(
+        self,
+        order_id: str,
+        algo_name: str,
+        strategy_id: str,
+        category: str,
+        symbol: str,
+        side: str,
+        source: str = "Straddle Pro",
+        message: str = "",
+    ):
+        oid = str(order_id or "").strip()
+        if not oid or oid.startswith("ORD_") or oid.startswith("ORD_ERR_") or oid.startswith("PAPER_"):
+            return
+        with _ENGINE_LOCK:
+            self._order_registry[oid] = {
+                "algo_name": algo_name,
+                "strategy_id": strategy_id,
+                "category": category,
+                "symbol": symbol,
+                "side": side.capitalize(),
+                "source": source,
+                "message": message,
+                "time": now_ist_str(),
+            }
+            self._save_order_registry()
 
     def _log_event(self, message: str, level: str = "INFO", details: Optional[Dict] = None):
         entry = {
@@ -1783,6 +1834,10 @@ class StraddleManager:
             is_success = bool(res.get("success", False)) and str(res.get("status", "")).upper() not in ("REJECTED", "CANCELLED", "FAILED")
             if is_success:
                 exit_price = float(res.get("price") or res.get("average_price") or 0.0)
+                oid = str(res.get("order_id", ""))
+                matched_strat_name = "Straddle Pro"
+                matched_strat_id = ""
+
                 # Also update any strategy tracking this position
                 for strat in self._strategies:
                     for leg in strat.get("positions", []):
@@ -1791,13 +1846,25 @@ class StraddleManager:
                             leg["exit_reason"] = "MANUAL SQUARE OFF"
                             leg["exit_time"] = now_ist_str()
                             leg["avg_exit_price"] = exit_price or float(leg.get("ltp") or 0.0)
+                            leg["exit_order_id"] = oid
                             leg.pop("error", None)
                             leg.pop("error_message", None)
+                            matched_strat_name = strat.get("name") or "Straddle Pro"
+                            matched_strat_id = strat.get("strategy_id") or ""
 
-                oid = str(res.get("order_id", ""))
                 if oid and not oid.startswith("ORD_") and not oid.startswith("PAPER_"):
+                    self._register_order_attribution(
+                        order_id=oid,
+                        algo_name=matched_strat_name,
+                        strategy_id=matched_strat_id,
+                        category="Square Off",
+                        symbol=symbol,
+                        side=exit_side,
+                        source="Straddle Pro",
+                        message="Manual square off executed on broker",
+                    )
                     self._record_orderbook_entry(
-                        algo_name="Manual Square Off",
+                        algo_name=matched_strat_name,
                         order_id=oid,
                         category="Square Off",
                         client_id="Kotak Neo Live",
@@ -1810,6 +1877,8 @@ class StraddleManager:
                         order_type="Market",
                         price=exit_price,
                         trigger_price=0.0,
+                        source="Straddle Pro",
+                        strategy_id=matched_strat_id,
                     )
 
                 self._save_strategies()
@@ -1896,10 +1965,24 @@ class StraddleManager:
             is_success = bool(res.get("success", False)) and str(res.get("status", "")).upper() not in ("REJECTED", "CANCELLED", "FAILED")
             if is_success:
                 oid = str(res.get("order_id", ""))
+                active_strat = self.get_strategy(self._active_strategy_id)
+                dir_algo_name = active_strat.get("name") if active_strat else "Straddle Pro"
+                dir_strat_id = active_strat.get("strategy_id") if active_strat else ""
+
                 # Record into orderbook
                 if oid and not oid.startswith("ORD_") and not oid.startswith("PAPER_"):
+                    self._register_order_attribution(
+                        order_id=oid,
+                        algo_name=dir_algo_name,
+                        strategy_id=dir_strat_id,
+                        category="Manual Order",
+                        symbol=symbol,
+                        side=transaction_type.upper(),
+                        source="Straddle Pro",
+                        message="Direct order placed on exchange",
+                    )
                     self._record_orderbook_entry(
-                        algo_name="Manual / Direct Trade",
+                        algo_name=dir_algo_name,
                         order_id=oid,
                         category="Manual Order",
                         client_id="Kotak Neo Live",
@@ -1912,6 +1995,8 @@ class StraddleManager:
                         order_type=clean_type,
                         price=float(price or res.get("price") or 0.0),
                         trigger_price=float(trigger_price or 0.0),
+                        source="Straddle Pro",
+                        strategy_id=dir_strat_id,
                     )
                 self._log_event(
                     f"Direct {transaction_type.upper()} order placed: {symbol} ({clean_qty} Qty @ ₹{price if clean_type != 'MARKET' else 'MKT'})",
@@ -1922,8 +2007,22 @@ class StraddleManager:
             else:
                 err = str(res.get("error") or res.get("status_message") or "Direct order rejected by broker")
                 failed_oid = str(res.get("order_id") or ("261008000" + str(int(time.time()*1000))[-6:]))
+                active_strat = self.get_strategy(self._active_strategy_id)
+                dir_algo_name = active_strat.get("name") if active_strat else "Straddle Pro"
+                dir_strat_id = active_strat.get("strategy_id") if active_strat else ""
+
+                self._register_order_attribution(
+                    order_id=failed_oid,
+                    algo_name=dir_algo_name,
+                    strategy_id=dir_strat_id,
+                    category="Manual Order",
+                    symbol=symbol,
+                    side=transaction_type.upper(),
+                    source="Straddle Pro",
+                    message=err,
+                )
                 self._record_orderbook_entry(
-                    algo_name="Manual / Direct Trade",
+                    algo_name=dir_algo_name,
                     order_id=failed_oid,
                     category="Manual Order",
                     client_id="Kotak Neo Live",
@@ -1936,6 +2035,8 @@ class StraddleManager:
                     order_type=clean_type,
                     price=float(price or 0.0),
                     trigger_price=float(trigger_price or 0.0),
+                    source="Straddle Pro",
+                    strategy_id=dir_strat_id,
                 )
                 self._log_event(
                     f"Direct order failed for {symbol}: {err}",
@@ -2447,6 +2548,7 @@ class StraddleManager:
         strategy: Optional[Dict[str, Any]] = None,
         prefetched_quotes: Optional[Tuple[Dict, Dict]] = None,
         entry_generation: int = 0,
+        is_re_entry: bool = False,
     ) -> Optional[Dict[str, Any]]:
         side = leg_cfg.get("side", "Sell").upper()
         prod = leg_cfg.get("product", "NRML")
@@ -2477,6 +2579,7 @@ class StraddleManager:
         # Strictly enforce 0.05 tick size
         limit_price = round_to_tick(raw_limit, 0.05)
 
+        tag_prefix = "re" if is_re_entry else "ent"
         order_res = broker.place_order(
             symbol=contract["trading_symbol"],
             instrument_key=contract["instrument_key"],
@@ -2485,7 +2588,7 @@ class StraddleManager:
             product=prod,
             order_type="LIMIT" if "Limit" in order_type_cfg else "MARKET",
             price=limit_price if "Limit" in order_type_cfg else 0.0,
-            tag=f"ent_{leg_cfg.get('id', 'leg')[:4]}",
+            tag=f"{tag_prefix}_{leg_cfg.get('id', 'leg')[:4]}",
         )
 
         entry_time = now_ist_str()
@@ -2516,11 +2619,25 @@ class StraddleManager:
             failed_order_id = str(order_res.get("order_id") or ("261008000" + str(int(time.time()*1000))[-6:]))
             self._log_event(f"Order REJECTED on broker for {contract['trading_symbol']}: {err_msg}", level="ERROR", details=order_res)
             
+            order_cat = "Re-Entry" if is_re_entry else ("Entry" if side in ("SELL", "BUY") else "Hedge")
+            strat_name = strategy.get("name") if strategy else (leg_cfg.get("underlying", "NIFTY") + " Straddle")
+            strat_id = strategy.get("strategy_id") if strategy else leg_cfg.get("strategy_id")
+
             # Record failed order into Orderbook so it immediately appears with exact rejection reason
-            self._record_orderbook_entry(
-                algo_name=strategy.get("name") if strategy else (leg_cfg.get("underlying", "NIFTY") + " Straddle"),
+            self._register_order_attribution(
                 order_id=failed_order_id,
-                category="Entry" if side == "SELL" else "Hedge",
+                algo_name=strat_name,
+                strategy_id=strat_id,
+                category=order_cat,
+                symbol=contract["trading_symbol"],
+                side=side,
+                source="Straddle Pro",
+                message=err_msg,
+            )
+            self._record_orderbook_entry(
+                algo_name=strat_name,
+                order_id=failed_order_id,
+                category=order_cat,
                 client_id="Kotak Neo Live",
                 symbol=contract["trading_symbol"],
                 side=side,
@@ -2531,6 +2648,8 @@ class StraddleManager:
                 order_type="Limit (L)" if "Limit" in order_type_cfg else "Market (M)",
                 price=limit_price if "Limit" in order_type_cfg else 0.0,
                 trigger_price=0.0,
+                source="Straddle Pro",
+                strategy_id=strat_id,
             )
 
             # Return full error position record for UI error display (highlighted in red)
@@ -2602,13 +2721,26 @@ class StraddleManager:
 
         orig_sl_label = f"ORIGINAL SL: -{sl_val:.0f}%" if ("%" in sl_type or "SL: %" in sl_type) else (f"ORIGINAL SL: {sl_price:.2f}" if sl_price > 0 else "")
         order_id = str(order_res.get("order_id") or "")
+        order_cat = "Re-Entry" if is_re_entry else ("Entry" if side in ("SELL", "BUY") else "Hedge")
+        strat_name = strategy.get("name") if strategy else (leg_cfg.get("underlying", "NIFTY") + " Straddle")
+        strat_id = strategy.get("strategy_id") if strategy else leg_cfg.get("strategy_id")
 
         # Only record into Orderbook if real broker order ID was returned
         if order_id and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
-            self._record_orderbook_entry(
-                algo_name=strategy.get("name") if strategy else (leg_cfg.get("underlying", "NIFTY") + " Straddle"),
+            self._register_order_attribution(
                 order_id=order_id,
-                category="Entry" if side == "SELL" else "Hedge",
+                algo_name=strat_name,
+                strategy_id=strat_id,
+                category=order_cat,
+                symbol=contract["trading_symbol"],
+                side=side,
+                source="Straddle Pro",
+                message="Entry order filled",
+            )
+            self._record_orderbook_entry(
+                algo_name=strat_name,
+                order_id=order_id,
+                category=order_cat,
                 client_id="Kotak Neo Live",
                 symbol=contract["trading_symbol"],
                 side=side,
@@ -2619,6 +2751,8 @@ class StraddleManager:
                 order_type="Limit (L)" if "Limit" in order_type_cfg else "Market (M)",
                 price=entry_price,
                 trigger_price=0.0,
+                source="Straddle Pro",
+                strategy_id=strat_id,
             )
 
         pos_record = {
@@ -2653,13 +2787,14 @@ class StraddleManager:
             "exit_time": None,
             "exit_qty": 0,
             "exit_reason": None,
-            "is_re_entry": False,
+            "is_re_entry": is_re_entry,
             "ltp": entry_price,
             "mtm": 0.0,
             "order_id": order_id,
+            "exit_order_id": None,
             "re_execute_count": 0,
-            "strategy_id": strategy.get("strategy_id") if strategy else leg_cfg.get("strategy_id"),
-            "strategy_name": strategy.get("name") if strategy else leg_cfg.get("underlying", "NIFTY"),
+            "strategy_id": strat_id,
+            "strategy_name": strat_name,
             "date": today_ist_str(),
         }
 
@@ -2971,13 +3106,17 @@ class StraddleManager:
         pos: Dict[str, Any],
         broker: BaseBrokerAdapter,
         reason: str = "TARGET HIT",
-    ):
+    ) -> Dict[str, Any]:
         if pos.get("status") != "OPEN":
-            return
+            return {"success": False, "error": "Position is not OPEN"}
 
         exit_side = "BUY" if pos.get("side") == "SELL" else "SELL"
         qty = pos.get("quantity", 0)
         ltp = float(pos.get("ltp", pos.get("avg_ent_price", 100.0)))
+
+        strat_name = pos.get("strategy_name") or "abc"
+        strat_id = pos.get("strategy_id") or ""
+        strat_tag = re.sub(r'[^a-zA-Z0-9]', '', str(strat_name))[:4] or "std"
 
         order_res = broker.place_order(
             symbol=pos["symbol"],
@@ -2987,10 +3126,10 @@ class StraddleManager:
             product=pos.get("product", "NRML"),
             order_type="MARKET",
             price=0.0,
-            tag=f"exit_{pos.get('id', 'pos')[:4]}",
+            tag=f"ex_{strat_tag}_{pos.get('id', 'pos')[:3]}",
         )
 
-        # Format Quantiply exit reason cleanly
+        # Format exit reason cleanly
         r_clean = reason
         if "TARGET" in reason.upper():
             r_clean = "Target hit"
@@ -3002,27 +3141,47 @@ class StraddleManager:
             r_clean = "Time exit"
 
         if order_res.get("success", False) and str(order_res.get("status", "")).upper() not in ("REJECTED", "CANCELLED", "FAILED"):
-            exit_price = float(order_res.get("price") or ltp)
-            pos["status"] = "COMPLETE"
-            pos["avg_exit_price"] = exit_price
-            pos["exit_time"] = now_ist_str()
+            order_id = str(order_res.get("order_id") or "")
+            pos["exit_order_id"] = order_id
+            pos["exit_side"] = exit_side
             pos["exit_qty"] = qty
             pos["exit_reason"] = r_clean
             pos.pop("error", None)
             pos.pop("error_message", None)
+
+            # Wait briefly (up to 3s) for the broker to confirm fill and get exact traded price
+            fill_res = {}
+            if order_id and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
+                fill_res = broker.wait_for_order_fill(order_id, timeout_sec=3.0, poll_interval_sec=0.1)
+
+            exit_price = float(fill_res.get("price") or order_res.get("price") or ltp)
+            pos["status"] = "COMPLETE"
+            pos["avg_exit_price"] = exit_price
+            pos["exit_time"] = now_ist_str()
+
             if pos.get("side") == "SELL":
                 pos["mtm"] = round((pos["avg_ent_price"] - exit_price) * qty, 2)
             else:
                 pos["mtm"] = round((exit_price - pos["avg_ent_price"]) * qty, 2)
 
-            order_id = str(order_res.get("order_id") or "")
-            # Only record to orderbook if confirmed by broker
+            exit_cat = "Square Off" if "SQUARE OFF" in reason.upper() else ("Target" if "TARGET" in reason.upper() else "Stoploss")
+
             if order_id and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
-                self._record_orderbook_entry(
-                    algo_name=pos.get("strategy_name") or pos.get("symbol", "NIFTY"),
+                self._register_order_attribution(
                     order_id=order_id,
-                    category="Square Off" if "SQUARE OFF" in reason else ("Target" if "TARGET" in reason else "Stoploss"),
-                    client_id="Kotak Neo Live",
+                    algo_name=strat_name,
+                    strategy_id=strat_id,
+                    category=exit_cat,
+                    symbol=pos["symbol"],
+                    side=exit_side,
+                    source="Straddle Pro",
+                    message=reason,
+                )
+                self._record_orderbook_entry(
+                    algo_name=strat_name,
+                    order_id=order_id,
+                    category=exit_cat,
+                    client_id=pos.get("client_id") or "Kotak Neo Live",
                     symbol=pos["symbol"],
                     side=exit_side,
                     status="Complete",
@@ -3032,12 +3191,15 @@ class StraddleManager:
                     order_type="Market",
                     price=exit_price,
                     trigger_price=0.0,
+                    source="Straddle Pro",
+                    strategy_id=strat_id,
                 )
 
             self._log_event(
                 f"Exited {pos['symbol']} @ ₹{exit_price:.2f} [{reason}]. Leg MTM: ₹{pos['mtm']:.2f}",
                 details=order_res,
             )
+            return {"success": True, "order_id": order_id, "filled": fill_res.get("filled", False), "price": exit_price, "pos": pos}
         else:
             err = str(order_res.get("error") or order_res.get("status_message") or "Broker order rejected")
             failed_oid = str(order_res.get("order_id") or ("261008000" + str(int(time.time()*1000))[-6:]))
@@ -3049,12 +3211,25 @@ class StraddleManager:
             pos["exit_reason"] = f"Exit Failed: {err}"
             pos["repair_needed"] = True
             pos["order_id"] = failed_oid
+            pos["exit_order_id"] = failed_oid
+
+            exit_cat = "Square Off" if "SQUARE OFF" in reason.upper() else ("Target" if "TARGET" in reason.upper() else "Stoploss")
 
             # Record exit failure to orderbook
-            self._record_orderbook_entry(
-                algo_name=pos.get("strategy_name") or pos.get("symbol", "NIFTY"),
+            self._register_order_attribution(
                 order_id=failed_oid,
-                category="Square Off" if "SQUARE OFF" in reason else ("Target" if "TARGET" in reason else "Stoploss"),
+                algo_name=strat_name,
+                strategy_id=strat_id,
+                category=exit_cat,
+                symbol=pos["symbol"],
+                side=exit_side,
+                source="Straddle Pro",
+                message=f"Exit failed ({reason}): {err}",
+            )
+            self._record_orderbook_entry(
+                algo_name=strat_name,
+                order_id=failed_oid,
+                category=exit_cat,
                 client_id="Kotak Neo Live",
                 symbol=pos["symbol"],
                 side=exit_side,
@@ -3065,6 +3240,8 @@ class StraddleManager:
                 order_type="Market",
                 price=0.0,
                 trigger_price=0.0,
+                source="Straddle Pro",
+                strategy_id=strat_id,
             )
 
             # Immediately halt strategy to prevent spamming broker with repeated exit attempts
@@ -3082,8 +3259,9 @@ class StraddleManager:
                 level="ERROR",
                 details=order_res,
             )
+            return {"success": False, "order_id": failed_oid, "error": err, "pos": pos}
 
-    def _handle_leg_re_entry(self, strat: Dict[str, Any], pos: Dict[str, Any], trigger: str = "STOPLOSS"):
+    def _handle_leg_re_entry(self, strat: Dict[str, Any], pos: Dict[str, Any], trigger: str = "STOPLOSS", exit_order_id: Optional[str] = None):
         """Handle Re-Entry / Re-Execute for a leg when SL or Target is hit."""
         legs_cfg = strat.get("legs", [])
         leg_cfg = next((l for l in legs_cfg if l.get("id") == pos.get("id")), None)
@@ -3098,7 +3276,31 @@ class StraddleManager:
             new_count = cur_count + 1
             self._log_event(f"Triggering Re-Execute #{new_count}/{re_max} for leg '{pos.get('symbol')}' ({trigger} hit)...")
 
+            target_exit_order_id = exit_order_id or pos.get("exit_order_id")
+
             def _re_entry_worker():
+                mode = self._state.get("execution_mode", "LIVE_BROKER")
+                broker = get_broker_adapter(mode)
+
+                # STRICT ORDER SEQUENCE & MARGIN SAFETY:
+                # Re-entry MUST ONLY execute after the previous leg's exit order is confirmed FILLED by the broker.
+                # Holding both positions concurrently causes severe margin issues and potential broker rejections.
+                if target_exit_order_id and not str(target_exit_order_id).startswith("PAPER_"):
+                    self._log_event(
+                        f"[Re-Entry #{new_count}] Verifying previous exit order {target_exit_order_id} ({pos.get('symbol')}) is FILLED before placing re-entry..."
+                    )
+                    fill_res = broker.wait_for_order_fill(target_exit_order_id, timeout_sec=20.0, poll_interval_sec=0.1)
+                    if not fill_res.get("filled"):
+                        err_st = fill_res.get("error") or fill_res.get("status") or "Timeout waiting for fill"
+                        self._log_event(
+                            f"[Re-Entry #{new_count} ABORTED] Exit order {target_exit_order_id} is NOT filled ({err_st}). Re-entry cancelled to prevent margin breach.",
+                            level="ERROR"
+                        )
+                        return
+                    self._log_event(
+                        f"[Re-Entry #{new_count}] Exit order {target_exit_order_id} verified FILLED @ ₹{fill_res.get('price', 0):.2f}. Placing Re-Entry immediately without delay."
+                    )
+
                 adv = strat.get("advanced") or strat.get("advanced_settings", {})
                 delay_sec = int(adv.get("re_execute_order_delay_sec", 0) or 0)
                 if delay_sec > 0:
@@ -3107,8 +3309,6 @@ class StraddleManager:
                 if not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
                     return
 
-                mode = self._state.get("execution_mode", "LIVE_BROKER")
-                broker = get_broker_adapter(mode)
                 und = strat.get("underlying", "NIFTY")
                 mult = int(strat.get("multiplier", 1))
 
@@ -3122,7 +3322,7 @@ class StraddleManager:
                     self._log_event(f"Re-Execute contract resolution failed for {und} {leg_cfg.get('option_type')}")
                     return
 
-                new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat)
+                new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat, is_re_entry=True)
                 if new_pos:
                     new_pos["re_execute_count"] = new_count
                     new_pos["is_re_entry"] = True
@@ -3155,14 +3355,17 @@ class StraddleManager:
         order_type: str,
         price: float,
         trigger_price: float = 0.0,
+        source: str = "Straddle Pro",
+        strategy_id: Optional[str] = None,
     ):
-        oid_str = str(order_id or "")
+        oid_str = str(order_id or "").strip()
         # Strictly ignore synthetic fallback IDs that never reached Upstox
         if not oid_str or oid_str.startswith("ORD_") or oid_str.startswith("ORD_ERR_") or oid_str.startswith("PAPER_"):
             return
 
         entry = {
             "algo_name": algo_name,
+            "strategy_id": strategy_id or "",
             "order_id": oid_str,
             "category": category,
             "client_id_broker": client_id,
@@ -3174,11 +3377,24 @@ class StraddleManager:
             "time": time_str,
             "quantity": quantity,
             "order_type": order_type,
-            "source": "Quantiply Algo",
+            "source": source or "Straddle Pro",
+            "source_type": "ALGO",
             "price": price,
             "trigger_price": trigger_price,
         }
         with _ENGINE_LOCK:
+            self._order_registry[oid_str] = {
+                "algo_name": algo_name,
+                "strategy_id": strategy_id or "",
+                "category": category,
+                "symbol": symbol,
+                "side": side.capitalize(),
+                "source": source or "Straddle Pro",
+                "message": message,
+                "time": time_str,
+            }
+            self._save_order_registry()
+
             self._orderbook.insert(0, entry)
             if len(self._orderbook) > 500:
                 self._orderbook = self._orderbook[:500]
@@ -3207,18 +3423,46 @@ class StraddleManager:
             except Exception as e:
                 logger.error(f"Error getting broker trades: {e}")
 
-            # Map of known algo order IDs / symbols to strategy names
+            # Build fast lookup map from local order registry and recorded orderbook
+            local_meta_map = {}
+            for oid_k, reg in self._order_registry.items():
+                local_meta_map[str(oid_k)] = reg
+            for lo in self._orderbook:
+                loid = str(lo.get("order_id") or "")
+                if loid:
+                    local_meta_map[loid] = {
+                        "algo_name": lo.get("algo_name") or lo.get("strategy_name"),
+                        "strategy_id": lo.get("strategy_id"),
+                        "category": lo.get("category"),
+                        "source": "Straddle Pro",
+                        "message": lo.get("message"),
+                    }
+
+            # Map of known algo order IDs / symbols to strategy names & IDs
             strat_map = {}
             for s in self._strategies:
                 s_name = s.get("name", s.get("strategy_id", "Algo"))
                 s_id = s.get("strategy_id", "")
-                for p in s.get("positions", []):
-                    oid = p.get("order_id")
-                    if oid:
-                        strat_map[str(oid)] = (s_name, s_id)
+                all_pos = list(s.get("positions", [])) + list(s.get("closed_positions", []))
+                for p in all_pos:
+                    ent_oid = str(p.get("order_id") or "")
+                    if ent_oid:
+                        strat_map[ent_oid] = (s_name, s_id, "Re-Entry" if p.get("is_re_entry") else "Entry")
+                    exit_oid = str(p.get("exit_order_id") or "")
+                    if exit_oid:
+                        reason_cat = "Target" if "target" in str(p.get("exit_reason", "")).lower() else ("Stoploss" if "stoploss" in str(p.get("exit_reason", "")).lower() or "sl" in str(p.get("exit_reason", "")).lower() else "Square off")
+                        strat_map[exit_oid] = (s_name, s_id, reason_cat)
                     sym = p.get("symbol")
                     if sym:
-                        strat_map[sym] = (s_name, s_id)
+                        strat_map[sym] = (s_name, s_id, "Entry")
+                        strat_map[sym.upper()] = (s_name, s_id, "Entry")
+                        strat_map[sym.replace(" ", "")] = (s_name, s_id, "Entry")
+                        try:
+                            c_sym = _resolve_kotak_trading_symbol(sym, p.get("instrument_key", ""))
+                            if c_sym:
+                                strat_map[c_sym] = (s_name, s_id, "Entry")
+                        except Exception:
+                            pass
 
             unified_orders = []
             seen_order_ids = set()
@@ -3246,42 +3490,73 @@ class StraddleManager:
                     except Exception:
                         pass
 
-                # Resolve algo attribution
+                # Resolve algo attribution & category
                 matched_strat_name = None
                 matched_strat_id = None
-                if oid in strat_map:
-                    matched_strat_name, matched_strat_id = strat_map[oid]
-                elif tag and tag not in ("None", "", "null"):
+                matched_category = None
+                matched_msg = None
+
+                # Priority 1: Match in local metadata registry / orderbook by order ID
+                if oid in local_meta_map:
+                    meta = local_meta_map[oid]
+                    matched_strat_name = meta.get("algo_name")
+                    matched_strat_id = meta.get("strategy_id")
+                    matched_category = meta.get("category")
+                    matched_msg = meta.get("message")
+
+                # Priority 2: Match in strat_map by order ID (entry or exit order ID)
+                if not matched_strat_name and oid in strat_map:
+                    matched_strat_name, matched_strat_id, matched_category = strat_map[oid]
+
+                # Priority 3: Match by tag
+                if not matched_strat_name and tag and tag not in ("None", "", "null"):
                     for s in self._strategies:
                         if s.get("strategy_id") in tag or s.get("name", "").lower() in tag.lower():
                             matched_strat_name = s.get("name")
                             matched_strat_id = s.get("strategy_id")
                             break
-                elif sym in strat_map:
-                    matched_strat_name, matched_strat_id = strat_map[sym]
 
-                is_algo = bool(matched_strat_name)
-                source_label = "Quantiply" if is_algo else "Manual"
-                source_type = "ALGO" if is_algo else "MANUAL"
-                algo_name_display = matched_strat_name if is_algo else "straddle"
+                # Priority 4: Match by trading symbol (canonical or display)
+                if not matched_strat_name:
+                    canon_sym = sym
+                    try:
+                        canon_sym = _resolve_kotak_trading_symbol(sym)
+                    except Exception:
+                        pass
+                    if sym in strat_map:
+                        matched_strat_name, matched_strat_id, matched_category = strat_map[sym]
+                    elif canon_sym in strat_map:
+                        matched_strat_name, matched_strat_id, matched_category = strat_map[canon_sym]
+
+                # Priority 5: Fallback to active strategy if available
+                active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else None)
+                if not matched_strat_name and active_strat:
+                    matched_strat_name = active_strat.get("name")
+                    matched_strat_id = active_strat.get("strategy_id")
+
+                algo_name_display = matched_strat_name or (active_strat.get("name") if active_strat else "Straddle Pro")
+                source_label = "Straddle Pro"
+                source_type = "ALGO"
 
                 # Normalize category
-                category = "Entry"
-                tag_lower = tag.lower()
-                if "stoploss" in tag_lower or "sl" in tag_lower:
-                    category = "Stoploss"
-                elif "target" in tag_lower:
-                    category = "target"
-                elif "hedge" in tag_lower:
-                    category = "Hedge"
-                elif "exit" in tag_lower or "square" in tag_lower:
-                    category = "Square off"
-                elif "entry" in tag_lower:
-                    category = "Entry"
-                elif is_algo:
-                    category = "Entry"
+                if matched_category:
+                    category = matched_category
                 else:
-                    category = "Manual"
+                    tag_lower = tag.lower()
+                    if "stoploss" in tag_lower or "sl" in tag_lower:
+                        category = "Stoploss"
+                    elif "target" in tag_lower:
+                        category = "Target"
+                    elif "hedge" in tag_lower:
+                        category = "Hedge"
+                    elif "exit" in tag_lower or "square" in tag_lower:
+                        category = "Square off"
+                    elif "re" in tag_lower:
+                        category = "Re-Entry"
+                    elif side_raw == "SELL":
+                        category = "Target"
+                    else:
+                        category = "Entry"
 
                 # Normalize order type
                 ot_upper = str(order_type).upper()
@@ -3310,7 +3585,7 @@ class StraddleManager:
                 unified_orders.append({
                     "algo_name": algo_name_display,
                     "strategy_id": matched_strat_id or "MANUAL",
-                    "strategy_name": matched_strat_name or "straddle",
+                    "strategy_name": matched_strat_name or "Straddle Pro",
                     "order_id": oid,
                     "category": category,
                     "client_id": bo.get("client_id") or "Kotak Neo Live",
@@ -3319,7 +3594,7 @@ class StraddleManager:
                     "side": side_raw.capitalize(),
                     "status": status_clean,
                     "status_raw": status_raw,
-                    "message": bo.get("status_message") or bo.get("message") or ("Order " + status_clean.lower()),
+                    "message": matched_msg or bo.get("status_message") or bo.get("message") or ("Order " + status_clean.lower()),
                     "time": str(t_str),
                     "quantity": qty,
                     "order_type": order_type_clean,
@@ -3348,22 +3623,26 @@ class StraddleManager:
                     except Exception:
                         pass
 
-                matched_strat_name, matched_strat_id = strat_map.get(toid, (None, None))
-                if not matched_strat_name and sym in strat_map:
-                    matched_strat_name, matched_strat_id = strat_map[sym]
+                matched_strat_name, matched_strat_id, matched_category = (None, None, None)
+                if toid in local_meta_map:
+                    matched_strat_name = local_meta_map[toid].get("algo_name")
+                    matched_strat_id = local_meta_map[toid].get("strategy_id")
+                    matched_category = local_meta_map[toid].get("category")
+                elif toid in strat_map:
+                    matched_strat_name, matched_strat_id, matched_category = strat_map[toid]
+                elif sym in strat_map:
+                    matched_strat_name, matched_strat_id, matched_category = strat_map[sym]
 
-                is_algo = bool(matched_strat_name)
-                source_label = matched_strat_name if is_algo else "Kotak Neo Direct / Manual"
-                source_type = "ALGO" if is_algo else "MANUAL"
-                algo_name_display = matched_strat_name if is_algo else "Manual / Direct Trade"
+                active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else None)
+                algo_name_display = matched_strat_name or (active_strat.get("name") if active_strat else "Straddle Pro")
 
                 unified_orders.append({
                     "algo_name": algo_name_display,
                     "strategy_id": matched_strat_id or "MANUAL",
-                    "strategy_name": matched_strat_name or "Manual Trade",
+                    "strategy_name": matched_strat_name or "Straddle Pro",
                     "order_id": toid,
                     "trade_id": bt.get("trade_id", toid),
-                    "category": "Executed Trade",
+                    "category": matched_category or "Executed Trade",
                     "client_id": "Kotak Neo Live",
                     "client_id_broker": "Kotak Neo Live",
                     "symbol": sym,
@@ -3377,8 +3656,8 @@ class StraddleManager:
                     "product": bt.get("product", "NRML"),
                     "price": price,
                     "trigger_price": 0.0,
-                    "source": source_label,
-                    "source_type": source_type,
+                    "source": "Straddle Pro",
+                    "source_type": "ALGO",
                 })
 
             # Also merge rejected orders from strategy legs so failures appear in Orderbook
@@ -3414,7 +3693,7 @@ class StraddleManager:
                                 "product": p.get("product", "NRML"),
                                 "price": float(p.get("avg_ent_price") or 0.0),
                                 "trigger_price": 0.0,
-                                "source": "Quantiply",
+                                "source": "Straddle Pro",
                                 "source_type": "ALGO",
                             })
 
@@ -3427,8 +3706,7 @@ class StraddleManager:
                 lo_copy = dict(lo)
                 if "source_type" not in lo_copy:
                     lo_copy["source_type"] = "ALGO"
-                if not lo_copy.get("source") or lo_copy.get("source") == "Quantiply Algo":
-                    lo_copy["source"] = "Quantiply"
+                lo_copy["source"] = "Straddle Pro"
                 unified_orders.append(lo_copy)
 
             # Filtering
@@ -4151,8 +4429,9 @@ class StraddleManager:
                     if tgt_price > 0:
                         if (side == "SELL" and ltp <= tgt_price) or (side == "BUY" and ltp >= tgt_price):
                             self._log_event(f"Target Hit for {pos['symbol']} @ ₹{ltp:.2f} (Target was ₹{tgt_price:.2f})")
-                            self._square_off_single_position(pos, broker, reason=f"TARGET HIT (₹{tgt_price:.2f})")
-                            self._handle_leg_re_entry(strat, pos, trigger="TARGET")
+                            res_sq = self._square_off_single_position(pos, broker, reason=f"TARGET HIT (₹{tgt_price:.2f})")
+                            exit_oid = (res_sq or {}).get("order_id") or pos.get("exit_order_id")
+                            self._handle_leg_re_entry(strat, pos, trigger="TARGET", exit_order_id=exit_oid)
                             continue
 
                     # Check Stoploss Hit
@@ -4160,8 +4439,9 @@ class StraddleManager:
                     if sl_price > 0:
                         if (side == "SELL" and ltp >= sl_price) or (side == "BUY" and ltp <= sl_price):
                             self._log_event(f"Stoploss Hit for {pos['symbol']} @ ₹{ltp:.2f} (SL was ₹{sl_price:.2f})")
-                            self._square_off_single_position(pos, broker, reason=f"STOPLOSS HIT (₹{sl_price:.2f})")
-                            self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS")
+                            res_sq = self._square_off_single_position(pos, broker, reason=f"STOPLOSS HIT (₹{sl_price:.2f})")
+                            exit_oid = (res_sq or {}).get("order_id") or pos.get("exit_order_id")
+                            self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS", exit_order_id=exit_oid)
                             continue
 
                 # Move SL to Cost Check

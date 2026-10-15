@@ -203,6 +203,15 @@ class BaseBrokerAdapter:
     def get_live_quotes(self, instrument_tokens: List[str]) -> Dict[str, Any]:
         return {}
 
+    def wait_for_order_fill(
+        self,
+        order_id: str,
+        timeout_sec: float = 15.0,
+        poll_interval_sec: float = 0.1,
+    ) -> Dict[str, Any]:
+        """Wait until an order is confirmed filled by broker exchange."""
+        return {"filled": True, "status": "COMPLETE", "order_id": str(order_id)}
+
 
 class KotakNeoBrokerAdapter(BaseBrokerAdapter):
     """
@@ -378,6 +387,96 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             logger.error(f"[Kotak Neo] Exception cancelling order {order_id}: {e}")
             return {"success": False, "error": str(e)}
 
+    def wait_for_order_fill(
+        self,
+        order_id: str,
+        timeout_sec: float = 15.0,
+        poll_interval_sec: float = 0.1,
+    ) -> Dict[str, Any]:
+        """
+        Polls Kotak Neo OMS/RMS order history until the order status is confirmed
+        'TRADED' / 'COMPLETE', or fails if 'REJECTED' / 'CANCELLED'.
+        Guarantees that exit orders are completely filled before re-entries fire,
+        eliminating concurrent position margin spikes.
+        """
+        client = self._get_client()
+        if client is None:
+            return {"filled": False, "status": "NO_CLIENT", "error": "Kotak Neo client not authenticated."}
+
+        oid_str = str(order_id).strip()
+        start_t = time.time()
+        logger.info(f"[Kotak Neo] Polling order {oid_str} until FILLED (timeout={timeout_sec}s, poll={poll_interval_sec}s)...")
+
+        while time.time() - start_t < timeout_sec:
+            try:
+                hist = client.order_history(order_id=oid_str)
+                items = []
+                if isinstance(hist, dict):
+                    d = hist.get("data")
+                    if isinstance(d, list):
+                        items = d
+                    elif isinstance(d, dict):
+                        items = d.get("data", []) if isinstance(d.get("data"), list) else [d]
+                elif isinstance(hist, list):
+                    items = hist
+
+                if items and isinstance(items, list):
+                    latest = items[0]
+                    st = str(latest.get("ordSt", "")).lower()
+                    if st in ("traded", "complete"):
+                        avg_p = float(latest.get("avgPrc", latest.get("prc", 0.0)) or 0.0)
+                        f_qty = int(latest.get("fldQty", latest.get("qty", 0)) or 0)
+                        logger.info(f"[Kotak Neo] Order {oid_str} confirmed FILLED: status='{st}', avg_price={avg_p}, qty={f_qty}")
+                        return {
+                            "filled": True,
+                            "status": "COMPLETE",
+                            "order_id": oid_str,
+                            "price": avg_p,
+                            "filled_quantity": f_qty,
+                            "data": latest,
+                        }
+                    elif st in ("rejected", "cancelled"):
+                        rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or f"Order {st}"
+                        logger.warning(f"[Kotak Neo] Order {oid_str} not filled: status='{st}', reason='{rej_msg}'")
+                        return {
+                            "filled": False,
+                            "status": st.upper(),
+                            "order_id": oid_str,
+                            "error": rej_msg,
+                            "data": latest,
+                        }
+            except Exception as e:
+                logger.debug(f"[Kotak Neo] Exception checking order {oid_str} history: {e}")
+
+            time.sleep(poll_interval_sec)
+
+        # Fallback check against active broker order report
+        try:
+            ob = self.get_order_book()
+            for o in ob:
+                if str(o.get("order_id")) == oid_str:
+                    st = str(o.get("status", "")).upper()
+                    if "COMP" in st or "TRAD" in st:
+                        return {
+                            "filled": True,
+                            "status": "COMPLETE",
+                            "order_id": oid_str,
+                            "price": float(o.get("average_price") or o.get("price") or 0.0),
+                            "filled_quantity": int(o.get("filled_quantity") or o.get("quantity") or 0),
+                        }
+                    elif "REJ" in st or "CAN" in st:
+                        return {
+                            "filled": False,
+                            "status": st,
+                            "order_id": oid_str,
+                            "error": o.get("status_message") or "Order rejected/cancelled",
+                        }
+        except Exception:
+            pass
+
+        logger.warning(f"[Kotak Neo] Order {oid_str} wait_for_order_fill timed out after {timeout_sec}s")
+        return {"filled": False, "status": "TIMEOUT", "order_id": oid_str, "error": f"Timed out after {timeout_sec}s"}
+
     def get_order_book(self) -> List[Dict[str, Any]]:
         client = self._get_client()
         if client is None:
@@ -427,7 +526,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     "order_timestamp": item.get("ordDtTm") or item.get("order_timestamp") or time.strftime("%H:%M:%S"),
                     "status_message": item.get("rejRsn") or item.get("status_message") or "",
                     "product": item.get("prod", "MIS"),
-                    "client_id": item.get("actId") or "Kotak Neo"
+                    "client_id": item.get("actId") or "Kotak Neo",
+                    "tag": str(item.get("guiOrdId") or item.get("tag") or item.get("remarks") or item.get("tok") or ""),
                 })
             return standardized
 
@@ -681,6 +781,14 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
     def get_live_quotes(self, instrument_tokens: List[str]) -> Dict[str, Any]:
         return {}
+
+    def wait_for_order_fill(
+        self,
+        order_id: str,
+        timeout_sec: float = 15.0,
+        poll_interval_sec: float = 0.1,
+    ) -> Dict[str, Any]:
+        return {"filled": True, "status": "COMPLETE", "order_id": str(order_id), "price": 0.0}
 
 
 _LIVE_ADAPTER = KotakNeoBrokerAdapter()

@@ -2572,10 +2572,26 @@ function renderStraddleOrderbookTable() {
             orderTypeDisplay = "Market (M)";
         }
 
-        const sourceDisplay = o.source || "Quantiply";
+        // Sanitize source - all platform orders belong to Straddle Pro
+        let sourceDisplay = o.source || "Straddle Pro";
+        if (sourceDisplay === "Quantiply" || sourceDisplay === "Manual") {
+            sourceDisplay = "Straddle Pro";
+        }
+
         const clientIdDisplay = o.client_id || "Kotak Neo Live";
-        const categoryDisplay = o.category || "Entry";
-        const algoNameDisplay = o.algo_name || "straddle";
+
+        // Active strategy fallback for algo name
+        const activeStratName = window._straddleState?.activeStrategy?.name || "abc";
+        let algoNameDisplay = o.algo_name || activeStratName;
+        if (algoNameDisplay.toLowerCase() === "straddle" || algoNameDisplay.toLowerCase() === "manual") {
+            algoNameDisplay = activeStratName;
+        }
+
+        // Sanitize category (avoid 'Manual', infer Target for Sell exits)
+        let categoryDisplay = o.category || (sideText === "Sell" ? "Target" : "Entry");
+        if (categoryDisplay === "Manual") {
+            categoryDisplay = (sideText === "Sell" ? "Target" : "Entry");
+        }
 
         const rowRejectedClass = isRejected ? "orderbook-row-rejected" : "";
         const messageColor = isRejected ? "color:#ef4444; font-weight:500;" : "color:#cbd5e1;";
@@ -2614,18 +2630,32 @@ function exportStraddleOrderbookCsv() {
 
     let csv = "Algo name,Order ID,Category,Client ID / Broker,Symbol,Side,Status,Message,Time,Qty,Order type,Source,Price,Trigger Price\n";
     orders.forEach(o => {
-        const algo = (o.algo_name || "straddle").replace(/"/g, '""');
+        const activeStratName = window._straddleState?.activeStrategy?.name || "abc";
+        let algoName = o.algo_name || activeStratName;
+        if (algoName.toLowerCase() === "straddle" || algoName.toLowerCase() === "manual") {
+            algoName = activeStratName;
+        }
+        const algo = algoName.replace(/"/g, '""');
         const oid = (o.order_id || "").replace(/"/g, '""');
-        const cat = (o.category || "Entry").replace(/"/g, '""');
+
+        const side = (o.side || "SELL").replace(/"/g, '""');
+        let catVal = o.category || (side.toUpperCase() === "SELL" ? "Target" : "Entry");
+        if (catVal === "Manual") catVal = (side.toUpperCase() === "SELL" ? "Target" : "Entry");
+        const cat = catVal.replace(/"/g, '""');
+
         const client = (o.client_id || "Kotak Neo Live").replace(/"/g, '""');
         const sym = (o.symbol || "").replace(/"/g, '""');
-        const side = (o.side || "SELL").replace(/"/g, '""');
         const st = (o.status || "Complete").replace(/"/g, '""');
         const msg = (o.message || "").replace(/"/g, '""');
         const time = (o.time || "").replace(/"/g, '""');
         const qty = o.quantity || 65;
         const otype = (o.order_type || "Limit (L)").replace(/"/g, '""');
-        const src = (o.source || "Quantiply").replace(/"/g, '""');
+
+        let srcVal = o.source || "Straddle Pro";
+        if (srcVal === "Quantiply" || srcVal === "Manual") {
+            srcVal = "Straddle Pro";
+        }
+        const src = srcVal.replace(/"/g, '""');
         const price = parseFloat(o.price || 0).toFixed(2);
         const trigPrice = parseFloat(o.trigger_price || 0).toFixed(2);
 
