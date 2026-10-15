@@ -1679,52 +1679,64 @@ class StraddleManager:
             all_positions = []
             instrument_keys = []
 
+            # Track existing symbols to easily merge
+            existing_sym_map = {}
+
             for p in raw_positions:
                 net_qty = int(p.get("net_qty") or p.get("quantity") or 0)
                 sym = p.get("trading_symbol") or p.get("symbol") or ""
                 ikey = p.get("instrument_key") or p.get("instrument_token") or ""
-                buy_avg = float(p.get("buy_avg") or p.get("day_buy_price") or p.get("buy_price") or 0.0)
-                sell_avg = float(p.get("sell_avg") or p.get("day_sell_price") or p.get("sell_price") or 0.0)
-                buy_qty = int(p.get("buy_qty") or p.get("day_buy_quantity") or 0)
-                sell_qty = int(p.get("sell_qty") or p.get("day_sell_quantity") or 0)
-                avg_price = float(p.get("avg_price") or p.get("average_price") or (buy_avg if net_qty > 0 else (sell_avg if net_qty < 0 else 0.0)))
-                ltp = float(p.get("ltp") or p.get("last_price") or p.get("close_price") or 0.0)
+                buy_avg = float(p.get("buy_avg") or p.get("buyAvgPrc") or p.get("buyPrc") or p.get("day_buy_price") or p.get("buy_price") or 0.0)
+                sell_avg = float(p.get("sell_avg") or p.get("sellAvgPrc") or p.get("sellPrc") or p.get("day_sell_price") or p.get("sell_price") or 0.0)
+                buy_qty = int(p.get("buy_qty") or p.get("buyQty") or p.get("day_buy_quantity") or 0)
+                sell_qty = int(p.get("sell_qty") or p.get("sellQty") or p.get("day_sell_quantity") or 0)
+                avg_price = float(p.get("avg_price") or p.get("avgPrc") or p.get("average_price") or 0.0)
+                ltp = float(p.get("ltp") or p.get("lastPrice") or p.get("last_price") or p.get("close_price") or 0.0)
                 realised_pnl = float(p.get("realised_pnl") or p.get("realized_pnl") or 0.0)
                 unrealised_pnl = float(p.get("unrealised_pnl") or p.get("unrealized_pnl") or 0.0)
                 pnl = float(p.get("pnl") or p.get("mtm") or (realised_pnl + unrealised_pnl))
-                prod = str(p.get("product") or "I").upper()
+                prod = str(p.get("product") or "NRML").upper()
+
+                # Match with active strategies to find source algo and fill missing buy/sell averages
+                matched_strat_name = p.get("source_strat_name")
+                matched_strat_id = p.get("source_strat_id")
+
+                for s in self._strategies:
+                    s_legs = s.get("positions", [])
+                    for leg in s_legs:
+                        leg_sym = leg.get("symbol") or leg.get("trading_symbol") or ""
+                        leg_k = _resolve_kotak_trading_symbol(leg_sym)
+                        if leg_sym == sym or (ikey and leg.get("instrument_key") == ikey) or leg_k == sym:
+                            if not matched_strat_id:
+                                matched_strat_name = s.get("name", s.get("strategy_id"))
+                                matched_strat_id = s.get("strategy_id")
+                            ent_p = float(leg.get("avg_ent_price") or 0.0)
+                            exit_p = float(leg.get("avg_exit_price") or 0.0)
+                            l_side = str(leg.get("side", "SELL")).upper()
+                            if buy_avg <= 0:
+                                buy_avg = ent_p if l_side == "BUY" else exit_p
+                            if sell_avg <= 0:
+                                sell_avg = exit_p if l_side == "BUY" else ent_p
+                            if ltp <= 0:
+                                ltp = float(leg.get("ltp") or exit_p or ent_p or 0.0)
+                            break
+                    if matched_strat_id:
+                        break
+
+                active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else None)
+                if not matched_strat_name or matched_strat_name in ("Kotak Neo Direct / Manual", "straddle"):
+                    matched_strat_name = (active_strat.get("name") if active_strat else "Straddle Pro")
+                    matched_strat_id = (active_strat.get("strategy_id") if active_strat else None)
+
+                # Compute avg_price if missing
+                if avg_price <= 0:
+                    avg_price = buy_avg if net_qty > 0 else (sell_avg if net_qty < 0 else (((buy_avg + sell_avg) / 2.0) if (buy_avg > 0 and sell_avg > 0) else (buy_avg or sell_avg)))
 
                 # If closed position but realized_pnl is 0, compute from buy and sell avg
-                if net_qty == 0 and realised_pnl == 0.0 and buy_qty > 0 and sell_qty > 0 and buy_avg > 0 and sell_avg > 0:
-                    realised_pnl = round((sell_avg - buy_avg) * min(buy_qty, sell_qty), 2)
+                if net_qty == 0 and realised_pnl == 0.0 and buy_avg > 0 and sell_avg > 0:
+                    calc_qty = min(buy_qty, sell_qty) if (buy_qty > 0 and sell_qty > 0) else (int(p.get("quantity") or 65))
+                    realised_pnl = round((sell_avg - buy_avg) * calc_qty, 2)
                     pnl = realised_pnl
-
-                # Match with active strategies to find source algo
-                matched_strat_name = p.get("source_strat_name") or "Kotak Neo Direct / Manual"
-                matched_strat_id = p.get("source_strat_id")
-                if not matched_strat_id:
-                    for s in self._strategies:
-                        s_legs = s.get("positions", [])
-                        for leg in s_legs:
-                            if leg.get("symbol") == sym or (ikey and leg.get("instrument_key") == ikey):
-                                matched_strat_name = s.get("name", s.get("strategy_id"))
-                                matched_strat_id = s.get("strategy_id")
-                                break
-                        if matched_strat_id:
-                            break
-
-                if not matched_strat_id:
-                    for s in self._strategies:
-                        cfg_legs = s.get("legs", [])
-                        for leg in cfg_legs:
-                            leg_und = (leg.get("underlying") or s.get("underlying") or "NIFTY").upper()
-                            leg_type = (leg.get("option_type") or "CE").upper()
-                            if leg_und in sym.upper() and leg_type in sym.upper():
-                                matched_strat_name = s.get("name", s.get("strategy_id"))
-                                matched_strat_id = s.get("strategy_id")
-                                break
-                        if matched_strat_id:
-                            break
 
                 side = "BUY" if net_qty > 0 else ("SELL" if net_qty < 0 else "CLOSED")
 
@@ -1742,6 +1754,7 @@ class StraddleManager:
                     "buy_avg": buy_avg,
                     "sell_avg": sell_avg,
                     "avg_price": avg_price,
+                    "net_avg": avg_price,
                     "ltp": ltp,
                     "mtm": pnl,
                     "pnl": pnl,
@@ -1754,33 +1767,113 @@ class StraddleManager:
                     "is_open": (net_qty != 0),
                 }
 
+                existing_sym_map[sym] = pos_entry
+                existing_sym_map[_resolve_kotak_trading_symbol(sym)] = pos_entry
                 all_positions.append(pos_entry)
 
+                if ikey:
+                    instrument_keys.append(ikey)
+                elif sym:
+                    instrument_keys.append(sym)
+
                 if net_qty != 0:
-                    if ikey:
-                        instrument_keys.append(ikey)
                     open_positions.append(pos_entry)
                 else:
                     closed_positions.append(pos_entry)
 
-            # Fetch fresh quotes for open positions
+            # Also synthesize any executed positions from strategy memory not present in raw broker list
+            for s in self._strategies:
+                for leg in s.get("positions", []):
+                    ent_p = float(leg.get("avg_ent_price") or 0.0)
+                    if ent_p <= 0:
+                        continue
+                    leg_sym = leg.get("symbol") or leg.get("trading_symbol") or ""
+                    leg_k = _resolve_kotak_trading_symbol(leg_sym)
+                    if leg_sym in existing_sym_map or leg_k in existing_sym_map:
+                        continue
+
+                    l_status = leg.get("status", "CLOSED").upper()
+                    is_op = l_status in ("OPEN", "ACTIVE")
+                    qty = int(leg.get("quantity") or 65)
+                    l_side = str(leg.get("side", "SELL")).upper()
+                    exit_p = float(leg.get("avg_exit_price") or ent_p)
+                    b_avg = ent_p if l_side == "BUY" else (exit_p if not is_op else 0.0)
+                    s_avg = exit_p if (not is_op and l_side == "BUY") else ent_p
+                    n_avg = ent_p
+                    l_ltp = float(leg.get("ltp") or exit_p or ent_p)
+                    l_mtm = float(leg.get("mtm") or 0.0)
+
+                    synth_pos = {
+                        "symbol": leg_sym,
+                        "trading_symbol": leg_k,
+                        "instrument_key": leg.get("instrument_key", ""),
+                        "side": l_side if is_op else "CLOSED",
+                        "product": leg.get("product", "NRML"),
+                        "quantity": qty if is_op else 0,
+                        "net_qty": qty if (is_op and l_side == "BUY") else (-qty if (is_op and l_side == "SELL") else 0),
+                        "abs_qty": qty,
+                        "buy_qty": qty if (l_side == "BUY" or not is_op) else 0,
+                        "sell_qty": qty if (l_side == "SELL" or not is_op) else 0,
+                        "buy_avg": b_avg,
+                        "sell_avg": s_avg,
+                        "avg_price": n_avg,
+                        "ltp": l_ltp,
+                        "mtm": l_mtm,
+                        "pnl": l_mtm,
+                        "realised_pnl": l_mtm if not is_op else 0.0,
+                        "unrealised_pnl": l_mtm if is_op else 0.0,
+                        "strategy_name": s.get("name", "Straddle Pro"),
+                        "strategy_id": s.get("strategy_id"),
+                        "source": s.get("name", "Straddle Pro"),
+                        "status": "OPEN" if is_op else "CLOSED",
+                        "is_open": is_op,
+                    }
+                    existing_sym_map[leg_sym] = synth_pos
+                    all_positions.append(synth_pos)
+                    if synth_pos["instrument_key"]:
+                        instrument_keys.append(synth_pos["instrument_key"])
+                    elif synth_pos["symbol"]:
+                        instrument_keys.append(synth_pos["symbol"])
+
+                    if is_op:
+                        open_positions.append(synth_pos)
+                    else:
+                        closed_positions.append(synth_pos)
+
+            # Fetch fresh quotes for ALL positions (open and closed)
             if instrument_keys:
                 prices_map, quotes_map = self._fetch_live_quotes(instrument_keys)
                 total_open_mtm = 0.0
-                for op in open_positions:
-                    ikey = op["instrument_key"]
-                    q = quotes_map.get(ikey) or quotes_map.get(ikey.replace("|", ":")) or {}
-                    live_ltp = float(prices_map.get(ikey) or prices_map.get(ikey.replace("|", ":")) or q.get("last_price") or q.get("ltp") or 0.0)
+                for p_item in all_positions:
+                    ikey = p_item["instrument_key"]
+                    sym = p_item["symbol"]
+                    k_cand = ikey or sym
+                    q = quotes_map.get(k_cand) or quotes_map.get(k_cand.replace("|", ":")) or quotes_map.get(sym) or {}
+                    live_ltp = float(prices_map.get(k_cand) or prices_map.get(sym) or q.get("last_price") or q.get("ltp") or 0.0)
                     if live_ltp > 0:
-                        op["ltp"] = live_ltp
-                        avg_p = op["avg_price"]
-                        qty = op["abs_qty"]
-                        if op["side"] == "SELL":
-                            op["mtm"] = round((avg_p - live_ltp) * qty, 2) if avg_p > 0 else op["mtm"]
-                        else:
-                            op["mtm"] = round((live_ltp - avg_p) * qty, 2) if avg_p > 0 else op["mtm"]
-                        op["unrealised_pnl"] = op["mtm"]
-                    total_open_mtm += op["mtm"]
+                        p_item["ltp"] = live_ltp
+                        if p_item["is_open"]:
+                            avg_p = p_item["avg_price"]
+                            qty = p_item["abs_qty"]
+                            if p_item["side"] == "SELL":
+                                p_item["mtm"] = round((avg_p - live_ltp) * qty, 2) if avg_p > 0 else p_item["mtm"]
+                            else:
+                                p_item["mtm"] = round((live_ltp - avg_p) * qty, 2) if avg_p > 0 else p_item["mtm"]
+                            p_item["unrealised_pnl"] = p_item["mtm"]
+                    elif p_item["ltp"] <= 0:
+                        # Black Scholes / Spot fallback so LTP is never 0 or '-'
+                        und_sym = "NIFTY"
+                        for u in ("BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "NIFTY"):
+                            if u in sym:
+                                und_sym = u
+                                break
+                        spot = self._get_underlying_spot_price(und_sym)
+                        opt_type = "PE" if "PE" in sym else "CE"
+                        bs = _calc_bs_greeks(spot, spot, opt_type=opt_type)
+                        p_item["ltp"] = float(bs.get("ltp") or 10.0)
+
+                    if p_item["is_open"]:
+                        total_open_mtm += p_item["mtm"]
             else:
                 total_open_mtm = sum(op.get("mtm", 0.0) for op in open_positions)
 
@@ -2798,6 +2891,24 @@ class StraddleManager:
             "date": today_ist_str(),
         }
 
+        # Quantiply-parity: timeout conversion to market
+        entry_timeout = int(adv.get("entry_market_timeout_sec", 0))
+        if entry_timeout > 0 and order_id and "Limit" in order_type_cfg and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
+            threading.Thread(
+                target=self._watch_limit_order_timeout,
+                args=(broker, order_id, entry_timeout),
+                daemon=True
+            ).start()
+
+        # Quantiply-parity: place Stoploss with broker in advance
+        if adv.get("sl_order_placement") == "Place in advance" and sl_price > 0:
+            sl_delay = int(adv.get("sl_placement_delay_sec", 0))
+            threading.Thread(
+                target=self._place_advance_sl_order,
+                args=(broker, pos_record, sl_delay),
+                daemon=True
+            ).start()
+
         self._log_event(
             f"Entered {side} {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty}, TGT: ₹{target_price}, SL: ₹{sl_price})",
             details=order_res,
@@ -2809,6 +2920,7 @@ class StraddleManager:
         strategy_id: Optional[str] = None,
         leg_ids: Optional[List[str]] = None,
         leg_indices: Optional[List[int]] = None,
+        updated_legs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Retry placing failed/error orders for specific legs or all error legs in a strategy."""
         with _ENGINE_LOCK:
@@ -2857,6 +2969,17 @@ class StraddleManager:
                     leg_cfg = legs_cfg[idx]
                 if not leg_cfg:
                     continue
+
+                # Apply inline updated lots and strike if passed
+                if updated_legs and isinstance(updated_legs, dict):
+                    up_info = updated_legs.get(idx) or updated_legs.get(str(idx)) or (updated_legs.get(pos.get("id")) if pos.get("id") else None)
+                    if up_info and isinstance(up_info, dict):
+                        if up_info.get("lots"):
+                            leg_cfg["lots"] = int(up_info["lots"])
+                        if up_info.get("strike_selection"):
+                            leg_cfg["strike_selection"] = str(up_info["strike_selection"]).strip()
+                        if up_info.get("strike"):
+                            leg_cfg["strike_selection"] = str(up_info["strike"]).strip()
 
                 contract = self.resolve_strike_and_contract(
                     underlying=und,
@@ -2959,6 +3082,288 @@ class StraddleManager:
                 "strategy": strat,
                 "retry_result": retry_res
             }
+
+    def update_running_position(
+        self,
+        strategy_id: Optional[str] = None,
+        leg_id: Optional[str] = None,
+        leg_index: Optional[int] = None,
+        target_mode: str = "%",
+        target_val: Optional[float] = None,
+        sl_mode: str = "%",
+        sl_val: Optional[float] = None,
+        new_lots: Optional[int] = None,
+        new_strike: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Dynamically update live running trade parameters:
+        - Target and Stoploss (% or Points/Price)
+        - Lot size (increasing lots buys/sells more; reducing lots partially squares off)
+        - Strike price (shifts trade: squares off current strike and immediately punches new strike upon fill)
+        """
+        with _ENGINE_LOCK:
+            sid = strategy_id or self._active_strategy_id
+            strat = self.get_strategy(sid)
+            if not strat:
+                return {"success": False, "error": f"Strategy {sid} not found."}
+
+            positions = strat.get("positions", [])
+            pos = None
+            pos_idx = None
+            if leg_id:
+                for idx, p in enumerate(positions):
+                    if p.get("id") == leg_id:
+                        pos = p
+                        pos_idx = idx
+                        break
+            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
+                pos = positions[int(leg_index)]
+                pos_idx = int(leg_index)
+
+            if not pos:
+                return {"success": False, "error": f"Position not found for leg {leg_id or leg_index}"}
+
+            legs_cfg = strat.get("legs", [])
+            leg_cfg = None
+            if leg_id:
+                leg_cfg = next((l for l in legs_cfg if l.get("id") == leg_id), None)
+            if not leg_cfg and pos_idx is not None and 0 <= pos_idx < len(legs_cfg):
+                leg_cfg = legs_cfg[pos_idx]
+
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            und = strat.get("underlying", pos.get("underlying", "NIFTY")).upper()
+            lot_size = int(pos.get("lot_size") or (15 if und == "BANKNIFTY" else (25 if und == "FINNIFTY" else (50 if und == "MIDCPNIFTY" else (10 if und == "SENSEX" else 65)))))
+
+            current_strike = str(pos.get("strike_price") or "")
+            pos_side = str(pos.get("side", "SELL")).upper()
+            curr_sym = pos.get("symbol", "")
+
+            # 1. SHIFT STRIKE (If new strike provided and different from current)
+            if new_strike and str(new_strike).strip() and str(new_strike).strip() != current_strike:
+                clean_new_strike = str(new_strike).strip().upper()
+                if clean_new_strike not in curr_sym:
+                    self._log_event(f"Shifting trade for {curr_sym} to strike {clean_new_strike}...")
+                    # A. Square off current position
+                    res_exit = self._square_off_single_position(pos, broker, reason=f"SHIFT STRIKE TO {clean_new_strike}")
+                    exit_oid = (res_exit or {}).get("order_id") or pos.get("exit_order_id")
+                    if exit_oid and not str(exit_oid).startswith("ORD_") and not str(exit_oid).startswith("PAPER_"):
+                        broker.wait_for_order_fill(str(exit_oid), timeout_sec=20.0, poll_interval_sec=0.1)
+
+                    # B. Resolve new contract
+                    opt_type = pos.get("option_type") or ("PE" if "PE" in curr_sym else "CE")
+                    new_contract = self.resolve_strike_and_contract(
+                        underlying=und,
+                        strike_selection=clean_new_strike,
+                        option_type=opt_type,
+                        expiry_type=leg_cfg.get("expiry", "Weekly") if leg_cfg else "Weekly"
+                    )
+                    if not new_contract:
+                        return {"success": False, "error": f"Could not resolve new contract for strike {clean_new_strike}"}
+
+                    # C. Punch entry for new strike
+                    target_lots = int(new_lots) if new_lots and int(new_lots) > 0 else int(pos.get("lots", 1))
+                    dummy_cfg = dict(leg_cfg or {})
+                    dummy_cfg.update({
+                        "id": pos.get("id") or f"leg_{pos_idx+1}",
+                        "underlying": und,
+                        "option_type": opt_type,
+                        "side": pos_side,
+                        "lots": target_lots,
+                        "lot_size": lot_size,
+                        "product": pos.get("product", "NRML"),
+                        "target_type": "TGT: %" if "%" in target_mode else "TGT: Pts",
+                        "target_value": float(target_val) if target_val is not None else float(pos.get("target_value", 25.0)),
+                        "sl_type": "SL: -%" if "%" in sl_mode else "SL: -Pts",
+                        "sl_value": float(sl_val) if sl_val is not None else float(pos.get("sl_value", 15.0)),
+                    })
+                    new_pos = self._place_leg_entry_order(
+                        dummy_cfg,
+                        new_contract,
+                        mult=int(strat.get("multiplier", 1)),
+                        broker=broker,
+                        adv=strat.get("advanced", {}),
+                        strategy=strat,
+                        is_re_entry=True
+                    )
+                    if new_pos and new_pos.get("status") == "OPEN":
+                        positions[pos_idx] = new_pos
+                        if leg_cfg:
+                            leg_cfg.update(dummy_cfg)
+                            leg_cfg["strike_selection"] = clean_new_strike
+                        self._save_strategies()
+                        self._save_state()
+                        return {
+                            "success": True,
+                            "message": f"Successfully shifted position from {curr_sym} to {new_contract['trading_symbol']}",
+                            "position": new_pos,
+                            "strategy": strat
+                        }
+                    else:
+                        err = (new_pos or {}).get("error", "Order placement failed on new strike")
+                        return {"success": False, "error": f"Exited previous strike, but new strike placement failed: {err}"}
+
+            # 2. LOT SIZE ADJUSTMENT (If lots changed on same strike)
+            curr_lots = int(pos.get("lots", 1))
+            if new_lots and int(new_lots) > 0 and int(new_lots) != curr_lots:
+                target_lots = int(new_lots)
+                diff_lots = target_lots - curr_lots
+                contract_sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
+
+                if diff_lots > 0:
+                    # Increasing position: Buy/Sell more in same direction
+                    add_qty = diff_lots * lot_size
+                    self._log_event(f"Increasing position for {pos['symbol']} by {diff_lots} lots ({add_qty} qty)...")
+                    order_res = broker.place_order(
+                        symbol=contract_sym,
+                        instrument_key=pos.get("instrument_key", ""),
+                        transaction_type=pos_side,
+                        quantity=add_qty,
+                        product=pos.get("product", "NRML"),
+                        order_type="MARKET",
+                        price=0.0,
+                        tag="add_lot"
+                    )
+                    if order_res.get("success"):
+                        oid = order_res.get("order_id")
+                        fill_res = broker.wait_for_order_fill(str(oid), timeout_sec=10.0) if oid else {}
+                        fill_p = float(fill_res.get("price") or pos.get("avg_ent_price", 0.0) or 0.0)
+                        old_qty = curr_lots * lot_size
+                        new_total_qty = target_lots * lot_size
+                        old_ent = float(pos.get("avg_ent_price", 0.0) or fill_p)
+                        blended_ent = round(((old_qty * old_ent) + (add_qty * fill_p)) / new_total_qty, 2)
+                        pos["lots"] = target_lots
+                        pos["quantity"] = new_total_qty
+                        pos["avg_ent_price"] = blended_ent
+                        if leg_cfg:
+                            leg_cfg["lots"] = target_lots
+                    else:
+                        return {"success": False, "error": f"Failed to increase position: {order_res.get('error')}"}
+
+                elif diff_lots < 0:
+                    # Reducing position: partially square off
+                    sub_qty = abs(diff_lots) * lot_size
+                    opp_side = "BUY" if pos_side == "SELL" else "SELL"
+                    self._log_event(f"Reducing position for {pos['symbol']} by {abs(diff_lots)} lots ({sub_qty} qty)...")
+                    order_res = broker.place_order(
+                        symbol=contract_sym,
+                        instrument_key=pos.get("instrument_key", ""),
+                        transaction_type=opp_side,
+                        quantity=sub_qty,
+                        product=pos.get("product", "NRML"),
+                        order_type="MARKET",
+                        price=0.0,
+                        tag="red_lot"
+                    )
+                    if order_res.get("success"):
+                        pos["lots"] = target_lots
+                        pos["quantity"] = target_lots * lot_size
+                        if leg_cfg:
+                            leg_cfg["lots"] = target_lots
+                    else:
+                        return {"success": False, "error": f"Failed to reduce position: {order_res.get('error')}"}
+
+            # 3. TARGET & STOPLOSS RE-CALCULATION
+            ent_p = float(pos.get("avg_ent_price", 0.0) or 0.0)
+            side = pos.get("side", "SELL").upper()
+
+            if target_val is not None:
+                tv = float(target_val)
+                pos["target_value"] = tv
+                pos["target_type"] = "TGT: %" if "%" in target_mode else "TGT: Pts"
+                pos["target_type_label"] = f"TGT: {tv:.0f}%" if "%" in target_mode else f"TGT: ₹{tv:.2f}"
+                if ent_p > 0:
+                    if "%" in target_mode:
+                        pos["target_price"] = round_to_tick(ent_p * (1.0 - tv / 100.0) if side == "SELL" else ent_p * (1.0 + tv / 100.0), 0.05)
+                    else:
+                        pos["target_price"] = round_to_tick(ent_p - tv if side == "SELL" else ent_p + tv, 0.05)
+                if leg_cfg:
+                    leg_cfg["target_value"] = tv
+                    leg_cfg["target_type"] = pos["target_type"]
+
+            if sl_val is not None:
+                sv = float(sl_val)
+                pos["sl_value"] = sv
+                pos["sl_type"] = "SL: -%" if "%" in sl_mode else "SL: -Pts"
+                pos["sl_type_label"] = f"SL: -{sv:.0f}%" if "%" in sl_mode else f"SL: -₹{sv:.2f}"
+                if ent_p > 0:
+                    if "%" in sl_mode:
+                        pos["sl_price"] = round_to_tick(ent_p * (1.0 + sv / 100.0) if side == "SELL" else ent_p * (1.0 - sv / 100.0), 0.05)
+                    else:
+                        pos["sl_price"] = round_to_tick(ent_p + sv if side == "SELL" else ent_p - sv, 0.05)
+                if leg_cfg:
+                    leg_cfg["sl_value"] = sv
+                    leg_cfg["sl_type"] = pos["sl_type"]
+
+                # If there was an advance SL order placed with broker, update trigger price on broker
+                adv_sl_oid = pos.get("sl_broker_order_id")
+                if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_") and pos.get("sl_price"):
+                    try:
+                        broker.modify_order(
+                            order_id=str(adv_sl_oid),
+                            trigger_price=pos["sl_price"],
+                            price=0.0
+                        )
+                        logger.info(f"Updated broker advance SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}")
+                    except Exception as e:
+                        logger.warning(f"Could not modify broker advance SL order: {e}")
+
+            self._save_strategies()
+            self._save_state()
+            self._log_event(f"Updated live trade parameters for {pos['symbol']}: Lots={pos.get('lots')}, TGT={pos.get('target_price')}, SL={pos.get('sl_price')}")
+            return {
+                "success": True,
+                "message": "Live position parameters updated and active immediately.",
+                "position": pos,
+                "strategy": strat
+            }
+
+    def _watch_limit_order_timeout(self, broker: BaseBrokerAdapter, order_id: str, timeout_sec: int):
+        """Quantiply-parity: if order remains OPEN for N seconds, convert to MARKET order."""
+        if not order_id or timeout_sec <= 0:
+            return
+        time.sleep(timeout_sec)
+        try:
+            status_res = broker.wait_for_order_fill(str(order_id), timeout_sec=0.1)
+            if not status_res.get("filled"):
+                logger.info(f"[Limit Timeout Watcher] Order {order_id} open for {timeout_sec}s. Converting to MARKET order...")
+                mod_res = broker.modify_order(order_id=str(order_id), order_type="MARKET", price=0.0)
+                if not mod_res.get("success"):
+                    logger.warning(f"[Limit Timeout Watcher] Modify order {order_id} failed: {mod_res.get('error')}. Cancelling and punching MARKET.")
+                    broker.cancel_order(str(order_id))
+        except Exception as e:
+            logger.error(f"[Limit Timeout Watcher] Exception for {order_id}: {e}")
+
+    def _place_advance_sl_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0):
+        """Quantiply-parity: place Stoploss order with broker in advance after delay_sec."""
+        if delay_sec > 0:
+            time.sleep(delay_sec)
+        if pos.get("status") != "OPEN" or pos.get("sl_broker_order_id"):
+            return
+        sl_price = float(pos.get("sl_price") or 0.0)
+        if sl_price <= 0:
+            return
+        try:
+            sl_side = "BUY" if pos.get("side") == "SELL" else "SELL"
+            qty = int(pos.get("quantity") or 65)
+            sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
+            logger.info(f"[Advance SL] Placing advance SL-M order on broker for {sym} @ trigger ₹{sl_price:.2f} (qty={qty})...")
+            res = broker.place_order(
+                symbol=sym,
+                instrument_key=pos.get("instrument_key", ""),
+                transaction_type=sl_side,
+                quantity=qty,
+                product=pos.get("product", "NRML"),
+                order_type="SL-M",
+                price=0.0,
+                trigger_price=sl_price,
+                tag="adv_sl"
+            )
+            if res.get("success") and res.get("order_id"):
+                pos["sl_broker_order_id"] = str(res.get("order_id"))
+                logger.info(f"[Advance SL] Order placed with broker ID: {pos['sl_broker_order_id']}")
+        except Exception as e:
+            logger.error(f"[Advance SL] Exception placing SL order: {e}")
 
     def reset_algo(self, strategy_id: Optional[str] = None, strategy_name: Optional[str] = None) -> Dict[str, Any]:
         """Reset failed/unfilled/filled positions, errors, and orders completely, re-initializing strategy to clean READY state."""
@@ -3118,14 +3523,43 @@ class StraddleManager:
         strat_id = pos.get("strategy_id") or ""
         strat_tag = re.sub(r'[^a-zA-Z0-9]', '', str(strat_name))[:4] or "std"
 
+        # Cancel any active advance SL order placed with the broker
+        adv_sl_oid = pos.get("sl_broker_order_id")
+        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+            try:
+                logger.info(f"Cancelling active broker advance SL order {adv_sl_oid} for {pos.get('symbol')} before exit...")
+                broker.cancel_order(str(adv_sl_oid))
+                pos["sl_broker_order_id"] = None
+            except Exception as e:
+                logger.warning(f"Error cancelling advance SL order {adv_sl_oid}: {e}")
+
+        strat = None
+        if strat_id:
+            strat = self.strategies.get(strat_id)
+        adv = (strat.get("advanced_settings") or {}) if strat else {}
+        exit_order_type_cfg = adv.get("exit_order_type", "Market")
+        exit_buffer = float(adv.get("exit_buffer_value", 0.1))
+
+        # Check if exit order should be Limit with buffer
+        use_limit_exit = "Limit" in exit_order_type_cfg and ltp > 0
+        if use_limit_exit:
+            if exit_side == "BUY":
+                exit_price_req = round_to_tick(ltp * (1.0 + exit_buffer / 100.0), 0.05)
+            else:
+                exit_price_req = round_to_tick(ltp * (1.0 - exit_buffer / 100.0), 0.05)
+            order_type_str = "LIMIT"
+        else:
+            exit_price_req = 0.0
+            order_type_str = "MARKET"
+
         order_res = broker.place_order(
             symbol=pos["symbol"],
             instrument_key=pos["instrument_key"],
             transaction_type=exit_side,
             quantity=qty,
             product=pos.get("product", "NRML"),
-            order_type="MARKET",
-            price=0.0,
+            order_type=order_type_str,
+            price=exit_price_req,
             tag=f"ex_{strat_tag}_{pos.get('id', 'pos')[:3]}",
         )
 
@@ -3148,6 +3582,15 @@ class StraddleManager:
             pos["exit_reason"] = r_clean
             pos.pop("error", None)
             pos.pop("error_message", None)
+
+            # Quantiply-parity: timeout conversion to market on exit if order remains open
+            exit_timeout = int(adv.get("exit_market_timeout_sec", 0))
+            if exit_timeout > 0 and order_id and order_type_str == "LIMIT" and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
+                threading.Thread(
+                    target=self._watch_limit_order_timeout,
+                    args=(broker, order_id, exit_timeout),
+                    daemon=True
+                ).start()
 
             # Wait briefly (up to 3s) for the broker to confirm fill and get exact traded price
             fill_res = {}
@@ -3188,7 +3631,7 @@ class StraddleManager:
                     message=reason,
                     time_str=pos["exit_time"],
                     quantity=qty,
-                    order_type="Market",
+                    order_type="Limit (L)" if order_type_str == "LIMIT" else "Market (M)",
                     price=exit_price,
                     trigger_price=0.0,
                     source="Straddle Pro",

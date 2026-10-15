@@ -413,6 +413,7 @@
                                 <th>EXIT REASON</th>
                                 <th style="text-align:right;">LTP</th>
                                 <th style="text-align:right;">MTM (₹)</th>
+                                <th style="text-align:center; width:100px;">ACTION</th>
                             </tr>
                         </thead>
                         <tbody id="straddlePositionsTableBody">
@@ -805,6 +806,13 @@
                                 </div>
                             </div>
                             <div class="straddle-form-group">
+                                <label>Entry with Market order if order Open for (N) secs:</label>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <input type="number" id="cfgEntryMarketTimeoutSec" class="straddle-input" value="0" min="0" max="300" style="flex:1;">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
+                                </div>
+                            </div>
+                            <div class="straddle-form-group">
                                 <label>Entry delay side (Hedge margin sequencing):</label>
                                 <select id="cfgEntryDelaySide" class="straddle-select">
                                     <option value="Delay entry of Sell positions" selected>Delay entry of Sell positions (Buy Hedge first)</option>
@@ -841,6 +849,13 @@
                                 </div>
                             </div>
                             <div class="straddle-form-group">
+                                <label>Exit with Market order if order Open for (N) secs:</label>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <input type="number" id="cfgExitMarketTimeoutSec" class="straddle-input" value="0" min="0" max="300" style="flex:1;">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
+                                </div>
+                            </div>
+                            <div class="straddle-form-group">
                                 <label>Exit delay side:</label>
                                 <select id="cfgExitDelaySide" class="straddle-select">
                                     <option value="Delay exit of Buy positions" selected>Delay exit of Buy positions (Exit Sell first)</option>
@@ -851,6 +866,36 @@
                             <div class="straddle-form-group">
                                 <label>Delay by (seconds):</label>
                                 <input type="number" id="cfgExitDelaySec" class="straddle-input" value="3" min="0" max="60">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stoploss Order Placement Mode & Delays (Quantiply Parity) -->
+                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-top:10px;">
+                        <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:10px;">Stoploss Order Placement Mode & Delays (Quantiply Parity)</div>
+                        <div class="straddle-grid-3col" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;">
+                            <div class="straddle-form-group">
+                                <label>SL order placement (individual leg):</label>
+                                <select id="cfgSlOrderPlacement" class="straddle-select">
+                                    <option value="Place in advance">Place in advance (Broker SL-M in advance)</option>
+                                    <option value="Keep with self" selected>Keep with self (Send to broker upon trigger)</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>SL placement delay (individual leg):</label>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <input type="number" id="cfgSlPlacementDelaySec" class="straddle-input" value="0" min="0" max="60" style="flex:1;">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
+                                </div>
+                                <div style="font-size:10px; color:#64748b; font-style:italic; margin-top:2px;">min: 0; max: 60</div>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>SL placement delay (MTM SL):</label>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <input type="number" id="cfgMtmSlDelaySec" class="straddle-input" value="0" min="0" max="60" style="flex:1;">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
+                                </div>
+                                <div style="font-size:10px; color:#64748b; font-style:italic; margin-top:2px;">min: 0; max: 60</div>
                             </div>
                         </div>
                     </div>

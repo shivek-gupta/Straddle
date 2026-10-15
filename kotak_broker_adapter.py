@@ -552,21 +552,36 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     continue
                 net_qty = int(item.get("netQty", item.get("quantity", 0)) or 0)
                 tsym = item.get("trdSym", item.get("trading_symbol", ""))
-                buy_avg = float(item.get("buyAvgPrc", 0.0) or 0.0)
-                sell_avg = float(item.get("sellAvgPrc", 0.0) or 0.0)
-                ltp = float(item.get("ltp", 0.0) or 0.0)
+                buy_avg = float(item.get("buyAvgPrc", item.get("buy_avg", 0.0)) or 0.0)
+                sell_avg = float(item.get("sellAvgPrc", item.get("sell_avg", 0.0)) or 0.0)
+                buy_qty = int(item.get("buyQty", item.get("buy_quantity", 0)) or 0)
+                sell_qty = int(item.get("sellQty", item.get("sell_quantity", 0)) or 0)
+                ltp = float(item.get("ltp", item.get("last_price", 0.0)) or 0.0)
                 pnl = float(item.get("urmtom", item.get("pnl", 0.0)) or 0.0)
+                rpnl = float(item.get("rpnl", item.get("realizedPnl", item.get("rPnl", 0.0))) or 0.0)
+                ikey = str(item.get("tok", item.get("instrument_token", item.get("instrument_key", ""))) or "")
+
+                avg_price = buy_avg if net_qty > 0 else (sell_avg if net_qty < 0 else (((buy_avg + sell_avg) / 2.0) if (buy_avg > 0 and sell_avg > 0) else (buy_avg or sell_avg)))
 
                 standardized.append({
+                    "symbol": tsym,
                     "trading_symbol": tsym,
+                    "instrument_key": ikey,
                     "quantity": net_qty,
-                    "buy_quantity": int(item.get("buyQty", 0) or 0),
-                    "sell_quantity": int(item.get("sellQty", 0) or 0),
-                    "average_price": buy_avg if net_qty > 0 else (sell_avg if net_qty < 0 else 0.0),
+                    "net_qty": net_qty,
+                    "buy_quantity": buy_qty,
+                    "sell_quantity": sell_qty,
+                    "buy_qty": buy_qty,
+                    "sell_qty": sell_qty,
+                    "buy_avg": buy_avg,
+                    "sell_avg": sell_avg,
+                    "average_price": avg_price,
                     "last_price": ltp,
+                    "ltp": ltp,
                     "pnl": pnl,
-                    "product": item.get("prod", "MIS"),
-                    "client_id": item.get("actId") or "Kotak Neo"
+                    "realised_pnl": rpnl,
+                    "product": item.get("prod", "NRML"),
+                    "client_id": item.get("actId") or "Kotak Neo Live"
                 })
             return standardized
         except Exception as e:
@@ -644,6 +659,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         sym = q.get("display_symbol")
                         if sym:
                             quotes_data[sym] = entry
+                        tsym = q.get("trdSym") or q.get("trading_symbol") or q.get("symbol")
+                        if tsym:
+                            quotes_data[tsym] = entry
             return quotes_data
         except Exception as e:
             logger.warning(f"[Kotak Neo] Exception fetching quotes: {e}")

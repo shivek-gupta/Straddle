@@ -271,11 +271,48 @@ def api_straddle_retry_legs():
         sid = data.get("strategy_id")
         leg_ids = data.get("leg_ids")
         leg_indices = data.get("leg_indices")
+        updated_legs = data.get("updated_legs")
         mgr = get_straddle_manager()
-        res = mgr.retry_failed_legs(strategy_id=sid, leg_ids=leg_ids, leg_indices=leg_indices)
+        res = mgr.retry_failed_legs(
+            strategy_id=sid,
+            leg_ids=leg_ids,
+            leg_indices=leg_indices,
+            updated_legs=updated_legs
+        )
         return jsonify(res)
     except Exception as e:
         logger.error(f"Error in api_straddle_retry_legs: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/update_running_position", methods=["POST"])
+def api_straddle_update_running_position():
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        leg_id = data.get("leg_id")
+        leg_idx = data.get("leg_index")
+        t_mode = data.get("target_mode", "%")
+        t_val = data.get("target_val")
+        sl_mode = data.get("sl_mode", "%")
+        sl_val = data.get("sl_val")
+        new_lots = data.get("new_lots")
+        new_strike = data.get("new_strike")
+        mgr = get_straddle_manager()
+        res = mgr.update_running_position(
+            strategy_id=sid,
+            leg_id=leg_id,
+            leg_index=leg_idx,
+            target_mode=t_mode,
+            target_val=t_val,
+            sl_mode=sl_mode,
+            sl_val=sl_val,
+            new_lots=new_lots,
+            new_strike=new_strike,
+        )
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_update_running_position: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
