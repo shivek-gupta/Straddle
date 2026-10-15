@@ -956,6 +956,14 @@ def init_services():
         logger.warning(f"Could not start auto git sync worker: {e}")
 
     try:
+        # Pre-initialize Straddle Engine singleton on startup
+        # to ensure background evaluation loop and auto square-off runner are active
+        logger.info("Initializing Straddle Engine background runner...")
+        get_straddle_manager()
+    except Exception as e:
+        logger.warning(f"Straddle Engine startup notice: {e}")
+
+    try:
         # Check authentication on startup
         if not kotak_auth.is_session_active_for_today():
             logger.info("Attempting startup authentication with Kotak Neo...")

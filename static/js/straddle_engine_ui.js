@@ -1923,6 +1923,15 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
             { timestamp: "09:15", pnl: 0.0, open: 0.0, high: 0.0, low: 0.0, close: 0.0 },
             { timestamp: (nowHM >= "09:15" && nowHM <= "15:30") ? nowHM : "15:30", pnl: curTot, open: curTot, high: curTot, low: 0.0, close: curTot }
         ];
+    } else if (points.length === 1) {
+        // If only 1 point, clone it across session to ensure line renders cleanly
+        const p0 = points[0];
+        const nowHM = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+        const endTimestamp = (nowHM >= "09:15" && nowHM <= "15:30") ? nowHM : "15:30";
+        points = [
+            { ...p0 },
+            { ...p0, timestamp: (p0.timestamp !== endTimestamp ? endTimestamp : "15:30") }
+        ];
     }
 
     // Determine Y-axis bounds with breathing room
@@ -1964,7 +1973,7 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     ctx.setLineDash([]);
 
     // 3. Draw Max P&L Reference (Green Dashed)
-    const maxPnl = pnlData.max_pnl || 0;
+    const maxPnl = pnlData.max_pnl !== undefined ? pnlData.max_pnl : 0;
     const maxY = getY(maxPnl);
     ctx.setLineDash([3, 3]);
     ctx.strokeStyle = "rgba(16, 185, 129, 0.5)";
@@ -1982,10 +1991,11 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 9px monospace";
     ctx.textAlign = "center";
-    ctx.fillText(`Max +₹${Math.round(maxPnl)}`, padLeft + 42.5, Math.max(padTop - 12, maxY - 16) + 11.5);
+    const maxPrefix = maxPnl >= 0 ? "+₹" : "-₹";
+    ctx.fillText(`Max ${maxPrefix}${Math.abs(Math.round(maxPnl))}`, padLeft + 42.5, Math.max(padTop - 12, maxY - 16) + 11.5);
 
     // 4. Draw Min P&L Reference (Red Dashed)
-    const minPnl = pnlData.min_pnl || 0;
+    const minPnl = pnlData.min_pnl !== undefined ? pnlData.min_pnl : 0;
     const minY = getY(minPnl);
     ctx.setLineDash([3, 3]);
     ctx.strokeStyle = "rgba(244, 63, 94, 0.5)";
@@ -2003,7 +2013,8 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 9px monospace";
     ctx.textAlign = "center";
-    ctx.fillText(`Min -₹${Math.abs(Math.round(minPnl))}`, padLeft + 42.5, Math.min(H - padBottom - 4, minY + 2) + 11.5);
+    const minPrefix = minPnl >= 0 ? "+₹" : "-₹";
+    ctx.fillText(`Min ${minPrefix}${Math.abs(Math.round(minPnl))}`, padLeft + 42.5, Math.min(H - padBottom - 4, minY + 2) + 11.5);
 
     // 5. Draw Curve / Candles
     if (chartType === "candle") {
@@ -2095,6 +2106,21 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         strokeGrad.addColorStop(1, "#f43f5e");
         ctx.strokeStyle = strokeGrad;
         ctx.stroke();
+
+        // Draw point dots
+        points.forEach((pt, idx) => {
+            if (points.length <= 40 || idx === 0 || idx === points.length - 1) {
+                const x = getX(idx);
+                const y = getY(pt.pnl);
+                ctx.beginPath();
+                ctx.arc(x, y, (idx === points.length - 1 ? 4.5 : 3), 0, Math.PI * 2);
+                ctx.fillStyle = pt.pnl >= 0 ? "#10b981" : "#f43f5e";
+                ctx.fill();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = "#ffffff";
+                ctx.stroke();
+            }
+        });
     }
 
     // 6. X-axis timestamps
@@ -3247,10 +3273,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 let qtyHtml = "";
                 if (isOpen) {
                     qtyHtml = `
-                        <div style="display:flex; align-items:center; gap:3px;">
-                            <div style="display:inline-flex; align-items:center; background:#0f172a; border:1px solid #334155; border-radius:4px; padding:1px 3px; gap:2px;">
-                                <input type="number" id="live_lots_${idx}" class="straddle-input" style="width:38px; padding:1px 2px; font-size:11.5px; font-weight:700; text-align:center; border:none; background:transparent;" value="${lots}" min="1" max="100" oninput="markRunningLegChanged(${idx})" title="Change lots: increase to buy/sell more, decrease to reduce">
-                                <div style="display:flex; flex-direction:column; gap:1px;">
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <div class="straddle-stepper-box" style="height:28px;">
+                                <input type="number" id="live_lots_${idx}" class="straddle-stepper-input" style="width:36px; font-size:12px; font-weight:700;" value="${lots}" min="1" max="100" oninput="markRunningLegChanged(${idx})" title="Change lots: increase to buy/sell more, decrease to reduce">
+                                <div class="straddle-stepper-arrows" style="width:18px;">
                                     <button type="button" class="lot-step-btn" onclick="stepLiveLots(${idx}, 1)" title="Lots +">▲</button>
                                     <button type="button" class="lot-step-btn" onclick="stepLiveLots(${idx}, -1)" title="Lots -">▼</button>
                                 </div>
@@ -3278,9 +3304,9 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             <div class="straddle-sym-sub">${expiryText}</div>
                             <div style="display:flex; align-items:center; gap:4px; margin-top:4px;">
                                 <span style="font-size:9.5px; color:#94a3b8; font-weight:700;">Shift:</span>
-                                <div style="display:inline-flex; align-items:center; background:#0f172a; border:1px solid #334155; border-radius:4px; padding:1px 3px; gap:2px;">
-                                    <input type="text" id="live_strike_${idx}" class="straddle-input" style="width:58px; padding:1px 2px; font-size:11px; font-weight:700; text-align:center; border:none; background:transparent;" value="${curStrikeMatch}" placeholder="Strike" oninput="markRunningLegChanged(${idx})" title="Enter or step strike price">
-                                    <div style="display:flex; flex-direction:column; gap:1px;">
+                                <div class="straddle-stepper-box" style="height:28px;">
+                                    <input type="text" id="live_strike_${idx}" class="straddle-stepper-input" style="width:58px; font-size:11.5px; font-weight:700;" value="${curStrikeMatch}" placeholder="Strike" oninput="markRunningLegChanged(${idx})" title="Enter or step strike price">
+                                    <div class="straddle-stepper-arrows" style="width:18px;">
                                         <button type="button" class="strike-step-btn" onclick="stepLiveStrikePrice(${idx}, 1)" title="Strike +">▲</button>
                                         <button type="button" class="strike-step-btn" onclick="stepLiveStrikePrice(${idx}, -1)" title="Strike -">▼</button>
                                     </div>
@@ -6114,6 +6140,12 @@ window.openAdoptBrokerPositionModal = openAdoptBrokerPositionModal;
 window.selectAdoptablePositionIndex = selectAdoptablePositionIndex;
 window.closeAdoptBrokerPositionModal = closeAdoptBrokerPositionModal;
 window.submitAdoptBrokerPosition = submitAdoptBrokerPosition;
+
+window.addEventListener("resize", () => {
+    if (window._straddleState && window._straddleState.activeTab === "pnl" && window._straddleState.pnlDataCache) {
+        drawPnlCanvas(window._straddleState.pnlDataCache, window._straddleState.pnlChartType || "line", null);
+    }
+});
 
 
 

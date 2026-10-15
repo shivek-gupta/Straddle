@@ -225,7 +225,10 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         _init_kotak_symbol_maps()
 
     def _get_client(self):
-        return kotak_auth.get_authenticated_client(force=False)
+        c = kotak_auth.get_authenticated_client(force=False)
+        if c is None:
+            c = kotak_auth.get_authenticated_client(force=True)
+        return c
 
     def get_status(self) -> Dict[str, Any]:
         client = self._get_client()

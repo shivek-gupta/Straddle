@@ -8437,37 +8437,87 @@ table .flag-cell {
         transform: translateY(-4px);
     }
 
-/* Compact Up/Down Stepper Buttons for Time and Strikes */
-.time-step-btn, .strike-step-btn, .lot-step-btn {
+/* ==========================================================
+   Quantiply / Professional Grade Stepper Controls (Image 2 Parity)
+   ========================================================== */
+.straddle-stepper-box {
     display: inline-flex !important;
+    align-items: stretch !important;
+    background: #090d16 !important;
+    border: 1px solid #232d3d !important;
+    border-radius: 6px !important;
+    overflow: hidden !important;
+    height: 32px !important;
+    box-sizing: border-box !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.straddle-stepper-box:focus-within {
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2) !important;
+}
+
+.straddle-stepper-input {
+    background: transparent !important;
+    border: none !important;
+    outline: none !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    font-size: 13px !important;
+    font-family: var(--font-mono, monospace) !important;
+    text-align: center !important;
+    padding: 0 6px !important;
+    box-sizing: border-box !important;
+    -moz-appearance: textfield !important;
+}
+
+.straddle-stepper-input::-webkit-outer-spin-button,
+.straddle-stepper-input::-webkit-inner-spin-button {
+    -webkit-appearance: none !important;
+    margin: 0 !important;
+}
+
+.straddle-stepper-arrows {
+    display: flex !important;
+    flex-direction: column !important;
+    border-left: 1px solid #232d3d !important;
+    width: 20px !important;
+    background: #0d121c !important;
+    box-sizing: border-box !important;
+    justify-content: stretch !important;
+}
+
+.straddle-stepper-btn, .time-step-btn, .strike-step-btn, .lot-step-btn {
+    flex: 1 1 50% !important;
+    display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    width: 14px !important;
-    height: 9px !important;
-    line-height: 1 !important;
+    background: transparent !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 0 !important;
     padding: 0 !important;
     margin: 0 !important;
-    background: #1e293b !important;
-    color: #94a3b8 !important;
-    border: 1px solid rgba(255, 255, 255, 0.15) !important;
-    border-radius: 2px !important;
-    font-size: 6.5px !important;
-    font-weight: 800 !important;
+    width: 100% !important;
+    font-size: 8.5px !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
     cursor: pointer !important;
-    transition: all 0.12s ease !important;
+    transition: background 0.12s ease, color 0.12s ease !important;
     outline: none !important;
     user-select: none !important;
 }
 
-.time-step-btn:hover, .strike-step-btn:hover, .lot-step-btn:hover {
-    background: #38bdf8 !important;
-    color: #0f172a !important;
-    border-color: #38bdf8 !important;
-    box-shadow: 0 0 6px rgba(56, 189, 248, 0.5) !important;
+.straddle-stepper-btn:hover, .time-step-btn:hover, .strike-step-btn:hover, .lot-step-btn:hover {
+    background: rgba(255, 255, 255, 0.12) !important;
+    color: #38bdf8 !important;
+    box-shadow: none !important;
 }
 
-.time-step-btn:active, .strike-step-btn:active, .lot-step-btn:active {
-    transform: scale(0.9) !important;
+.straddle-stepper-btn:active, .time-step-btn:active, .strike-step-btn:active, .lot-step-btn:active {
+    background: rgba(56, 189, 248, 0.25) !important;
+    color: #38bdf8 !important;
+    transform: scale(0.92) !important;
 }
 
 /* Detach Button in Leg Action Column */

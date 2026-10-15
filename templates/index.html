@@ -584,29 +584,29 @@
                         <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Start Time (HH:MM:SS):</label>
-                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:3px 6px; gap:4px;">
+                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#070a12; border:1px solid #1e2638; border-radius:8px; padding:3px 6px; gap:4px;">
                                     <!-- HH -->
-                                    <div style="display:flex; align-items:center; gap:2px;">
-                                        <input type="text" id="cfgStartTime_hh" maxlength="2" value="09" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 23)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Hour (00-23)">
-                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:32px;">
+                                        <input type="text" id="cfgStartTime_hh" maxlength="2" value="09" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 23)" style="width:26px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Hour (00-23)">
+                                        <div class="straddle-stepper-arrows">
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'hh', 1)" title="Hour +1">▲</button>
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'hh', -1)" title="Hour -1">▼</button>
                                         </div>
                                     </div>
                                     <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
                                     <!-- MM -->
-                                    <div style="display:flex; align-items:center; gap:2px;">
-                                        <input type="text" id="cfgStartTime_mm" maxlength="2" value="15" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 59)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Minute (00-59)">
-                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:32px;">
+                                        <input type="text" id="cfgStartTime_mm" maxlength="2" value="15" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 59)" style="width:26px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Minute (00-59)">
+                                        <div class="straddle-stepper-arrows">
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'mm', 1)" title="Minute +1">▲</button>
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'mm', -1)" title="Minute -1">▼</button>
                                         </div>
                                     </div>
                                     <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
                                     <!-- SS -->
-                                    <div style="display:flex; align-items:center; gap:2px;">
-                                        <input type="text" id="cfgStartTime_ss" maxlength="2" value="56" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 59)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Second (00-59)">
-                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:32px;">
+                                        <input type="text" id="cfgStartTime_ss" maxlength="2" value="56" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 59)" style="width:26px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Second (00-59)">
+                                        <div class="straddle-stepper-arrows">
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'ss', 1)" title="Second +1">▲</button>
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgStartTime', 'ss', -1)" title="Second -1">▼</button>
                                         </div>
@@ -616,29 +616,29 @@
                             </div>
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">End Time (HH:MM:SS):</label>
-                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:3px 6px; gap:4px;">
+                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#070a12; border:1px solid #1e2638; border-radius:8px; padding:3px 6px; gap:4px;">
                                     <!-- HH -->
-                                    <div style="display:flex; align-items:center; gap:2px;">
-                                        <input type="text" id="cfgEndTime_hh" maxlength="2" value="15" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 23)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Hour (00-23)">
-                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:32px;">
+                                        <input type="text" id="cfgEndTime_hh" maxlength="2" value="15" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 23)" style="width:26px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Hour (00-23)">
+                                        <div class="straddle-stepper-arrows">
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'hh', 1)" title="Hour +1">▲</button>
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'hh', -1)" title="Hour -1">▼</button>
                                         </div>
                                     </div>
                                     <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
                                     <!-- MM -->
-                                    <div style="display:flex; align-items:center; gap:2px;">
-                                        <input type="text" id="cfgEndTime_mm" maxlength="2" value="29" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 59)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Minute (00-59)">
-                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:32px;">
+                                        <input type="text" id="cfgEndTime_mm" maxlength="2" value="29" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 59)" style="width:26px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Minute (00-59)">
+                                        <div class="straddle-stepper-arrows">
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'mm', 1)" title="Minute +1">▲</button>
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'mm', -1)" title="Minute -1">▼</button>
                                         </div>
                                     </div>
                                     <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
                                     <!-- SS -->
-                                    <div style="display:flex; align-items:center; gap:2px;">
-                                        <input type="text" id="cfgEndTime_ss" maxlength="2" value="50" class="straddle-time-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 59)" style="width:22px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0;" title="Second (00-59)">
-                                        <div style="display:flex; flex-direction:column; gap:1px;">
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:32px;">
+                                        <input type="text" id="cfgEndTime_ss" maxlength="2" value="50" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 59)" style="width:26px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Second (00-59)">
+                                        <div class="straddle-stepper-arrows">
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'ss', 1)" title="Second +1">▲</button>
                                             <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgEndTime', 'ss', -1)" title="Second -1">▼</button>
                                         </div>

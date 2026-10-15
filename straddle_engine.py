@@ -51,6 +51,31 @@ def current_day_name() -> str:
     return now_ist().strftime("%A")
 
 
+def parse_time_to_seconds(t_str: Any, default_sec: int = 0) -> int:
+    """Parse time string in HH:MM:SS, HH:MM, or H:M:S format into integer seconds past midnight."""
+    if not t_str:
+        return default_sec
+    try:
+        parts = str(t_str).strip().split(":")
+        hh = int(parts[0]) if len(parts) > 0 else 0
+        mm = int(parts[1]) if len(parts) > 1 else 0
+        ss = int(parts[2]) if len(parts) > 2 else 0
+        return hh * 3600 + mm * 60 + ss
+    except Exception:
+        return default_sec
+
+
+def normalize_time_str(t_str: Any, default: str = "15:29:50") -> str:
+    """Format any time string cleanly as HH:MM:SS with leading zeroes."""
+    sec = parse_time_to_seconds(t_str, -1)
+    if sec < 0:
+        return default
+    hh = (sec // 3600) % 24
+    mm = (sec % 3600) // 60
+    ss = sec % 60
+    return f"{hh:02d}:{mm:02d}:{ss:02d}"
+
+
 # ==========================================================
 # Paths & Lock Configuration
 # ==========================================================
@@ -473,7 +498,7 @@ class StraddleManager:
                 self._strategies = []
                 self._save_strategies()
 
-            # Ensure unique names across all strategies (resolve any existing duplicate names)
+            # Ensure unique names and valid default timings across all strategies
             seen_names = set()
             names_modified = False
             for s in self._strategies:
@@ -490,6 +515,17 @@ class StraddleManager:
                 else:
                     s["name"] = name
                     seen_names.add(name.lower())
+
+                if not s.get("start_time"):
+                    s["start_time"] = "09:15:56"
+                else:
+                    s["start_time"] = normalize_time_str(s["start_time"], "09:15:56")
+                if not s.get("end_time"):
+                    s["end_time"] = "15:29:50"
+                else:
+                    s["end_time"] = normalize_time_str(s["end_time"], "15:29:50")
+                if not s.get("schedule_days"):
+                    s["schedule_days"] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
             if names_modified:
                 self._save_strategies()
@@ -1351,6 +1387,8 @@ class StraddleManager:
                     strat_dict["positions"] = []
                 if "status" not in strat_dict:
                     strat_dict["status"] = "READY"
+                strat_dict["start_time"] = normalize_time_str(strat_dict.get("start_time"), "09:15:56")
+                strat_dict["end_time"] = normalize_time_str(strat_dict.get("end_time"), "15:29:50")
                 self._strategies.append(strat_dict)
 
             self._save_strategies()
@@ -2449,10 +2487,10 @@ class StraddleManager:
     # ==========================================================
 
     def _is_within_trading_hours(self, strat: Dict[str, Any]) -> bool:
-        now_t = now_ist().strftime("%H:%M:%S")
-        st = strat.get("start_time", "09:15:00")
-        et = strat.get("end_time", "15:30:00")
-        return st <= now_t <= et
+        now_sec = parse_time_to_seconds(now_ist_str())
+        st_sec = parse_time_to_seconds(strat.get("start_time", "09:15:00"), 9 * 3600 + 15 * 60)
+        et_sec = parse_time_to_seconds(strat.get("end_time", "15:29:50"), 15 * 3600 + 29 * 60 + 50)
+        return st_sec <= now_sec <= et_sec
 
     def _execute_strategy_entry(self, strat: Dict[str, Any]):
         """Execute entry orders for all configured legs with hedge sequencing, parallel execution, and margin optimization."""
@@ -3858,13 +3896,19 @@ class StraddleManager:
 
         strat = None
         if strat_id:
-            strat = self.strategies.get(strat_id)
+            try:
+                strat = self.get_strategy(strat_id)
+            except Exception:
+                strat = None
         adv = (strat.get("advanced_settings") or {}) if strat else {}
         exit_order_type_cfg = adv.get("exit_order_type", "Market")
         exit_buffer = float(adv.get("exit_buffer_value", 0.1))
 
         # Check if exit order should be Limit with buffer
-        use_limit_exit = "Limit" in exit_order_type_cfg and ltp > 0
+        # For auto end-time, square-off, or emergency exits, always force MARKET order
+        # so orders fill instantly with 0 delay before market closing at 15:30:00!
+        is_urgent_exit = any(k in reason.upper() for k in ("END TIME", "SQUARE OFF", "EMERGENCY", "TIME EXIT"))
+        use_limit_exit = "Limit" in exit_order_type_cfg and ltp > 0 and not is_urgent_exit
         if use_limit_exit:
             if exit_side == "BUY":
                 exit_price_req = round_to_tick(ltp * (1.0 + exit_buffer / 100.0), 0.05)
@@ -3875,16 +3919,20 @@ class StraddleManager:
             exit_price_req = 0.0
             order_type_str = "MARKET"
 
-        order_res = broker.place_order(
-            symbol=pos["symbol"],
-            instrument_key=pos["instrument_key"],
-            transaction_type=exit_side,
-            quantity=qty,
-            product=pos.get("product", "NRML"),
-            order_type=order_type_str,
-            price=exit_price_req,
-            tag=f"ex_{strat_tag}_{pos.get('id', 'pos')[:3]}",
-        )
+        try:
+            order_res = broker.place_order(
+                symbol=pos["symbol"],
+                instrument_key=pos["instrument_key"],
+                transaction_type=exit_side,
+                quantity=qty,
+                product=pos.get("product", "NRML"),
+                order_type=order_type_str,
+                price=exit_price_req,
+                tag=f"ex_{strat_tag}_{pos.get('id', 'pos')[:3]}",
+            )
+        except Exception as e:
+            logger.error(f"Exception placing broker exit order for {pos.get('symbol')}: {e}")
+            order_res = {"success": False, "error": str(e)}
 
         # Format exit reason cleanly
         r_clean = reason
@@ -4685,22 +4733,24 @@ class StraddleManager:
                     times.append(f"{h:02d}:{m:02d}")
 
             current_hhmm = ist_now.strftime("%H:%M")
-            # If during market hours, show timeline up to now (or at least 09:15)
-            if ist_now.hour < 15 or (ist_now.hour == 15 and ist_now.minute < 30):
-                if current_hhmm >= "09:15":
-                    times = [t for t in times if t <= current_hhmm]
-                else:
-                    times = ["09:15"]
+            # If during market hours, show timeline up to now (guarantee at least 2 points)
+            if "09:15" <= current_hhmm <= "15:30":
+                times_filt = [t for t in times if t <= current_hhmm]
+                if len(times_filt) >= 2:
+                    times = times_filt
+            # Outside market hours, show complete intraday session 09:15 to 15:30
 
             if not times:
                 times = ["09:15", "15:30"]
 
             # Map today's recorded history points
-            hist_map = {
-                entry.get("time"): float(entry.get("pnl", 0.0))
-                for entry in self._pnl_history
-                if isinstance(entry, dict) and entry.get("date") == today_str and entry.get("time")
-            }
+            source_hist = (target_strat.get("_pnl_history", []) if target_strat else self._pnl_history) or self._pnl_history
+            hist_map = {}
+            for entry in source_hist:
+                if isinstance(entry, dict) and entry.get("time"):
+                    ed = entry.get("date")
+                    if not ed or ed == today_str:
+                        hist_map[entry["time"]] = float(entry.get("pnl", 0.0))
 
             points = []
             n_pts = len(times)
@@ -4854,10 +4904,17 @@ class StraddleManager:
                     if ltp > 0:
                         matched_leg_pos["ltp"] = ltp
                     matched_leg_pos["mtm"] = leg_mtm
-                    matched_strat["status"] = "TRADE_ACTIVE"
-                    matched_strat["enabled"] = matched_strat.get("enabled", True)
-                    matched_strat["_manual_reset"] = False
-                    matched_strat["entry_error"] = "-"
+                    
+                    et_sec_m = parse_time_to_seconds(matched_strat.get("end_time", "15:29:50"), 15 * 3600 + 29 * 60 + 50)
+                    now_sec_m = parse_time_to_seconds(now_ist_str())
+                    if now_sec_m < et_sec_m:
+                        matched_strat["status"] = "TRADE_ACTIVE"
+                        matched_strat["enabled"] = matched_strat.get("enabled", True)
+                        matched_strat["_manual_reset"] = False
+                        matched_strat["entry_error"] = "-"
+                    else:
+                        if matched_strat.get("status") not in ("TERMINATED", "EXIT_FAILED"):
+                            matched_strat["status"] = "TERMINATED"
                     matched_strat["repair_needed"] = False
                     changes_made = True
                 else:
@@ -5039,11 +5096,21 @@ class StraddleManager:
             self._state["live_feed_running"] = True
             self._state["order_api_running"] = True
 
-            now_t = now_ist_str()
+            ist_now_dt = now_ist()
+            now_sec = ist_now_dt.hour * 3600 + ist_now_dt.minute * 60 + ist_now_dt.second
+            now_t = ist_now_dt.strftime("%H:%M:%S")
             today_name = current_day_name()
+            today_s = today_ist_str()
 
-            # If terminated or algo stopped, do not evaluate entries or exit triggers
-            if is_terminated or not self._state["algo_running"]:
+            # Check if any strategy has open positions
+            has_any_open = any(
+                any(p.get("status") == "OPEN" for p in s.get("positions", []))
+                for s in self._strategies
+            )
+
+            # If terminated or algo stopped, do not evaluate entries
+            # BUT if ANY strategy has open positions, continue to evaluate exits and end-time square-offs!
+            if (is_terminated or not self._state["algo_running"]) and not has_any_open:
                 self._save_state()
                 return
 
@@ -5065,13 +5132,14 @@ class StraddleManager:
                 sched_days = strat.get("schedule_days", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
                 is_day_scheduled = (today_name in sched_days)
 
-                st = strat.get("start_time", "09:15:56")
-                et = strat.get("end_time", "15:29:50")
+                st = normalize_time_str(strat.get("start_time"), "09:15:56")
+                et = normalize_time_str(strat.get("end_time"), "15:29:50")
+                st_sec = parse_time_to_seconds(st, 9 * 3600 + 15 * 60 + 56)
+                et_sec = parse_time_to_seconds(et, 15 * 3600 + 29 * 60 + 50)
                 strat_status = strat.get("status", "READY")
                 strat_positions = strat.get("positions", [])
 
                 # Date-awareness: if strategy has positions from a prior date, archive/reset them so it trades fresh today
-                today_s = today_ist_str()
                 if strat.get("last_trade_date") and strat.get("last_trade_date") != today_s:
                     open_l = [p for p in strat_positions if p.get("status") == "OPEN"]
                     if not open_l:
@@ -5084,6 +5152,20 @@ class StraddleManager:
 
                 has_open_positions = any(p.get("status") == "OPEN" for p in strat_positions)
                 has_completed_positions = any(p.get("status") == "COMPLETE" for p in strat_positions)
+
+                # UNCONDITIONAL SAFETY RULE 1: If Strategy has OPEN positions and End Time is reached (now_sec >= et_sec),
+                # square off immediately without delay, regardless of enable toggle or schedule state!
+                if has_open_positions and now_sec >= et_sec:
+                    if not strat.get("_exit_in_progress"):
+                        strat["_exit_in_progress"] = True
+                        strat["status"] = "TERMINATED"
+                        strat["entry_error"] = f"Trading hours ended ({et})"
+                        self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off.")
+                        self._save_strategies()
+                        self._square_off_strategy_positions(strat, broker, reason="AUTO END TIME")
+                        strat["_exit_in_progress"] = False
+                        self._save_strategies()
+                    continue
 
                 # Diagnostic feedback for strategy schedule/enable state
                 if not is_enabled:
@@ -5100,22 +5182,16 @@ class StraddleManager:
                     if strat_status not in ("READY", "ENTRY_FAILED") and not has_open_positions:
                         strat["status"] = "READY"
                     strat["entry_error"] = f"Not scheduled for {today_name}"
-                elif now_t < st:
+                elif now_sec < st_sec:
                     if strat_status not in ("READY", "ENTRY_FAILED") and not has_open_positions:
                         strat["status"] = "READY"
                     if not strat.get("entry_error") or strat.get("entry_error") == "-":
                         strat["entry_error"] = f"Waiting for Start Time ({st})"
-                elif now_t > et:
-                    if strat_status == "TRADE_ACTIVE" and has_open_positions:
-                        self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off.")
-                        self._square_off_strategy_positions(strat, broker, reason="AUTO END TIME")
-                        strat["status"] = "TERMINATED"
-                        self._save_strategies()
-                        continue
-                    elif not has_open_positions:
+                elif now_sec >= et_sec:
+                    if not has_open_positions:
                         if not strat.get("entry_error") or strat.get("entry_error") == "-":
                             strat["entry_error"] = f"Trading hours ended ({et})"
-                elif is_enabled and is_day_scheduled and st <= now_t <= et:
+                elif is_enabled and is_day_scheduled and st_sec <= now_sec < et_sec:
                     now_ts = time.time()
                     last_attempt = strat.get("_last_entry_attempt_ts", 0)
                     entry_in_prog = strat.get("_entry_in_progress", False)
@@ -5315,27 +5391,59 @@ class StraddleManager:
             if total_portfolio_mtm < self._state.get("min_mtm", 999999):
                 self._state["min_mtm"] = round(total_portfolio_mtm, 2)
 
-            # Record point in P&L history every minute
+            # Record point in P&L history every minute with date and per-strategy tracking
             now_min = now_ist_str()[:5]
-            if not self._pnl_history or self._pnl_history[-1].get("time") != now_min:
+            today_s = today_ist_str()
+            if not self._pnl_history or self._pnl_history[-1].get("time") != now_min or self._pnl_history[-1].get("date") != today_s:
                 self._pnl_history.append({
                     "time": now_min,
+                    "date": today_s,
                     "pnl": round(total_portfolio_mtm, 2),
                     "spot": spot_price,
-                    "max_pnl": self._state["max_mtm"],
-                    "min_pnl": self._state["min_mtm"],
+                    "max_pnl": self._state.get("max_mtm", 0.0),
+                    "min_pnl": self._state.get("min_mtm", 0.0),
                 })
+                if len(self._pnl_history) > 1000:
+                    self._pnl_history = self._pnl_history[-1000:]
                 self._save_pnl_history()
+
+            for s in self._strategies:
+                s_pnl = s.setdefault("_pnl_history", [])
+                s_mtm = float(s.get("mtm", 0.0) or 0.0)
+                if not s_pnl or s_pnl[-1].get("time") != now_min or s_pnl[-1].get("date") != today_s:
+                    s_pnl.append({
+                        "time": now_min,
+                        "date": today_s,
+                        "pnl": round(s_mtm, 2),
+                    })
+                    if len(s_pnl) > 500:
+                        s["_pnl_history"] = s_pnl[-500:]
 
     def _square_off_strategy_positions(self, strat: Dict[str, Any], broker: BaseBrokerAdapter, reason: str = "AUTO SQUARE OFF"):
         """Square off all open positions belonging to a single strategy."""
         positions = strat.get("positions", [])
         sells = [p for p in positions if p.get("status") == "OPEN" and p.get("side", "").upper() == "SELL"]
         buys = [p for p in positions if p.get("status") == "OPEN" and p.get("side", "").upper() == "BUY"]
+        
+        # Sells first to free margins, then buys
         for pos in sells:
-            self._square_off_single_position(pos, broker, reason=reason)
+            try:
+                self._square_off_single_position(pos, broker, reason=reason)
+            except Exception as e:
+                logger.error(f"Error squaring off short leg {pos.get('symbol')}: {e}")
+                self._log_event(f"Error squaring off short leg {pos.get('symbol')}: {e}", level="ERROR")
         for pos in buys:
-            self._square_off_single_position(pos, broker, reason=reason)
+            try:
+                self._square_off_single_position(pos, broker, reason=reason)
+            except Exception as e:
+                logger.error(f"Error squaring off long leg {pos.get('symbol')}: {e}")
+                self._log_event(f"Error squaring off long leg {pos.get('symbol')}: {e}", level="ERROR")
+
+        strat_open = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
+        if not strat_open:
+            strat["status"] = "TERMINATED"
+            strat["repair_needed"] = False
+        self._save_strategies()
 
     # ==========================================================
     # State Inspection API
