@@ -339,6 +339,48 @@ def api_straddle_rectify_leg():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/adoptable_positions", methods=["GET"])
+def api_straddle_adoptable_positions():
+    try:
+        sid = request.args.get("strategy_id")
+        mgr = get_straddle_manager()
+        positions = mgr.get_adoptable_broker_positions(strategy_id=sid)
+        return jsonify({"success": True, "positions": positions})
+    except Exception as e:
+        logger.error(f"Error in api_straddle_adoptable_positions: {e}")
+        return jsonify({"success": False, "error": str(e), "positions": []}), 500
+
+
+@app.route("/api/straddle/adopt_position", methods=["POST"])
+def api_straddle_adopt_position():
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        pos_data = data.get("position") or data
+        mgr = get_straddle_manager()
+        res = mgr.adopt_broker_position(strategy_id=sid, position_data=pos_data)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_adopt_position: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/detach_position", methods=["POST"])
+def api_straddle_detach_position():
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        leg_id = data.get("leg_id")
+        leg_idx = data.get("leg_index")
+        mgr = get_straddle_manager()
+        res = mgr.detach_position(strategy_id=sid, leg_id=leg_id, leg_index=leg_idx)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_detach_position: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+
 @app.route("/api/straddle/reset_algo", methods=["POST"])
 def api_straddle_reset_algo():
     try:

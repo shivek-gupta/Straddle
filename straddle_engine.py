@@ -2909,6 +2909,15 @@ class StraddleManager:
                 daemon=True
             ).start()
 
+        # Place Target with broker in advance (Broker OCO)
+        if (adv.get("target_order_placement") == "Place in advance" or adv.get("sl_order_placement") == "Place in advance") and target_price > 0:
+            tgt_delay = int(adv.get("sl_placement_delay_sec", 0))
+            threading.Thread(
+                target=self._place_advance_target_order,
+                args=(broker, pos_record, tgt_delay),
+                daemon=True
+            ).start()
+
         self._log_event(
             f"Entered {side} {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty}, TGT: ₹{target_price}, SL: ₹{sl_price})",
             details=order_res,
@@ -3281,6 +3290,21 @@ class StraddleManager:
                     leg_cfg["target_value"] = tv
                     leg_cfg["target_type"] = pos["target_type"]
 
+                # If there was an advance Target order placed with broker, update limit price on broker
+                adv_tgt_oid = pos.get("target_broker_order_id")
+                if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_") and pos.get("target_price"):
+                    try:
+                        broker.modify_order(
+                            order_id=str(adv_tgt_oid),
+                            price=pos["target_price"],
+                            quantity=pos.get("quantity")
+                        )
+                        logger.info(f"Updated broker advance Target order {adv_tgt_oid} price to ₹{pos['target_price']:.2f} (qty={pos.get('quantity')})")
+                    except Exception as e:
+                        logger.warning(f"Could not modify broker advance Target order: {e}")
+                elif (adv.get("target_order_placement") == "Place in advance" or adv.get("sl_order_placement") == "Place in advance") and pos.get("target_price"):
+                    threading.Thread(target=self._place_advance_target_order, args=(broker, pos, 0), daemon=True).start()
+
             if sl_val is not None:
                 sv = float(sl_val)
                 pos["sl_value"] = sv
@@ -3302,11 +3326,29 @@ class StraddleManager:
                         broker.modify_order(
                             order_id=str(adv_sl_oid),
                             trigger_price=pos["sl_price"],
+                            quantity=pos.get("quantity"),
                             price=0.0
                         )
-                        logger.info(f"Updated broker advance SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}")
+                        logger.info(f"Updated broker advance SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f} (qty={pos.get('quantity')})")
                     except Exception as e:
                         logger.warning(f"Could not modify broker advance SL order: {e}")
+                elif adv.get("sl_order_placement") == "Place in advance" and pos.get("sl_price"):
+                    threading.Thread(target=self._place_advance_sl_order, args=(broker, pos, 0), daemon=True).start()
+
+            # If lots changed but neither target_val nor sl_val changed, still ensure quantities on active broker orders match
+            if diff_lots != 0:
+                adv_sl_oid = pos.get("sl_broker_order_id")
+                if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                    try:
+                        broker.modify_order(order_id=str(adv_sl_oid), quantity=pos.get("quantity"))
+                    except Exception as e_q:
+                        logger.warning(f"Could not update quantity on advance SL order {adv_sl_oid}: {e_q}")
+                adv_tgt_oid = pos.get("target_broker_order_id")
+                if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                    try:
+                        broker.modify_order(order_id=str(adv_tgt_oid), quantity=pos.get("quantity"))
+                    except Exception as e_q:
+                        logger.warning(f"Could not update quantity on advance Target order {adv_tgt_oid}: {e_q}")
 
             self._save_strategies()
             self._save_state()
@@ -3364,6 +3406,266 @@ class StraddleManager:
                 logger.info(f"[Advance SL] Order placed with broker ID: {pos['sl_broker_order_id']}")
         except Exception as e:
             logger.error(f"[Advance SL] Exception placing SL order: {e}")
+
+    def _place_advance_target_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0):
+        """Quantiply/Broker-parity: place Target (LIMIT) order with broker in advance after delay_sec."""
+        if delay_sec > 0:
+            time.sleep(delay_sec)
+        if pos.get("status") != "OPEN" or pos.get("target_broker_order_id"):
+            return
+        tgt_price = float(pos.get("target_price") or 0.0)
+        if tgt_price <= 0:
+            return
+        try:
+            tgt_side = "BUY" if pos.get("side") == "SELL" else "SELL"
+            qty = int(pos.get("quantity") or 65)
+            sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
+            logger.info(f"[Advance Target] Placing advance LIMIT order on broker for {sym} @ price ₹{tgt_price:.2f} (qty={qty})...")
+            res = broker.place_order(
+                symbol=sym,
+                instrument_key=pos.get("instrument_key", ""),
+                transaction_type=tgt_side,
+                quantity=qty,
+                product=pos.get("product", "NRML"),
+                order_type="LIMIT",
+                price=tgt_price,
+                trigger_price=0.0,
+                tag="adv_tgt"
+            )
+            if res.get("success") and res.get("order_id"):
+                pos["target_broker_order_id"] = str(res.get("order_id"))
+                logger.info(f"[Advance Target] Order placed with broker ID: {pos['target_broker_order_id']}")
+        except Exception as e:
+            logger.error(f"[Advance Target] Exception placing Target order: {e}")
+
+    def get_adoptable_broker_positions(self, strategy_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch open positions from Kotak Neo broker that are not currently running in the given strategy."""
+        with _ENGINE_LOCK:
+            sid = strategy_id or self._active_strategy_id
+            strat = self.get_strategy(sid)
+            existing_syms = set()
+            if strat and "positions" in strat:
+                for p in strat.get("positions", []):
+                    if p.get("status") == "OPEN":
+                        if p.get("symbol"):
+                            existing_syms.add(str(p.get("symbol")).upper())
+                        if p.get("trading_symbol"):
+                            existing_syms.add(str(p.get("trading_symbol")).upper())
+
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            broker_positions = []
+            try:
+                broker_positions = broker.get_positions()
+            except Exception as e:
+                logger.error(f"Error reading broker positions for adoption: {e}")
+                return []
+
+            adoptable = []
+            for bp in broker_positions:
+                net_qty = int(bp.get("net_qty", bp.get("quantity", 0)) or 0)
+                if net_qty == 0:
+                    continue  # closed position
+                tsym = bp.get("trading_symbol") or bp.get("symbol", "")
+                if not tsym or tsym.upper() in existing_syms:
+                    continue  # already tracked in current strategy
+
+                # Determine underlying lot size to compute lots
+                lot_size = 65
+                tsym_u = tsym.upper()
+                if "BANKNIFTY" in tsym_u:
+                    lot_size = 15
+                elif "SENSEX" in tsym_u:
+                    lot_size = 10
+                elif "BANKEX" in tsym_u:
+                    lot_size = 15
+                elif "FINNIFTY" in tsym_u:
+                    lot_size = 65
+                elif "MIDCPNIFTY" in tsym_u:
+                    lot_size = 50
+                elif "NIFTY" in tsym_u:
+                    lot_size = 65
+
+                qty_abs = abs(net_qty)
+                lots = max(1, round(qty_abs / lot_size))
+                side = "BUY" if net_qty > 0 else "SELL"
+                avg_p = float(bp.get("average_price") or bp.get("buy_avg") or bp.get("sell_avg") or 0.0)
+                ltp = float(bp.get("ltp") or bp.get("last_price") or avg_p)
+                pnl = float(bp.get("pnl") or 0.0)
+
+                adoptable.append({
+                    "symbol": tsym,
+                    "trading_symbol": tsym,
+                    "instrument_key": bp.get("instrument_key", ""),
+                    "side": side,
+                    "quantity": qty_abs,
+                    "net_qty": net_qty,
+                    "lots": lots,
+                    "lot_size": lot_size,
+                    "average_price": avg_p,
+                    "ltp": ltp,
+                    "pnl": pnl,
+                    "product": bp.get("product", "NRML"),
+                    "client_id": bp.get("client_id", "Kotak Neo")
+                })
+
+            return adoptable
+
+    def adopt_broker_position(self, strategy_id: str, position_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Import an existing open Kotak Neo broker position into this strategy for active SL/Target tracking."""
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy {strategy_id} not found."}
+
+            sym = position_data.get("symbol") or position_data.get("trading_symbol")
+            if not sym:
+                return {"success": False, "error": "Symbol is required to adopt position."}
+
+            side = str(position_data.get("side", "BUY")).upper()
+            qty = int(position_data.get("quantity") or 65)
+            lots = int(position_data.get("lots") or 1)
+            avg_p = float(position_data.get("average_price") or position_data.get("avg_ent_price") or 0.0)
+            if avg_p <= 0:
+                avg_p = float(position_data.get("ltp") or 100.0)
+
+            t_mode = str(position_data.get("target_mode", "%"))
+            t_val = float(position_data.get("target_val", 25.0))
+            sl_mode = str(position_data.get("sl_mode", "%"))
+            sl_val = float(position_data.get("sl_val", 15.0))
+
+            # Calculate target and SL prices
+            if "%" in t_mode:
+                target_price = round_to_tick(avg_p * (1.0 + t_val / 100.0) if side == "BUY" else avg_p * (1.0 - t_val / 100.0), 0.05)
+            else:
+                target_price = round_to_tick(avg_p + t_val if side == "BUY" else avg_p - t_val, 0.05)
+
+            if "%" in sl_mode:
+                sl_price = round_to_tick(avg_p * (1.0 - sl_val / 100.0) if side == "BUY" else avg_p * (1.0 + sl_val / 100.0), 0.05)
+            else:
+                sl_price = round_to_tick(avg_p - sl_val if side == "BUY" else avg_p + sl_val, 0.05)
+
+            now_str = time.strftime("%H:%M:%S")
+            leg_id = f"leg_adopt_{int(time.time()*1000)}"
+
+            pos_record = {
+                "id": leg_id,
+                "strategy_id": strat.get("strategy_id"),
+                "strategy_name": strat.get("name", "Strategy"),
+                "symbol": sym,
+                "trading_symbol": sym,
+                "instrument_key": position_data.get("instrument_key", ""),
+                "side": side,
+                "lots": lots,
+                "quantity": qty,
+                "entry_qty": qty,
+                "avg_ent_price": avg_p,
+                "entry_price": avg_p,
+                "entry_time": now_str,
+                "target_value": t_val,
+                "target_type": "TGT: %" if "%" in t_mode else "TGT: Pts",
+                "target_type_label": f"TGT: {t_val:.0f}%" if "%" in t_mode else f"TGT: ₹{t_val:.2f}",
+                "target_price": target_price,
+                "sl_value": sl_val,
+                "sl_type": "SL: -%" if "%" in sl_mode else "SL: -Pts",
+                "sl_type_label": f"SL: -{sl_val:.0f}%" if "%" in sl_mode else f"SL: -₹{sl_val:.2f}",
+                "sl_price": sl_price,
+                "status": "OPEN",
+                "ltp": avg_p,
+                "mtm": 0.0,
+                "adopted": True,
+                "is_re_entry": False,
+                "product": position_data.get("product", "NRML")
+            }
+
+            if "positions" not in strat or not isinstance(strat["positions"], list):
+                strat["positions"] = []
+            strat["positions"].append(pos_record)
+
+            if strat.get("status") not in ("TRADE_ACTIVE", "ACTIVE", "RUNNING"):
+                strat["status"] = "TRADE_ACTIVE"
+
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            adv = strat.get("advanced") or strat.get("advanced_settings", {})
+
+            # Place advance broker orders if configured in advanced settings
+            if adv.get("sl_order_placement") == "Place in advance" and sl_price > 0:
+                threading.Thread(target=self._place_advance_sl_order, args=(broker, pos_record, 0), daemon=True).start()
+            if (adv.get("target_order_placement") == "Place in advance" or adv.get("sl_order_placement") == "Place in advance") and target_price > 0:
+                threading.Thread(target=self._place_advance_target_order, args=(broker, pos_record, 0), daemon=True).start()
+
+            self._save_strategies()
+            self._save_state()
+            self._log_event(f"Adopted external broker trade {sym} ({side} {lots} lots, Qty: {qty}) into '{strat.get('name')}' (TGT: ₹{target_price}, SL: ₹{sl_price})")
+
+            return {
+                "success": True,
+                "message": f"Adopted {sym} successfully into algorithm.",
+                "position": pos_record
+            }
+
+    def detach_position(self, strategy_id: str, leg_id: Optional[str] = None, leg_index: Optional[int] = None) -> Dict[str, Any]:
+        """Remove a running position from algorithm monitoring WITHOUT squaring it off on Kotak Neo broker."""
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy {strategy_id} not found."}
+
+            positions = strat.get("positions", [])
+            target_pos = None
+            target_idx = -1
+
+            if leg_id:
+                for idx, p in enumerate(positions):
+                    if p.get("id") == leg_id:
+                        target_pos = p
+                        target_idx = idx
+                        break
+            if target_pos is None and leg_index is not None and 0 <= leg_index < len(positions):
+                target_pos = positions[leg_index]
+                target_idx = leg_index
+
+            if not target_pos:
+                return {"success": False, "error": "Position not found in strategy."}
+
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+
+            # Cancel any advance SL / Target trigger orders placed by algo on broker so orphaned triggers aren't left behind
+            adv_sl_oid = target_pos.get("sl_broker_order_id")
+            if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                try:
+                    logger.info(f"Detaching leg: cancelling advance SL order {adv_sl_oid} on broker...")
+                    broker.cancel_order(str(adv_sl_oid))
+                except Exception as e:
+                    logger.warning(f"Note cancelling advance SL order {adv_sl_oid} on detach: {e}")
+
+            adv_tgt_oid = target_pos.get("target_broker_order_id")
+            if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                try:
+                    logger.info(f"Detaching leg: cancelling advance Target order {adv_tgt_oid} on broker...")
+                    broker.cancel_order(str(adv_tgt_oid))
+                except Exception as e:
+                    logger.warning(f"Note cancelling advance Target order {adv_tgt_oid} on detach: {e}")
+
+            sym = target_pos.get("symbol", "Leg")
+            # Remove from active positions array
+            positions.pop(target_idx)
+
+            # If no open positions remain, update strategy status if needed
+            open_left = [p for p in positions if p.get("status") == "OPEN"]
+            if not open_left and strat.get("status") == "TRADE_ACTIVE":
+                strat["status"] = "READY"
+
+            self._save_strategies()
+            self._save_state()
+            self._log_event(f"Detached position {sym} from '{strat.get('name')}' without squaring off on broker. Position remains active on Kotak Neo.")
+
+            return {
+                "success": True,
+                "message": f"Position {sym} detached from algorithm. (Broker trade was NOT closed)."
+            }
 
     def reset_algo(self, strategy_id: Optional[str] = None, strategy_name: Optional[str] = None) -> Dict[str, Any]:
         """Reset failed/unfilled/filled positions, errors, and orders completely, re-initializing strategy to clean READY state."""
@@ -3532,6 +3834,16 @@ class StraddleManager:
                 pos["sl_broker_order_id"] = None
             except Exception as e:
                 logger.warning(f"Error cancelling advance SL order {adv_sl_oid}: {e}")
+
+        # Cancel any active advance Target order placed with the broker
+        adv_tgt_oid = pos.get("target_broker_order_id")
+        if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+            try:
+                logger.info(f"Cancelling active broker advance Target order {adv_tgt_oid} for {pos.get('symbol')} before exit...")
+                broker.cancel_order(str(adv_tgt_oid))
+                pos["target_broker_order_id"] = None
+            except Exception as e:
+                logger.warning(f"Error cancelling advance Target order {adv_tgt_oid}: {e}")
 
         strat = None
         if strat_id:
@@ -4866,6 +5178,61 @@ class StraddleManager:
                                 if new_sl > cur_sl:
                                     pos["sl_price"] = new_sl
                                     self._log_event(f"Trailing SL adjusted for {pos['symbol']}: ₹{cur_sl:.2f} -> ₹{new_sl:.2f} (Profit: +{profit_pts:.2f} pts)")
+
+                    # Check if broker advance SL or Target order was filled on exchange (Broker OCO)
+                    adv_tgt_oid = pos.get("target_broker_order_id")
+                    adv_sl_oid = pos.get("sl_broker_order_id")
+
+                    tgt_filled = False
+                    sl_filled = False
+
+                    if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                        try:
+                            t_stat = broker.wait_for_order_fill(str(adv_tgt_oid), timeout_sec=0.02)
+                            if t_stat.get("filled"):
+                                tgt_filled = True
+                                pos["avg_exit_price"] = t_stat.get("price") or pos.get("target_price") or ltp
+                        except Exception:
+                            pass
+
+                    if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                        try:
+                            s_stat = broker.wait_for_order_fill(str(adv_sl_oid), timeout_sec=0.02)
+                            if s_stat.get("filled"):
+                                sl_filled = True
+                                pos["avg_exit_price"] = s_stat.get("price") or pos.get("sl_price") or ltp
+                        except Exception:
+                            pass
+
+                    if tgt_filled:
+                        # Cancel SL order on broker (One Cancels Other)
+                        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                            try:
+                                broker.cancel_order(str(adv_sl_oid))
+                            except Exception as e_c:
+                                logger.warning(f"OCO: Error cancelling SL order {adv_sl_oid}: {e_c}")
+                        pos["status"] = "COMPLETE"
+                        pos["exit_reason"] = "TARGET HIT (Broker OCO)"
+                        pos["exit_order_id"] = str(adv_tgt_oid)
+                        pos["exit_time"] = time.strftime("%H:%M:%S")
+                        self._log_event(f"Target order {adv_tgt_oid} FILLED on broker for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. OCO SL cancelled.")
+                        self._handle_leg_re_entry(strat, pos, trigger="TARGET", exit_order_id=str(adv_tgt_oid))
+                        continue
+
+                    if sl_filled:
+                        # Cancel Target order on broker (One Cancels Other)
+                        if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                            try:
+                                broker.cancel_order(str(adv_tgt_oid))
+                            except Exception as e_c:
+                                logger.warning(f"OCO: Error cancelling Target order {adv_tgt_oid}: {e_c}")
+                        pos["status"] = "COMPLETE"
+                        pos["exit_reason"] = "STOPLOSS HIT (Broker OCO)"
+                        pos["exit_order_id"] = str(adv_sl_oid)
+                        pos["exit_time"] = time.strftime("%H:%M:%S")
+                        self._log_event(f"Stoploss order {adv_sl_oid} FILLED on broker for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. OCO Target cancelled.")
+                        self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS", exit_order_id=str(adv_sl_oid))
+                        continue
 
                     # Check Target Hit
                     tgt_price = float(pos.get("target_price", 0.0))

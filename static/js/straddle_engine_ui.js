@@ -2865,11 +2865,94 @@ function updateStraddleStrategyDropdown(strategies, activeStrat) {
     }
 }
 
+window._straddlePendingLegEdits = window._straddlePendingLegEdits || {};
+
 function markRunningLegChanged(idx) {
+    const lotsInput = document.getElementById(`live_lots_${idx}`);
+    const strikeInput = document.getElementById(`live_strike_${idx}`);
+    const tgtModeSelect = document.getElementById(`live_tgt_mode_${idx}`);
+    const tgtValInput = document.getElementById(`live_tgt_val_${idx}`);
+    const slModeSelect = document.getElementById(`live_sl_mode_${idx}`);
+    const slValInput = document.getElementById(`live_sl_val_${idx}`);
+
+    window._straddlePendingLegEdits[idx] = {
+        lots: lotsInput ? parseInt(lotsInput.value) || 1 : 1,
+        strike: strikeInput ? strikeInput.value.trim() : "",
+        target_mode: tgtModeSelect ? tgtModeSelect.value : "%",
+        target_val: tgtValInput ? parseFloat(tgtValInput.value) : 25,
+        sl_mode: slModeSelect ? slModeSelect.value : "%",
+        sl_val: slValInput ? parseFloat(slValInput.value) : 15
+    };
+
     const btn = document.getElementById(`btn_save_running_${idx}`);
     if (btn) {
         btn.style.display = "inline-flex";
     }
+
+    // Dynamic preview of trigger prices
+    const row = document.querySelector(`tr[data-leg-index="${idx}"]`);
+    const entPriceEl = row ? row.querySelector(".straddle-ent-price-val") : null;
+    const entPrice = entPriceEl ? parseFloat(entPriceEl.textContent) : 0;
+    const sideBadge = row ? row.querySelector(".straddle-side-badge") : null;
+    const side = sideBadge ? sideBadge.textContent.trim().toUpperCase() : "SELL";
+
+    if (entPrice > 0) {
+        const tVal = window._straddlePendingLegEdits[idx].target_val;
+        const tMode = window._straddlePendingLegEdits[idx].target_mode;
+        let tPrice = 0;
+        if (tMode.includes("%")) {
+            tPrice = (side === "SELL") ? entPrice * (1.0 - tVal / 100.0) : entPrice * (1.0 + tVal / 100.0);
+        } else {
+            tPrice = (side === "SELL") ? entPrice - tVal : entPrice + tVal;
+        }
+        const tgtSub = document.getElementById(`live_tgt_sub_${idx}`);
+        if (tgtSub) tgtSub.textContent = `TGT: ₹${Math.max(0.05, tPrice).toFixed(2)}`;
+
+        const sVal = window._straddlePendingLegEdits[idx].sl_val;
+        const sMode = window._straddlePendingLegEdits[idx].sl_mode;
+        let sPrice = 0;
+        if (sMode.includes("%")) {
+            sPrice = (side === "SELL") ? entPrice * (1.0 + sVal / 100.0) : entPrice * (1.0 - sVal / 100.0);
+        } else {
+            sPrice = (side === "SELL") ? entPrice + sVal : entPrice - sVal;
+        }
+        const slSub = document.getElementById(`live_sl_sub_${idx}`);
+        if (slSub) slSub.textContent = `SL: ₹${Math.max(0.05, sPrice).toFixed(2)}`;
+    }
+}
+
+function stepLiveStrikePrice(idx, direction) {
+    const input = document.getElementById(`live_strike_${idx}`);
+    if (!input) return;
+    let curVal = parseInt(input.value.replace(/[^0-9]/g, '')) || 0;
+
+    // Detect strike interval: BankNifty/Sensex = 100, MidcpNifty = 25, Nifty/Finnifty = 50
+    let step = 50;
+    const symEl = document.querySelector(`tr[data-leg-index="${idx}"] .straddle-sym-title`);
+    const symText = (symEl ? symEl.textContent : "").toUpperCase();
+    if (symText.includes("BANKNIFTY") || symText.includes("SENSEX") || symText.includes("BANKEX")) {
+        step = 100;
+    } else if (symText.includes("MIDCPNIFTY")) {
+        step = 25;
+    } else {
+        step = 50;
+    }
+
+    if (curVal === 0) {
+        curVal = 22500;
+    }
+    curVal += direction * step;
+    input.value = curVal;
+    markRunningLegChanged(idx);
+}
+
+function stepLiveLots(idx, direction) {
+    const input = document.getElementById(`live_lots_${idx}`);
+    if (!input) return;
+    let curVal = parseInt(input.value) || 1;
+    curVal = Math.max(1, Math.min(100, curVal + direction));
+    input.value = curVal;
+    markRunningLegChanged(idx);
 }
 
 async function saveRunningPositionChanges(stratId, legId, legIndex) {
@@ -2908,9 +2991,10 @@ async function saveRunningPositionChanges(stratId, legId, legIndex) {
         });
         const res = await resp.json();
         if (res.success) {
-            showStraddleToast(res.message || "Position updated successfully!", "success", 3000);
+            delete window._straddlePendingLegEdits[legIndex];
             const btn = document.getElementById(`btn_save_running_${legIndex}`);
             if (btn) btn.style.display = "none";
+            showStraddleToast(res.message || "Position updated successfully!", "success", 3000);
             await fetchStraddleState();
             await loadStraddleOpenPositions();
         } else {
@@ -2918,6 +3002,35 @@ async function saveRunningPositionChanges(stratId, legId, legIndex) {
         }
     } catch (e) {
         showStraddleToast("Error updating position: " + e.message, "error", 3000);
+    }
+}
+
+async function detachRunningPosition(stratId, legId, legIndex) {
+    if (!confirm("Detach this running position from the algo?\n\nNOTE: The open position will NOT be squared off on Kotak Neo broker. It will simply be removed from this algo's monitoring.")) {
+        return;
+    }
+    showStraddleToast(`Detaching leg ${legIndex + 1} from algo...`, "info", 1500);
+    try {
+        const resp = await fetch("/api/straddle/detach_position", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                strategy_id: stratId || window._straddleState?.activeStrategy?.strategy_id,
+                leg_id: legId || null,
+                leg_index: legIndex
+            })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            delete window._straddlePendingLegEdits[legIndex];
+            showStraddleToast(res.message || "Position detached from algo successfully.", "success", 2500);
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(res.error || "Failed to detach position", "error", 4000);
+        }
+    } catch (e) {
+        showStraddleToast("Error detaching position: " + e.message, "error", 3000);
     }
 }
 
@@ -2999,316 +3112,403 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             </tr>
         `;
     } else {
-        let html = "";
         const prevMap = window._straddleState.prevLtpMap || {};
 
-        positions.forEach((pos, idx) => {
-            const rawStatus = String(pos.status || "OPEN").toUpperCase();
-            const isError = (rawStatus === "ERROR" || !!pos.error_message);
-            const isCompleteOrClosed = (rawStatus === "COMPLETE" || rawStatus === "CLOSED" || rawStatus === "EXITED" || (pos.avg_exit_price && Number(pos.avg_exit_price) > 0 && pos.exit_reason && pos.exit_reason !== "-"));
-            const isOpen = !isError && !isCompleteOrClosed && (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
-            const isClosed = !isError && (isCompleteOrClosed || (!isOpen && !isError));
-            const isReEntry = !!(pos.is_re_entry || pos.re_entry || (pos.re_execute_count && pos.re_execute_count > 0));
-            const stratId = pos.strategy_id || window._straddleState?.activeStrategy?.strategy_id || '';
+        // Check if we can perform smooth in-place DOM update instead of destroying innerHTML
+        const existingRows = tbody.querySelectorAll("tr[data-leg-index]:not(.straddle-error-banner-row)");
+        const hasErrors = positions.some(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message));
+        const canUpdateInPlace = (
+            existingRows.length === positions.length &&
+            positions.length > 0 &&
+            !hasErrors &&
+            !tbody.querySelector(".straddle-error-banner-row")
+        );
 
-            // Status Badge
-            let statusHtml = "";
-            if (isError) {
-                statusHtml = `
-                    <div class="straddle-status-container">
-                        <span class="straddle-status-pill status-badge-error">ERROR</span>
-                        ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
-                    </div>
-                `;
-            } else if (isOpen) {
-                statusHtml = `
-                    <div class="straddle-status-container">
-                        <span class="straddle-status-pill status-badge-open">OPEN</span>
-                        ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
-                    </div>
-                `;
-            } else {
-                statusHtml = `
-                    <div class="straddle-status-container">
-                        <span class="straddle-status-pill status-badge-closed">CLOSED</span>
-                        ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
-                    </div>
-                `;
-            }
+        if (canUpdateInPlace) {
+            positions.forEach((pos, idx) => {
+                const row = tbody.querySelector(`tr[data-leg-index="${idx}"]`);
+                if (!row) return;
 
-            // Side Badge
-            const side = String(pos.side || "SELL").toUpperCase();
-            const sideClass = (side === "BUY") ? "side-badge-buy" : "side-badge-sell";
+                const sym = pos.symbol || pos.trading_symbol || 'NIFTY OPT';
+                const side = String(pos.side || "SELL").toUpperCase();
+                const rawStatus = String(pos.status || "OPEN").toUpperCase();
+                const isOpen = (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
+                const ltp = Number(pos.ltp || pos.avg_ent_price || 0.0);
+                const prevLtp = prevMap[sym] || ltp;
+                let ltpClass = "";
+                if (ltp > prevLtp) ltpClass = "straddle-ltp-up";
+                else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
+                prevMap[sym] = ltp;
 
-            // Symbol Styling & Accent Border
-            const sym = pos.symbol || pos.trading_symbol || 'NIFTY OPT';
-            let symAccentClass = "sym-ce";
-            if (side === "BUY") {
-                symAccentClass = "sym-buy";
-            } else if (sym.toUpperCase().includes("PE") || (pos.option_type && String(pos.option_type).toUpperCase() === "PE")) {
-                symAccentClass = "sym-pe";
-            } else {
-                symAccentClass = "sym-ce";
-            }
+                const ltpColor = !isOpen ? '#f87171' : (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
+                const mtm = Number(pos.mtm || 0.0);
+                const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
 
-            // Expiry subtext
-            let expiryText = pos.contract ? (pos.contract.expiry_date || 'NFO') : (pos.expiry_str || pos.expiry || 'NFO');
-            if (expiryText && !String(expiryText).toUpperCase().startsWith("NFO")) {
-                expiryText = "NFO " + expiryText;
-            }
+                // Update LTP cell
+                const ltpEl = row.querySelector(".straddle-ltp");
+                if (ltpEl) {
+                    ltpEl.textContent = ltp > 0 ? ltp.toFixed(2) : "-";
+                    ltpEl.style.color = ltpColor;
+                    ltpEl.className = `straddle-ltp ${ltpClass}`;
+                }
 
-            // Quantity column
-            const lots = pos.lots || 1;
-            const totalQty = pos.quantity || 65;
-            const entryQty = pos.entry_qty || totalQty;
-            const exitQty = (isClosed || (pos.exit_qty && pos.exit_qty > 0)) ? (pos.exit_qty || totalQty) : "-";
+                // Update MTM cell
+                const mtmEl = row.querySelector(".straddle-mtm");
+                if (mtmEl) {
+                    mtmEl.textContent = mtm.toFixed(2);
+                    mtmEl.className = `straddle-mtm ${mtmClass}`;
+                }
 
-            // Quantity HTML (Interactive for OPEN legs)
-            let qtyHtml = "";
-            if (isOpen) {
-                qtyHtml = `
-                    <div style="display:flex; align-items:center; gap:4px;">
-                        <input type="number" id="live_lots_${idx}" class="straddle-input" style="width:52px; padding:2px 4px; font-size:11.5px; font-weight:700; text-align:center;" value="${lots}" min="1" max="100" oninput="markRunningLegChanged(${idx})" title="Change lots: increase to buy/sell more, decrease to reduce">
-                        <span style="font-size:10.5px; color:#94a3b8; font-weight:700;">lots</span>
-                    </div>
-                    <div class="straddle-subtext">Total: ${totalQty} qty</div>
-                    <div class="straddle-subtext">Entry: ${entryQty}</div>
-                `;
-            } else {
-                qtyHtml = `
-                    <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${lots} (${totalQty})</div>
-                    <div class="straddle-subtext">Entry Qty: ${entryQty}</div>
-                    <div class="straddle-subtext">Exit Qty: ${exitQty}</div>
-                `;
-            }
+                // Check pending edits or active focus
+                const hasPending = !!(window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]);
+                const activeEl = document.activeElement;
+                const isFocusedInRow = activeEl && row.contains(activeEl);
 
-            // Symbol HTML (With shift strike option for OPEN legs)
-            let symHtml = "";
-            if (isOpen) {
-                const curStrikeMatch = (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
-                symHtml = `
-                    <div class="straddle-sym-card ${symAccentClass}">
-                        <div class="straddle-sym-title">${sym}</div>
-                        <div class="straddle-sym-sub">${expiryText}</div>
-                        <div style="display:flex; align-items:center; gap:4px; margin-top:4px;">
-                            <span style="font-size:9.5px; color:#94a3b8; font-weight:700;">Shift:</span>
-                            <input type="text" id="live_strike_${idx}" class="straddle-input" style="width:72px; padding:2px 4px; font-size:11px; font-weight:700;" value="${curStrikeMatch}" placeholder="Strike" oninput="markRunningLegChanged(${idx})" title="Enter new strike (e.g. 23300) to shift position">
+                const btnSave = document.getElementById(`btn_save_running_${idx}`);
+                if (hasPending) {
+                    if (btnSave) btnSave.style.display = "inline-flex";
+                } else if (!isFocusedInRow) {
+                    if (btnSave) btnSave.style.display = "none";
+                    const tgtSub = document.getElementById(`live_tgt_sub_${idx}`);
+                    if (tgtSub && pos.target_price) tgtSub.textContent = `TGT: ₹${Number(pos.target_price).toFixed(2)}`;
+                    const slSub = document.getElementById(`live_sl_sub_${idx}`);
+                    if (slSub && pos.sl_price) slSub.textContent = `SL: ₹${Number(pos.sl_price).toFixed(2)}`;
+                }
+            });
+        } else {
+            // Full render with preserved pending edits
+            let html = "";
+            positions.forEach((pos, idx) => {
+                const rawStatus = String(pos.status || "OPEN").toUpperCase();
+                const isError = (rawStatus === "ERROR" || !!pos.error_message);
+                const isCompleteOrClosed = (rawStatus === "COMPLETE" || rawStatus === "CLOSED" || rawStatus === "EXITED" || (pos.avg_exit_price && Number(pos.avg_exit_price) > 0 && pos.exit_reason && pos.exit_reason !== "-"));
+                const isOpen = !isError && !isCompleteOrClosed && (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
+                const isClosed = !isError && (isCompleteOrClosed || (!isOpen && !isError));
+                const isReEntry = !!(pos.is_re_entry || pos.re_entry || (pos.re_execute_count && pos.re_execute_count > 0));
+                const stratId = pos.strategy_id || window._straddleState?.activeStrategy?.strategy_id || '';
+
+                // Retrieve any pending user edits for this leg so they are never lost
+                const pending = (window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]) || null;
+                const hasPending = !!pending;
+
+                // Status Badge
+                let statusHtml = "";
+                if (isError) {
+                    statusHtml = `
+                        <div class="straddle-status-container">
+                            <span class="straddle-status-pill status-badge-error">ERROR</span>
+                            ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
                         </div>
-                    </div>
-                `;
-            } else {
-                symHtml = `
-                    <div class="straddle-sym-card ${symAccentClass}">
-                        <div class="straddle-sym-title">${sym}</div>
-                        <div class="straddle-sym-sub">${expiryText}</div>
-                    </div>
-                `;
-            }
-
-            // Avg Entry Price & Entry Time
-            const avgEntPrice = pos.avg_ent_price ? Number(pos.avg_ent_price).toFixed(2) : '-';
-            const entryTime = pos.entry_time || '-';
-
-            // Per Leg Target (Interactive for OPEN legs)
-            let targetHtml = "-";
-            if (isOpen) {
-                const isPts = pos.target_type && (pos.target_type.includes("Pts") || pos.target_type.includes("₹"));
-                targetHtml = `
-                    <div style="display:flex; align-items:center; gap:3px;">
-                        <select id="live_tgt_mode_${idx}" class="straddle-select" style="padding:2px 3px; font-size:10.5px; width:45px;" onchange="markRunningLegChanged(${idx})">
-                            <option value="%" ${!isPts ? 'selected' : ''}>%</option>
-                            <option value="₹" ${isPts ? 'selected' : ''}>₹</option>
-                        </select>
-                        <input type="number" id="live_tgt_val_${idx}" class="straddle-input" style="width:54px; padding:2px 4px; font-size:11px; font-weight:700;" value="${pos.target_value !== undefined ? pos.target_value : 25}" step="0.5" oninput="markRunningLegChanged(${idx})" title="Change Target (% or ₹ points)">
-                    </div>
-                    <div style="font-size:10px; color:#38bdf8; font-weight:700; margin-top:2px;">TGT: ₹${pos.target_price ? Number(pos.target_price).toFixed(2) : '-'}</div>
-                `;
-            } else if (pos.target_price && pos.target_price > 0) {
-                const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
-                targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span></div>`;
-            } else if (pos.target_value && pos.target_value > 0) {
-                const tgtLabel = `TGT: ${pos.target_value}%`;
-                targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>`;
-            }
-
-            // Per Leg Stoploss (Interactive for OPEN legs)
-            let slHtml = "-";
-            if (isOpen) {
-                const isPts = pos.sl_type && (pos.sl_type.includes("Pts") || pos.sl_type.includes("₹"));
-                slHtml = `
-                    <div style="display:flex; align-items:center; gap:3px;">
-                        <select id="live_sl_mode_${idx}" class="straddle-select" style="padding:2px 3px; font-size:10.5px; width:45px;" onchange="markRunningLegChanged(${idx})">
-                            <option value="%" ${!isPts ? 'selected' : ''}>%</option>
-                            <option value="₹" ${isPts ? 'selected' : ''}>₹</option>
-                        </select>
-                        <input type="number" id="live_sl_val_${idx}" class="straddle-input" style="width:54px; padding:2px 4px; font-size:11px; font-weight:700;" value="${pos.sl_value !== undefined ? pos.sl_value : 15}" step="0.5" oninput="markRunningLegChanged(${idx})" title="Change Stoploss (% or ₹ points)">
-                    </div>
-                    <div style="font-size:10px; color:#f87171; font-weight:700; margin-top:2px;">SL: ₹${pos.sl_price ? Number(pos.sl_price).toFixed(2) : '-'}</div>
-                `;
-            } else if (pos.sl_price && pos.sl_price > 0) {
-                const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
-                const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
-                slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span></div>
-                          <div class="orig-sl-sub">${origSlLabel}</div>`;
-            } else if (pos.sl_value && pos.sl_value > 0) {
-                const slLabel = `SL: -${pos.sl_value}%`;
-                const origSlLabel = `ORIGINAL SL: -${pos.sl_value}%`;
-                slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">-</span></div>
-                          <div class="orig-sl-sub">${origSlLabel}</div>`;
-            }
-
-            // Avg Exit Price & Exit Time
-            const avgExitPrice = (pos.avg_exit_price && pos.avg_exit_price > 0) ? Number(pos.avg_exit_price).toFixed(2) : '-';
-            const exitTime = (isClosed && pos.exit_time) ? pos.exit_time : (pos.avg_exit_price && pos.avg_exit_price > 0 ? (pos.exit_time || '-') : '-');
-
-            // Exit Reason
-            let exitReasonHtml = "-";
-            if (pos.exit_reason && pos.exit_reason !== "-") {
-                const rLower = String(pos.exit_reason).toLowerCase();
-                if (rLower.includes("target")) {
-                    exitReasonHtml = `<span class="exit-reason-tgt">Target hit</span>`;
-                } else if (rLower.includes("stoploss") || rLower.includes("sl")) {
-                    exitReasonHtml = `<span class="exit-reason-sl">Stoploss hit</span>`;
+                    `;
+                } else if (isOpen) {
+                    statusHtml = `
+                        <div class="straddle-status-container">
+                            <span class="straddle-status-pill status-badge-open">OPEN</span>
+                            ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
+                        </div>
+                    `;
                 } else {
-                    exitReasonHtml = `<span class="straddle-reason-pill">${pos.exit_reason}</span>`;
-                }
-            }
-
-            // Action buttons (Save on live change + Exit)
-            let actionHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
-            if (isOpen) {
-                actionHtml = `
-                    <div style="display:flex; flex-direction:column; gap:4px; align-items:center;">
-                        <button type="button" id="btn_save_running_${idx}" class="straddle-btn btn-primary" style="display:none; padding:3px 8px; font-size:11px; font-weight:800; background:#0ea5e9; border:none; box-shadow:0 0 8px rgba(14,165,233,0.6);" onclick="saveRunningPositionChanges('${stratId}', '${pos.id || ''}', ${idx})" title="Save and apply live modifications immediately">
-                            💾 Save
-                        </button>
-                        <button type="button" class="straddle-btn btn-danger" style="padding:2px 8px; font-size:10.5px; font-weight:700;" onclick="squareOffSingleLegIndex(${idx})" title="Square off this leg">
-                            Exit
-                        </button>
-                    </div>
-                `;
-            }
-
-            // LTP & Dynamic Color Tick
-            const ltp = Number(pos.ltp || pos.avg_ent_price || 0.0);
-            const prevLtp = prevMap[sym] || ltp;
-            let ltpClass = "";
-            if (ltp > prevLtp) ltpClass = "straddle-ltp-up";
-            else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
-            prevMap[sym] = ltp;
-
-            const ltpColor = isClosed ? '#f87171' : (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
-
-            // MTM (₹)
-            const mtm = Number(pos.mtm || 0.0);
-            const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
-            const mtmFormatted = mtm.toFixed(2);
-
-            const rowClass = isError ? "straddle-row-error" : "";
-
-            // Check if rejected toast needs to be shown
-            if (isError) {
-                if (!window._straddleToastedErrors) window._straddleToastedErrors = new Set();
-                const errKey = `${sym}_${pos.error_message || ''}_${pos.entry_time || ''}`;
-                if (!window._straddleToastedErrors.has(errKey)) {
-                    window._straddleToastedErrors.add(errKey);
-                    showStraddleRejectedToast({
-                        symbol: sym,
-                        message: pos.error_message || "You need to add required funds in your account to place this trade.",
-                        clientId: pos.client_id || (window._straddleState.activeAccount ? window._straddleState.activeAccount.id : 'Kotak Neo'),
-                        orderId: pos.order_id || ('261' + Math.floor(Math.random() * 1000000000000)),
-                        time: pos.entry_time || (new Date().toLocaleTimeString('en-US', { hour12: false }))
-                    });
-                }
-            }
-
-            const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
-
-            html += `
-                <tr class="${rowClass}">
-                    <td style="text-align:center;">
-                        <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
-                    </td>
-                    <td>${statusHtml}</td>
-                    <td><span class="straddle-side-badge ${sideClass}">${side}</span></td>
-                    <td>${symHtml}</td>
-                    <td>${qtyHtml}</td>
-                    <td>
-                        <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${avgEntPrice}</div>
-                        <div class="straddle-subtext">${entryTime}</div>
-                    </td>
-                    <td>${targetHtml}</td>
-                    <td>${slHtml}</td>
-                    <td>
-                        <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${avgExitPrice}</div>
-                        ${exitTime !== '-' ? `<div class="straddle-subtext">${exitTime}</div>` : ''}
-                    </td>
-                    <td>${exitReasonHtml}</td>
-                    <td style="text-align:right;">
-                        <span class="straddle-ltp ${ltpClass}" style="color:${ltpColor}; font-weight:700; font-family:var(--font-mono);">${ltp > 0 ? ltp.toFixed(2) : '-'}</span>
-                    </td>
-                    <td style="text-align:right;">
-                        <span class="straddle-mtm ${mtmClass}">${mtmFormatted}</span>
-                    </td>
-                    <td style="text-align:center;">${actionHtml}</td>
-                </tr>
-            `;
-
-            // If error, append error banner directly underneath row with direct action buttons (Retry with adjusted Settings / Rectify)
-            if (isError) {
-                const legId = pos.id || '';
-                const errDetail = pos.error_message || pos.error || "Order placement rejected by broker / exchange RMS.";
-                const marginInfo = parseMarginError(errDetail);
-                let marginBadgeHtml = "";
-                if (marginInfo && marginInfo.hasMarginDetails) {
-                    marginBadgeHtml = `
-                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
-                            <span style="background:rgba(56,189,248,0.15); color:#38bdf8; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">💳 Available: ₹${marginInfo.available.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
-                            <span style="background:rgba(245,158,11,0.15); color:#fbbf24; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">⚡ Required: ₹${marginInfo.required.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
-                            <span style="background:rgba(239,68,68,0.22); color:#f87171; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">🔴 Shortfall: ₹${marginInfo.shortfall.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+                    statusHtml = `
+                        <div class="straddle-status-container">
+                            <span class="straddle-status-pill status-badge-closed">CLOSED</span>
+                            ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
                         </div>
                     `;
                 }
-                const curStrikeMatch = (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
-                html += `
-                    <tr class="straddle-error-banner-row">
-                        <td colspan="13">
-                            <div class="straddle-error-banner-cell" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); padding:10px 14px; border-radius:6px; margin: 4px 0;">
-                                <div style="display:flex; flex-direction:column; gap:3px; flex:1; min-width:260px;">
-                                    <div style="display:flex; align-items:center; gap:8px;">
-                                        <span class="straddle-error-banner-icon" style="font-size:16px;">⚠️</span>
-                                        <span class="straddle-error-banner-text" style="color:#fca5a5; font-size:11.5px; font-weight:600; line-height:1.4;">
-                                            ${errDetail}
-                                        </span>
-                                    </div>
-                                    ${marginBadgeHtml}
-                                </div>
-                                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:rgba(0,0,0,0.3); padding:6px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
-                                    <div style="display:flex; align-items:center; gap:4px;">
-                                        <span style="font-size:11px; color:#cbd5e1; font-weight:700;">Lots:</span>
-                                        <input type="number" id="err_lots_${idx}" class="straddle-input" style="width:52px; padding:3px 6px; font-size:11.5px; font-weight:700; text-align:center;" value="${pos.lots || 1}" min="1" max="100" title="Adjust lots to fit margin">
-                                    </div>
-                                    <div style="display:flex; align-items:center; gap:4px;">
-                                        <span style="font-size:11px; color:#cbd5e1; font-weight:700;">Strike:</span>
-                                        <input type="text" id="err_strike_${idx}" class="straddle-input" style="width:80px; padding:3px 6px; font-size:11.5px; font-weight:700;" value="${curStrikeMatch}" placeholder="e.g. 23250" title="Adjust strike to fit margin">
-                                    </div>
-                                    <button type="button" class="algo-btn-retry" style="background:#10b981; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLegInline('${stratId}', '${legId}', ${idx})" title="Retry order with updated lots and strike">
-                                        🔄 Retry with Settings
-                                    </button>
-                                    <button type="button" class="algo-btn-retry" style="background:#ef4444; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLeg('${stratId}', '${legId}', ${idx})" title="Immediately retry placing this order on broker">
-                                        Retry Original
-                                    </button>
-                                    <button type="button" class="algo-btn-rectify" style="background:#2563eb; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="openRectifyLegModal('${stratId}', '${legId}', ${idx})" title="Edit lots, strike price, product or configuration">
-                                        🛠️ Rectify Leg
-                                    </button>
+
+                // Side Badge
+                const side = String(pos.side || "SELL").toUpperCase();
+                const sideClass = (side === "BUY") ? "side-badge-buy" : "side-badge-sell";
+
+                // Symbol Styling & Accent Border
+                const sym = pos.symbol || pos.trading_symbol || 'NIFTY OPT';
+                let symAccentClass = "sym-ce";
+                if (side === "BUY") {
+                    symAccentClass = "sym-buy";
+                } else if (sym.toUpperCase().includes("PE") || (pos.option_type && String(pos.option_type).toUpperCase() === "PE")) {
+                    symAccentClass = "sym-pe";
+                } else {
+                    symAccentClass = "sym-ce";
+                }
+
+                // Expiry subtext
+                let expiryText = pos.contract ? (pos.contract.expiry_date || 'NFO') : (pos.expiry_str || pos.expiry || 'NFO');
+                if (expiryText && !String(expiryText).toUpperCase().startsWith("NFO")) {
+                    expiryText = "NFO " + expiryText;
+                }
+
+                // Quantity column
+                const lots = pending ? pending.lots : (pos.lots || 1);
+                const totalQty = pos.quantity || 65;
+                const entryQty = pos.entry_qty || totalQty;
+                const exitQty = (isClosed || (pos.exit_qty && pos.exit_qty > 0)) ? (pos.exit_qty || totalQty) : "-";
+
+                // Quantity HTML (Interactive with stepper arrows for OPEN legs)
+                let qtyHtml = "";
+                if (isOpen) {
+                    qtyHtml = `
+                        <div style="display:flex; align-items:center; gap:3px;">
+                            <div style="display:inline-flex; align-items:center; background:#0f172a; border:1px solid #334155; border-radius:4px; padding:1px 3px; gap:2px;">
+                                <input type="number" id="live_lots_${idx}" class="straddle-input" style="width:38px; padding:1px 2px; font-size:11.5px; font-weight:700; text-align:center; border:none; background:transparent;" value="${lots}" min="1" max="100" oninput="markRunningLegChanged(${idx})" title="Change lots: increase to buy/sell more, decrease to reduce">
+                                <div style="display:flex; flex-direction:column; gap:1px;">
+                                    <button type="button" class="lot-step-btn" onclick="stepLiveLots(${idx}, 1)" title="Lots +">▲</button>
+                                    <button type="button" class="lot-step-btn" onclick="stepLiveLots(${idx}, -1)" title="Lots -">▼</button>
                                 </div>
                             </div>
+                            <span style="font-size:10.5px; color:#94a3b8; font-weight:700;">lots</span>
+                        </div>
+                        <div class="straddle-subtext">Total: ${totalQty} qty</div>
+                        <div class="straddle-subtext">Entry: ${entryQty}</div>
+                    `;
+                } else {
+                    qtyHtml = `
+                        <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${lots} (${totalQty})</div>
+                        <div class="straddle-subtext">Entry Qty: ${entryQty}</div>
+                        <div class="straddle-subtext">Exit Qty: ${exitQty}</div>
+                    `;
+                }
+
+                // Symbol HTML (With shift strike option and step arrows for OPEN legs)
+                let symHtml = "";
+                const curStrikeMatch = pending ? pending.strike : (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
+                if (isOpen) {
+                    symHtml = `
+                        <div class="straddle-sym-card ${symAccentClass}">
+                            <div class="straddle-sym-title">${sym}</div>
+                            <div class="straddle-sym-sub">${expiryText}</div>
+                            <div style="display:flex; align-items:center; gap:4px; margin-top:4px;">
+                                <span style="font-size:9.5px; color:#94a3b8; font-weight:700;">Shift:</span>
+                                <div style="display:inline-flex; align-items:center; background:#0f172a; border:1px solid #334155; border-radius:4px; padding:1px 3px; gap:2px;">
+                                    <input type="text" id="live_strike_${idx}" class="straddle-input" style="width:58px; padding:1px 2px; font-size:11px; font-weight:700; text-align:center; border:none; background:transparent;" value="${curStrikeMatch}" placeholder="Strike" oninput="markRunningLegChanged(${idx})" title="Enter or step strike price">
+                                    <div style="display:flex; flex-direction:column; gap:1px;">
+                                        <button type="button" class="strike-step-btn" onclick="stepLiveStrikePrice(${idx}, 1)" title="Strike +">▲</button>
+                                        <button type="button" class="strike-step-btn" onclick="stepLiveStrikePrice(${idx}, -1)" title="Strike -">▼</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    symHtml = `
+                        <div class="straddle-sym-card ${symAccentClass}">
+                            <div class="straddle-sym-title">${sym}</div>
+                            <div class="straddle-sym-sub">${expiryText}</div>
+                        </div>
+                    `;
+                }
+
+                // Avg Entry Price & Entry Time
+                const avgEntPrice = pos.avg_ent_price ? Number(pos.avg_ent_price).toFixed(2) : '-';
+                const entryTime = pos.entry_time || '-';
+
+                // Per Leg Target (Interactive for OPEN legs)
+                let targetHtml = "-";
+                if (isOpen) {
+                    const isPts = pending ? (pending.target_mode === "₹" || pending.target_mode.includes("Pts")) : (pos.target_type && (pos.target_type.includes("Pts") || pos.target_type.includes("₹")));
+                    const tVal = pending ? pending.target_val : (pos.target_value !== undefined ? pos.target_value : 25);
+                    targetHtml = `
+                        <div style="display:flex; align-items:center; gap:3px;">
+                            <select id="live_tgt_mode_${idx}" class="straddle-select" style="padding:2px 3px; font-size:10.5px; width:45px;" onchange="markRunningLegChanged(${idx})">
+                                <option value="%" ${!isPts ? 'selected' : ''}>%</option>
+                                <option value="₹" ${isPts ? 'selected' : ''}>₹</option>
+                            </select>
+                            <input type="number" id="live_tgt_val_${idx}" class="straddle-input" style="width:54px; padding:2px 4px; font-size:11px; font-weight:700;" value="${tVal}" step="0.5" oninput="markRunningLegChanged(${idx})" title="Change Target (% or ₹ points)">
+                        </div>
+                        <div id="live_tgt_sub_${idx}" style="font-size:10px; color:#38bdf8; font-weight:700; margin-top:2px;">TGT: ₹${pos.target_price ? Number(pos.target_price).toFixed(2) : '-'}</div>
+                    `;
+                } else if (pos.target_price && pos.target_price > 0) {
+                    const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
+                    targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span></div>`;
+                } else if (pos.target_value && pos.target_value > 0) {
+                    const tgtLabel = `TGT: ${pos.target_value}%`;
+                    targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>`;
+                }
+
+                // Per Leg Stoploss (Interactive for OPEN legs)
+                let slHtml = "-";
+                if (isOpen) {
+                    const isPts = pending ? (pending.sl_mode === "₹" || pending.sl_mode.includes("Pts")) : (pos.sl_type && (pos.sl_type.includes("Pts") || pos.sl_type.includes("₹")));
+                    const sVal = pending ? pending.sl_val : (pos.sl_value !== undefined ? pos.sl_value : 15);
+                    slHtml = `
+                        <div style="display:flex; align-items:center; gap:3px;">
+                            <select id="live_sl_mode_${idx}" class="straddle-select" style="padding:2px 3px; font-size:10.5px; width:45px;" onchange="markRunningLegChanged(${idx})">
+                                <option value="%" ${!isPts ? 'selected' : ''}>%</option>
+                                <option value="₹" ${isPts ? 'selected' : ''}>₹</option>
+                            </select>
+                            <input type="number" id="live_sl_val_${idx}" class="straddle-input" style="width:54px; padding:2px 4px; font-size:11px; font-weight:700;" value="${sVal}" step="0.5" oninput="markRunningLegChanged(${idx})" title="Change Stoploss (% or ₹ points)">
+                        </div>
+                        <div id="live_sl_sub_${idx}" style="font-size:10px; color:#f87171; font-weight:700; margin-top:2px;">SL: ₹${pos.sl_price ? Number(pos.sl_price).toFixed(2) : '-'}</div>
+                    `;
+                } else if (pos.sl_price && pos.sl_price > 0) {
+                    const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
+                    const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
+                    slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span></div>
+                              <div class="orig-sl-sub">${origSlLabel}</div>`;
+                } else if (pos.sl_value && pos.sl_value > 0) {
+                    const slLabel = `SL: -${pos.sl_value}%`;
+                    const origSlLabel = `ORIGINAL SL: -${pos.sl_value}%`;
+                    slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">-</span></div>
+                              <div class="orig-sl-sub">${origSlLabel}</div>`;
+                }
+
+                // Avg Exit Price & Exit Time
+                const avgExitPrice = (pos.avg_exit_price && pos.avg_exit_price > 0) ? Number(pos.avg_exit_price).toFixed(2) : '-';
+                const exitTime = (isClosed && pos.exit_time) ? pos.exit_time : (pos.avg_exit_price && pos.avg_exit_price > 0 ? (pos.exit_time || '-') : '-');
+
+                // Exit Reason
+                let exitReasonHtml = "-";
+                if (pos.exit_reason && pos.exit_reason !== "-") {
+                    const rLower = String(pos.exit_reason).toLowerCase();
+                    if (rLower.includes("target")) {
+                        exitReasonHtml = `<span class="exit-reason-tgt">${pos.exit_reason}</span>`;
+                    } else if (rLower.includes("stoploss") || rLower.includes("sl")) {
+                        exitReasonHtml = `<span class="exit-reason-sl">${pos.exit_reason}</span>`;
+                    } else {
+                        exitReasonHtml = `<span class="straddle-reason-pill">${pos.exit_reason}</span>`;
+                    }
+                }
+
+                // Action buttons (Save on live change + Exit + Detach)
+                let actionHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
+                if (isOpen) {
+                    actionHtml = `
+                        <div style="display:flex; flex-direction:column; gap:4px; align-items:center;">
+                            <button type="button" id="btn_save_running_${idx}" class="straddle-btn btn-primary" style="${hasPending ? 'display:inline-flex;' : 'display:none;'} padding:3px 8px; font-size:11px; font-weight:800; background:#0ea5e9; border:none; box-shadow:0 0 8px rgba(14,165,233,0.6);" onclick="saveRunningPositionChanges('${stratId}', '${pos.id || ''}', ${idx})" title="Save and apply live modifications immediately">
+                                💾 Save
+                            </button>
+                            <div style="display:flex; align-items:center; gap:4px;">
+                                <button type="button" class="straddle-btn btn-danger" style="padding:2px 7px; font-size:10.5px; font-weight:700;" onclick="squareOffSingleLegIndex(${idx})" title="Square off this leg on broker">
+                                    Exit
+                                </button>
+                                <button type="button" class="btn-detach" onclick="detachRunningPosition('${stratId}', '${pos.id || ''}', ${idx})" title="Detach from algo WITHOUT squaring off on broker">
+                                    🔓 Detach
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // LTP & Dynamic Color Tick
+                const ltp = Number(pos.ltp || pos.avg_ent_price || 0.0);
+                const prevLtp = prevMap[sym] || ltp;
+                let ltpClass = "";
+                if (ltp > prevLtp) ltpClass = "straddle-ltp-up";
+                else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
+                prevMap[sym] = ltp;
+
+                const ltpColor = isClosed ? '#f87171' : (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
+
+                // MTM (₹)
+                const mtm = Number(pos.mtm || 0.0);
+                const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
+                const mtmFormatted = mtm.toFixed(2);
+
+                const rowClass = isError ? "straddle-row-error" : "";
+
+                // Check if rejected toast needs to be shown
+                if (isError) {
+                    if (!window._straddleToastedErrors) window._straddleToastedErrors = new Set();
+                    const errKey = `${sym}_${pos.error_message || ''}_${pos.entry_time || ''}`;
+                    if (!window._straddleToastedErrors.has(errKey)) {
+                        window._straddleToastedErrors.add(errKey);
+                        showStraddleRejectedToast({
+                            symbol: sym,
+                            message: pos.error_message || "You need to add required funds in your account to place this trade.",
+                            clientId: pos.client_id || (window._straddleState.activeAccount ? window._straddleState.activeAccount.id : 'Kotak Neo'),
+                            orderId: pos.order_id || ('261' + Math.floor(Math.random() * 1000000000000)),
+                            time: pos.entry_time || (new Date().toLocaleTimeString('en-US', { hour12: false }))
+                        });
+                    }
+                }
+
+                const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
+
+                html += `
+                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}">
+                        <td style="text-align:center;">
+                            <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
                         </td>
+                        <td>${statusHtml}</td>
+                        <td><span class="straddle-side-badge ${sideClass}">${side}</span></td>
+                        <td>${symHtml}</td>
+                        <td>${qtyHtml}</td>
+                        <td>
+                            <div class="straddle-ent-price-val" style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${avgEntPrice}</div>
+                            <div class="straddle-subtext">${entryTime}</div>
+                        </td>
+                        <td>${targetHtml}</td>
+                        <td>${slHtml}</td>
+                        <td>
+                            <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${avgExitPrice}</div>
+                            ${exitTime !== '-' ? `<div class="straddle-subtext">${exitTime}</div>` : ''}
+                        </td>
+                        <td>${exitReasonHtml}</td>
+                        <td style="text-align:right;">
+                            <span class="straddle-ltp ${ltpClass}" style="color:${ltpColor}; font-weight:700; font-family:var(--font-mono);">${ltp > 0 ? ltp.toFixed(2) : '-'}</span>
+                        </td>
+                        <td style="text-align:right;">
+                            <span class="straddle-mtm ${mtmClass}">${mtmFormatted}</span>
+                        </td>
+                        <td style="text-align:center;">${actionHtml}</td>
                     </tr>
                 `;
-            }
-        });
-        tbody.innerHTML = html;
+
+                // If error, append error banner directly underneath row with direct action buttons (Retry with adjusted Settings / Rectify)
+                if (isError) {
+                    const legId = pos.id || '';
+                    const errDetail = pos.error_message || pos.error || "Order placement rejected by broker / exchange RMS.";
+                    const marginInfo = parseMarginError(errDetail);
+                    let marginBadgeHtml = "";
+                    if (marginInfo && marginInfo.hasMarginDetails) {
+                        marginBadgeHtml = `
+                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
+                                <span style="background:rgba(56,189,248,0.15); color:#38bdf8; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">💳 Available: ₹${marginInfo.available.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+                                <span style="background:rgba(245,158,11,0.15); color:#fbbf24; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">⚡ Required: ₹${marginInfo.required.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+                                <span style="background:rgba(239,68,68,0.22); color:#f87171; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">🔴 Shortfall: ₹${marginInfo.shortfall.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+                            </div>
+                        `;
+                    }
+                    const curStrikeMatch = (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
+                    html += `
+                        <tr class="straddle-error-banner-row">
+                            <td colspan="13">
+                                <div class="straddle-error-banner-cell" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); padding:10px 14px; border-radius:6px; margin: 4px 0;">
+                                    <div style="display:flex; flex-direction:column; gap:3px; flex:1; min-width:260px;">
+                                        <div style="display:flex; align-items:center; gap:8px;">
+                                            <span class="straddle-error-banner-icon" style="font-size:16px;">⚠️</span>
+                                            <span class="straddle-error-banner-text" style="color:#fca5a5; font-size:11.5px; font-weight:600; line-height:1.4;">
+                                                ${errDetail}
+                                            </span>
+                                        </div>
+                                        ${marginBadgeHtml}
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:rgba(0,0,0,0.3); padding:6px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
+                                        <div style="display:flex; align-items:center; gap:4px;">
+                                            <span style="font-size:11px; color:#cbd5e1; font-weight:700;">Lots:</span>
+                                            <input type="number" id="err_lots_${idx}" class="straddle-input" style="width:52px; padding:3px 6px; font-size:11.5px; font-weight:700; text-align:center;" value="${pos.lots || 1}" min="1" max="100" title="Adjust lots to fit margin">
+                                        </div>
+                                        <div style="display:flex; align-items:center; gap:4px;">
+                                            <span style="font-size:11px; color:#cbd5e1; font-weight:700;">Strike:</span>
+                                            <input type="text" id="err_strike_${idx}" class="straddle-input" style="width:80px; padding:3px 6px; font-size:11.5px; font-weight:700;" value="${curStrikeMatch}" placeholder="e.g. 23250" title="Adjust strike to fit margin">
+                                        </div>
+                                        <button type="button" class="algo-btn-retry" style="background:#10b981; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLegInline('${stratId}', '${legId}', ${idx})" title="Retry order with updated lots and strike">
+                                            🔄 Retry with Settings
+                                        </button>
+                                        <button type="button" class="algo-btn-retry" style="background:#ef4444; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLeg('${stratId}', '${legId}', ${idx})" title="Immediately retry placing this order on broker">
+                                            Retry Original
+                                        </button>
+                                        <button type="button" class="algo-btn-rectify" style="background:#2563eb; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="openRectifyLegModal('${stratId}', '${legId}', ${idx})" title="Edit lots, strike price, product or configuration">
+                                            🛠️ Rectify Leg
+                                        </button>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }
+            });
+            tbody.innerHTML = html;
+        }
     }
 
     // Render MTM Banner Strip
@@ -4212,6 +4412,8 @@ function populateStraddleSettingsForm(s) {
     document.getElementById("cfgExitDelaySec").value = adv.exit_delay_sec !== undefined ? adv.exit_delay_sec : 3;
 
     document.getElementById("cfgSlOrderPlacement").value = adv.sl_order_placement || "Keep with self";
+    const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
+    if (tgtOrderEl) tgtOrderEl.value = adv.target_order_placement || "Keep with self";
     document.getElementById("cfgSlPlacementDelaySec").value = adv.sl_placement_delay_sec !== undefined ? adv.sl_placement_delay_sec : 0;
     document.getElementById("cfgMtmSlDelaySec").value = adv.mtm_sl_delay_sec !== undefined ? adv.mtm_sl_delay_sec : 0;
 
@@ -4619,6 +4821,7 @@ function serializeCurrentStrategySettings() {
             exit_delay_side: document.getElementById("cfgExitDelaySide")?.value,
             exit_delay_sec: parseInt(document.getElementById("cfgExitDelaySec")?.value) || 3,
             sl_order_placement: document.getElementById("cfgSlOrderPlacement")?.value || "Keep with self",
+            target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Keep with self",
             sl_placement_delay_sec: parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value) || 0,
             mtm_sl_delay_sec: parseInt(document.getElementById("cfgMtmSlDelaySec")?.value) || 0,
             auto_handling_sl_cancellation: document.getElementById("cfgAutoHandlingSl")?.checked,
@@ -5698,5 +5901,219 @@ window.retrySingleStraddleLegInline = retrySingleStraddleLegInline;
 window.saveRunningPositionChanges = saveRunningPositionChanges;
 window.markRunningLegChanged = markRunningLegChanged;
 window.squareOffSingleLegIndex = squareOffSingleLegIndex;
+window.stepLiveStrikePrice = stepLiveStrikePrice;
+window.stepLiveLots = stepLiveLots;
+window.detachRunningPosition = detachRunningPosition;
+
+// Broker position adoption functions and exports
+let _adoptablePositionsList = [];
+let _selectedAdoptablePositionIndex = -1;
+
+async function openAdoptBrokerPositionModal() {
+    const stratId = window._straddleState?.activeStrategy?.strategy_id || 
+                    window._straddleState?.activeStrategyId || 
+                    document.getElementById("straddleTerminalStrategySelect")?.value;
+    if (!stratId) {
+        showStraddleToast("Please select or start a strategy first.", "error", 2500);
+        return;
+    }
+
+    const modal = document.getElementById("modalAdoptBrokerPosition");
+    if (!modal) return;
+    modal.style.display = "flex";
+
+    const loadingDiv = document.getElementById("adoptModalLoading");
+    const emptyDiv = document.getElementById("adoptModalEmpty");
+    const contentDiv = document.getElementById("adoptModalContent");
+    const tbody = document.getElementById("adoptBrokerPositionsTableBody");
+    const confirmBtn = document.getElementById("btnConfirmAdoptPosition");
+
+    if (loadingDiv) loadingDiv.style.display = "block";
+    if (emptyDiv) emptyDiv.style.display = "none";
+    if (contentDiv) contentDiv.style.display = "none";
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "➕ Add Selected Position to Algo";
+    }
+    _selectedAdoptablePositionIndex = -1;
+    _adoptablePositionsList = [];
+
+    try {
+        const resp = await fetch(`/api/straddle/adoptable_positions?strategy_id=${encodeURIComponent(stratId)}`);
+        const res = await resp.json();
+
+        if (loadingDiv) loadingDiv.style.display = "none";
+
+        if (!res.success) {
+            showStraddleToast(res.error || "Failed to scan broker positions", "error", 3500);
+            if (emptyDiv) {
+                emptyDiv.style.display = "block";
+                emptyDiv.innerHTML = `<div style="font-size:14px; font-weight:700; color:#f87171; margin-bottom:4px;">Error Accessing Kotak Neo</div><div style="font-size:12px;">${res.error || "Broker communication error"}</div>`;
+            }
+            return;
+        }
+
+        _adoptablePositionsList = res.positions || [];
+        if (_adoptablePositionsList.length === 0) {
+            if (emptyDiv) emptyDiv.style.display = "block";
+            return;
+        }
+
+        if (contentDiv) contentDiv.style.display = "block";
+        if (tbody) {
+            tbody.innerHTML = _adoptablePositionsList.map((p, idx) => {
+                const sideClass = (p.side === 'BUY') ? 'badge-buy' : 'badge-sell';
+                const pnl = Number(p.pnl || 0);
+                const pnlClass = pnl >= 0 ? 'color:#10b981;' : 'color:#f87171;';
+                return `
+                    <tr id="adopt_row_${idx}" style="cursor:pointer; transition:background 0.15s ease;" onclick="selectAdoptablePositionIndex(${idx})">
+                        <td style="text-align:center;">
+                            <input type="radio" name="adoptPosRadio" id="adopt_radio_${idx}" value="${idx}" onchange="selectAdoptablePositionIndex(${idx})">
+                        </td>
+                        <td>
+                            <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono); font-size:12px;">${p.symbol}</div>
+                            <div style="font-size:10px; color:#64748b;">${p.trading_symbol || p.symbol} (${p.exchange_segment || 'nfo'})</div>
+                        </td>
+                        <td>
+                            <span class="straddle-badge ${sideClass}" style="font-size:10px; padding:2px 6px;">${p.side}</span>
+                        </td>
+                        <td style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:12px;">
+                            ${p.quantity} <span style="font-size:10px; color:#94a3b8;">(${p.lots || 1} lots)</span>
+                        </td>
+                        <td style="font-family:var(--font-mono); color:#cbd5e1; font-size:12px;">
+                            ₹${Number(p.avg_price || 0).toFixed(2)}
+                        </td>
+                        <td style="font-family:var(--font-mono); font-weight:700; color:#38bdf8; font-size:12px;">
+                            ₹${Number(p.ltp || p.avg_price || 0).toFixed(2)}
+                        </td>
+                        <td style="text-align:right; font-family:var(--font-mono); font-weight:800; font-size:12px; ${pnlClass}">
+                            ₹${pnl.toFixed(2)}
+                        </td>
+                    </tr>
+                `;
+            }).join("");
+        }
+
+        // Auto-select first position
+        selectAdoptablePositionIndex(0);
+
+    } catch (err) {
+        if (loadingDiv) loadingDiv.style.display = "none";
+        if (emptyDiv) {
+            emptyDiv.style.display = "block";
+            emptyDiv.innerHTML = `<div style="font-size:14px; font-weight:700; color:#f87171; margin-bottom:4px;">Error Connecting to Server</div><div style="font-size:12px;">${err.message}</div>`;
+        }
+    }
+}
+
+function selectAdoptablePositionIndex(idx) {
+    _selectedAdoptablePositionIndex = idx;
+    const confirmBtn = document.getElementById("btnConfirmAdoptPosition");
+    if (confirmBtn) confirmBtn.disabled = false;
+
+    // Check radio
+    const radio = document.getElementById(`adopt_radio_${idx}`);
+    if (radio) radio.checked = true;
+
+    // Highlight row
+    const tbody = document.getElementById("adoptBrokerPositionsTableBody");
+    if (tbody) {
+        const rows = tbody.querySelectorAll("tr");
+        rows.forEach((r, i) => {
+            if (i === idx) {
+                r.style.background = "rgba(56, 189, 248, 0.12)";
+                r.style.borderLeft = "3px solid #38bdf8";
+            } else {
+                r.style.background = "transparent";
+                r.style.borderLeft = "none";
+            }
+        });
+    }
+}
+
+function closeAdoptBrokerPositionModal() {
+    const modal = document.getElementById("modalAdoptBrokerPosition");
+    if (modal) modal.style.display = "none";
+    _selectedAdoptablePositionIndex = -1;
+    _adoptablePositionsList = [];
+}
+
+async function submitAdoptBrokerPosition() {
+    if (_selectedAdoptablePositionIndex < 0 || !_adoptablePositionsList[_selectedAdoptablePositionIndex]) {
+        showStraddleToast("Please select a position to adopt.", "error", 2500);
+        return;
+    }
+
+    const stratId = window._straddleState?.activeStrategy?.strategy_id || 
+                    window._straddleState?.activeStrategyId || 
+                    document.getElementById("straddleTerminalStrategySelect")?.value;
+    const pos = _adoptablePositionsList[_selectedAdoptablePositionIndex];
+
+    const tgtMode = document.getElementById("adopt_tgt_mode")?.value || "%";
+    const tgtVal = parseFloat(document.getElementById("adopt_tgt_val")?.value) || 25;
+    const slMode = document.getElementById("adopt_sl_mode")?.value || "%";
+    const slVal = parseFloat(document.getElementById("adopt_sl_val")?.value) || 15;
+
+    const confirmBtn = document.getElementById("btnConfirmAdoptPosition");
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "Adopting Position...";
+    }
+
+    try {
+        const resp = await fetch("/api/straddle/adopt_position", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                strategy_id: stratId,
+                position_data: {
+                    symbol: pos.symbol,
+                    trading_symbol: pos.trading_symbol || pos.symbol,
+                    token: pos.token,
+                    exchange_segment: pos.exchange_segment || "nfo",
+                    side: pos.side,
+                    product: pos.product || "MIS",
+                    quantity: pos.quantity,
+                    lots: pos.lots || 1,
+                    lot_size: pos.lot_size || 65,
+                    strike_price: pos.strike_price,
+                    option_type: pos.option_type,
+                    expiry_date: pos.expiry_date,
+                    avg_price: pos.avg_price,
+                    ltp: pos.ltp || pos.avg_price,
+                    target_mode: tgtMode,
+                    target_val: tgtVal,
+                    sl_mode: slMode,
+                    sl_val: slVal
+                }
+            })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showStraddleToast(res.message || `Successfully adopted ${pos.symbol} into ${stratId}!`, "success", 3000);
+            closeAdoptBrokerPositionModal();
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(res.error || "Failed to adopt position", "error", 4000);
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = "➕ Add Selected Position to Algo";
+            }
+        }
+    } catch (e) {
+        showStraddleToast("Error adopting position: " + e.message, "error", 3500);
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "➕ Add Selected Position to Algo";
+        }
+    }
+}
+
+window.openAdoptBrokerPositionModal = openAdoptBrokerPositionModal;
+window.selectAdoptablePositionIndex = selectAdoptablePositionIndex;
+window.closeAdoptBrokerPositionModal = closeAdoptBrokerPositionModal;
+window.submitAdoptBrokerPosition = submitAdoptBrokerPosition;
+
 
 
