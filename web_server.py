@@ -918,7 +918,7 @@ def api_system_restart():
 
 def _auto_git_sync_worker():
     """Periodically check remote GitHub repository and auto-pull if updates exist."""
-    time.sleep(30)
+    time.sleep(10)
     while True:
         try:
             rem_chk = subprocess.run(["git", "remote"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
@@ -939,7 +939,7 @@ def _auto_git_sync_worker():
                         os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception as e:
             logger.debug(f"[Auto-Updater] Check notice: {e}")
-        time.sleep(300)
+        time.sleep(15)
 
 
 def init_services():
