@@ -8591,4 +8591,128 @@ table .flag-cell {
     }
 }
 
+/* =========================================================================
+   ANGELONE-STYLE BASKET ORDERS SYSTEM STYLES
+   ========================================================================= */
+.basket-orders-table tbody tr {
+    background: #0d1322;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+
+.basket-orders-table tbody tr:hover {
+    background: #111a2e;
+    border-color: rgba(56, 189, 248, 0.25);
+}
+
+.basket-action-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s ease;
+}
+
+.basket-action-btn:hover {
+    transform: scale(1.08);
+}
+
+.basket-action-buy {
+    background: #064e3b;
+    color: #34d399;
+    border: 1px solid #059669;
+}
+
+.basket-action-sell {
+    background: #4c0519;
+    color: #fb7185;
+    border: 1px solid #e11d48;
+}
+
+.basket-badge-type {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #cbd5e1;
+}
+
+.basket-badge-type.active-ce {
+    background: #1e3a8a;
+    color: #93c5fd;
+    border-color: #3b82f6;
+}
+
+.basket-badge-type.active-pe {
+    background: #4a044e;
+    color: #f472b6;
+    border-color: #c026d3;
+}
+
+.basket-search-result-item {
+    padding: 9px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.12s ease;
+}
+
+.basket-search-result-item:hover {
+    background: #1e293b;
+}
+
+.basket-stepper-box {
+    display: inline-flex;
+    align-items: center;
+    background: #0b1120;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.basket-stepper-btn {
+    background: #1e293b;
+    color: #cbd5e1;
+    border: none;
+    width: 22px;
+    height: 26px;
+    cursor: pointer;
+    font-weight: 800;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.basket-stepper-btn:hover {
+    background: #334155;
+    color: #ffffff;
+}
+
+.basket-input-num {
+    width: 60px;
+    height: 26px;
+    background: transparent;
+    border: none;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 12px;
+    color: #f8fafc;
+    outline: none;
+}
+
+
 

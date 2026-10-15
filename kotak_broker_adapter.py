@@ -553,37 +553,68 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             for item in data:
                 if not isinstance(item, dict):
                     continue
-                net_qty = int(item.get("netQty", item.get("quantity", 0)) or 0)
-                tsym = item.get("trdSym", item.get("trading_symbol", ""))
-                buy_avg = float(item.get("buyAvgPrc", item.get("buy_avg", 0.0)) or 0.0)
-                sell_avg = float(item.get("sellAvgPrc", item.get("sell_avg", 0.0)) or 0.0)
-                buy_qty = int(item.get("buyQty", item.get("buy_quantity", 0)) or 0)
-                sell_qty = int(item.get("sellQty", item.get("sell_quantity", 0)) or 0)
+
+                # Kotak Neo positions provide:
+                # 'flBuyQty' & 'flSellQty' (day filled) or 'cfBuyQty' & 'cfSellQty' (carry forward)
+                fl_buy = int(item.get("flBuyQty") or 0)
+                fl_sell = int(item.get("flSellQty") or 0)
+                cf_buy = int(item.get("cfBuyQty") or 0)
+                cf_sell = int(item.get("cfSellQty") or 0)
+
+                tot_buy_qty = fl_buy + cf_buy if (fl_buy + cf_buy) > 0 else int(item.get("buyQty", item.get("buy_quantity", 0)) or 0)
+                tot_sell_qty = fl_sell + cf_sell if (fl_sell + cf_sell) > 0 else int(item.get("sellQty", item.get("sell_quantity", 0)) or 0)
+
+                if item.get("netQty") is not None:
+                    net_qty = int(item.get("netQty") or 0)
+                elif item.get("quantity") is not None:
+                    net_qty = int(item.get("quantity") or 0)
+                else:
+                    net_qty = tot_buy_qty - tot_sell_qty
+
+                tsym = str(item.get("trdSym", item.get("trading_symbol", "")) or "")
+
+                buy_amt = float(item.get("buyAmt", 0.0) or item.get("cfBuyAmt", 0.0) or 0.0)
+                sell_amt = float(item.get("sellAmt", 0.0) or item.get("cfSellAmt", 0.0) or 0.0)
+
+                buy_avg = (buy_amt / tot_buy_qty) if tot_buy_qty > 0 else float(item.get("buyAvgPrc", item.get("buy_avg", 0.0)) or 0.0)
+                sell_avg = (sell_amt / tot_sell_qty) if tot_sell_qty > 0 else float(item.get("sellAvgPrc", item.get("sell_avg", 0.0)) or 0.0)
+
                 ltp = float(item.get("ltp", item.get("last_price", 0.0)) or 0.0)
-                pnl = float(item.get("urmtom", item.get("pnl", 0.0)) or 0.0)
+                pnl = float(item.get("urmtom", item.get("urMtom", item.get("pnl", 0.0))) or 0.0)
                 rpnl = float(item.get("rpnl", item.get("realizedPnl", item.get("rPnl", 0.0))) or 0.0)
                 ikey = str(item.get("tok", item.get("instrument_token", item.get("instrument_key", ""))) or "")
+                lot_size = int(item.get("lotSz") or item.get("brdLtQty") or 65)
 
                 avg_price = buy_avg if net_qty > 0 else (sell_avg if net_qty < 0 else (((buy_avg + sell_avg) / 2.0) if (buy_avg > 0 and sell_avg > 0) else (buy_avg or sell_avg)))
 
+                disp_sym = _KOTAK_TOKEN_MAP.get(ikey, tsym) or tsym
+
                 standardized.append({
-                    "symbol": tsym,
+                    "symbol": disp_sym,
                     "trading_symbol": tsym,
                     "instrument_key": ikey,
+                    "token": ikey,
                     "quantity": net_qty,
                     "net_qty": net_qty,
-                    "buy_quantity": buy_qty,
-                    "sell_quantity": sell_qty,
-                    "buy_qty": buy_qty,
-                    "sell_qty": sell_qty,
+                    "lots": abs(net_qty) // lot_size if lot_size > 0 else 1,
+                    "lot_size": lot_size,
+                    "buy_quantity": tot_buy_qty,
+                    "sell_quantity": tot_sell_qty,
+                    "buy_qty": tot_buy_qty,
+                    "sell_qty": tot_sell_qty,
                     "buy_avg": buy_avg,
                     "sell_avg": sell_avg,
                     "average_price": avg_price,
+                    "avg_price": avg_price,
                     "last_price": ltp,
                     "ltp": ltp,
                     "pnl": pnl,
                     "realised_pnl": rpnl,
+                    "strike_price": float(item.get("stkPrc") or 0.0),
+                    "option_type": str(item.get("optTp") or "").upper(),
+                    "expiry_date": str(item.get("expDt") or ""),
                     "product": item.get("prod", "NRML"),
+                    "exchange_segment": item.get("exSeg", "nse_fo"),
                     "client_id": item.get("actId") or "Kotak Neo Live"
                 })
             return standardized
@@ -598,14 +629,32 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
         try:
             res = client.limits()
-            data = res.get("data") if isinstance(res, dict) else res
+            data = res.get("data") if (isinstance(res, dict) and "data" in res and isinstance(res["data"], dict)) else res
+            if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                data = data[0]
+
             if isinstance(data, dict):
-                avail = float(data.get("availableMargin", data.get("net", 0.0)) or 0.0)
-                used = float(data.get("utilizedMargin", data.get("marginUsed", 0.0)) or 0.0)
+                avail = float(data.get("Net") or data.get("net") or data.get("availableMargin") or data.get("available_margin") or 0.0)
+                used = float(data.get("MarginUsed") or data.get("MarginUsedPrsnt") or data.get("utilizedMargin") or data.get("marginUsed") or 0.0)
+                collateral = float(data.get("CollateralValue") or data.get("Collateral") or data.get("collateral") or 0.0)
+                span = float(data.get("SpanMarginPrsnt") or data.get("FoSpanrgnNrmlPrsnt") or 0.0)
+                exposure = float(data.get("ExposureMarginPrsnt") or data.get("FoExpMrgnNrmlPrsnt") or 0.0)
+                payin = float(data.get("RmsPayInAmt") or data.get("payin") or 0.0)
+                unavailable = float(data.get("DeliveryMarginPresent") or data.get("CncSellcrdPresent") or 0.0)
+                total = round(avail + used, 2)
+
                 return {
                     "available_margin": avail,
+                    "available_cash": avail,
                     "used_margin": used,
-                    "net_cash": avail + used
+                    "collateral_margin": collateral,
+                    "span_margin": span,
+                    "exposure_margin": exposure,
+                    "payin_amount": payin,
+                    "unavailable_to_trade": unavailable,
+                    "net_cash": total,
+                    "total_margin": total,
+                    "raw": data
                 }
             return {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
         except Exception as e:

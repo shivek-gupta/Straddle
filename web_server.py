@@ -356,7 +356,7 @@ def api_straddle_adopt_position():
     try:
         data = request.get_json(silent=True) or {}
         sid = data.get("strategy_id")
-        pos_data = data.get("position") or data
+        pos_data = data.get("position_data") or data.get("position") or data
         mgr = get_straddle_manager()
         res = mgr.adopt_broker_position(strategy_id=sid, position_data=pos_data)
         return jsonify(res)
@@ -719,6 +719,34 @@ def api_straddle_order_margin():
         return jsonify(res)
     except Exception as e:
         logger.error(f"Error in api_straddle_order_margin: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/basket/margin", methods=["POST"])
+def api_straddle_basket_margin():
+    try:
+        data = request.get_json(silent=True) or {}
+        orders = data.get("orders") or []
+        multiplier = int(data.get("multiplier") or 1)
+        mgr = get_straddle_manager()
+        res = mgr.calculate_basket_margin(orders=orders, multiplier=multiplier)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_basket_margin: {e}")
+        return jsonify({"success": False, "error": str(e), "required_margin": 0.0, "available_margin": 0.0}), 500
+
+
+@app.route("/api/straddle/basket/execute", methods=["POST"])
+def api_straddle_basket_execute():
+    try:
+        data = request.get_json(silent=True) or {}
+        orders = data.get("orders") or []
+        multiplier = int(data.get("multiplier") or 1)
+        mgr = get_straddle_manager()
+        res = mgr.execute_basket_orders(orders=orders, multiplier=multiplier)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_basket_execute: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

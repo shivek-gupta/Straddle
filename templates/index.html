@@ -284,7 +284,7 @@
                         <div style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">Broker Funds & Margin Utilization</div>
                         <div style="font-size:12px; color:#94a3b8; margin-top:2px;">Live synchronized with Kotak Neo API</div>
                     </div>
-                    <button type="button" class="orderbook-blue-btn" onclick="loadStraddleMargin()">🔄 Refresh Funds</button>
+                    <button type="button" class="orderbook-blue-btn" id="btnRefreshFunds" onclick="loadStraddleMargin(this)">🔄 Refresh Funds</button>
                 </div>
                 <div id="straddleMarginCardsContainer">
                     <!-- Populated dynamically via JS -->
@@ -1356,6 +1356,7 @@
                         </select>
 
                         <button type="button" class="straddle-btn btn-outline" style="padding:4px 10px; font-size:12px;" onclick="loadStraddleOptionChain()">🔄 Refresh</button>
+                        <button type="button" class="straddle-btn" style="background:#2563eb; color:#fff; font-weight:800; padding:4px 12px; font-size:12px; display:inline-flex; align-items:center; gap:6px; border:none; border-radius:4px; cursor:pointer;" onclick="openBasketOrderModal()">🧺 Basket <span id="basketHeaderBadge" style="background:rgba(255,255,255,0.25); color:#fff; border-radius:10px; padding:0 6px; font-size:10px;">0</span></button>
                         <button class="straddle-modal-close" onclick="closeStraddleOptionChainModal()">×</button>
                     </div>
                 </div>
@@ -1667,6 +1668,10 @@
                 <button type="button" class="straddle-btn btn-outline" onclick="closeSystemUpdateModal()">Close</button>
                 <button type="button" class="straddle-btn btn-success" onclick="executeGitCommitPush()">🚀 Commit & Push to Cloud</button>
                 <button type="button" class="straddle-btn btn-primary" onclick="executeSafeGitPull()">📥 Fetch & Reload (Zero Data Loss)</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Adopt / Import Existing Broker Position into Algo -->
     <div id="modalAdoptBrokerPosition" class="straddle-modal-backdrop" style="display:none; z-index:10050;">
         <div class="straddle-modal-card" style="max-width:840px;">
@@ -1737,6 +1742,124 @@
             <div class="straddle-modal-footer" style="padding:12px 20px; background:#070a13; border-top:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
                 <button type="button" class="straddle-btn btn-outline" onclick="closeAdoptBrokerPositionModal()">Cancel</button>
                 <button type="button" class="straddle-btn btn-success" id="btnConfirmAdoptPosition" onclick="submitAdoptBrokerPosition()" style="font-weight:800;" disabled>➕ Add Selected Position to Algo</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================================================================
+         ANGELONE-GRADE BASKET ORDERS MODAL
+         ==================================================================== -->
+    <div id="modalBasketOrders" class="straddle-modal-backdrop" style="display:none; z-index:10060;">
+        <div class="straddle-modal-card" style="max-width:1050px; width:95%; background:#0b0f19; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.85); overflow:hidden; display:flex; flex-direction:column;">
+            <!-- Header -->
+            <div class="basket-modal-header" style="padding:14px 20px; background:#070a13; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span id="basketModalName" contenteditable="true" spellcheck="false" title="Click to rename basket" style="font-size:15px; font-weight:800; color:#f8fafc; letter-spacing:0.5px; border-bottom:1px dashed #64748b; padding:1px 4px; outline:none; text-transform:uppercase;">THURSDAY BASKET</span>
+                        <span style="font-size:12px; color:#64748b; cursor:pointer;" onclick="document.getElementById('basketModalName').focus()">✏️</span>
+                    </div>
+                    <span id="basketOrderCountBadge" style="font-size:12px; font-weight:700; color:#94a3b8;">(0/50 orders)</span>
+                </div>
+
+                <!-- Search & Add Bar -->
+                <div style="position:relative; width:360px; max-width:100%;">
+                    <div style="display:flex; align-items:center; background:#0c101a; border:1px solid #334155; border-radius:6px; padding:0 10px; height:36px;">
+                        <span style="font-size:13px; color:#64748b; margin-right:8px;">🔍</span>
+                        <input type="text" id="basketSearchInput" placeholder="Search and add stocks, futures and options" oninput="handleBasketSearchInput(this.value)" autocomplete="off" style="background:transparent; border:none; outline:none; color:#f8fafc; font-size:12px; width:100%;">
+                        <span id="basketSearchClear" style="font-size:12px; color:#64748b; cursor:pointer; display:none;" onclick="clearBasketSearch()">✕</span>
+                    </div>
+                    <div id="basketSearchResultsDropdown" style="display:none; position:absolute; top:40px; left:0; right:0; background:#0f172a; border:1px solid #3b82f6; border-radius:6px; z-index:11000; max-height:240px; overflow-y:auto; box-shadow:0 12px 30px rgba(0,0,0,0.8);"></div>
+                </div>
+
+                <!-- Window Controls -->
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" class="straddle-modal-close" onclick="closeBasketOrderModal()" style="font-size:20px; color:#94a3b8; background:none; border:none; cursor:pointer; padding:4px 8px;">✕</button>
+                </div>
+            </div>
+
+            <!-- Basket Orders List Table -->
+            <div style="padding:16px 20px; max-height:55vh; overflow-y:auto; background:#080c14;">
+                <div style="overflow-x:auto;">
+                    <table class="straddle-table basket-orders-table" style="width:100%; border-collapse:separate; border-spacing:0 8px;">
+                        <thead>
+                            <tr style="color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                                <th style="width:36px; padding:6px 8px; text-align:center;"><input type="checkbox" id="basketSelectAllCheckbox" checked onchange="toggleSelectAllBasketOrders(this.checked)"></th>
+                                <th style="padding:6px 10px; text-align:left;">Scrip name</th>
+                                <th style="padding:6px 8px; text-align:center;">Action</th>
+                                <th style="padding:6px 8px; text-align:left;">Expiry Date</th>
+                                <th style="padding:6px 8px; text-align:center;">Strike Price</th>
+                                <th style="padding:6px 8px; text-align:center;">CE/PE</th>
+                                <th style="padding:6px 8px; text-align:center;">Product</th>
+                                <th style="padding:6px 8px; text-align:center;">Quantity</th>
+                                <th style="padding:6px 10px; text-align:left;">Price / Price Type</th>
+                                <th style="padding:6px 8px; text-align:center;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="basketOrdersTableBody">
+                            <!-- Populated dynamically via JS -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Empty State -->
+                <div id="basketOrdersEmptyState" style="display:none; text-align:center; padding:50px 20px; color:#64748b;">
+                    <div style="font-size:32px; margin-bottom:10px;">🧺</div>
+                    <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">Your Basket is Empty</div>
+                    <div style="font-size:12px; margin-bottom:14px;">Add legs from the Option Chain or use the search bar above to build multi-leg strategies.</div>
+                    <button type="button" class="straddle-btn btn-primary" onclick="closeBasketOrderModal(); openStraddleOptionChainModal();" style="font-size:12px; padding:6px 14px;">⚡ Open Option Chain</button>
+                </div>
+
+                <!-- Protected Market Orders Notice Banner (Screenshot 4) -->
+                <div id="basketNoticeBanner" style="background:rgba(217,119,6,0.12); border:1px solid rgba(217,119,6,0.3); border-radius:6px; padding:8px 14px; color:#fbbf24; font-size:12px; display:flex; align-items:center; gap:8px; margin-top:12px;">
+                    <span style="font-size:14px;">⚠️</span>
+                    <span>All your market orders are protected with automated price protection filters and BUY-first margin priority</span>
+                </div>
+            </div>
+
+            <!-- Footer: Margins, Multiplier, Charges & Actions (Screenshot 4) -->
+            <div style="padding:14px 20px; background:#070a13; border-top:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; gap:12px;">
+                <!-- Row 1: Margin Summary & Multiplier -->
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+                    <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+                        <div style="font-size:13px; color:#cbd5e1;">
+                            <span style="color:#94a3b8;">Available Margin:</span> 
+                            <strong style="color:#10b981; font-family:var(--font-mono); font-size:14px; margin-left:4px;">₹ <span id="basketAvailableMarginText">--</span></strong>
+                        </div>
+                        <div style="font-size:13px; color:#cbd5e1;">
+                            <span style="color:#94a3b8;">Required Margin:</span> 
+                            <strong style="color:#38bdf8; font-family:var(--font-mono); font-size:14px; margin-left:4px;">₹ <span id="basketRequiredMarginText">0.00</span></strong>
+                            <span title="Calculated with SEBI Hedge Benefit: BUY positions discount SELL margin requirement" style="cursor:help; font-size:12px; color:#64748b; margin-left:4px;">ℹ️</span>
+                        </div>
+                        <div id="basketMarginHedgeSavings" style="display:none; font-size:11.5px; color:#10b981; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:4px; padding:2px 8px;">
+                            🎉 Hedge Benefit: ₹ <span id="basketHedgeSavingsText">0.00</span> saved
+                        </div>
+                    </div>
+
+                    <!-- Lot / Quantity Multiplier Stepper (Screenshot 4) -->
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:12px; color:#94a3b8; font-weight:700;">Lot/Quantity Multiplier</span>
+                        <div style="display:flex; align-items:center; background:#0b1120; border:1px solid #334155; border-radius:6px; overflow:hidden;">
+                            <button type="button" onclick="stepBasketMultiplier(-1)" style="background:#1e293b; color:#cbd5e1; border:none; width:28px; height:28px; cursor:pointer; font-weight:800; font-size:14px;">-</button>
+                            <input type="number" id="basketMultiplierInput" min="1" max="100" value="1" onchange="onBasketMultiplierChange(this.value)" style="width:42px; height:28px; background:transparent; border:none; text-align:center; font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:13px; outline:none;">
+                            <button type="button" onclick="stepBasketMultiplier(1)" style="background:#1e293b; color:#cbd5e1; border:none; width:28px; height:28px; cursor:pointer; font-weight:800; font-size:14px;">+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 2: Charges & Action Buttons (Screenshot 4) -->
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; border-top:1px solid rgba(255,255,255,0.04); padding-top:10px;">
+                    <div style="font-size:12.5px; color:#94a3b8; display:flex; align-items:center; gap:6px;">
+                        <span>Total Charges:</span> 
+                        <strong style="color:#f8fafc; font-family:var(--font-mono);">₹ <span id="basketTotalChargesText">0.00</span></strong>
+                        <span title="Estimated Kotak Neo brokerage (₹20/order) + STT, Exchange, GST & Stamp charges" style="cursor:help; font-size:12px; color:#64748b;">ℹ️</span>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <button type="button" class="straddle-btn" style="background:#ea580c; color:#fff; font-weight:800; font-size:12px; padding:8px 16px; border-radius:6px; border:none; cursor:pointer; display:flex; align-items:center; gap:6px;" onclick="analyseBasketPayoff()">📊 ANALYSE</button>
+                        <button type="button" class="straddle-btn btn-outline" style="font-weight:700; font-size:12px; padding:8px 16px; border-radius:6px;" onclick="saveCurrentBasket()">SAVE BASKET</button>
+                        <button type="button" class="straddle-btn btn-primary" id="btnExecuteBasket" onclick="executeCurrentBasket()" style="font-weight:900; font-size:13px; padding:8px 24px; border-radius:6px; letter-spacing:0.3px; background:linear-gradient(135deg, #2563eb, #3b82f6); box-shadow:0 4px 14px rgba(37,99,235,0.4);">⚡ EXECUTE BASKET</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

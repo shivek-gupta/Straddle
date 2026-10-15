@@ -4553,31 +4553,35 @@ class StraddleManager:
             return filtered
 
     def get_margin_overview(self, client_id: Optional[str] = None) -> Dict[str, Any]:
-        """Return funds and margin utilization from Upstox or Paper adapter."""
+        """Return funds and margin utilization from Kotak Neo or Paper adapter."""
         mode = self._state.get("execution_mode", "LIVE_BROKER")
         
         # Query broker adapter for live funds
         funds = {}
         try:
-            upstox_broker = KotakNeoBrokerAdapter()
-            funds = upstox_broker.get_funds()
-        except Exception:
+            broker = KotakNeoBrokerAdapter()
+            funds = broker.get_funds()
+        except Exception as e:
+            logger.warning(f"Error querying live Kotak funds: {e}")
             funds = {}
 
         if not funds or (funds.get("available_margin", 0) == 0 and funds.get("available_cash", 0) == 0):
-            broker = get_broker_adapter(mode)
-            funds = broker.get_funds()
+            try:
+                adapter = get_broker_adapter(mode)
+                funds = adapter.get_funds()
+            except Exception:
+                pass
 
-        avail_margin = float(funds.get("available_margin", 0.0) or funds.get("available_cash", 0.0) or 196370.08)
-        avail_cash = float(funds.get("available_cash", 0.0) or avail_margin or 196370.08)
-        used = float(funds.get("used_margin", 0.0) or 40.61)
-        collateral = float(funds.get("collateral_margin", 0.0))
-        payin = float(funds.get("payin_amount", 0.0))
-        span = float(funds.get("span_margin", 0.0))
-        exposure = float(funds.get("exposure_margin", 0.0))
-        unavailable = float(funds.get("unavailable_to_trade", 0.0) or 3079.36)
+        avail_margin = float(funds.get("available_margin", 0.0) or funds.get("available_cash", 0.0) or 0.0)
+        avail_cash = float(funds.get("available_cash", 0.0) or avail_margin or 0.0)
+        used = float(funds.get("used_margin", 0.0) or 0.0)
+        collateral = float(funds.get("collateral_margin", 0.0) or 0.0)
+        payin = float(funds.get("payin_amount", 0.0) or 0.0)
+        span = float(funds.get("span_margin", 0.0) or 0.0)
+        exposure = float(funds.get("exposure_margin", 0.0) or 0.0)
+        unavailable = float(funds.get("unavailable_to_trade", 0.0) or 0.0)
 
-        total = avail_margin + used
+        total = round(avail_margin + used, 2)
         pct = round((used / total * 100.0), 2) if total > 0 else 0.0
 
         return {
@@ -4593,6 +4597,330 @@ class StraddleManager:
             "utilization_pct": pct,
             "client_id": client_id or "Kotak Neo Live",
             "mode": mode,
+        }
+
+    def get_adoptable_broker_positions(self, strategy_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Scans Kotak Neo broker positions for open positions not yet adopted or tracked by any strategy.
+        """
+        with _ENGINE_LOCK:
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            raw_pos = broker.get_positions() or []
+
+            # Gather all existing position tokens/symbols across active strategies
+            tracked_identifiers = set()
+            for s in self._strategies:
+                for p in s.get("positions", []):
+                    if p.get("status") == "OPEN":
+                        tok = str(p.get("token") or p.get("instrument_key") or "")
+                        sym = str(p.get("symbol") or p.get("trading_symbol") or "")
+                        if tok:
+                            tracked_identifiers.add(tok)
+                        if sym:
+                            tracked_identifiers.add(sym.upper())
+
+            adoptable = []
+            for p in raw_pos:
+                net_qty = int(p.get("net_qty") or p.get("quantity") or 0)
+                if net_qty == 0:
+                    continue  # Closed / squared off position
+
+                tok = str(p.get("token") or p.get("instrument_key") or "")
+                sym = str(p.get("symbol") or p.get("trading_symbol") or "")
+                tsym = str(p.get("trading_symbol") or sym)
+
+                # Skip if already managed by an algo
+                if tok in tracked_identifiers or sym.upper() in tracked_identifiers or tsym.upper() in tracked_identifiers:
+                    continue
+
+                side = "BUY" if net_qty > 0 else "SELL"
+                lot_size = int(p.get("lot_size") or 65)
+                lots = max(1, abs(net_qty) // lot_size) if lot_size > 0 else 1
+
+                adoptable.append({
+                    "symbol": sym,
+                    "trading_symbol": tsym,
+                    "token": tok,
+                    "instrument_key": tok,
+                    "exchange_segment": p.get("exchange_segment", "nse_fo"),
+                    "side": side,
+                    "quantity": abs(net_qty),
+                    "net_qty": net_qty,
+                    "lots": lots,
+                    "lot_size": lot_size,
+                    "avg_price": float(p.get("avg_price") or p.get("average_price") or 0.0),
+                    "ltp": float(p.get("ltp") or p.get("last_price") or 0.0),
+                    "pnl": float(p.get("pnl") or 0.0),
+                    "strike_price": float(p.get("strike_price") or 0.0),
+                    "option_type": str(p.get("option_type") or ("CE" if "CE" in sym.upper() else "PE")),
+                    "expiry_date": str(p.get("expiry_date") or ""),
+                    "product": str(p.get("product") or "MIS")
+                })
+
+            return adoptable
+
+    def adopt_broker_position(self, strategy_id: str, position_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Adopts an existing external broker position into the specified strategy so it gains
+        automated target, stop-loss, trailing, and unified auto square-off monitoring.
+        """
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy '{strategy_id}' not found."}
+
+            pos = position_data.get("position_data") or position_data
+            sym = pos.get("symbol") or pos.get("trading_symbol")
+            if not sym:
+                return {"success": False, "error": "Invalid position data (symbol missing)."}
+
+            net_qty = int(pos.get("quantity") or pos.get("net_qty") or 65)
+            side = str(pos.get("side") or ("BUY" if net_qty > 0 else "SELL")).upper()
+            lot_size = int(pos.get("lot_size") or 65)
+            lots = int(pos.get("lots") or max(1, abs(net_qty) // lot_size))
+            avg_p = float(pos.get("avg_price") or pos.get("avg_ent_price") or pos.get("ltp") or 0.0)
+            ltp = float(pos.get("ltp") or avg_p)
+
+            t_val = float(pos.get("target_val") or 45.0)
+            t_mode = str(pos.get("target_mode") or "%")
+            sl_val = float(pos.get("sl_val") or 40.0)
+            sl_mode = str(pos.get("sl_mode") or "%")
+
+            # Calculate target & stoploss prices
+            if "%" in t_mode:
+                tgt_p = avg_p * (1.0 - t_val / 100.0) if side == "SELL" else avg_p * (1.0 + t_val / 100.0)
+            else:
+                tgt_p = avg_p - t_val if side == "SELL" else avg_p + t_val
+
+            if "%" in sl_mode:
+                sl_p = avg_p * (1.0 + sl_val / 100.0) if side == "SELL" else avg_p * (1.0 - sl_val / 100.0)
+            else:
+                sl_p = avg_p + sl_val if side == "SELL" else avg_p - sl_val
+
+            adopted_leg = {
+                "leg_id": f"leg_adopted_{int(time.time()*1000)%1000000}",
+                "symbol": sym,
+                "trading_symbol": pos.get("trading_symbol") or sym,
+                "token": pos.get("token") or pos.get("instrument_key") or "",
+                "instrument_key": pos.get("token") or pos.get("instrument_key") or "",
+                "exchange_segment": pos.get("exchange_segment", "nse_fo"),
+                "side": side,
+                "product": pos.get("product", "MIS"),
+                "quantity": abs(net_qty),
+                "lots": lots,
+                "lot_size": lot_size,
+                "entry_qty": abs(net_qty),
+                "exit_qty": 0,
+                "avg_ent_price": round(avg_p, 2),
+                "entry_time": pos.get("entry_time") or now_ist_str(),
+                "last_price": round(ltp, 2),
+                "ltp": round(ltp, 2),
+                "target_type": "PERCENTAGE" if "%" in t_mode else "POINTS",
+                "target_type_label": f"TGT: {t_val}{t_mode}",
+                "target_value": t_val,
+                "target_price": round(max(0.05, tgt_p), 2),
+                "sl_type": "PERCENTAGE" if "%" in sl_mode else "POINTS",
+                "sl_type_label": f"SL: {sl_val}{sl_mode}",
+                "sl_value": sl_val,
+                "sl_price": round(max(0.05, sl_p), 2),
+                "status": "OPEN",
+                "pnl": float(pos.get("pnl") or 0.0),
+                "is_adopted": True,
+                "strike_price": float(pos.get("strike_price") or 0.0),
+                "option_type": pos.get("option_type") or ("CE" if "CE" in sym.upper() else "PE"),
+                "expiry_str": pos.get("expiry_date") or ""
+            }
+
+            strat.setdefault("positions", []).append(adopted_leg)
+            strat["status"] = "TRADE_ACTIVE"
+            strat["has_traded_today"] = True
+            strat["is_enabled"] = True
+            strat["last_trade_date"] = today_ist_str()
+
+            self._save_strategies()
+            self._log_event(f"Successfully adopted broker position '{sym}' ({side} {lots} lots @ ₹{avg_p:.2f}) into '{strat.get('name')}'.", level="SUCCESS")
+
+            return {
+                "success": True,
+                "message": f"Successfully adopted {sym} into {strat.get('name')}.",
+                "strategy": strat
+            }
+
+    def calculate_basket_margin(self, orders: List[Dict[str, Any]], multiplier: int = 1) -> Dict[str, Any]:
+        """
+        Calculates live required margin, available margin, and total charges for a basket of orders.
+        Applies SEBI/Exchange hedge-benefit spread reductions when long and short legs co-exist.
+        """
+        mult = max(1, int(multiplier or 1))
+        funds = self.get_margin_overview()
+        avail_margin = float(funds.get("available_margin") or funds.get("available_cash") or 0.0)
+
+        total_required_margin = 0.0
+        total_buy_premium = 0.0
+        total_short_margin = 0.0
+        
+        # Categorize orders
+        buy_orders = [o for o in orders if str(o.get("transaction_type") or o.get("side") or "").upper() in ("BUY", "B")]
+        sell_orders = [o for o in orders if str(o.get("transaction_type") or o.get("side") or "").upper() in ("SELL", "S")]
+
+        has_hedge = len(buy_orders) > 0 and len(sell_orders) > 0
+
+        # Try Kotak Neo margin_required for each individual leg if available
+        kotak_client = None
+        try:
+            kotak_client = kotak_auth.get_authenticated_client(force=False)
+        except Exception:
+            pass
+
+        for o in orders:
+            qty = int(o.get("quantity", 65)) * mult
+            prc = float(o.get("price", 0.0) or o.get("ltp", 0.0) or 0.0)
+            side = str(o.get("transaction_type") or o.get("side") or "BUY").upper()
+            tok = str(o.get("token") or o.get("instrument_token") or o.get("instrument_key") or "")
+            seg = str(o.get("exchange_segment") or "nse_fo").lower()
+            prod = str(o.get("product") or "NRML").upper()
+            ot = "MKT" if str(o.get("order_type", "")).upper() in ("MARKET", "MKT") else "L"
+
+            leg_margin = 0.0
+            queried = False
+            if kotak_client and tok.isdigit() and int(tok) > 0:
+                try:
+                    m_resp = kotak_client.margin_required(
+                        exchange_segment=seg,
+                        price=str(prc) if ot == "L" else "0",
+                        order_type=ot,
+                        product=prod,
+                        quantity=str(qty),
+                        instrument_token=str(tok),
+                        transaction_type="B" if side.startswith("B") else "S"
+                    )
+                    if isinstance(m_resp, dict):
+                        m_val = float(m_resp.get("marginRequired") or m_resp.get("margin_required") or m_resp.get("ordMrgnPrsnt") or m_resp.get("totMrgn") or 0.0)
+                        if m_val > 0:
+                            leg_margin = m_val
+                            queried = True
+                except Exception:
+                    pass
+
+            if not queried:
+                # Heuristic SEBI F&O Margin Calculation
+                if side.startswith("B"):
+                    # Long option requires premium: Price * Qty
+                    leg_margin = prc * qty
+                else:
+                    # Short option: base margin per lot is ~ ₹1,20,000 for Nifty (65 qty)
+                    # If hedged in basket, reduced by exchange spread benefit to ~ ₹35,000 - ₹45,000
+                    base_per_lot = 42000.0 if has_hedge else 125000.0
+                    lots = max(1, qty // 65)
+                    leg_margin = lots * base_per_lot
+
+            if side.startswith("B"):
+                total_buy_premium += leg_margin
+            else:
+                total_short_margin += leg_margin
+
+        # Net required margin: for hedged baskets, total is max(short_margin, spread_cost) + buy_premium
+        total_required_margin = total_short_margin + total_buy_premium
+        if total_required_margin < 0:
+            total_required_margin = 0.0
+
+        # Total estimated charges: approx ₹23.60 per order (Brokerage ₹20 + STT/GST/SEBI ~ ₹3.60)
+        total_charges = round(len(orders) * 23.60, 2)
+
+        return {
+            "success": True,
+            "available_margin": avail_margin,
+            "required_margin": round(total_required_margin, 2),
+            "final_margin": round(total_required_margin * 0.9 if has_hedge else total_required_margin, 2),
+            "total_charges": total_charges,
+            "orders_count": len(orders),
+            "multiplier": mult,
+            "has_hedge_benefit": has_hedge
+        }
+
+    def execute_basket_orders(self, orders: List[Dict[str, Any]], multiplier: int = 1) -> Dict[str, Any]:
+        """
+        Executes a batch/basket of orders in atomic sequence:
+        BUY orders execute first to unlock SEBI hedge margin benefit before SELL orders execute.
+        """
+        mult = max(1, int(multiplier or 1))
+        if not orders:
+            return {"success": False, "error": "No orders in basket."}
+
+        mode = self._state.get("execution_mode", "LIVE_BROKER")
+        broker = get_broker_adapter(mode)
+
+        # Sort: BUY orders first (B), then SELL orders (S)
+        buy_legs = [o for o in orders if str(o.get("transaction_type") or o.get("side") or "").upper().startswith("B")]
+        sell_legs = [o for o in orders if str(o.get("transaction_type") or o.get("side") or "").upper().startswith("S")]
+        sorted_orders = buy_legs + sell_legs
+
+        results = []
+        success_count = 0
+        fail_count = 0
+
+        self._log_event(f"Executing Basket ({len(sorted_orders)} orders, {mult}x multiplier)...", level="INFO")
+
+        for ord_spec in sorted_orders:
+            sym = ord_spec.get("symbol") or ord_spec.get("trading_symbol") or ""
+            ikey = ord_spec.get("token") or ord_spec.get("instrument_key") or ord_spec.get("instrument_token") or ""
+            side = str(ord_spec.get("transaction_type") or ord_spec.get("side") or "BUY").upper()
+            clean_side = "BUY" if side.startswith("B") else "SELL"
+            qty = int(ord_spec.get("quantity") or 65) * mult
+            prod = str(ord_spec.get("product") or "NRML").upper()
+            ot = "MARKET" if str(ord_spec.get("order_type", "")).upper() in ("MARKET", "MKT") else "LIMIT"
+            prc = float(ord_spec.get("price") or 0.0) if ot == "LIMIT" else 0.0
+
+            try:
+                res = broker.place_order(
+                    symbol=sym,
+                    instrument_key=ikey,
+                    transaction_type=clean_side,
+                    quantity=qty,
+                    product=prod,
+                    order_type=ot,
+                    price=prc,
+                    trigger_price=0.0,
+                    tag="basket_order"
+                )
+
+                if res.get("success"):
+                    success_count += 1
+                    results.append({
+                        "symbol": sym,
+                        "side": clean_side,
+                        "quantity": qty,
+                        "status": "PLACED",
+                        "order_id": res.get("order_id"),
+                        "message": "Order successfully placed"
+                    })
+                else:
+                    fail_count += 1
+                    results.append({
+                        "symbol": sym,
+                        "side": clean_side,
+                        "quantity": qty,
+                        "status": "FAILED",
+                        "error": res.get("error") or "Order rejected by broker"
+                    })
+            except Exception as e:
+                fail_count += 1
+                results.append({
+                    "symbol": sym,
+                    "side": clean_side,
+                    "quantity": qty,
+                    "status": "ERROR",
+                    "error": str(e)
+                })
+
+        self._log_event(f"Basket Execution Finished: {success_count} placed, {fail_count} failed.", level="SUCCESS" if fail_count == 0 else "WARNING")
+
+        return {
+            "success": fail_count == 0,
+            "placed_count": success_count,
+            "failed_count": fail_count,
+            "results": results
         }
 
     def sync_broker_data(self) -> Dict[str, Any]:

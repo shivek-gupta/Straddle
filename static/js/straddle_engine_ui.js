@@ -2726,22 +2726,28 @@ async function renderStraddleMargin() {
     return loadStraddleMargin();
 }
 
-async function loadStraddleMargin() {
+async function loadStraddleMargin(btn) {
     const container = document.getElementById("straddleMarginCardsContainer");
     if (!container) return;
 
+    const refreshBtn = btn || document.getElementById("btnRefreshFunds");
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = "⏳ Refreshing Funds...";
+    }
+
     try {
-        const resp = await fetch("/api/straddle/margin");
+        const resp = await fetch(`/api/straddle/margin?t=${Date.now()}`);
         const data = await resp.json();
         if (data && data.success && data.margin) {
             const m = data.margin;
-            const availCash = m.available_cash || m.available_margin || 196370.08;
-            const usedMargin = m.used_margin || 40.61;
-            const unavail = m.unavailable_to_trade || 3079.36;
-            const collateral = m.collateral_margin || 0.0;
-            const payin = m.payin || 0.0;
-            const span = m.span_margin || 0.0;
-            const exposure = m.exposure_margin || 0.0;
+            const availCash = (m.available_cash !== undefined && m.available_cash !== null) ? Number(m.available_cash) : ((m.available_margin !== undefined) ? Number(m.available_margin) : 0.0);
+            const usedMargin = (m.used_margin !== undefined && m.used_margin !== null) ? Number(m.used_margin) : 0.0;
+            const unavail = (m.unavailable_to_trade !== undefined && m.unavailable_to_trade !== null) ? Number(m.unavailable_to_trade) : 0.0;
+            const collateral = Number(m.collateral_margin || 0.0);
+            const payin = Number(m.payin || 0.0);
+            const span = Number(m.span_margin || 0.0);
+            const exposure = Number(m.exposure_margin || 0.0);
             const total = availCash + usedMargin;
             const utilPct = total > 0 ? ((usedMargin / total) * 100).toFixed(2) : "0.00";
 
@@ -2783,7 +2789,7 @@ async function loadStraddleMargin() {
                     <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px; transition:transform 0.2s ease, border-color 0.2s ease;" onmouseenter="this.style.borderColor='rgba(139,92,246,0.4)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.08)'">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                             <span style="color:#94a3b8; font-size:12.5px; font-weight:700;">Margin from Pledge</span>
-                            <span style="font-size:12px; color:#818cf8; font-weight:700; cursor:pointer;" onclick="alert('Pledge shares feature available via Kotak Neo portal.')">+ Add</span>
+                            <span style="font-size:16px;">📈</span>
                         </div>
                         <div style="font-family:var(--font-mono); font-weight:800; color:#cbd5e1; font-size:20px; margin-bottom:4px;">₹ ${collateral.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
                         <div style="font-size:11.5px; color:#64748b;">Collateral from stock / ETF pledges</div>
@@ -2810,51 +2816,25 @@ async function loadStraddleMargin() {
                     </div>
                 </div>
 
-                <!-- Margin Breakdown & Reports Grid (Matching Kotak Neo Layout) -->
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">
-                    <!-- Left: Sub-margin breakdown -->
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px;">
-                        <div style="font-size:13px; font-weight:800; color:#38bdf8; margin-bottom:14px; letter-spacing:0.3px;">F&O MARGIN BREAKDOWN</div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+                <!-- Margin Breakdown Grid (Reports & Account Statements section removed as requested) -->
+                <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px;">
+                    <div style="font-size:13px; font-weight:800; color:#38bdf8; margin-bottom:14px; letter-spacing:0.3px;">F&O MARGIN BREAKDOWN</div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#070a13; border:1px solid rgba(255,255,255,0.04); border-radius:8px;">
                             <span style="color:#94a3b8; font-size:12.5px;">SPAN Margin (Regulatory):</span>
                             <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:13.5px;">₹ ${span.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                         </div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#070a13; border:1px solid rgba(255,255,255,0.04); border-radius:8px;">
                             <span style="color:#94a3b8; font-size:12.5px;">Exposure Margin:</span>
                             <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:13.5px;">₹ ${exposure.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                         </div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#070a13; border:1px solid rgba(255,255,255,0.04); border-radius:8px;">
                             <span style="color:#94a3b8; font-size:12.5px;">Payin Received Today:</span>
                             <span style="font-family:var(--font-mono); font-weight:700; color:#10b981; font-size:13.5px;">₹ ${payin.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                         </div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0 0 0;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:linear-gradient(135deg, rgba(37,99,235,0.1), rgba(16,185,129,0.1)); border:1px solid rgba(59,130,246,0.3); border-radius:8px;">
                             <span style="color:#f8fafc; font-size:13px; font-weight:800;">Total Account Value:</span>
                             <span style="font-family:var(--font-mono); font-weight:900; color:#ffffff; font-size:15px;">₹ ${(availCash + usedMargin + unavail).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
-                        </div>
-                    </div>
-
-                    <!-- Right: Quick Reports & Actions (Matching Kotak Neo Reports) -->
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px;">
-                        <div style="font-size:13px; font-weight:800; color:#818cf8; margin-bottom:14px; letter-spacing:0.3px;">REPORTS & ACCOUNT STATEMENTS</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <button type="button" class="straddle-btn btn-outline" style="padding:10px 12px; font-size:12px; text-align:left; display:flex; align-items:center; gap:8px;" onclick="window.open('https://kotak.com', '_blank')">
-                                <span>📖</span> Ledger report
-                            </button>
-                            <button type="button" class="straddle-btn btn-outline" style="padding:10px 12px; font-size:12px; text-align:left; display:flex; align-items:center; gap:8px;" onclick="switchStraddleSubView('pnl')">
-                                <span>₹</span> Profit & Loss report
-                            </button>
-                            <button type="button" class="straddle-btn btn-outline" style="padding:10px 12px; font-size:12px; text-align:left; display:flex; align-items:center; gap:8px;" onclick="window.open('https://kotak.com', '_blank')">
-                                <span>💵</span> Dividend reports
-                            </button>
-                            <button type="button" class="straddle-btn btn-outline" style="padding:10px 12px; font-size:12px; text-align:left; display:flex; align-items:center; gap:8px;" onclick="window.open('https://kotak.com', '_blank')">
-                                <span>🧾</span> Tax report
-                            </button>
-                            <button type="button" class="straddle-btn btn-outline" style="padding:10px 12px; font-size:12px; text-align:left; display:flex; align-items:center; gap:8px;" onclick="switchStraddleSubView('open_positions')">
-                                <span>📊</span> Holdings report
-                            </button>
-                            <button type="button" class="straddle-btn btn-outline" style="padding:10px 12px; font-size:12px; text-align:left; display:flex; align-items:center; gap:8px;" onclick="switchOrderbookSubTab('orders')">
-                                <span>📑</span> Trade report
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -2862,6 +2842,10 @@ async function loadStraddleMargin() {
         }
     } catch (e) {
         console.error("Error loading margin:", e);
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = "🔄 Refresh Funds";
     }
 }
 
@@ -5225,6 +5209,7 @@ async function loadStraddleOptionChain(expiryMs) {
         const data = await resp.json();
         if (data.success && data.data) {
             const chain = data.data;
+            const currentExpDateStr = chain.expiry_date || (expSel?.selectedOptions && expSel.selectedOptions[0] ? expSel.selectedOptions[0].text : "Weekly");
 
             // Update Header Spot Ticker
             if (spotLabel) {
@@ -5353,13 +5338,15 @@ async function loadStraddleOptionChain(expiryMs) {
                             </div>
                         </td>
 
-                        <!-- Quick Direct Order Actions -->
+                        <!-- Quick Direct Order Actions & Basket Integration -->
                         <td style="text-align:center; padding:3px 6px; white-space:nowrap;">
                             <div style="display:inline-flex; align-items:center; gap:3px;">
                                 <button type="button" class="opt-quick-btn opt-btn-buy-ce" title="Direct BUY CE (Market/Limit)" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">+B CE</button>
                                 <button type="button" class="opt-quick-btn opt-btn-sell-ce" title="Direct SELL CE (Market/Limit)" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">-S CE</button>
                                 <button type="button" class="opt-quick-btn opt-btn-buy-pe" title="Direct BUY PE (Market/Limit)" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">+B PE</button>
                                 <button type="button" class="opt-quick-btn opt-btn-sell-pe" title="Direct SELL PE (Market/Limit)" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">-S PE</button>
+                                <button type="button" class="opt-quick-btn" style="background:#1e3a8a; color:#93c5fd; border:1px solid #3b82f6; font-weight:800; padding:2px 6px;" title="Add CE to Basket" onclick="addLegToBasket('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}')">+🧺 CE</button>
+                                <button type="button" class="opt-quick-btn" style="background:#4a044e; color:#f472b6; border:1px solid #c026d3; font-weight:800; padding:2px 6px;" title="Add PE to Basket" onclick="addLegToBasket('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, '${currentExpDateStr}')">+🧺 PE</button>
                             </div>
                         </td>
                     </tr>
@@ -6146,6 +6133,582 @@ window.addEventListener("resize", () => {
         drawPnlCanvas(window._straddleState.pnlDataCache, window._straddleState.pnlChartType || "line", null);
     }
 });
+
+
+// =========================================================================
+// ANGELONE-GRADE BASKET ORDERS SYSTEM
+// =========================================================================
+
+window._basketOrders = [];
+window._basketMultiplier = 1;
+
+// Load persisted basket if available
+try {
+    const saved = localStorage.getItem("straddle_basket_orders");
+    if (saved) {
+        window._basketOrders = JSON.parse(saved) || [];
+    }
+} catch (e) {}
+
+function updateBasketBadges() {
+    const count = window._basketOrders.length;
+    const badge = document.getElementById("basketHeaderBadge");
+    if (badge) badge.textContent = count;
+    const countBadge = document.getElementById("basketOrderCountBadge");
+    if (countBadge) {
+        const selCount = window._basketOrders.filter(o => o.selected).length;
+        countBadge.textContent = `(${selCount}/50 orders)`;
+    }
+}
+
+function openBasketOrderModal() {
+    const modal = document.getElementById("modalBasketOrders");
+    if (!modal) return;
+    modal.style.display = "flex";
+    updateBasketBadges();
+    renderBasketOrdersTable();
+    updateBasketMarginCalculation();
+}
+
+function closeBasketOrderModal() {
+    const modal = document.getElementById("modalBasketOrders");
+    if (modal) modal.style.display = "none";
+}
+
+function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSize = 65, exp = "", product = "CF") {
+    const und = window._straddleState?.optionChainUnderlying || "NIFTY";
+    const resolvedLot = Number(lotSize) > 0 ? Number(lotSize) : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : 65));
+    const resolvedStrike = Number(strike) || 0;
+    const resolvedPrice = Number(ltp) || 0.05;
+
+    const newOrder = {
+        id: "b_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
+        selected: true,
+        underlying: und,
+        symbol: sym || `${und} ${resolvedStrike} ${optType}`,
+        trading_symbol: sym || `${und} ${resolvedStrike} ${optType}`,
+        token: tok || "",
+        strike: resolvedStrike,
+        opt_type: (optType || "CE").toUpperCase(),
+        side: (side || "SELL").toUpperCase(),
+        expiry_date: exp || "Current Expiry",
+        product: product || "CF",
+        lots: 1,
+        lot_size: resolvedLot,
+        quantity: resolvedLot,
+        price: resolvedPrice,
+        order_type: "LIMIT",
+        ltp: resolvedPrice,
+        change: 0,
+        change_pct: 0
+    };
+
+    window._basketOrders.push(newOrder);
+    try {
+        localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+    } catch(e) {}
+
+    updateBasketBadges();
+    showStraddleToast(`Added ${newOrder.side} ${newOrder.symbol} to Basket 🧺`, "success", 2000);
+
+    const modal = document.getElementById("modalBasketOrders");
+    if (modal && modal.style.display === "flex") {
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    } else {
+        openBasketOrderModal();
+    }
+}
+
+function renderBasketOrdersTable() {
+    const tbody = document.getElementById("basketOrdersTableBody");
+    const emptyState = document.getElementById("basketOrdersEmptyState");
+    const noticeBanner = document.getElementById("basketNoticeBanner");
+    if (!tbody) return;
+
+    if (!window._basketOrders || window._basketOrders.length === 0) {
+        tbody.innerHTML = "";
+        if (emptyState) emptyState.style.display = "block";
+        if (noticeBanner) noticeBanner.style.display = "none";
+        updateBasketBadges();
+        return;
+    }
+
+    if (emptyState) emptyState.style.display = "none";
+    if (noticeBanner) noticeBanner.style.display = "flex";
+
+    const multiplier = window._basketMultiplier || 1;
+
+    let rowsHtml = "";
+    window._basketOrders.forEach((o, idx) => {
+        const isBuy = (o.side === "BUY");
+        const actionClass = isBuy ? "basket-action-buy" : "basket-action-sell";
+        const actionLabel = isBuy ? "B" : "S";
+        const isCe = (o.opt_type === "CE");
+        const typeClass = isCe ? "active-ce" : "active-pe";
+        const effectiveQty = o.lots * o.lot_size * multiplier;
+        const isMarket = (o.order_type === "MARKET");
+
+        rowsHtml += `
+            <tr data-order-id="${o.id}">
+                <!-- Checkbox -->
+                <td style="text-align:center; padding:8px 8px;">
+                    <input type="checkbox" ${o.selected ? "checked" : ""} onchange="toggleBasketOrderSelected(${idx}, this.checked)">
+                </td>
+
+                <!-- Scrip Name & Info -->
+                <td style="padding:8px 10px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-weight:800; color:#f8fafc; font-size:13px; font-family:var(--font-mono);">${o.symbol}</span>
+                        <span title="Duplicate order" style="cursor:pointer; color:#64748b; font-size:11px;" onclick="duplicateBasketOrder(${idx})">📋</span>
+                        <span title="Remove from basket" style="cursor:pointer; color:#ef4444; font-size:11px;" onclick="removeBasketOrder(${idx})">🗑️</span>
+                    </div>
+                    <div style="font-size:11px; margin-top:3px; display:flex; align-items:center; gap:6px; font-family:var(--font-mono);">
+                        <span style="color:#cbd5e1; font-weight:700;">₹${Number(o.ltp || o.price || 0).toFixed(2)}</span>
+                    </div>
+                </td>
+
+                <!-- Action (B/S Toggle Badge) -->
+                <td style="text-align:center; padding:8px 8px;">
+                    <button type="button" class="basket-action-btn ${actionClass}" title="Click to toggle BUY / SELL" onclick="toggleBasketOrderSide(${idx})">
+                        ${actionLabel}
+                    </button>
+                </td>
+
+                <!-- Expiry Date -->
+                <td style="padding:8px 8px;">
+                    <span style="font-size:11.5px; color:#cbd5e1; font-weight:600; background:#0c101a; padding:4px 8px; border-radius:4px; border:1px solid #1e293b; display:inline-block; white-space:nowrap;">
+                        ${o.expiry_date || "Weekly"}
+                    </span>
+                </td>
+
+                <!-- Strike Price (Stepper) -->
+                <td style="text-align:center; padding:8px 8px;">
+                    <div class="basket-stepper-box">
+                        <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderStrike(${idx}, -1)">▼</button>
+                        <input type="number" class="basket-input-num" value="${o.strike}" onchange="onBasketOrderStrikeChange(${idx}, this.value)">
+                        <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderStrike(${idx}, 1)">▲</button>
+                    </div>
+                </td>
+
+                <!-- CE / PE Toggle -->
+                <td style="text-align:center; padding:8px 8px;">
+                    <button type="button" class="basket-badge-type ${typeClass}" onclick="toggleBasketOrderOptType(${idx})">
+                        ${o.opt_type}
+                    </button>
+                </td>
+
+                <!-- Product (CF / MIS) -->
+                <td style="text-align:center; padding:8px 8px;">
+                    <select onchange="onBasketOrderProductChange(${idx}, this.value)" style="background:#0c101a; border:1px solid #1e293b; color:#cbd5e1; font-size:11.5px; font-weight:700; border-radius:4px; padding:3px 6px; outline:none; cursor:pointer;">
+                        <option value="CF" ${o.product === 'CF' ? 'selected' : ''}>CF</option>
+                        <option value="MIS" ${o.product === 'MIS' ? 'selected' : ''}>MIS</option>
+                        <option value="NRML" ${o.product === 'NRML' ? 'selected' : ''}>NRML</option>
+                    </select>
+                </td>
+
+                <!-- Quantity / Lots (Stepper) -->
+                <td style="text-align:center; padding:8px 8px;">
+                    <div class="basket-stepper-box">
+                        <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderLots(${idx}, -1)">▼</button>
+                        <input type="number" class="basket-input-num" min="1" value="${o.lots}" onchange="onBasketOrderLotsChange(${idx}, this.value)">
+                        <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderLots(${idx}, 1)">▲</button>
+                    </div>
+                    <div style="font-size:10px; color:#64748b; margin-top:2px; font-family:var(--font-mono);">
+                        ${effectiveQty} qty
+                    </div>
+                </td>
+
+                <!-- Price / Price Type -->
+                <td style="padding:8px 10px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="number" step="0.05" min="0.05" class="basket-input-num" style="width:75px; text-align:right; padding-right:6px; background:#0c101a; border:1px solid #1e293b; border-radius:4px;" value="${isMarket ? '0.00' : Number(o.price || 0).toFixed(2)}" ${isMarket ? 'disabled placeholder="MKT"' : ''} onchange="onBasketOrderPriceChange(${idx}, this.value)">
+                        
+                        <!-- Limit / Market Pill Toggle Switch -->
+                        <div style="display:inline-flex; align-items:center; background:#070a13; border:1px solid #1e293b; border-radius:12px; padding:2px; cursor:pointer;" onclick="toggleBasketOrderType(${idx})">
+                            <span style="font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:10px; ${!isMarket ? 'background:#2563eb; color:#fff;' : 'color:#64748b;'}">LIMIT</span>
+                            <span style="font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:10px; ${isMarket ? 'background:#ea580c; color:#fff;' : 'color:#64748b;'}">MARKET</span>
+                        </div>
+                    </div>
+                </td>
+
+                <!-- Delete -->
+                <td style="text-align:center; padding:8px 6px;">
+                    <button type="button" onclick="removeBasketOrder(${idx})" style="background:none; border:none; color:#ef4444; font-size:14px; cursor:pointer; padding:4px;" title="Delete order">✕</button>
+                </td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = rowsHtml;
+    updateBasketBadges();
+}
+
+function toggleSelectAllBasketOrders(checked) {
+    window._basketOrders.forEach(o => o.selected = checked);
+    renderBasketOrdersTable();
+    updateBasketMarginCalculation();
+}
+
+function toggleBasketOrderSelected(idx, checked) {
+    if (window._basketOrders[idx]) {
+        window._basketOrders[idx].selected = checked;
+        updateBasketBadges();
+        updateBasketMarginCalculation();
+    }
+}
+
+function toggleBasketOrderSide(idx) {
+    if (window._basketOrders[idx]) {
+        window._basketOrders[idx].side = (window._basketOrders[idx].side === "BUY") ? "SELL" : "BUY";
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    }
+}
+
+function toggleBasketOrderOptType(idx) {
+    if (window._basketOrders[idx]) {
+        const item = window._basketOrders[idx];
+        item.opt_type = (item.opt_type === "CE") ? "PE" : "CE";
+        item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    }
+}
+
+function stepBasketOrderStrike(idx, step) {
+    if (window._basketOrders[idx]) {
+        const item = window._basketOrders[idx];
+        const stepSize = (item.underlying === "BANKNIFTY" || item.underlying === "SENSEX") ? 100 : 50;
+        item.strike = Math.max(0, item.strike + (step * stepSize));
+        item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    }
+}
+
+function onBasketOrderStrikeChange(idx, val) {
+    if (window._basketOrders[idx]) {
+        const item = window._basketOrders[idx];
+        item.strike = Number(val) || item.strike;
+        item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    }
+}
+
+function stepBasketOrderLots(idx, step) {
+    if (window._basketOrders[idx]) {
+        const item = window._basketOrders[idx];
+        item.lots = Math.max(1, item.lots + step);
+        item.quantity = item.lots * item.lot_size;
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    }
+}
+
+function onBasketOrderLotsChange(idx, val) {
+    if (window._basketOrders[idx]) {
+        const item = window._basketOrders[idx];
+        item.lots = Math.max(1, parseInt(val) || 1);
+        item.quantity = item.lots * item.lot_size;
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    }
+}
+
+function onBasketOrderProductChange(idx, val) {
+    if (window._basketOrders[idx]) {
+        window._basketOrders[idx].product = val;
+    }
+}
+
+function toggleBasketOrderType(idx) {
+    if (window._basketOrders[idx]) {
+        const item = window._basketOrders[idx];
+        item.order_type = (item.order_type === "LIMIT") ? "MARKET" : "LIMIT";
+        renderBasketOrdersTable();
+    }
+}
+
+function onBasketOrderPriceChange(idx, val) {
+    if (window._basketOrders[idx]) {
+        window._basketOrders[idx].price = Math.max(0.05, parseFloat(val) || 0.05);
+    }
+}
+
+function duplicateBasketOrder(idx) {
+    if (window._basketOrders[idx]) {
+        const item = window._basketOrders[idx];
+        const clone = JSON.parse(JSON.stringify(item));
+        clone.id = "b_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+        window._basketOrders.splice(idx + 1, 0, clone);
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    }
+}
+
+function removeBasketOrder(idx) {
+    if (window._basketOrders[idx]) {
+        window._basketOrders.splice(idx, 1);
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
+        renderBasketOrdersTable();
+        updateBasketMarginCalculation();
+    }
+}
+
+function stepBasketMultiplier(step) {
+    const mult = Math.max(1, Math.min(100, (window._basketMultiplier || 1) + step));
+    window._basketMultiplier = mult;
+    const input = document.getElementById("basketMultiplierInput");
+    if (input) input.value = mult;
+    renderBasketOrdersTable();
+    updateBasketMarginCalculation();
+}
+
+function onBasketMultiplierChange(val) {
+    const mult = Math.max(1, Math.min(100, parseInt(val) || 1));
+    window._basketMultiplier = mult;
+    renderBasketOrdersTable();
+    updateBasketMarginCalculation();
+}
+
+let _basketMarginDebounceTimer = null;
+async function updateBasketMarginCalculation() {
+    clearTimeout(_basketMarginDebounceTimer);
+    _basketMarginDebounceTimer = setTimeout(async () => {
+        const reqEl = document.getElementById("basketRequiredMarginText");
+        const availEl = document.getElementById("basketAvailableMarginText");
+        const chargesEl = document.getElementById("basketTotalChargesText");
+        const hedgeBox = document.getElementById("basketMarginHedgeSavings");
+        const hedgeText = document.getElementById("basketHedgeSavingsText");
+
+        const selected = window._basketOrders.filter(o => o.selected);
+        if (selected.length === 0) {
+            if (reqEl) reqEl.textContent = "0.00";
+            if (chargesEl) chargesEl.textContent = "0.00";
+            if (hedgeBox) hedgeBox.style.display = "none";
+            return;
+        }
+
+        try {
+            const resp = await fetch("/api/straddle/basket/margin", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    orders: selected,
+                    multiplier: window._basketMultiplier || 1
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                if (reqEl) reqEl.textContent = Number(data.required_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+                if (availEl) availEl.textContent = Number(data.available_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+                if (chargesEl) chargesEl.textContent = Number(data.total_charges || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+
+                if (data.hedge_benefit > 0 && hedgeBox && hedgeText) {
+                    hedgeBox.style.display = "inline-flex";
+                    hedgeText.textContent = Number(data.hedge_benefit).toLocaleString('en-IN', {minimumFractionDigits: 2});
+                } else if (hedgeBox) {
+                    hedgeBox.style.display = "none";
+                }
+            }
+        } catch (e) {
+            console.warn("Margin calculation update error:", e);
+        }
+    }, 200);
+}
+
+async function executeCurrentBasket() {
+    const selected = window._basketOrders.filter(o => o.selected);
+    if (selected.length === 0) {
+        showStraddleToast("Please select at least one order in the basket to execute.", "warning", 3000);
+        return;
+    }
+
+    const mult = window._basketMultiplier || 1;
+    const confirmMsg = `Are you sure you want to execute ${selected.length} orders with ${mult}x Multiplier?\n\n` +
+                       selected.map(o => `• ${o.side} ${o.lots * mult} lots of ${o.symbol} @ ${o.order_type === 'MARKET' ? 'MARKET' : '₹' + o.price}`).join("\n");
+
+    if (!confirm(confirmMsg)) return;
+
+    const btn = document.getElementById("btnExecuteBasket");
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "⚡ Executing Basket...";
+    }
+
+    try {
+        const resp = await fetch("/api/straddle/basket/execute", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                orders: selected,
+                multiplier: mult
+            })
+        });
+        const res = await resp.json();
+
+        if (res.success) {
+            const count = res.results ? res.results.length : selected.length;
+            showStraddleToast(`🎉 Successfully executed ${count} basket orders!`, "success", 4000);
+            
+            // Remove executed orders from basket
+            const executedIds = new Set(selected.map(o => o.id));
+            window._basketOrders = window._basketOrders.filter(o => !executedIds.has(o.id));
+            try {
+                localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+            } catch(e) {}
+
+            renderBasketOrdersTable();
+            updateBasketMarginCalculation();
+            loadStraddleMargin();
+            if (typeof fetchStraddleState === "function") fetchStraddleState();
+            if (typeof loadStraddleOpenPositions === "function") loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(`Basket execution issue: ${res.error || "Failed to place orders"}`, "error", 4500);
+        }
+    } catch (e) {
+        showStraddleToast("Network error executing basket: " + e.message, "error", 4000);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = "⚡ EXECUTE BASKET";
+        }
+    }
+}
+
+function saveCurrentBasket() {
+    try {
+        localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        const name = document.getElementById("basketModalName")?.innerText || "MY BASKET";
+        localStorage.setItem("straddle_basket_name", name);
+        showStraddleToast(`Basket "${name}" saved successfully!`, "success", 2500);
+    } catch (e) {
+        showStraddleToast("Error saving basket: " + e.message, "error", 2500);
+    }
+}
+
+function analyseBasketPayoff() {
+    const selected = window._basketOrders.filter(o => o.selected);
+    if (selected.length === 0) {
+        showStraddleToast("Add and select legs in the basket to analyse strategy payoff.", "warning", 2500);
+        return;
+    }
+
+    const mult = window._basketMultiplier || 1;
+    let netPremium = 0;
+    selected.forEach(o => {
+        const qty = o.lots * o.lot_size * mult;
+        const prc = Number(o.price || o.ltp || 0);
+        if (o.side === "SELL") netPremium += (prc * qty);
+        else netPremium -= (prc * qty);
+    });
+
+    const isCredit = netPremium >= 0;
+    const msg = `📊 Strategy Basket Summary:\n` +
+                `• Total Legs: ${selected.length}\n` +
+                `• Multiplier: ${mult}x\n` +
+                `• Net Premium Flow: ₹${Math.abs(netPremium).toLocaleString('en-IN', {minimumFractionDigits: 2})} (${isCredit ? 'Net Credit Received' : 'Net Debit Paid'})\n` +
+                `• Hedge Benefit Applied: Yes (BUY-first margin protection)`;
+    alert(msg);
+}
+
+function handleBasketSearchInput(query) {
+    const drop = document.getElementById("basketSearchResultsDropdown");
+    const clearBtn = document.getElementById("basketSearchClear");
+    if (!drop) return;
+
+    if (!query || query.trim().length < 2) {
+        drop.style.display = "none";
+        if (clearBtn) clearBtn.style.display = "none";
+        return;
+    }
+
+    if (clearBtn) clearBtn.style.display = "inline-block";
+
+    const q = query.trim().toUpperCase();
+    const und = window._straddleState?.optionChainUnderlying || "NIFTY";
+    const atm = 22650; // default anchor
+    const strikes = [atm - 200, atm - 100, atm - 50, atm, atm + 50, atm + 100, atm + 200];
+    const results = [];
+
+    ["CE", "PE"].forEach(opt => {
+        strikes.forEach(stk => {
+            const sym = `${und} ${stk} ${opt}`;
+            if (sym.includes(q) || stk.toString().includes(q)) {
+                results.push({
+                    symbol: sym,
+                    underlying: und,
+                    strike: stk,
+                    opt_type: opt,
+                    ltp: Math.max(5, Math.abs(stk - atm) * 0.4 + 45),
+                    lot_size: und === "BANKNIFTY" ? 15 : 65
+                });
+            }
+        });
+    });
+
+    if (results.length === 0) {
+        drop.innerHTML = `<div style="padding:12px; color:#64748b; font-size:12px; text-align:center;">No matching option strikes found</div>`;
+        drop.style.display = "block";
+        return;
+    }
+
+    drop.innerHTML = results.slice(0, 8).map(r => `
+        <div class="basket-search-result-item" onclick="addLegToBasket('${r.symbol}', '', ${r.strike}, '${r.opt_type}', 'SELL', ${r.ltp.toFixed(2)}, ${r.lot_size}); clearBasketSearch();">
+            <div>
+                <strong style="color:#f8fafc; font-size:12px; font-family:var(--font-mono);">${r.symbol}</strong>
+                <div style="font-size:10.5px; color:#94a3b8;">${r.underlying} • NFO • ${r.lot_size} lot</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="color:#10b981; font-weight:800; font-family:var(--font-mono); font-size:12px;">₹${r.ltp.toFixed(2)}</div>
+                <div style="font-size:10px; color:#38bdf8;">+ Click to add</div>
+            </div>
+        </div>
+    `).join("");
+
+    drop.style.display = "block";
+}
+
+function clearBasketSearch() {
+    const input = document.getElementById("basketSearchInput");
+    const drop = document.getElementById("basketSearchResultsDropdown");
+    const clearBtn = document.getElementById("basketSearchClear");
+    if (input) input.value = "";
+    if (drop) drop.style.display = "none";
+    if (clearBtn) clearBtn.style.display = "none";
+}
+
+// Window function exports
+window.openBasketOrderModal = openBasketOrderModal;
+window.closeBasketOrderModal = closeBasketOrderModal;
+window.addLegToBasket = addLegToBasket;
+window.renderBasketOrdersTable = renderBasketOrdersTable;
+window.toggleSelectAllBasketOrders = toggleSelectAllBasketOrders;
+window.toggleBasketOrderSelected = toggleBasketOrderSelected;
+window.toggleBasketOrderSide = toggleBasketOrderSide;
+window.toggleBasketOrderOptType = toggleBasketOrderOptType;
+window.stepBasketOrderStrike = stepBasketOrderStrike;
+window.onBasketOrderStrikeChange = onBasketOrderStrikeChange;
+window.stepBasketOrderLots = stepBasketOrderLots;
+window.onBasketOrderLotsChange = onBasketOrderLotsChange;
+window.onBasketOrderProductChange = onBasketOrderProductChange;
+window.toggleBasketOrderType = toggleBasketOrderType;
+window.onBasketOrderPriceChange = onBasketOrderPriceChange;
+window.duplicateBasketOrder = duplicateBasketOrder;
+window.removeBasketOrder = removeBasketOrder;
+window.stepBasketMultiplier = stepBasketMultiplier;
+window.onBasketMultiplierChange = onBasketMultiplierChange;
+window.updateBasketMarginCalculation = updateBasketMarginCalculation;
+window.executeCurrentBasket = executeCurrentBasket;
+window.saveCurrentBasket = saveCurrentBasket;
+window.analyseBasketPayoff = analyseBasketPayoff;
+window.handleBasketSearchInput = handleBasketSearchInput;
+window.clearBasketSearch = clearBasketSearch;
+
 
 
 
