@@ -40,7 +40,55 @@
         "sl_price": 20.15,
         "target_type_label": "TGT: \u20b910.00",
         "sl_type_label": "SL: -\u20b95.00"
+      },
+      {
+        "id": "leg_1",
+        "status": "OPEN",
+        "side": "BUY",
+        "product": "NRML",
+        "symbol": "NIFTY26O1922550PE",
+        "instrument_key": "47138",
+        "quantity": 130,
+        "entry_qty": 130,
+        "avg_ent_price": 24.9,
+        "entry_time": "01:03:31",
+        "target_type": "TGT: Pts",
+        "target_type_label": "TGT: 10.0 pts",
+        "target_value": 10.0,
+        "target_price": 34.9,
+        "sl_type": "SL: -Pts",
+        "sl_type_label": "SL: -5.0 pts",
+        "sl_value": 5.0,
+        "sl_price": 19.9,
+        "original_sl_label": "ORIGINAL SL: 19.90",
+        "original_sl_price": 19.9,
+        "tsl_profit_pts": 0.0,
+        "tsl_trail_pts": 0.0,
+        "highest_profit_pts": 0.0,
+        "avg_exit_price": 0.0,
+        "exit_time": null,
+        "exit_qty": 0,
+        "exit_reason": null,
+        "is_re_entry": false,
+        "ltp": 24.9,
+        "mtm": 0.0,
+        "strategy_id": "test_strat_update",
+        "strategy_name": "Test Strategy",
+        "date": "2026-10-16"
       }
-    ]
+    ],
+    "start_time": "09:15:56",
+    "end_time": "15:29:50",
+    "schedule_days": [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday"
+    ],
+    "enabled": true,
+    "_manual_reset": false,
+    "entry_error": "-",
+    "repair_needed": false
   }
 ]

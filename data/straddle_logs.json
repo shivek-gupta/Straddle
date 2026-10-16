@@ -1,5 +1,12 @@
 [
   {
+    "timestamp": "01:03:31",
+    "date": "2026-10-16",
+    "level": "INFO",
+    "message": "Reconciled live Kotak Neo broker position NIFTY26O1922550PE (Qty: 130 @ \u20b924.90) to strategy 'Test Strategy'.",
+    "details": {}
+  },
+  {
     "timestamp": "15:09:19",
     "date": "2026-10-15",
     "level": "INFO",

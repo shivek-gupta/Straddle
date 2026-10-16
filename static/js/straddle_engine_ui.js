@@ -2846,6 +2846,7 @@ async function loadStraddleMargin(btn) {
         if (refreshBtn) {
             refreshBtn.disabled = false;
             refreshBtn.innerHTML = "🔄 Refresh Funds";
+        }
     }
 }
 
@@ -6708,7 +6709,7 @@ window.saveCurrentBasket = saveCurrentBasket;
 window.analyseBasketPayoff = analyseBasketPayoff;
 window.handleBasketSearchInput = handleBasketSearchInput;
 window.clearBasketSearch = clearBasketSearch;
-
-
-
-
+window.straddleToggleExecutionMode = straddleToggleExecutionMode;
+window.toggleStraddleExecutionMode = straddleToggleExecutionMode;
+window.straddleSquareOffAllAndTerminate = straddleSquareOffAllAndTerminate;
+window.emergencySquareOffAllStraddles = straddleSquareOffAllAndTerminate;
