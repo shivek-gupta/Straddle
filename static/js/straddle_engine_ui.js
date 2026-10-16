@@ -647,7 +647,11 @@ function renderStraddleOpenPositionsTable() {
                </div>`;
 
         const actionBtn = isOpen
-            ? `<button type="button" class="straddle-btn btn-danger" style="padding:4px 10px; font-size:11px; font-weight:800;" onclick="squareOffSingleOpenPosition('${p.symbol}', '${p.instrument_key}', '${p.product}', ${absQty}, '${side}')">Exit</button>`
+            ? `<div style="display:flex; align-items:center; gap:4px; justify-content:center;">
+                 ${(!p.strategy_id || p.source === 'Kotak Neo Direct / Manual' || (p.strategy_name && p.strategy_name.includes('Kotak Neo Direct')) || !p.strategy_name) ?
+                   `<button type="button" class="straddle-btn" style="background:linear-gradient(135deg, #0284c7, #2563eb); color:#fff; padding:3px 8px; font-size:10px; font-weight:800; border:none; border-radius:4px; cursor:pointer;" title="Add this live broker trade to an algo strategy" onclick="openAdoptBrokerPositionModal()">📥 Add to Algo</button>` : ''}
+                 <button type="button" class="straddle-btn btn-danger" style="padding:3px 8px; font-size:11px; font-weight:800;" onclick="squareOffSingleOpenPosition('${p.symbol}', '${p.instrument_key}', '${p.product}', ${absQty}, '${side}')">Exit</button>
+               </div>`
             : `<span style="color:#64748b; font-size:11px;">-</span>`;
 
         rowsHtml += `
@@ -5185,6 +5189,166 @@ async function onChangeOptChainUnderlying(und) {
     }
 }
 
+// =========================================================================
+// BASKET MODE CONTROLLER FOR OPTION CHAIN (KOTAK NEO SCREENSHOT 5 GRADE)
+// =========================================================================
+
+window._optionChainBasketMode = false;
+window._chainSelectedLegs = {};
+
+function toggleOptionChainBasketMode() {
+    window._optionChainBasketMode = !window._optionChainBasketMode;
+    const isMode = window._optionChainBasketMode;
+    const btn = document.getElementById("btnToggleBasketMode");
+    const lbl = document.getElementById("basketModeStateLabel");
+    const thCe = document.getElementById("thCeBasketTick");
+    const thPe = document.getElementById("thPeBasketTick");
+    const thCeSuper = document.getElementById("thCeSuperHeader");
+    const thPeSuper = document.getElementById("thPeSuperHeader");
+    const botBar = document.getElementById("optionChainBasketBottomBar");
+
+    if (lbl) {
+        lbl.textContent = isMode ? "ON" : "OFF";
+        lbl.style.color = isMode ? "#10b981" : "#f87171";
+    }
+    if (btn) {
+        if (isMode) {
+            btn.style.background = "#1d4ed8";
+            btn.style.borderColor = "#60a5fa";
+            btn.style.color = "#ffffff";
+            btn.style.boxShadow = "0 0 12px rgba(37,99,235,0.6)";
+        } else {
+            btn.style.background = "#0f172a";
+            btn.style.borderColor = "#38bdf8";
+            btn.style.color = "#38bdf8";
+            btn.style.boxShadow = "none";
+        }
+    }
+    if (thCe) thCe.style.display = isMode ? "" : "none";
+    if (thPe) thPe.style.display = isMode ? "" : "none";
+    if (thCeSuper) thCeSuper.setAttribute("colspan", isMode ? "3" : "2");
+    if (thPeSuper) thPeSuper.setAttribute("colspan", isMode ? "3" : "2");
+    if (botBar) botBar.style.display = isMode ? "flex" : "none";
+
+    updateOptionChainBasketSummaryBar();
+    loadStraddleOptionChain();
+}
+window.toggleOptionChainBasketMode = toggleOptionChainBasketMode;
+
+function onToggleChainBasketLeg(strike, optType, side, symbol, token, ltp, lotSize, expDate, isChecked) {
+    const key = `${strike}_${optType}_${side}`;
+    if (isChecked) {
+        window._chainSelectedLegs[key] = {
+            strike: Number(strike),
+            opt_type: optType,
+            side: side,
+            symbol: symbol,
+            token: token || "",
+            ltp: Number(ltp) || 0,
+            lot_size: Number(lotSize) || 65,
+            expiry_date: expDate || "Weekly"
+        };
+    } else {
+        delete window._chainSelectedLegs[key];
+    }
+    updateOptionChainBasketSummaryBar();
+}
+window.onToggleChainBasketLeg = onToggleChainBasketLeg;
+
+function updateOptionChainBasketSummaryBar() {
+    const keys = Object.keys(window._chainSelectedLegs);
+    const count = keys.length;
+    const countEl = document.getElementById("optionChainBasketSelectedCount");
+    const pillsWrap = document.getElementById("optionChainBasketSummaryPills");
+    const addBtn = document.getElementById("btnAddSelectedToBasket");
+    const chainBasketTotalBadge = document.getElementById("chainBasketTotalCountBadge");
+
+    if (chainBasketTotalBadge) {
+        chainBasketTotalBadge.textContent = window._basketOrders?.length || 0;
+    }
+    if (countEl) countEl.textContent = count;
+    if (addBtn) {
+        addBtn.disabled = (count === 0);
+        addBtn.style.opacity = (count === 0) ? "0.5" : "1";
+        addBtn.style.cursor = (count === 0) ? "not-allowed" : "pointer";
+    }
+
+    if (pillsWrap) {
+        pillsWrap.innerHTML = keys.map(k => {
+            const item = window._chainSelectedLegs[k];
+            const isBuy = item.side === "BUY";
+            const bg = isBuy ? "rgba(16,185,129,0.2)" : "rgba(244,63,94,0.2)";
+            const border = isBuy ? "rgba(16,185,129,0.4)" : "rgba(244,63,94,0.4)";
+            const text = isBuy ? "#34d399" : "#fb7185";
+            return `<span class="basket-pill-chip ${isBuy ? 'chip-buy' : 'chip-sell'}">
+                ${isBuy ? '+B' : '-S'} ${item.strike} ${item.opt_type}
+                <span style="cursor:pointer; font-size:10px; margin-left:3px;" onclick="onToggleChainBasketLeg(${item.strike}, '${item.opt_type}', '${item.side}', '', '', 0, 0, '', false); loadStraddleOptionChain();">✕</span>
+            </span>`;
+        }).join("");
+    }
+}
+window.updateOptionChainBasketSummaryBar = updateOptionChainBasketSummaryBar;
+
+function clearOptionChainBasketSelection() {
+    window._chainSelectedLegs = {};
+    updateOptionChainBasketSummaryBar();
+    loadStraddleOptionChain();
+}
+window.clearOptionChainBasketSelection = clearOptionChainBasketSelection;
+
+function addSelectedLegsToBasketModal() {
+    const keys = Object.keys(window._chainSelectedLegs);
+    if (keys.length === 0) {
+        showStraddleToast("Please select at least one Call or Put option leg first.", "warning", 2500);
+        return;
+    }
+
+    const und = window._straddleState?.optionChainUnderlying || "NIFTY";
+    let addedCount = 0;
+
+    keys.forEach(k => {
+        const leg = window._chainSelectedLegs[k];
+        const resolvedLot = Number(leg.lot_size) > 0 ? Number(leg.lot_size) : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : 65));
+        const resolvedStrike = Number(leg.strike) || 0;
+        const resolvedPrice = Number(leg.ltp) || 0.05;
+
+        const newOrder = {
+            id: "b_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
+            selected: true,
+            underlying: und,
+            symbol: leg.symbol || `${und} ${resolvedStrike} ${leg.opt_type}`,
+            trading_symbol: leg.symbol || `${und} ${resolvedStrike} ${leg.opt_type}`,
+            token: leg.token || "",
+            strike: resolvedStrike,
+            opt_type: (leg.opt_type || "CE").toUpperCase(),
+            side: (leg.side || "SELL").toUpperCase(),
+            expiry_date: leg.expiry_date || "Weekly",
+            product: "CF",
+            lots: 1,
+            lot_size: resolvedLot,
+            quantity: resolvedLot,
+            price: resolvedPrice,
+            order_type: "LIMIT",
+            ltp: resolvedPrice,
+            change: 0,
+            change_pct: 0
+        };
+        window._basketOrders.push(newOrder);
+        addedCount++;
+    });
+
+    try {
+        localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+    } catch(e) {}
+
+    window._chainSelectedLegs = {};
+    updateOptionChainBasketSummaryBar();
+    updateBasketBadges();
+    showStraddleToast(`🧺 Added ${addedCount} leg(s) directly to your Basket!`, "success", 2500);
+    openBasketOrderModal();
+}
+window.addSelectedLegsToBasketModal = addSelectedLegsToBasketModal;
+
 async function loadStraddleOptionChain(expiryMs) {
     const undSel = document.getElementById("optChainUnderlyingSelect");
     const und = undSel?.value || window._straddleState.optionChainUnderlying || "NIFTY";
@@ -5200,7 +5364,7 @@ async function loadStraddleOptionChain(expiryMs) {
     if (!tbody) return;
 
     if (!tbody.children.length || tbody.querySelector("td[colspan]")) {
-        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:40px; color:#94a3b8;"><span style="font-size:16px;">⏳</span> Calculating Black-Scholes Greeks, PCR & Real-Time Option Depth...</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:35px; color:#94a3b8;"><span style="font-size:16px;">⏳</span> Loading Real-Time Option Depth & Greeks...</td></tr>`;
     }
 
     try {
@@ -5251,10 +5415,20 @@ async function loadStraddleOptionChain(expiryMs) {
             if (totOiEl) {
                 const ceL = (chain.total_ce_oi / 100000).toFixed(1);
                 const peL = (chain.total_pe_oi / 100000).toFixed(1);
-                totOiEl.innerHTML = `<span style="color:#34d399;">${ceL}L CE</span> vs <span style="color:#fb7185;">${peL}L PE</span>`;
+                totOiEl.innerHTML = `<span style="color:#34d399; font-weight:800;">${ceL}L CE</span> vs <span style="color:#fb7185; font-weight:800;">${peL}L PE</span>`;
             }
 
-            const maxSingleOi = chain.max_single_oi || 100000;
+            const isBasketMode = !!window._optionChainBasketMode;
+
+            // Sync Header Colspan & Visibility
+            const thCe = document.getElementById("thCeBasketTick");
+            const thPe = document.getElementById("thPeBasketTick");
+            const thCeSuper = document.getElementById("thCeSuperHeader");
+            const thPeSuper = document.getElementById("thPeSuperHeader");
+            if (thCe) thCe.style.display = isBasketMode ? "" : "none";
+            if (thPe) thPe.style.display = isBasketMode ? "" : "none";
+            if (thCeSuper) thCeSuper.setAttribute("colspan", isBasketMode ? "3" : "2");
+            if (thPeSuper) thPeSuper.setAttribute("colspan", isBasketMode ? "3" : "2");
 
             let rowsHtml = "";
             chain.rows.forEach(r => {
@@ -5268,11 +5442,6 @@ async function loadStraddleOptionChain(expiryMs) {
                 const peCellClass = isPeItm ? "opt-chain-itm-pe" : "";
 
                 // CE Data
-                const ceOi = r.ce ? r.ce.oi : 0;
-                const ceOiLakhs = (ceOi / 100000).toFixed(2);
-                const ceOiBarWidth = Math.min(100, Math.round((ceOi / maxSingleOi) * 100));
-                const ceIv = r.ce ? (r.ce.iv || 13.5).toFixed(1) : "-";
-                const ceDelta = r.ce ? (r.ce.delta >= 0 ? "+" + r.ce.delta.toFixed(2) : r.ce.delta.toFixed(2)) : "-";
                 const ceLtp = r.ce ? r.ce.ltp.toFixed(2) : "-";
                 const ceLtpNum = r.ce ? (r.ce.ltp || 0) : 0;
                 const ceBidAsk = r.ce ? `${r.ce.bid.toFixed(1)} / ${r.ce.ask.toFixed(1)}` : "-";
@@ -5283,11 +5452,6 @@ async function loadStraddleOptionChain(expiryMs) {
                 const ceChgPct = r.ce ? (r.ce.net_change_pct || 0) : 0;
 
                 // PE Data
-                const peOi = r.pe ? r.pe.oi : 0;
-                const peOiLakhs = (peOi / 100000).toFixed(2);
-                const peOiBarWidth = Math.min(100, Math.round((peOi / maxSingleOi) * 100));
-                const peIv = r.pe ? (r.pe.iv || 13.5).toFixed(1) : "-";
-                const peDelta = r.pe ? (r.pe.delta >= 0 ? "+" + r.pe.delta.toFixed(2) : r.pe.delta.toFixed(2)) : "-";
                 const peLtp = r.pe ? r.pe.ltp.toFixed(2) : "-";
                 const peLtpNum = r.pe ? (r.pe.ltp || 0) : 0;
                 const peBidAsk = r.pe ? `${r.pe.bid.toFixed(1)} / ${r.pe.ask.toFixed(1)}` : "-";
@@ -5297,67 +5461,85 @@ async function loadStraddleOptionChain(expiryMs) {
                 const peChg = r.pe ? (r.pe.net_change || 0) : 0;
                 const peChgPct = r.pe ? (r.pe.net_change_pct || 0) : 0;
 
+                // Checkbox state in Basket Mode
+                const ceBuyKey = `${strike}_CE_BUY`;
+                const ceSellKey = `${strike}_CE_SELL`;
+                const peBuyKey = `${strike}_PE_BUY`;
+                const peSellKey = `${strike}_PE_SELL`;
+
+                const isCeBuyChecked = !!window._chainSelectedLegs[ceBuyKey];
+                const isCeSellChecked = !!window._chainSelectedLegs[ceSellKey];
+                const isPeBuyChecked = !!window._chainSelectedLegs[peBuyKey];
+                const isPeSellChecked = !!window._chainSelectedLegs[peSellKey];
+
+                const ceActionCell = isBasketMode ? `
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:82px;">
+                        <div class="chain-tick-wrap">
+                            <label class="chain-tick-btn tick-buy ${isCeBuyChecked ? 'checked' : ''}" title="Tick to BUY CE in basket">
+                                <input type="checkbox" ${isCeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'BUY', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
+                                <span class="tick-box"></span><span class="tick-lbl">B</span>
+                            </label>
+                            <label class="chain-tick-btn tick-sell ${isCeSellChecked ? 'checked' : ''}" title="Tick to SELL CE in basket">
+                                <input type="checkbox" ${isCeSellChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'SELL', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
+                                <span class="tick-box"></span><span class="tick-lbl">S</span>
+                            </label>
+                        </div>
+                    </td>
+                ` : ``;
+
+                const peActionCell = isBasketMode ? `
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:82px;">
+                        <div class="chain-tick-wrap">
+                            <label class="chain-tick-btn tick-buy ${isPeBuyChecked ? 'checked' : ''}" title="Tick to BUY PE in basket">
+                                <input type="checkbox" ${isPeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'BUY', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
+                                <span class="tick-box"></span><span class="tick-lbl">B</span>
+                            </label>
+                            <label class="chain-tick-btn tick-sell ${isPeSellChecked ? 'checked' : ''}" title="Tick to SELL PE in basket">
+                                <input type="checkbox" ${isPeSellChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'SELL', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
+                                <span class="tick-box"></span><span class="tick-lbl">S</span>
+                            </label>
+                        </div>
+                    </td>
+                ` : ``;
+
                 rowsHtml += `
                     <tr class="${rowClass}">
-                        <!-- CE OI -->
-                        <td class="${ceCellClass}" style="padding:4px 8px; text-align:right;">
-                            <div class="oi-bar-wrap">
-                                <div class="oi-bar-fill-ce" style="width:${ceOiBarWidth}%;"></div>
-                                <span class="oi-bar-text" style="color:#34d399;">${ceOiLakhs}L</span>
-                            </div>
-                        </td>
-                        <!-- CE IV -->
-                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#94a3b8;">${ceIv}%</td>
-                        <!-- CE Delta -->
-                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#60a5fa; font-weight:600;">${ceDelta}</td>
+                        ${ceActionCell}
                         <!-- CE LTP -->
-                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#10b981; font-weight:800; font-size:12.5px;">₹${ceLtp}</td>
+                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#10b981; font-weight:800; font-size:12.5px; padding:6px 10px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})" title="Click to trade ${ceSym}">
+                            ₹${ceLtp}
+                        </td>
                         <!-- CE Bid/Ask -->
-                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#64748b; font-size:11px;">${ceBidAsk}</td>
+                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#94a3b8; font-size:11px; padding:6px 8px;">
+                            ${ceBidAsk}
+                        </td>
 
                         <!-- STRIKE (Center) -->
-                        <td style="text-align:center; padding:5px 8px; background:#0f172a; border-left:1px solid rgba(255,255,255,0.08); border-right:1px solid rgba(255,255,255,0.08);">
+                        <td style="text-align:center; padding:6px 4px; width:100px; background:#0f172a; border-left:1px solid rgba(255,255,255,0.08); border-right:1px solid rgba(255,255,255,0.08);">
                             ${isAtm ? 
                                 `<span class="opt-chain-atm-strike-badge">${strike} ★ ATM</span>` : 
-                                `<span style="font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:12.5px;">${strike}</span>`
+                                `<span style="font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:13px;">${strike}</span>`
                             }
                         </td>
 
                         <!-- PE Bid/Ask -->
-                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#64748b; font-size:11px;">${peBidAsk}</td>
+                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#94a3b8; font-size:11px; padding:6px 8px;">
+                            ${peBidAsk}
+                        </td>
                         <!-- PE LTP -->
-                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#f43f5e; font-weight:800; font-size:12.5px;">₹${peLtp}</td>
-                        <!-- PE Delta -->
-                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#c084fc; font-weight:600;">${peDelta}</td>
-                        <!-- PE IV -->
-                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#94a3b8;">${peIv}%</td>
-                        <!-- PE OI -->
-                        <td class="${peCellClass}" style="padding:4px 8px; text-align:left;">
-                            <div class="oi-bar-wrap pe-side">
-                                <div class="oi-bar-fill-pe" style="width:${peOiBarWidth}%;"></div>
-                                <span class="oi-bar-text" style="color:#fb7185;">${peOiLakhs}L</span>
-                            </div>
+                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#f43f5e; font-weight:800; font-size:12.5px; padding:6px 10px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})" title="Click to trade ${peSym}">
+                            ₹${peLtp}
                         </td>
-
-                        <!-- Quick Direct Order Actions & Basket Integration -->
-                        <td style="text-align:center; padding:3px 6px; white-space:nowrap;">
-                            <div style="display:inline-flex; align-items:center; gap:3px;">
-                                <button type="button" class="opt-quick-btn opt-btn-buy-ce" title="Direct BUY CE (Market/Limit)" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">+B CE</button>
-                                <button type="button" class="opt-quick-btn opt-btn-sell-ce" title="Direct SELL CE (Market/Limit)" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">-S CE</button>
-                                <button type="button" class="opt-quick-btn opt-btn-buy-pe" title="Direct BUY PE (Market/Limit)" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">+B PE</button>
-                                <button type="button" class="opt-quick-btn opt-btn-sell-pe" title="Direct SELL PE (Market/Limit)" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">-S PE</button>
-                                <button type="button" class="opt-quick-btn" style="background:#1e3a8a; color:#93c5fd; border:1px solid #3b82f6; font-weight:800; padding:2px 6px;" title="Add CE to Basket" onclick="addLegToBasket('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}')">+🧺 CE</button>
-                                <button type="button" class="opt-quick-btn" style="background:#4a044e; color:#f472b6; border:1px solid #c026d3; font-weight:800; padding:2px 6px;" title="Add PE to Basket" onclick="addLegToBasket('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, '${currentExpDateStr}')">+🧺 PE</button>
-                            </div>
-                        </td>
+                        ${peActionCell}
                     </tr>
                 `;
             });
 
             tbody.innerHTML = rowsHtml;
+            updateOptionChainBasketSummaryBar();
         }
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#f43f5e; padding:30px;">Error loading Option Matrix: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#f43f5e; padding:30px;">Error loading Option Matrix: ${e.message}</td></tr>`;
     }
 }
 
@@ -5924,18 +6106,34 @@ let _adoptablePositionsList = [];
 let _selectedAdoptablePositionIndex = -1;
 
 async function openAdoptBrokerPositionModal() {
-    const stratId = window._straddleState?.activeStrategy?.strategy_id || 
-                    window._straddleState?.activeStrategyId || 
-                    document.getElementById("straddleTerminalStrategySelect")?.value;
-    if (!stratId) {
-        showStraddleToast("Please select or start a strategy first.", "error", 2500);
-        return;
+    const allStrats = window._straddleState?.allStrategies || [];
+    let stratId = document.getElementById("adopt_target_strat_select")?.value ||
+                  window._straddleState?.activeStrategy?.strategy_id || 
+                  window._straddleState?.activeStrategyId || 
+                  document.getElementById("straddleTerminalStrategySelect")?.value;
+    
+    if (!stratId && allStrats.length > 0) {
+        stratId = allStrats[0].strategy_id;
     }
 
     const modal = document.getElementById("modalAdoptBrokerPosition");
     if (!modal) return;
     modal.style.display = "flex";
 
+    // Populate target strategy selector dropdown
+    const stratSel = document.getElementById("adopt_target_strat_select");
+    if (stratSel && allStrats.length > 0) {
+        stratSel.innerHTML = allStrats.map(s => {
+            const isSel = (s.strategy_id === stratId) ? "selected" : "";
+            const statusIcon = s.enabled ? "🟢" : "⚪";
+            return `<option value="${s.strategy_id}" ${isSel}>${statusIcon} ${s.name} (${s.strategy_id})</option>`;
+        }).join("");
+    }
+
+    await fetchAdoptablePositionsForStrategy(stratId || "");
+}
+
+async function fetchAdoptablePositionsForStrategy(stratId) {
     const loadingDiv = document.getElementById("adoptModalLoading");
     const emptyDiv = document.getElementById("adoptModalEmpty");
     const contentDiv = document.getElementById("adoptModalContent");
@@ -5953,7 +6151,8 @@ async function openAdoptBrokerPositionModal() {
     _adoptablePositionsList = [];
 
     try {
-        const resp = await fetch(`/api/straddle/adoptable_positions?strategy_id=${encodeURIComponent(stratId)}`);
+        const url = stratId ? `/api/straddle/adoptable_positions?strategy_id=${encodeURIComponent(stratId)}` : `/api/straddle/adoptable_positions`;
+        const resp = await fetch(url);
         const res = await resp.json();
 
         if (loadingDiv) loadingDiv.style.display = "none";
@@ -5979,6 +6178,10 @@ async function openAdoptBrokerPositionModal() {
                 const sideClass = (p.side === 'BUY') ? 'badge-buy' : 'badge-sell';
                 const pnl = Number(p.pnl || 0);
                 const pnlClass = pnl >= 0 ? 'color:#10b981;' : 'color:#f87171;';
+                const statusBadge = (p.currently_in && !p.currently_in.includes("Unassigned")) 
+                    ? `<span style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); padding:2px 8px; border-radius:12px; font-size:10.5px; font-weight:700;">Running in ${p.currently_in}</span>`
+                    : `<span style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:2px 8px; border-radius:12px; font-size:10.5px; font-weight:700;">🟢 Live on Kotak Neo</span>`;
+
                 return `
                     <tr id="adopt_row_${idx}" style="cursor:pointer; transition:background 0.15s ease;" onclick="selectAdoptablePositionIndex(${idx})">
                         <td style="text-align:center;">
@@ -6003,6 +6206,9 @@ async function openAdoptBrokerPositionModal() {
                         <td style="text-align:right; font-family:var(--font-mono); font-weight:800; font-size:12px; ${pnlClass}">
                             ₹${pnl.toFixed(2)}
                         </td>
+                        <td style="text-align:center;">
+                            ${statusBadge}
+                        </td>
                     </tr>
                 `;
             }).join("");
@@ -6019,6 +6225,13 @@ async function openAdoptBrokerPositionModal() {
         }
     }
 }
+
+function onAdoptTargetStratChange(targetId) {
+    if (targetId) {
+        fetchAdoptablePositionsForStrategy(targetId);
+    }
+}
+window.onAdoptTargetStratChange = onAdoptTargetStratChange;
 
 function selectAdoptablePositionIndex(idx) {
     _selectedAdoptablePositionIndex = idx;
@@ -6058,9 +6271,16 @@ async function submitAdoptBrokerPosition() {
         return;
     }
 
-    const stratId = window._straddleState?.activeStrategy?.strategy_id || 
+    const stratId = document.getElementById("adopt_target_strat_select")?.value ||
+                    window._straddleState?.activeStrategy?.strategy_id || 
                     window._straddleState?.activeStrategyId || 
                     document.getElementById("straddleTerminalStrategySelect")?.value;
+    
+    if (!stratId) {
+        showStraddleToast("Please select a target algorithm first.", "error", 2500);
+        return;
+    }
+
     const pos = _adoptablePositionsList[_selectedAdoptablePositionIndex];
 
     const tgtMode = document.getElementById("adopt_tgt_mode")?.value || "%";
@@ -6141,9 +6361,6 @@ window.addEventListener("resize", () => {
 // =========================================================================
 
 window._basketOrders = [];
-window._basketMultiplier = 1;
-
-// Load persisted basket if available
 try {
     const saved = localStorage.getItem("straddle_basket_orders");
     if (saved) {
@@ -6151,10 +6368,19 @@ try {
     }
 } catch (e) {}
 
+try {
+    const savedMult = localStorage.getItem("straddle_basket_multiplier");
+    window._basketMultiplier = savedMult ? Math.max(1, parseInt(savedMult) || 1) : 1;
+} catch (e) {
+    window._basketMultiplier = 1;
+}
+
 function updateBasketBadges() {
     const count = window._basketOrders.length;
     const badge = document.getElementById("basketHeaderBadge");
     if (badge) badge.textContent = count;
+    const chainBadge = document.getElementById("chainBasketTotalCountBadge");
+    if (chainBadge) chainBadge.textContent = count;
     const countBadge = document.getElementById("basketOrderCountBadge");
     if (countBadge) {
         const selCount = window._basketOrders.filter(o => o.selected).length;
@@ -6166,6 +6392,8 @@ function openBasketOrderModal() {
     const modal = document.getElementById("modalBasketOrders");
     if (!modal) return;
     modal.style.display = "flex";
+    const multInput = document.getElementById("basketMultiplierInput");
+    if (multInput) multInput.value = window._basketMultiplier || 1;
     updateBasketBadges();
     renderBasketOrdersTable();
     updateBasketMarginCalculation();
@@ -6192,7 +6420,7 @@ function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSi
         strike: resolvedStrike,
         opt_type: (optType || "CE").toUpperCase(),
         side: (side || "SELL").toUpperCase(),
-        expiry_date: exp || "Current Expiry",
+        expiry_date: exp || "Weekly",
         product: product || "CF",
         lots: 1,
         lot_size: resolvedLot,
@@ -6251,57 +6479,52 @@ function renderBasketOrdersTable() {
         const isMarket = (o.order_type === "MARKET");
 
         rowsHtml += `
-            <tr data-order-id="${o.id}">
+            <tr data-order-id="${o.id}" data-idx="${idx}" style="border-bottom:1px solid rgba(255,255,255,0.04);">
                 <!-- Checkbox -->
-                <td style="text-align:center; padding:8px 8px;">
+                <td style="text-align:center; padding:6px 4px; width:32px;">
                     <input type="checkbox" ${o.selected ? "checked" : ""} onchange="toggleBasketOrderSelected(${idx}, this.checked)">
                 </td>
 
-                <!-- Scrip Name & Info -->
-                <td style="padding:8px 10px;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-weight:800; color:#f8fafc; font-size:13px; font-family:var(--font-mono);">${o.symbol}</span>
+                <!-- Scrip & Expiry (Merged for compact layout, no horizontal scrollbar) -->
+                <td style="padding:6px 8px;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${o.symbol}</span>
                         <span title="Duplicate order" style="cursor:pointer; color:#64748b; font-size:11px;" onclick="duplicateBasketOrder(${idx})">📋</span>
                         <span title="Remove from basket" style="cursor:pointer; color:#ef4444; font-size:11px;" onclick="removeBasketOrder(${idx})">🗑️</span>
                     </div>
-                    <div style="font-size:11px; margin-top:3px; display:flex; align-items:center; gap:6px; font-family:var(--font-mono);">
+                    <div style="font-size:10.5px; margin-top:2px; display:flex; align-items:center; gap:5px; font-family:var(--font-mono); color:#94a3b8;">
                         <span style="color:#cbd5e1; font-weight:700;">₹${Number(o.ltp || o.price || 0).toFixed(2)}</span>
+                        <span>•</span>
+                        <span style="color:#38bdf8; font-weight:600;">${o.expiry_date || 'Current Weekly'}</span>
                     </div>
                 </td>
 
                 <!-- Action (B/S Toggle Badge) -->
-                <td style="text-align:center; padding:8px 8px;">
-                    <button type="button" class="basket-action-btn ${actionClass}" title="Click to toggle BUY / SELL" onclick="toggleBasketOrderSide(${idx})">
+                <td style="text-align:center; padding:6px 4px; width:44px;">
+                    <button type="button" class="basket-action-btn ${actionClass}" title="Click to toggle BUY / SELL" onclick="toggleBasketOrderSide(${idx})" style="padding:3px 8px; font-size:11px; font-weight:900;">
                         ${actionLabel}
                     </button>
                 </td>
 
-                <!-- Expiry Date -->
-                <td style="padding:8px 8px;">
-                    <span style="font-size:11.5px; color:#cbd5e1; font-weight:600; background:#0c101a; padding:4px 8px; border-radius:4px; border:1px solid #1e293b; display:inline-block; white-space:nowrap;">
-                        ${o.expiry_date || "Weekly"}
-                    </span>
-                </td>
-
                 <!-- Strike Price (Stepper) -->
-                <td style="text-align:center; padding:8px 8px;">
-                    <div class="basket-stepper-box">
+                <td style="text-align:center; padding:6px 4px; width:90px;">
+                    <div class="basket-stepper-box" style="display:inline-flex; align-items:center;">
                         <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderStrike(${idx}, -1)">▼</button>
-                        <input type="number" class="basket-input-num" value="${o.strike}" onchange="onBasketOrderStrikeChange(${idx}, this.value)">
+                        <input type="number" class="basket-input-num" style="width:48px;" value="${o.strike}" onchange="onBasketOrderStrikeChange(${idx}, this.value)">
                         <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderStrike(${idx}, 1)">▲</button>
                     </div>
                 </td>
 
                 <!-- CE / PE Toggle -->
-                <td style="text-align:center; padding:8px 8px;">
-                    <button type="button" class="basket-badge-type ${typeClass}" onclick="toggleBasketOrderOptType(${idx})">
+                <td style="text-align:center; padding:6px 4px; width:46px;">
+                    <button type="button" class="basket-badge-type ${typeClass}" onclick="toggleBasketOrderOptType(${idx})" style="padding:2px 6px; font-size:10.5px;">
                         ${o.opt_type}
                     </button>
                 </td>
 
-                <!-- Product (CF / MIS) -->
-                <td style="text-align:center; padding:8px 8px;">
-                    <select onchange="onBasketOrderProductChange(${idx}, this.value)" style="background:#0c101a; border:1px solid #1e293b; color:#cbd5e1; font-size:11.5px; font-weight:700; border-radius:4px; padding:3px 6px; outline:none; cursor:pointer;">
+                <!-- Product (CF / MIS / NRML) -->
+                <td style="text-align:center; padding:6px 4px; width:62px;">
+                    <select onchange="onBasketOrderProductChange(${idx}, this.value)" style="background:#0c101a; border:1px solid #1e293b; color:#cbd5e1; font-size:11px; font-weight:700; border-radius:4px; padding:2px 4px; outline:none; cursor:pointer;">
                         <option value="CF" ${o.product === 'CF' ? 'selected' : ''}>CF</option>
                         <option value="MIS" ${o.product === 'MIS' ? 'selected' : ''}>MIS</option>
                         <option value="NRML" ${o.product === 'NRML' ? 'selected' : ''}>NRML</option>
@@ -6309,33 +6532,33 @@ function renderBasketOrdersTable() {
                 </td>
 
                 <!-- Quantity / Lots (Stepper) -->
-                <td style="text-align:center; padding:8px 8px;">
-                    <div class="basket-stepper-box">
+                <td style="text-align:center; padding:6px 4px; width:90px;">
+                    <div class="basket-stepper-box" style="display:inline-flex; align-items:center;">
                         <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderLots(${idx}, -1)">▼</button>
-                        <input type="number" class="basket-input-num" min="1" value="${o.lots}" onchange="onBasketOrderLotsChange(${idx}, this.value)">
+                        <input type="number" class="basket-input-num" min="1" style="width:36px;" value="${o.lots}" onchange="onBasketOrderLotsChange(${idx}, this.value)">
                         <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderLots(${idx}, 1)">▲</button>
                     </div>
-                    <div style="font-size:10px; color:#64748b; margin-top:2px; font-family:var(--font-mono);">
+                    <div class="basket-effective-qty-label" style="font-size:10px; color:#60a5fa; margin-top:2px; font-family:var(--font-mono); font-weight:700;">
                         ${effectiveQty} qty
                     </div>
                 </td>
 
-                <!-- Price / Price Type -->
-                <td style="padding:8px 10px;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <input type="number" step="0.05" min="0.05" class="basket-input-num" style="width:75px; text-align:right; padding-right:6px; background:#0c101a; border:1px solid #1e293b; border-radius:4px;" value="${isMarket ? '0.00' : Number(o.price || 0).toFixed(2)}" ${isMarket ? 'disabled placeholder="MKT"' : ''} onchange="onBasketOrderPriceChange(${idx}, this.value)">
+                <!-- Price / Price Type (LIMIT / MARKET) -->
+                <td style="padding:6px 8px; width:150px;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <input type="number" step="0.05" min="0.05" class="basket-input-num basket-price-input" data-saved-price="${o.price || o.ltp || 0.05}" style="width:68px; text-align:right; padding-right:5px; background:#0c101a; border:1px solid #1e293b; border-radius:4px; font-weight:700; font-size:11px; ${isMarket ? 'opacity:0.6;' : ''}" value="${isMarket ? '0.00' : Number(o.price || 0.05).toFixed(2)}" ${isMarket ? 'disabled placeholder="MKT"' : ''} onchange="onBasketOrderPriceChange(${idx}, this.value)">
                         
                         <!-- Limit / Market Pill Toggle Switch -->
-                        <div style="display:inline-flex; align-items:center; background:#070a13; border:1px solid #1e293b; border-radius:12px; padding:2px; cursor:pointer;" onclick="toggleBasketOrderType(${idx})">
-                            <span style="font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:10px; ${!isMarket ? 'background:#2563eb; color:#fff;' : 'color:#64748b;'}">LIMIT</span>
-                            <span style="font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:10px; ${isMarket ? 'background:#ea580c; color:#fff;' : 'color:#64748b;'}">MARKET</span>
+                        <div style="display:inline-flex; align-items:center; background:#070a13; border:1px solid #1e293b; border-radius:12px; padding:2px; cursor:pointer;" onclick="toggleBasketOrderType(${idx})" title="Click to toggle LIMIT / MARKET">
+                            <span class="basket-pill-limit" style="font-size:9px; font-weight:800; padding:2px 5px; border-radius:10px; transition:all 0.15s ease; ${!isMarket ? 'background:#2563eb; color:#fff;' : 'background:transparent; color:#64748b;'}">LIMIT</span>
+                            <span class="basket-pill-market" style="font-size:9px; font-weight:800; padding:2px 5px; border-radius:10px; transition:all 0.15s ease; ${isMarket ? 'background:#ea580c; color:#fff;' : 'background:transparent; color:#64748b;'}">MARKET</span>
                         </div>
                     </div>
                 </td>
 
                 <!-- Delete -->
-                <td style="text-align:center; padding:8px 6px;">
-                    <button type="button" onclick="removeBasketOrder(${idx})" style="background:none; border:none; color:#ef4444; font-size:14px; cursor:pointer; padding:4px;" title="Delete order">✕</button>
+                <td style="text-align:center; padding:6px 4px; width:30px;">
+                    <button type="button" onclick="removeBasketOrder(${idx})" style="background:none; border:none; color:#ef4444; font-size:13px; cursor:pointer; padding:2px;" title="Delete order">✕</button>
                 </td>
             </tr>
         `;
@@ -6347,6 +6570,9 @@ function renderBasketOrdersTable() {
 
 function toggleSelectAllBasketOrders(checked) {
     window._basketOrders.forEach(o => o.selected = checked);
+    try {
+        localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+    } catch(e) {}
     renderBasketOrdersTable();
     updateBasketMarginCalculation();
 }
@@ -6354,6 +6580,9 @@ function toggleSelectAllBasketOrders(checked) {
 function toggleBasketOrderSelected(idx, checked) {
     if (window._basketOrders[idx]) {
         window._basketOrders[idx].selected = checked;
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
         updateBasketBadges();
         updateBasketMarginCalculation();
     }
@@ -6362,6 +6591,9 @@ function toggleBasketOrderSelected(idx, checked) {
 function toggleBasketOrderSide(idx) {
     if (window._basketOrders[idx]) {
         window._basketOrders[idx].side = (window._basketOrders[idx].side === "BUY") ? "SELL" : "BUY";
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
     }
@@ -6372,6 +6604,9 @@ function toggleBasketOrderOptType(idx) {
         const item = window._basketOrders[idx];
         item.opt_type = (item.opt_type === "CE") ? "PE" : "CE";
         item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
     }
@@ -6383,6 +6618,9 @@ function stepBasketOrderStrike(idx, step) {
         const stepSize = (item.underlying === "BANKNIFTY" || item.underlying === "SENSEX") ? 100 : 50;
         item.strike = Math.max(0, item.strike + (step * stepSize));
         item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
     }
@@ -6393,6 +6631,9 @@ function onBasketOrderStrikeChange(idx, val) {
         const item = window._basketOrders[idx];
         item.strike = Number(val) || item.strike;
         item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
     }
@@ -6403,7 +6644,20 @@ function stepBasketOrderLots(idx, step) {
         const item = window._basketOrders[idx];
         item.lots = Math.max(1, item.lots + step);
         item.quantity = item.lots * item.lot_size;
-        renderBasketOrdersTable();
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
+
+        const row = document.querySelector(`tr[data-idx="${idx}"]`);
+        if (row) {
+            const numInput = row.querySelectorAll(".basket-input-num")[1];
+            if (numInput) numInput.value = item.lots;
+            const mult = window._basketMultiplier || 1;
+            const qtyLbl = row.querySelector(".basket-effective-qty-label");
+            if (qtyLbl) qtyLbl.textContent = `${item.lots * item.lot_size * mult} qty`;
+        } else {
+            renderBasketOrdersTable();
+        }
         updateBasketMarginCalculation();
     }
 }
@@ -6413,7 +6667,18 @@ function onBasketOrderLotsChange(idx, val) {
         const item = window._basketOrders[idx];
         item.lots = Math.max(1, parseInt(val) || 1);
         item.quantity = item.lots * item.lot_size;
-        renderBasketOrdersTable();
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
+
+        const row = document.querySelector(`tr[data-idx="${idx}"]`);
+        if (row) {
+            const mult = window._basketMultiplier || 1;
+            const qtyLbl = row.querySelector(".basket-effective-qty-label");
+            if (qtyLbl) qtyLbl.textContent = `${item.lots * item.lot_size * mult} qty`;
+        } else {
+            renderBasketOrdersTable();
+        }
         updateBasketMarginCalculation();
     }
 }
@@ -6421,20 +6686,76 @@ function onBasketOrderLotsChange(idx, val) {
 function onBasketOrderProductChange(idx, val) {
     if (window._basketOrders[idx]) {
         window._basketOrders[idx].product = val;
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
     }
 }
 
 function toggleBasketOrderType(idx) {
-    if (window._basketOrders[idx]) {
-        const item = window._basketOrders[idx];
-        item.order_type = (item.order_type === "LIMIT") ? "MARKET" : "LIMIT";
+    if (!window._basketOrders[idx]) return;
+    const item = window._basketOrders[idx];
+    const newType = (item.order_type === "LIMIT") ? "MARKET" : "LIMIT";
+    item.order_type = newType;
+    try {
+        localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+    } catch(e) {}
+
+    // In-place DOM update without destroying inputs!
+    const row = document.querySelector(`tr[data-idx="${idx}"]`);
+    if (row) {
+        const priceInput = row.querySelector(".basket-price-input");
+        const limitPill = row.querySelector(".basket-pill-limit");
+        const mktPill = row.querySelector(".basket-pill-market");
+        const isMarket = (newType === "MARKET");
+        if (priceInput) {
+            if (isMarket) {
+                priceInput.dataset.savedPrice = priceInput.value || item.price || item.ltp || "0.05";
+                priceInput.value = "0.00";
+                priceInput.disabled = true;
+                priceInput.placeholder = "MKT";
+                priceInput.style.opacity = "0.6";
+            } else {
+                priceInput.disabled = false;
+                priceInput.placeholder = "0.00";
+                priceInput.style.opacity = "1";
+                const restored = parseFloat(priceInput.dataset.savedPrice || item.price || item.ltp || 0.05);
+                priceInput.value = (restored > 0 ? restored : 0.05).toFixed(2);
+                item.price = parseFloat(priceInput.value);
+            }
+        }
+        if (limitPill && mktPill) {
+            if (isMarket) {
+                limitPill.style.background = "transparent";
+                limitPill.style.color = "#64748b";
+                mktPill.style.background = "#ea580c";
+                mktPill.style.color = "#fff";
+            } else {
+                limitPill.style.background = "#2563eb";
+                limitPill.style.color = "#fff";
+                mktPill.style.background = "transparent";
+                mktPill.style.color = "#64748b";
+            }
+        }
+    } else {
         renderBasketOrdersTable();
     }
+    updateBasketMarginCalculation();
 }
 
 function onBasketOrderPriceChange(idx, val) {
     if (window._basketOrders[idx]) {
-        window._basketOrders[idx].price = Math.max(0.05, parseFloat(val) || 0.05);
+        const price = Math.max(0.05, parseFloat(val) || 0.05);
+        window._basketOrders[idx].price = price;
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
+        const row = document.querySelector(`tr[data-idx="${idx}"]`);
+        if (row) {
+            const priceInput = row.querySelector(".basket-price-input");
+            if (priceInput) priceInput.dataset.savedPrice = price.toString();
+        }
+        updateBasketMarginCalculation();
     }
 }
 
@@ -6444,6 +6765,9 @@ function duplicateBasketOrder(idx) {
         const clone = JSON.parse(JSON.stringify(item));
         clone.id = "b_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
         window._basketOrders.splice(idx + 1, 0, clone);
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+        } catch(e) {}
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
     }
@@ -6461,18 +6785,44 @@ function removeBasketOrder(idx) {
 }
 
 function stepBasketMultiplier(step) {
-    const mult = Math.max(1, Math.min(100, (window._basketMultiplier || 1) + step));
+    const cur = window._basketMultiplier || 1;
+    const mult = Math.max(1, Math.min(100, cur + step));
     window._basketMultiplier = mult;
+    try {
+        localStorage.setItem("straddle_basket_multiplier", mult.toString());
+    } catch(e) {}
     const input = document.getElementById("basketMultiplierInput");
     if (input) input.value = mult;
-    renderBasketOrdersTable();
+
+    // Update effective quantity labels in-place without rebuilding DOM
+    document.querySelectorAll(".basket-effective-qty-label").forEach(el => {
+        const row = el.closest("tr");
+        const idx = parseInt(row?.getAttribute("data-idx"));
+        if (!isNaN(idx) && window._basketOrders[idx]) {
+            const o = window._basketOrders[idx];
+            el.textContent = `${o.lots * o.lot_size * mult} qty`;
+        }
+    });
     updateBasketMarginCalculation();
 }
 
 function onBasketMultiplierChange(val) {
     const mult = Math.max(1, Math.min(100, parseInt(val) || 1));
     window._basketMultiplier = mult;
-    renderBasketOrdersTable();
+    try {
+        localStorage.setItem("straddle_basket_multiplier", mult.toString());
+    } catch(e) {}
+    const input = document.getElementById("basketMultiplierInput");
+    if (input) input.value = mult;
+
+    document.querySelectorAll(".basket-effective-qty-label").forEach(el => {
+        const row = el.closest("tr");
+        const idx = parseInt(row?.getAttribute("data-idx"));
+        if (!isNaN(idx) && window._basketOrders[idx]) {
+            const o = window._basketOrders[idx];
+            el.textContent = `${o.lots * o.lot_size * mult} qty`;
+        }
+    });
     updateBasketMarginCalculation();
 }
 

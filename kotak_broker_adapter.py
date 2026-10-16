@@ -16,6 +16,7 @@ import os
 import gzip
 import re
 import uuid
+import math
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 
@@ -554,36 +555,60 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 if not isinstance(item, dict):
                     continue
 
-                # Kotak Neo positions provide:
-                # 'flBuyQty' & 'flSellQty' (day filled) or 'cfBuyQty' & 'cfSellQty' (carry forward)
-                fl_buy = int(item.get("flBuyQty") or 0)
-                fl_sell = int(item.get("flSellQty") or 0)
-                cf_buy = int(item.get("cfBuyQty") or 0)
-                cf_sell = int(item.get("cfSellQty") or 0)
+                def _safe_float(val, d=0.0):
+                    try:
+                        if val is None or val == "":
+                            return d
+                        f = float(val)
+                        return f if not math.isnan(f) else d
+                    except (ValueError, TypeError):
+                        return d
 
-                tot_buy_qty = fl_buy + cf_buy if (fl_buy + cf_buy) > 0 else int(item.get("buyQty", item.get("buy_quantity", 0)) or 0)
-                tot_sell_qty = fl_sell + cf_sell if (fl_sell + cf_sell) > 0 else int(item.get("sellQty", item.get("sell_quantity", 0)) or 0)
+                def _safe_int(val, d=0):
+                    try:
+                        if val is None or val == "":
+                            return d
+                        return int(float(val))
+                    except (ValueError, TypeError):
+                        return d
+
+                # Kotak Neo positions provide:
+                # 'flBuyQty' & 'flSellQty' (day filled) and 'cfBuyQty' & 'cfSellQty' (carry forward)
+                fl_buy = _safe_int(item.get("flBuyQty"))
+                fl_sell = _safe_int(item.get("flSellQty"))
+                cf_buy = _safe_int(item.get("cfBuyQty"))
+                cf_sell = _safe_int(item.get("cfSellQty"))
+
+                tot_buy_qty = (fl_buy + cf_buy) if (fl_buy + cf_buy) > 0 else (_safe_int(item.get("buyQty")) or _safe_int(item.get("buy_quantity")))
+                tot_sell_qty = (fl_sell + cf_sell) if (fl_sell + cf_sell) > 0 else (_safe_int(item.get("sellQty")) or _safe_int(item.get("sell_quantity")))
 
                 if item.get("netQty") is not None:
-                    net_qty = int(item.get("netQty") or 0)
+                    net_qty = _safe_int(item.get("netQty"))
                 elif item.get("quantity") is not None:
-                    net_qty = int(item.get("quantity") or 0)
+                    net_qty = _safe_int(item.get("quantity"))
                 else:
                     net_qty = tot_buy_qty - tot_sell_qty
 
                 tsym = str(item.get("trdSym", item.get("trading_symbol", "")) or "")
 
-                buy_amt = float(item.get("buyAmt", 0.0) or item.get("cfBuyAmt", 0.0) or 0.0)
-                sell_amt = float(item.get("sellAmt", 0.0) or item.get("cfSellAmt", 0.0) or 0.0)
+                fl_buy_amt = _safe_float(item.get("buyAmt"))
+                cf_buy_amt = _safe_float(item.get("cfBuyAmt"))
+                fl_sell_amt = _safe_float(item.get("sellAmt"))
+                cf_sell_amt = _safe_float(item.get("cfSellAmt"))
 
-                buy_avg = (buy_amt / tot_buy_qty) if tot_buy_qty > 0 else float(item.get("buyAvgPrc", item.get("buy_avg", 0.0)) or 0.0)
-                sell_avg = (sell_amt / tot_sell_qty) if tot_sell_qty > 0 else float(item.get("sellAvgPrc", item.get("sell_avg", 0.0)) or 0.0)
+                tot_buy_amt = (fl_buy_amt + cf_buy_amt) if (fl_buy_amt + cf_buy_amt) > 0 else _safe_float(item.get("buy_amt"))
+                tot_sell_amt = (fl_sell_amt + cf_sell_amt) if (fl_sell_amt + cf_sell_amt) > 0 else _safe_float(item.get("sell_amt"))
 
-                ltp = float(item.get("ltp", item.get("last_price", 0.0)) or 0.0)
-                pnl = float(item.get("urmtom", item.get("urMtom", item.get("pnl", 0.0))) or 0.0)
-                rpnl = float(item.get("rpnl", item.get("realizedPnl", item.get("rPnl", 0.0))) or 0.0)
+                buy_avg = (tot_buy_amt / tot_buy_qty) if tot_buy_qty > 0 else (_safe_float(item.get("buyAvgPrc")) or _safe_float(item.get("buy_avg")))
+                sell_avg = (tot_sell_amt / tot_sell_qty) if tot_sell_qty > 0 else (_safe_float(item.get("sellAvgPrc")) or _safe_float(item.get("sell_avg")))
+
+                ltp = _safe_float(item.get("ltp") or item.get("last_price"))
+                pnl = _safe_float(item.get("urmtom") or item.get("urMtom") or item.get("pnl"))
+                rpnl = _safe_float(item.get("rpnl") or item.get("realizedPnl") or item.get("rPnl"))
                 ikey = str(item.get("tok", item.get("instrument_token", item.get("instrument_key", ""))) or "")
-                lot_size = int(item.get("lotSz") or item.get("brdLtQty") or 65)
+                lot_size = _safe_int(item.get("lotSz") or item.get("brdLtQty") or 65)
+                if lot_size <= 0:
+                    lot_size = 65
 
                 avg_price = buy_avg if net_qty > 0 else (sell_avg if net_qty < 0 else (((buy_avg + sell_avg) / 2.0) if (buy_avg > 0 and sell_avg > 0) else (buy_avg or sell_avg)))
 
@@ -596,27 +621,48 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     "token": ikey,
                     "quantity": net_qty,
                     "net_qty": net_qty,
-                    "lots": abs(net_qty) // lot_size if lot_size > 0 else 1,
+                    "lots": max(1, abs(net_qty) // lot_size) if abs(net_qty) > 0 else 0,
                     "lot_size": lot_size,
                     "buy_quantity": tot_buy_qty,
                     "sell_quantity": tot_sell_qty,
                     "buy_qty": tot_buy_qty,
                     "sell_qty": tot_sell_qty,
-                    "buy_avg": buy_avg,
-                    "sell_avg": sell_avg,
-                    "average_price": avg_price,
-                    "avg_price": avg_price,
-                    "last_price": ltp,
-                    "ltp": ltp,
-                    "pnl": pnl,
-                    "realised_pnl": rpnl,
-                    "strike_price": float(item.get("stkPrc") or 0.0),
+                    "buy_avg": round(buy_avg, 2),
+                    "sell_avg": round(sell_avg, 2),
+                    "average_price": round(avg_price, 2),
+                    "avg_price": round(avg_price, 2),
+                    "last_price": round(ltp, 2),
+                    "ltp": round(ltp, 2),
+                    "pnl": round(pnl, 2),
+                    "realised_pnl": round(rpnl, 2),
+                    "strike_price": _safe_float(item.get("stkPrc")),
                     "option_type": str(item.get("optTp") or "").upper(),
                     "expiry_date": str(item.get("expDt") or ""),
                     "product": item.get("prod", "NRML"),
                     "exchange_segment": item.get("exSeg", "nse_fo"),
                     "client_id": item.get("actId") or "Kotak Neo Live"
                 })
+
+            # Backfill live LTP and Unrealized PnL if broker positions payload lacks real-time ticks
+            open_tokens = [p["token"] for p in standardized if p["net_qty"] != 0 and p.get("token")]
+            if open_tokens:
+                try:
+                    quotes = self.get_live_quotes(open_tokens)
+                    for p in standardized:
+                        tok = p.get("token")
+                        tsym_key = p.get("trading_symbol")
+                        q = quotes.get(tok) or quotes.get(f"NSE_FO|{tok}") or quotes.get(tsym_key)
+                        if q and _safe_float(q.get("ltp")) > 0:
+                            live_p = _safe_float(q["ltp"])
+                            p["ltp"] = round(live_p, 2)
+                            p["last_price"] = round(live_p, 2)
+                            if p["net_qty"] > 0 and p["avg_price"] > 0:
+                                p["pnl"] = round((live_p - p["avg_price"]) * p["net_qty"], 2)
+                            elif p["net_qty"] < 0 and p["avg_price"] > 0:
+                                p["pnl"] = round((p["avg_price"] - live_p) * abs(p["net_qty"]), 2)
+                except Exception as q_err:
+                    logger.debug(f"[Kotak Neo] Backfill live quotes note: {q_err}")
+
             return standardized
         except Exception as e:
             logger.error(f"[Kotak Neo] Exception fetching positions: {e}")

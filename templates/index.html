@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=2.6">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=3.0">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -1356,7 +1356,8 @@
                         </select>
 
                         <button type="button" class="straddle-btn btn-outline" style="padding:4px 10px; font-size:12px;" onclick="loadStraddleOptionChain()">🔄 Refresh</button>
-                        <button type="button" class="straddle-btn" style="background:#2563eb; color:#fff; font-weight:800; padding:4px 12px; font-size:12px; display:inline-flex; align-items:center; gap:6px; border:none; border-radius:4px; cursor:pointer;" onclick="openBasketOrderModal()">🧺 Basket <span id="basketHeaderBadge" style="background:rgba(255,255,255,0.25); color:#fff; border-radius:10px; padding:0 6px; font-size:10px;">0</span></button>
+                        <button type="button" class="straddle-btn" id="btnToggleBasketMode" onclick="toggleOptionChainBasketMode()" style="background:#0f172a; color:#38bdf8; border:1px solid #38bdf8; font-weight:800; padding:4px 12px; font-size:12px; display:inline-flex; align-items:center; gap:6px; border-radius:6px; cursor:pointer;" title="Toggle multi-leg basket selection checkboxes">🧺 Basket Mode: <span id="basketModeStateLabel" style="color:#f87171; font-weight:900;">OFF</span></button>
+                        <button type="button" class="straddle-btn" style="background:#2563eb; color:#fff; font-weight:800; padding:4px 12px; font-size:12px; display:inline-flex; align-items:center; gap:6px; border:none; border-radius:4px; cursor:pointer;" onclick="openBasketOrderModal()">📋 Basket <span id="basketHeaderBadge" style="background:rgba(255,255,255,0.25); color:#fff; border-radius:10px; padding:0 6px; font-size:10px;">0</span></button>
                         <button class="straddle-modal-close" onclick="closeStraddleOptionChainModal()">×</button>
                     </div>
                 </div>
@@ -1392,54 +1393,56 @@
                     </div>
                 </div>
 
-                <!-- Matrix Table -->
-                <div class="straddle-modal-body" style="padding:0; overflow-x:auto; max-height:calc(92vh - 160px);">
-                    <table class="straddle-table" id="straddleOptionChainTable" style="margin:0; font-size:12px;">
+                <!-- Matrix Table (Compact, Wrapped, Zero Horizontal Scrollbar) -->
+                <div class="straddle-modal-body" style="padding:0; overflow-x:hidden; max-height:calc(88vh - 160px); overflow-y:auto;">
+                    <table class="straddle-table opt-chain-table" id="straddleOptionChainTable" style="margin:0; width:100%; font-size:12px; table-layout:fixed; border-collapse:collapse;">
                         <thead>
-                            <tr>
+                            <tr id="optChainSuperHeaderRow">
                                 <!-- CALLS HEADER -->
-                                <th colspan="5" class="opt-table-header-ce" style="text-align:center; font-size:12.5px; letter-spacing:0.5px;">
-                                    ▲ CALLS (CE) • BULLISH ACCUMULATION
+                                <th id="thCeSuperHeader" colspan="2" class="opt-table-header-ce" style="text-align:center; font-size:12.5px; letter-spacing:0.5px; padding:7px 10px;">
+                                    ▲ CALLS (CE) • BULLISH
                                 </th>
                                 <!-- STRIKE HEADER -->
-                                <th class="opt-table-header-strike" style="text-align:center; width:120px; font-size:12.5px;">
+                                <th class="opt-table-header-strike" style="text-align:center; width:100px; font-size:12.5px; padding:7px 6px;">
                                     STRIKE
                                 </th>
                                 <!-- PUTS HEADER -->
-                                <th colspan="5" class="opt-table-header-pe" style="text-align:center; font-size:12.5px; letter-spacing:0.5px;">
-                                    ▼ PUTS (PE) • BEARISH ACCUMULATION
-                                </th>
-                                <!-- ACTION HEADER -->
-                                <th style="text-align:center; width:150px; background:#0f172a; color:#cbd5e1;">
-                                    QUICK ACTION
+                                <th id="thPeSuperHeader" colspan="2" class="opt-table-header-pe" style="text-align:center; font-size:12.5px; letter-spacing:0.5px; padding:7px 10px;">
+                                    ▼ PUTS (PE) • BEARISH
                                 </th>
                             </tr>
-                            <tr style="background:#0c101a; border-bottom:1px solid rgba(255,255,255,0.1);">
-                                <!-- Calls Columns -->
-                                <th style="text-align:right; min-width:130px;">OI (Lakhs)</th>
-                                <th style="text-align:right; width:70px;">IV (%)</th>
-                                <th style="text-align:right; width:65px;">Delta (Δ)</th>
-                                <th style="text-align:right; min-width:85px; color:#34d399;">LTP (₹)</th>
-                                <th style="text-align:right; min-width:90px;">Bid / Ask</th>
+                            <tr id="optChainSubHeaderRow" style="background:#0c101a; border-bottom:1px solid rgba(255,255,255,0.1);">
+                                <!-- Calls Columns: Select Tick (Basket Mode), LTP, Bid/Ask -->
+                                <th id="thCeBasketTick" style="display:none; text-align:center; width:82px; color:#38bdf8; padding:6px 4px;">SELECT</th>
+                                <th id="thCeLtp" style="text-align:right; color:#34d399; font-weight:800; padding:6px 10px;">LTP (₹)</th>
+                                <th id="thCeBidAsk" style="text-align:right; color:#94a3b8; padding:6px 8px;">Bid / Ask</th>
 
                                 <!-- Center Strike -->
-                                <th style="text-align:center; background:#111c3a; color:#60a5fa; font-weight:800;">STRIKE</th>
+                                <th style="text-align:center; width:100px; background:#111c3a; color:#60a5fa; font-weight:900; padding:6px 4px;">STRIKE</th>
 
-                                <!-- Puts Columns -->
-                                <th style="text-align:left; min-width:90px;">Bid / Ask</th>
-                                <th style="text-align:left; min-width:85px; color:#fb7185;">LTP (₹)</th>
-                                <th style="text-align:left; width:65px;">Delta (Δ)</th>
-                                <th style="text-align:left; width:70px;">IV (%)</th>
-                                <th style="text-align:left; min-width:130px;">OI (Lakhs)</th>
-
-                                <!-- Quick Action -->
-                                <th style="text-align:center; color:#38bdf8;">BUY / SELL</th>
+                                <!-- Puts Columns: Bid/Ask, LTP, Select Tick (Basket Mode) -->
+                                <th id="thPeBidAsk" style="text-align:left; color:#94a3b8; padding:6px 8px;">Bid / Ask</th>
+                                <th id="thPeLtp" style="text-align:left; color:#fb7185; font-weight:800; padding:6px 10px;">LTP (₹)</th>
+                                <th id="thPeBasketTick" style="display:none; text-align:center; width:82px; color:#38bdf8; padding:6px 4px;">SELECT</th>
                             </tr>
                         </thead>
                         <tbody id="straddleOptionChainBody">
                             <!-- Option chain rows rendered dynamically -->
                         </tbody>
                     </table>
+                </div>
+
+                <!-- Sticky Bottom Toolbar for Basket Mode (Kotak Neo Screenshot 5 Experience) -->
+                <div id="optionChainBasketBottomBar" style="display:none; justify-content:space-between; align-items:center; padding:10px 18px; background:#070a13; border-top:1px solid #1e293b; box-shadow:0 -6px 20px rgba(0,0,0,0.6); flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <button type="button" class="straddle-btn btn-outline" style="font-size:11.5px; padding:5px 12px; border-color:#64748b; color:#94a3b8;" onclick="clearOptionChainBasketSelection()">✕ Clear Selection</button>
+                        <span style="font-size:12.5px; color:#cbd5e1; font-weight:700;"><strong id="optionChainBasketSelectedCount" style="color:#38bdf8; font-size:14px;">0</strong> legs selected:</span>
+                        <div id="optionChainBasketSummaryPills" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;"></div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <button type="button" class="straddle-btn btn-outline" style="font-size:12px; padding:6px 14px; color:#38bdf8; border-color:#38bdf8;" onclick="openBasketOrderModal()">📋 View Basket (<span id="chainBasketTotalCountBadge">0</span>)</button>
+                        <button type="button" id="btnAddSelectedToBasket" class="straddle-btn btn-primary" onclick="addSelectedLegsToBasketModal()" style="font-size:12.5px; font-weight:900; padding:7px 20px; background:linear-gradient(135deg, #0284c7, #2563eb); border:none; box-shadow:0 4px 14px rgba(37,99,235,0.4);" disabled>🧺 Add to Basket</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1694,6 +1697,14 @@
                     <div style="font-size:12px;">All Kotak Neo positions are either closed (net qty 0) or already running in this algorithm.</div>
                 </div>
                 <div id="adoptModalContent" style="display:none;">
+                    <!-- Target Strategy Picker -->
+                    <div style="display:flex; align-items:center; gap:10px; background:#070a13; border:1px solid rgba(56,189,248,0.25); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
+                        <span style="font-size:12px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px;">Target Algo:</span>
+                        <select id="adopt_target_strat_select" class="straddle-select" style="flex:1; font-weight:700; color:#f8fafc; background:#0f172a;" onchange="onAdoptTargetStratChange(this.value)">
+                            <!-- Populated dynamically with all strategies -->
+                        </select>
+                    </div>
+
                     <div style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:8px;">1. Select Open Broker Position:</div>
                     <div style="border:1px solid rgba(255,255,255,0.1); border-radius:8px; overflow:hidden; margin-bottom:14px; max-height:220px; overflow-y:auto;">
                         <table class="straddle-table" style="margin:0; width:100%;">
@@ -1706,6 +1717,7 @@
                                     <th>Avg Price</th>
                                     <th>LTP</th>
                                     <th style="text-align:right;">P&L (₹)</th>
+                                    <th>Status</th>
                                 </tr>
                             </thead>
                             <tbody id="adoptBrokerPositionsTableBody">
@@ -1779,20 +1791,19 @@
 
             <!-- Basket Orders List Table -->
             <div style="padding:16px 20px; max-height:55vh; overflow-y:auto; background:#080c14;">
-                <div style="overflow-x:auto;">
-                    <table class="straddle-table basket-orders-table" style="width:100%; border-collapse:separate; border-spacing:0 8px;">
+                <div style="overflow-x:hidden;">
+                    <table class="straddle-table basket-orders-table" style="width:100%; border-collapse:separate; border-spacing:0 6px;">
                         <thead>
                             <tr style="color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid rgba(255,255,255,0.06);">
-                                <th style="width:36px; padding:6px 8px; text-align:center;"><input type="checkbox" id="basketSelectAllCheckbox" checked onchange="toggleSelectAllBasketOrders(this.checked)"></th>
-                                <th style="padding:6px 10px; text-align:left;">Scrip name</th>
-                                <th style="padding:6px 8px; text-align:center;">Action</th>
-                                <th style="padding:6px 8px; text-align:left;">Expiry Date</th>
-                                <th style="padding:6px 8px; text-align:center;">Strike Price</th>
-                                <th style="padding:6px 8px; text-align:center;">CE/PE</th>
-                                <th style="padding:6px 8px; text-align:center;">Product</th>
-                                <th style="padding:6px 8px; text-align:center;">Quantity</th>
-                                <th style="padding:6px 10px; text-align:left;">Price / Price Type</th>
-                                <th style="padding:6px 8px; text-align:center;"></th>
+                                <th style="width:32px; padding:6px 4px; text-align:center;"><input type="checkbox" id="basketSelectAllCheckbox" checked onchange="toggleSelectAllBasketOrders(this.checked)"></th>
+                                <th style="padding:6px 8px; text-align:left;">Scrip & Expiry</th>
+                                <th style="padding:6px 4px; text-align:center; width:44px;">Action</th>
+                                <th style="padding:6px 6px; text-align:center; width:90px;">Strike</th>
+                                <th style="padding:6px 4px; text-align:center; width:46px;">CE/PE</th>
+                                <th style="padding:6px 4px; text-align:center; width:62px;">Product</th>
+                                <th style="padding:6px 6px; text-align:center; width:90px;">Quantity</th>
+                                <th style="padding:6px 8px; text-align:left; width:150px;">Price / Price Type</th>
+                                <th style="padding:6px 4px; text-align:center; width:30px;"></th>
                             </tr>
                         </thead>
                         <tbody id="basketOrdersTableBody">
@@ -1865,7 +1876,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=2.6"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=3.0"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

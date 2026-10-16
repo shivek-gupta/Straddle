@@ -18,6 +18,7 @@ import time
 import math
 import json
 import gzip
+import re
 import logging
 import threading
 import requests
@@ -4608,17 +4609,17 @@ class StraddleManager:
             broker = get_broker_adapter(mode)
             raw_pos = broker.get_positions() or []
 
-            # Gather all existing position tokens/symbols across active strategies
-            tracked_identifiers = set()
+            # Map existing open positions to their managing strategy
+            assigned_map = {}
             for s in self._strategies:
                 for p in s.get("positions", []):
                     if p.get("status") == "OPEN":
                         tok = str(p.get("token") or p.get("instrument_key") or "")
-                        sym = str(p.get("symbol") or p.get("trading_symbol") or "")
+                        sym = str(p.get("symbol") or p.get("trading_symbol") or "").upper()
                         if tok:
-                            tracked_identifiers.add(tok)
+                            assigned_map[tok] = s
                         if sym:
-                            tracked_identifiers.add(sym.upper())
+                            assigned_map[sym] = s
 
             adoptable = []
             for p in raw_pos:
@@ -4630,13 +4631,19 @@ class StraddleManager:
                 sym = str(p.get("symbol") or p.get("trading_symbol") or "")
                 tsym = str(p.get("trading_symbol") or sym)
 
-                # Skip if already managed by an algo
-                if tok in tracked_identifiers or sym.upper() in tracked_identifiers or tsym.upper() in tracked_identifiers:
+                managing_strat = assigned_map.get(tok) or assigned_map.get(sym.upper()) or assigned_map.get(tsym.upper())
+
+                # If requested for a specific strategy, skip only if already managed by THIS exact strategy
+                if strategy_id and managing_strat and managing_strat.get("strategy_id") == strategy_id:
                     continue
 
                 side = "BUY" if net_qty > 0 else "SELL"
                 lot_size = int(p.get("lot_size") or 65)
                 lots = max(1, abs(net_qty) // lot_size) if lot_size > 0 else 1
+
+                status_label = "Unassigned (Kotak Neo Direct)"
+                if managing_strat:
+                    status_label = f"In '{managing_strat.get('name')}'"
 
                 adoptable.append({
                     "symbol": sym,
@@ -4655,7 +4662,9 @@ class StraddleManager:
                     "strike_price": float(p.get("strike_price") or 0.0),
                     "option_type": str(p.get("option_type") or ("CE" if "CE" in sym.upper() else "PE")),
                     "expiry_date": str(p.get("expiry_date") or ""),
-                    "product": str(p.get("product") or "MIS")
+                    "product": str(p.get("product") or "NRML"),
+                    "currently_in": status_label,
+                    "managing_strat_id": managing_strat.get("strategy_id") if managing_strat else None
                 })
 
             return adoptable
@@ -4698,15 +4707,22 @@ class StraddleManager:
             else:
                 sl_p = avg_p + sl_val if side == "SELL" else avg_p - sl_val
 
+            tgt_type = "TGT: %" if "%" in t_mode else "TGT: Pts"
+            sl_type = "SL: -%" if "%" in sl_mode else "SL: -Pts"
+            tgt_label = f"TGT: {t_val:.0f}%" if "%" in t_mode else f"TGT: ₹{t_val:.2f}"
+            sl_label = f"SL: -{sl_val:.0f}%" if "%" in sl_mode else f"SL: -₹{sl_val:.2f}"
+
+            adopted_id = f"leg_adopted_{int(time.time()*1000)%1000000}"
             adopted_leg = {
-                "leg_id": f"leg_adopted_{int(time.time()*1000)%1000000}",
+                "id": adopted_id,
+                "leg_id": adopted_id,
                 "symbol": sym,
                 "trading_symbol": pos.get("trading_symbol") or sym,
                 "token": pos.get("token") or pos.get("instrument_key") or "",
                 "instrument_key": pos.get("token") or pos.get("instrument_key") or "",
                 "exchange_segment": pos.get("exchange_segment", "nse_fo"),
                 "side": side,
-                "product": pos.get("product", "MIS"),
+                "product": pos.get("product", "NRML"),
                 "quantity": abs(net_qty),
                 "lots": lots,
                 "lot_size": lot_size,
@@ -4716,29 +4732,54 @@ class StraddleManager:
                 "entry_time": pos.get("entry_time") or now_ist_str(),
                 "last_price": round(ltp, 2),
                 "ltp": round(ltp, 2),
-                "target_type": "PERCENTAGE" if "%" in t_mode else "POINTS",
-                "target_type_label": f"TGT: {t_val}{t_mode}",
+                "target_type": tgt_type,
+                "target_type_label": tgt_label,
                 "target_value": t_val,
                 "target_price": round(max(0.05, tgt_p), 2),
-                "sl_type": "PERCENTAGE" if "%" in sl_mode else "POINTS",
-                "sl_type_label": f"SL: {sl_val}{sl_mode}",
+                "sl_type": sl_type,
+                "sl_type_label": sl_label,
                 "sl_value": sl_val,
                 "sl_price": round(max(0.05, sl_p), 2),
                 "status": "OPEN",
                 "pnl": float(pos.get("pnl") or 0.0),
+                "mtm": float(pos.get("pnl") or 0.0),
                 "is_adopted": True,
                 "strike_price": float(pos.get("strike_price") or 0.0),
                 "option_type": pos.get("option_type") or ("CE" if "CE" in sym.upper() else "PE"),
-                "expiry_str": pos.get("expiry_date") or ""
+                "expiry_str": pos.get("expiry_date") or "",
+                "strategy_id": strat.get("strategy_id"),
+                "strategy_name": strat.get("name"),
+                "date": today_ist_str()
             }
+
+            # Remove this position from any other strategy where it might have been placed
+            tok_key = str(pos.get("token") or pos.get("instrument_key") or "")
+            sym_key = sym.upper()
+            for other_s in self._strategies:
+                if other_s.get("strategy_id") != strategy_id:
+                    other_s["positions"] = [
+                        op for op in other_s.get("positions", [])
+                        if not (
+                            op.get("status") == "OPEN" and (
+                                (tok_key and str(op.get("token") or op.get("instrument_key") or "") == tok_key) or
+                                (str(op.get("symbol") or op.get("trading_symbol") or "").upper() == sym_key)
+                            )
+                        )
+                    ]
 
             strat.setdefault("positions", []).append(adopted_leg)
             strat["status"] = "TRADE_ACTIVE"
             strat["has_traded_today"] = True
+            strat["enabled"] = True
             strat["is_enabled"] = True
             strat["last_trade_date"] = today_ist_str()
 
+            if self._active_strategy_id == strategy_id:
+                self._state["positions"] = strat["positions"]
+                self._state["status"] = "TRADE_ACTIVE"
+
             self._save_strategies()
+            self._save_state()
             self._log_event(f"Successfully adopted broker position '{sym}' ({side} {lots} lots @ ₹{avg_p:.2f}) into '{strat.get('name')}'.", level="SUCCESS")
 
             return {
@@ -5263,10 +5304,7 @@ class StraddleManager:
                             break
 
                     if not target_strat:
-                        if active and (active.get("enabled") or active.get("status") in ("READY", "TRADE_ACTIVE")):
-                            target_strat = active
-                        elif self._strategies:
-                            target_strat = self._strategies[0]
+                        continue  # Leave manual/external positions unassigned so user can adopt them into whichever algo they choose
 
                     if target_strat:
                         # Extract leg configuration if any

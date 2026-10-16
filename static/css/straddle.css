@@ -8714,5 +8714,151 @@ table .flag-cell {
     outline: none;
 }
 
+/* ==========================================================================
+   Basket Mode & Expressive Styles for Option Chain & Basket Modal
+   ========================================================================== */
+.chain-tick-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: center;
+}
+
+.chain-tick-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s ease-in-out;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #090e18;
+}
+
+.chain-tick-btn input[type="checkbox"] {
+    display: none;
+}
+
+.chain-tick-btn .tick-box {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    border: 1.5px solid #475569;
+    background: #0b1120;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.chain-tick-btn.checked .tick-box {
+    border-color: currentColor;
+    background: currentColor;
+}
+
+.chain-tick-btn.checked .tick-box::after {
+    content: "✓";
+    font-size: 9.5px;
+    font-weight: 900;
+    color: #ffffff;
+    display: block;
+    line-height: 1;
+}
+
+.chain-tick-btn .tick-lbl {
+    font-size: 10.5px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+}
+
+/* Buy tick styling */
+.chain-tick-btn.tick-buy {
+    color: #34d399;
+}
+.chain-tick-btn.tick-buy:hover {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.12);
+}
+.chain-tick-btn.tick-buy.checked {
+    background: rgba(16, 185, 129, 0.25);
+    border-color: #10b981;
+    color: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+/* Sell tick styling */
+.chain-tick-btn.tick-sell {
+    color: #fb7185;
+}
+.chain-tick-btn.tick-sell:hover {
+    border-color: #f43f5e;
+    background: rgba(244, 63, 94, 0.12);
+}
+.chain-tick-btn.tick-sell.checked {
+    background: rgba(244, 63, 94, 0.25);
+    border-color: #f43f5e;
+    color: #f43f5e;
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.4);
+}
+
+/* Basket Summary Pills */
+.basket-pill-chip {
+    font-size: 11px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    padding: 2px 8px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.basket-pill-chip.chip-buy {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #34d399;
+}
+.basket-pill-chip.chip-sell {
+    background: rgba(244, 63, 94, 0.2);
+    border: 1px solid rgba(244, 63, 94, 0.4);
+    color: #fb7185;
+}
+
+/* Ensure no horizontal scrollbars anywhere in Option Chain & Basket Modal */
+#straddleOptionChainModal .straddle-modal-dialog,
+#modalBasketOrders .straddle-modal-dialog,
+#straddleOptionChainModal .straddle-modal-body,
+#modalBasketOrders .straddle-modal-body {
+    overflow-x: hidden !important;
+}
+
+.opt-chain-table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    overflow-x: hidden !important;
+}
+
+.opt-chain-table th, 
+.opt-chain-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.basket-orders-table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    overflow-x: hidden !important;
+}
+
+.basket-orders-table th,
+.basket-orders-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+
 
 

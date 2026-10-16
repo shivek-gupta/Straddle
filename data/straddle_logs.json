@@ -1,5 +1,12 @@
 [
   {
+    "timestamp": "12:19:20",
+    "date": "2026-10-16",
+    "level": "INFO",
+    "message": "Stoploss Hit for NIFTY26O1922550PE @ \u20b99.95 (SL was \u20b919.90)",
+    "details": {}
+  },
+  {
     "timestamp": "01:03:31",
     "date": "2026-10-16",
     "level": "INFO",
