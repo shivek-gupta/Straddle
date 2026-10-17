@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=3.6">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=3.7">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -98,6 +98,9 @@
                 </button>
                 <button type="button" class="straddle-sub-tab" id="straddleSubTab_pnl" onclick="switchStraddleSubView('pnl')">
                     <span>📈</span> P&L Chart
+                </button>
+                <button type="button" class="straddle-sub-tab" id="straddleSubTab_basket" onclick="openBasketOrderModal()" title="Quick Compile & Execute Basket Orders" style="display:inline-flex; align-items:center; gap:6px;">
+                    <span>🧺</span> Basket Orders <span id="navBasketCountBadge" style="background:#2563eb; color:#fff; border-radius:10px; padding:0 6px; font-size:10px; font-weight:800; display:none;">0</span>
                 </button>
             </div>
 
@@ -1876,7 +1879,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=3.6"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=3.7"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

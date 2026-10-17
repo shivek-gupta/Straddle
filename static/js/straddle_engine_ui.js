@@ -5172,6 +5172,27 @@ async function straddleToggleExecutionMode() {
 // OPTION CHAIN INTERACTIVE MATRIX (EXPRESSIVE, COLOURFUL + GREEKS & PCR)
 // =========================================================================
 
+let _optChainTickerInterval = null;
+
+function startOptionChainTicker() {
+    stopOptionChainTicker();
+    _optChainTickerInterval = setInterval(() => {
+        const modal = document.getElementById("straddleOptionChainModal");
+        if (modal && modal.style.display === "flex") {
+            loadStraddleOptionChain(null, true);
+        } else {
+            stopOptionChainTicker();
+        }
+    }, 1500); // Continuous 1.5s tick feed for Option Chain LTP & Bid/Ask
+}
+
+function stopOptionChainTicker() {
+    if (_optChainTickerInterval) {
+        clearInterval(_optChainTickerInterval);
+        _optChainTickerInterval = null;
+    }
+}
+
 async function openStraddleOptionChainModal(undParam) {
     const modal = document.getElementById("straddleOptionChainModal");
     if (!modal) return;
@@ -5182,11 +5203,13 @@ async function openStraddleOptionChainModal(undParam) {
     if (undSel) undSel.value = targetUnd;
 
     await onChangeOptChainUnderlying(targetUnd);
+    startOptionChainTicker();
 }
 
 function closeStraddleOptionChainModal() {
     const modal = document.getElementById("straddleOptionChainModal");
     if (modal) modal.style.display = "none";
+    stopOptionChainTicker();
 }
 
 async function onChangeOptChainUnderlying(und) {
@@ -5271,21 +5294,64 @@ window.toggleOptionChainBasketMode = toggleOptionChainBasketMode;
 
 function onToggleChainBasketLeg(strike, optType, side, symbol, token, ltp, lotSize, expDate, isChecked) {
     const key = `${strike}_${optType}_${side}`;
+    const und = window._straddleState?.optionChainUnderlying || "NIFTY";
+    const resolvedLot = Number(lotSize) > 0 ? Number(lotSize) : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : 65));
+    const resolvedStrike = Number(strike) || 0;
+    const resolvedPrice = Number(ltp) || 0.05;
+
     if (isChecked) {
         window._chainSelectedLegs[key] = {
-            strike: Number(strike),
+            strike: resolvedStrike,
             opt_type: optType,
             side: side,
             symbol: symbol,
             token: token || "",
-            ltp: Number(ltp) || 0,
-            lot_size: Number(lotSize) || 65,
+            ltp: resolvedPrice,
+            lot_size: resolvedLot,
             expiry_date: expDate || "Weekly"
         };
+
+        // Directly add or sync with window._basketOrders
+        if (!Array.isArray(window._basketOrders)) window._basketOrders = [];
+        const exists = window._basketOrders.some(o => Number(o.strike) === resolvedStrike && o.opt_type === optType && o.side === side);
+        if (!exists) {
+            window._basketOrders.push({
+                id: "b_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
+                selected: true,
+                underlying: und,
+                symbol: symbol || `${und} ${resolvedStrike} ${optType}`,
+                trading_symbol: symbol || `${und} ${resolvedStrike} ${optType}`,
+                token: token || "",
+                strike: resolvedStrike,
+                opt_type: (optType || "CE").toUpperCase(),
+                side: (side || "SELL").toUpperCase(),
+                expiry_date: expDate || "Weekly",
+                product: "CF",
+                lots: 1,
+                lot_size: resolvedLot,
+                quantity: resolvedLot,
+                price: resolvedPrice,
+                order_type: "LIMIT",
+                ltp: resolvedPrice,
+                change: 0,
+                change_pct: 0
+            });
+            try {
+                localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+            } catch(e) {}
+        }
     } else {
         delete window._chainSelectedLegs[key];
+        // Directly remove from window._basketOrders
+        if (Array.isArray(window._basketOrders)) {
+            window._basketOrders = window._basketOrders.filter(o => !(Number(o.strike) === resolvedStrike && o.opt_type === optType && o.side === side));
+            try {
+                localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+            } catch(e) {}
+        }
     }
     updateOptionChainBasketSummaryBar();
+    updateBasketBadges();
 }
 window.onToggleChainBasketLeg = onToggleChainBasketLeg;
 
@@ -5383,7 +5449,7 @@ function addSelectedLegsToBasketModal() {
 }
 window.addSelectedLegsToBasketModal = addSelectedLegsToBasketModal;
 
-async function loadStraddleOptionChain(expiryMs) {
+async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
     const undSel = document.getElementById("optChainUnderlyingSelect");
     const und = undSel?.value || window._straddleState.optionChainUnderlying || "NIFTY";
     
@@ -5397,7 +5463,7 @@ async function loadStraddleOptionChain(expiryMs) {
     const spotLabel = document.getElementById("optChainSpotTicker");
     if (!tbody) return;
 
-    if (!tbody.children.length || tbody.querySelector("td[colspan]")) {
+    if (!isBackgroundUpdate && (!tbody.children.length || tbody.querySelector("td[colspan]"))) {
         tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:35px; color:#94a3b8;"><span style="font-size:16px;">⏳</span> Loading Real-Time Option Depth & Greeks...</td></tr>`;
     }
 
@@ -5501,27 +5567,27 @@ async function loadStraddleOptionChain(expiryMs) {
                 const peChg = r.pe ? (r.pe.net_change || 0) : 0;
                 const peChgPct = r.pe ? (r.pe.net_change_pct || 0) : 0;
 
-                // Checkbox state in Basket Mode
+                // Checkbox state in Basket Mode (inspect both chainSelection and active basketOrders)
                 const ceBuyKey = `${strike}_CE_BUY`;
                 const ceSellKey = `${strike}_CE_SELL`;
                 const peBuyKey = `${strike}_PE_BUY`;
                 const peSellKey = `${strike}_PE_SELL`;
 
-                const isCeBuyChecked = !!window._chainSelectedLegs[ceBuyKey];
-                const isCeSellChecked = !!window._chainSelectedLegs[ceSellKey];
-                const isPeBuyChecked = !!window._chainSelectedLegs[peBuyKey];
-                const isPeSellChecked = !!window._chainSelectedLegs[peSellKey];
+                const isCeBuyChecked = !!(window._chainSelectedLegs[ceBuyKey] || (window._basketOrders || []).some(o => Number(o.strike) === strike && o.opt_type === "CE" && o.side === "BUY"));
+                const isCeSellChecked = !!(window._chainSelectedLegs[ceSellKey] || (window._basketOrders || []).some(o => Number(o.strike) === strike && o.opt_type === "CE" && o.side === "SELL"));
+                const isPeBuyChecked = !!(window._chainSelectedLegs[peBuyKey] || (window._basketOrders || []).some(o => Number(o.strike) === strike && o.opt_type === "PE" && o.side === "BUY"));
+                const isPeSellChecked = !!(window._chainSelectedLegs[peSellKey] || (window._basketOrders || []).some(o => Number(o.strike) === strike && o.opt_type === "PE" && o.side === "SELL"));
 
                 const ceActionCell = isBasketMode ? `
                     <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
                         <div class="chain-tick-wrap">
                             <label class="chain-tick-btn tick-buy ${isCeBuyChecked ? 'checked' : ''}" title="Tick to BUY CE in basket">
-                                <input type="checkbox" ${isCeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'BUY', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
-                                <span class="tick-box"></span><span class="tick-lbl">B</span>
+                                <input type="checkbox" ${isCeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'BUY', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked); this.parentElement.querySelector('.tick-box').textContent = this.checked ? '☑' : '☐'">
+                                <span class="tick-box">${isCeBuyChecked ? '☑' : '☐'}</span><span class="tick-lbl">B</span>
                             </label>
                             <label class="chain-tick-btn tick-sell ${isCeSellChecked ? 'checked' : ''}" title="Tick to SELL CE in basket">
-                                <input type="checkbox" ${isCeSellChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'SELL', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
-                                <span class="tick-box"></span><span class="tick-lbl">S</span>
+                                <input type="checkbox" ${isCeSellChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'SELL', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked); this.parentElement.querySelector('.tick-box').textContent = this.checked ? '☑' : '☐'">
+                                <span class="tick-box">${isCeSellChecked ? '☑' : '☐'}</span><span class="tick-lbl">S</span>
                             </label>
                         </div>
                     </td>
@@ -5538,12 +5604,12 @@ async function loadStraddleOptionChain(expiryMs) {
                     <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
                         <div class="chain-tick-wrap">
                             <label class="chain-tick-btn tick-buy ${isPeBuyChecked ? 'checked' : ''}" title="Tick to BUY PE in basket">
-                                <input type="checkbox" ${isPeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'BUY', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
-                                <span class="tick-box"></span><span class="tick-lbl">B</span>
+                                <input type="checkbox" ${isPeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'BUY', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked); this.parentElement.querySelector('.tick-box').textContent = this.checked ? '☑' : '☐'">
+                                <span class="tick-box">${isPeBuyChecked ? '☑' : '☐'}</span><span class="tick-lbl">B</span>
                             </label>
                             <label class="chain-tick-btn tick-sell ${isPeSellChecked ? 'checked' : ''}" title="Tick to SELL PE in basket">
-                                <input type="checkbox" ${isPeSellChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'SELL', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
-                                <span class="tick-box"></span><span class="tick-lbl">S</span>
+                                <input type="checkbox" ${isPeSellChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'SELL', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked); this.parentElement.querySelector('.tick-box').textContent = this.checked ? '☑' : '☐'">
+                                <span class="tick-box">${isPeSellChecked ? '☑' : '☐'}</span><span class="tick-lbl">S</span>
                             </label>
                         </div>
                     </td>
@@ -6430,15 +6496,93 @@ try {
 }
 
 function updateBasketBadges() {
-    const count = window._basketOrders.length;
+    const count = window._basketOrders?.length || 0;
     const badge = document.getElementById("basketHeaderBadge");
     if (badge) badge.textContent = count;
+    const navBadge = document.getElementById("navBasketCountBadge");
+    if (navBadge) navBadge.textContent = count;
     const chainBadge = document.getElementById("chainBasketTotalCountBadge");
     if (chainBadge) chainBadge.textContent = count;
     const countBadge = document.getElementById("basketOrderCountBadge");
     if (countBadge) {
-        const selCount = window._basketOrders.filter(o => o.selected).length;
+        const selCount = (window._basketOrders || []).filter(o => o.selected).length;
         countBadge.textContent = `(${selCount}/50 orders)`;
+    }
+}
+
+let _basketQuoteTickerInterval = null;
+
+async function refreshAllBasketQuotes() {
+    if (!window._basketOrders || window._basketOrders.length === 0) return;
+    try {
+        const resp = await fetch("/api/straddle/basket/quotes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orders: window._basketOrders })
+        });
+        const data = await resp.json();
+        if (data.success && data.quotes) {
+            let pricesChanged = false;
+            data.quotes.forEach(q => {
+                const idx = q.idx;
+                if (window._basketOrders[idx]) {
+                    const o = window._basketOrders[idx];
+                    const freshLtp = Number(q.ltp) || 0;
+                    if (freshLtp > 0 && Math.abs((o.ltp || 0) - freshLtp) > 0.01) {
+                        o.ltp = freshLtp;
+                        pricesChanged = true;
+
+                        const row = document.querySelector(`tr[data-idx="${idx}"]`);
+                        if (row) {
+                            const ltpEl = row.querySelector(".basket-row-ltp");
+                            if (ltpEl) {
+                                ltpEl.textContent = `₹${freshLtp.toFixed(2)}`;
+                                ltpEl.style.color = (freshLtp >= (o.prev_ltp || freshLtp)) ? "#10b981" : "#f43f5e";
+                            }
+                            o.prev_ltp = freshLtp;
+
+                            const priceInput = row.querySelector(".basket-price-input");
+                            if (priceInput && o.order_type !== "MARKET") {
+                                const isUserEdited = priceInput.getAttribute("data-user-edited") === "true";
+                                if (!isUserEdited || priceInput.value === "0.00" || priceInput.value === "") {
+                                    priceInput.value = freshLtp.toFixed(2);
+                                    priceInput.setAttribute("data-saved-price", freshLtp.toString());
+                                    o.price = freshLtp;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            if (pricesChanged) {
+                try {
+                    localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+                } catch(e) {}
+                updateBasketMarginCalculation();
+            }
+        }
+    } catch (e) {
+        console.warn("[Basket] Live quotes ticker fetch error:", e);
+    }
+}
+
+function startBasketQuoteTicker() {
+    stopBasketQuoteTicker();
+    refreshAllBasketQuotes();
+    _basketQuoteTickerInterval = setInterval(() => {
+        const modal = document.getElementById("modalBasketOrders");
+        if (modal && modal.style.display === "flex") {
+            refreshAllBasketQuotes();
+        } else {
+            stopBasketQuoteTicker();
+        }
+    }, 1000); // 1-second continuous tick refresh
+}
+
+function stopBasketQuoteTicker() {
+    if (_basketQuoteTickerInterval) {
+        clearInterval(_basketQuoteTickerInterval);
+        _basketQuoteTickerInterval = null;
     }
 }
 
@@ -6451,11 +6595,13 @@ function openBasketOrderModal() {
     updateBasketBadges();
     renderBasketOrdersTable();
     updateBasketMarginCalculation();
+    startBasketQuoteTicker();
 }
 
 function closeBasketOrderModal() {
     const modal = document.getElementById("modalBasketOrders");
     if (modal) modal.style.display = "none";
+    stopBasketQuoteTicker();
 }
 
 function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSize = 65, exp = "", product = "CF") {
@@ -6879,7 +7025,10 @@ function onBasketOrderPriceChange(idx, val) {
         const row = document.querySelector(`tr[data-idx="${idx}"]`);
         if (row) {
             const priceInput = row.querySelector(".basket-price-input");
-            if (priceInput) priceInput.dataset.savedPrice = price.toString();
+            if (priceInput) {
+                priceInput.dataset.savedPrice = price.toString();
+                priceInput.setAttribute("data-user-edited", "true");
+            }
         }
         updateBasketMarginCalculation();
     }
@@ -7185,6 +7334,8 @@ function clearBasketSearch() {
 
 // Window function exports
 window.openBasketOrderModal = openBasketOrderModal;
+window.openBasketModal = openBasketOrderModal;
+window.refreshAllBasketQuotes = refreshAllBasketQuotes;
 window.closeBasketOrderModal = closeBasketOrderModal;
 window.addLegToBasket = addLegToBasket;
 window.renderBasketOrdersTable = renderBasketOrdersTable;

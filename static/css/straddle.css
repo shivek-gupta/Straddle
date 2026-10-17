@@ -8487,6 +8487,36 @@ table .flag-cell {
     justify-content: stretch !important;
 }
 
+/* Time Input Stepper Arrows: Horizontal Side-by-Side (Screenshot 5 Match) */
+.straddle-time-stepper-group .straddle-stepper-arrows {
+    flex-direction: row !important;
+    width: 40px !important;
+    align-items: stretch !important;
+    background: #0d121c !important;
+}
+
+.straddle-time-stepper-group .time-step-btn {
+    flex: 1 1 50% !important;
+    width: 20px !important;
+    height: 100% !important;
+    font-size: 11px !important;
+    font-weight: 900 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: #cbd5e1 !important;
+    cursor: pointer !important;
+}
+
+.straddle-time-stepper-group .time-step-btn:first-child {
+    border-right: 1px solid #1e2638 !important;
+}
+
+.straddle-time-stepper-group .time-step-btn:hover {
+    background: rgba(56, 189, 248, 0.25) !important;
+    color: #38bdf8 !important;
+}
+
 .straddle-stepper-btn, .time-step-btn, .strike-step-btn, .lot-step-btn {
     flex: 1 1 50% !important;
     display: flex !important;
@@ -9029,7 +9059,83 @@ table .flag-cell {
     transform: translateY(-1px);
 }
 
+/* ==========================================================
+   Option Chain Basket Mode Selection Tick Pills (Screenshot 2 Parity)
+   ========================================================== */
+.chain-tick-wrap {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+}
 
+.chain-tick-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 2px !important;
+    padding: 2px 6px !important;
+    border-radius: 4px !important;
+    font-size: 11px !important;
+    font-weight: 800 !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+    user-select: none !important;
+    border: 1px solid transparent !important;
+    height: 24px !important;
+    box-sizing: border-box !important;
+}
 
+.chain-tick-btn input[type="checkbox"] {
+    display: none !important;
+}
 
+.chain-tick-btn.tick-buy {
+    background: rgba(16, 185, 129, 0.12) !important;
+    color: #34d399 !important;
+    border-color: rgba(16, 185, 129, 0.4) !important;
+}
 
+.chain-tick-btn.tick-buy:hover {
+    background: rgba(16, 185, 129, 0.25) !important;
+    border-color: #10b981 !important;
+    transform: scale(1.04) !important;
+}
+
+.chain-tick-btn.tick-buy.checked {
+    background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+    color: #ffffff !important;
+    border-color: #34d399 !important;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.6) !important;
+}
+
+.chain-tick-btn.tick-sell {
+    background: rgba(239, 68, 68, 0.12) !important;
+    color: #f87171 !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+}
+
+.chain-tick-btn.tick-sell:hover {
+    background: rgba(239, 68, 68, 0.25) !important;
+    border-color: #ef4444 !important;
+    transform: scale(1.04) !important;
+}
+
+.chain-tick-btn.tick-sell.checked {
+    background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%) !important;
+    color: #ffffff !important;
+    border-color: #f87171 !important;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.6) !important;
+}
+
+.chain-tick-btn .tick-box {
+    font-size: 12px !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+    display: inline-block !important;
+}
+
+.chain-tick-btn .tick-lbl {
+    font-size: 11px !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.5px !important;
+}

@@ -470,6 +470,36 @@ def api_straddle_contract_quote():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/basket/quotes", methods=["POST"])
+def api_straddle_basket_quotes():
+    try:
+        data = request.get_json(silent=True) or {}
+        contracts = data.get("contracts", [])
+        mgr = get_straddle_manager()
+        results = []
+        for it in contracts:
+            q = mgr.get_contract_quote(
+                underlying=it.get("underlying", "NIFTY"),
+                strike=float(it.get("strike", 0)),
+                opt_type=it.get("opt_type", "CE"),
+                expiry_date=it.get("expiry_date")
+            )
+            results.append({
+                "id": it.get("id"),
+                "symbol": it.get("symbol"),
+                "strike": it.get("strike"),
+                "opt_type": it.get("opt_type"),
+                "ltp": q.get("ltp", 0.0),
+                "bid": q.get("bid", 0.0),
+                "ask": q.get("ask", 0.0),
+                "token": q.get("token") or q.get("instrument_key") or "",
+                "trading_symbol": q.get("trading_symbol") or ""
+            })
+        return jsonify({"success": True, "quotes": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "quotes": []}), 500
+
+
 
 @app.route("/api/straddle/strategy/duplicate", methods=["POST"])
 def api_straddle_strategy_duplicate():
