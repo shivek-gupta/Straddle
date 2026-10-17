@@ -4441,17 +4441,17 @@ function populateStraddleSettingsForm(s) {
     const adv = s.advanced_settings || s.advanced || {};
     document.getElementById("cfgEntryOrderType").value = adv.entry_order_type || "Limit (L) / Stoploss Limit (SL-L)";
     document.getElementById("cfgEntryBufferType").value = adv.entry_buffer_type || "Percentage";
-    document.getElementById("cfgEntryBufferVal").value = adv.entry_buffer_val || 5.0;
+    document.getElementById("cfgEntryBufferVal").value = adv.entry_buffer_val !== undefined ? adv.entry_buffer_val : (adv.entry_buffer_value !== undefined ? adv.entry_buffer_value : 5.0);
     document.getElementById("cfgEntryMarketTimeoutSec").value = adv.entry_market_timeout_sec !== undefined ? adv.entry_market_timeout_sec : 0;
-    document.getElementById("cfgEntryDelaySide").value = adv.entry_delay_side || "Delay entry of Sell positions";
-    document.getElementById("cfgEntryDelaySec").value = adv.entry_delay_sec !== undefined ? adv.entry_delay_sec : 3;
+    document.getElementById("cfgEntryDelaySide").value = adv.entry_delay_side || adv.entry_order_delay_side || "Delay entry of Sell positions";
+    document.getElementById("cfgEntryDelaySec").value = adv.entry_delay_sec !== undefined ? adv.entry_delay_sec : (adv.entry_order_delay_sec !== undefined ? adv.entry_order_delay_sec : 0);
 
     document.getElementById("cfgExitOrderType").value = adv.exit_order_type || "Limit (L) / Stoploss Limit (SL-L)";
     document.getElementById("cfgExitBufferType").value = adv.exit_buffer_type || "Percentage";
-    document.getElementById("cfgExitBufferVal").value = adv.exit_buffer_val || 0.1;
+    document.getElementById("cfgExitBufferVal").value = adv.exit_buffer_val !== undefined ? adv.exit_buffer_val : (adv.exit_buffer_value !== undefined ? adv.exit_buffer_value : 0.1);
     document.getElementById("cfgExitMarketTimeoutSec").value = adv.exit_market_timeout_sec !== undefined ? adv.exit_market_timeout_sec : 0;
-    document.getElementById("cfgExitDelaySide").value = adv.exit_delay_side || "Delay exit of Buy positions";
-    document.getElementById("cfgExitDelaySec").value = adv.exit_delay_sec !== undefined ? adv.exit_delay_sec : 3;
+    document.getElementById("cfgExitDelaySide").value = adv.exit_delay_side || adv.exit_order_delay_side || "Delay exit of Buy positions";
+    document.getElementById("cfgExitDelaySec").value = adv.exit_delay_sec !== undefined ? adv.exit_delay_sec : (adv.exit_order_delay_sec !== undefined ? adv.exit_order_delay_sec : 3);
 
     document.getElementById("cfgSlOrderPlacement").value = adv.sl_order_placement || "Keep with self";
     const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
@@ -4850,22 +4850,28 @@ function serializeCurrentStrategySettings() {
             action: document.getElementById("cfgMtmSlAction")?.value
         },
         advanced_settings: {
-            entry_order_type: document.getElementById("cfgEntryOrderType")?.value,
-            entry_buffer_type: document.getElementById("cfgEntryBufferType")?.value,
-            entry_buffer_val: parseFloat(document.getElementById("cfgEntryBufferVal")?.value) || 5.0,
-            entry_market_timeout_sec: parseInt(document.getElementById("cfgEntryMarketTimeoutSec")?.value) || 0,
-            entry_delay_side: document.getElementById("cfgEntryDelaySide")?.value,
-            entry_delay_sec: parseInt(document.getElementById("cfgEntryDelaySec")?.value) || 3,
-            exit_order_type: document.getElementById("cfgExitOrderType")?.value,
-            exit_buffer_type: document.getElementById("cfgExitBufferType")?.value,
-            exit_buffer_val: parseFloat(document.getElementById("cfgExitBufferVal")?.value) || 0.1,
-            exit_market_timeout_sec: parseInt(document.getElementById("cfgExitMarketTimeoutSec")?.value) || 0,
-            exit_delay_side: document.getElementById("cfgExitDelaySide")?.value,
-            exit_delay_sec: parseInt(document.getElementById("cfgExitDelaySec")?.value) || 3,
+            entry_order_type: document.getElementById("cfgEntryOrderType")?.value || "Limit (L) / Stoploss Limit (SL-L)",
+            entry_buffer_type: document.getElementById("cfgEntryBufferType")?.value || "Percentage",
+            entry_buffer_val: isNaN(parseFloat(document.getElementById("cfgEntryBufferVal")?.value)) ? 5.0 : parseFloat(document.getElementById("cfgEntryBufferVal")?.value),
+            entry_buffer_value: isNaN(parseFloat(document.getElementById("cfgEntryBufferVal")?.value)) ? 5.0 : parseFloat(document.getElementById("cfgEntryBufferVal")?.value),
+            entry_market_timeout_sec: isNaN(parseInt(document.getElementById("cfgEntryMarketTimeoutSec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgEntryMarketTimeoutSec")?.value, 10),
+            entry_delay_side: document.getElementById("cfgEntryDelaySide")?.value || "Delay entry of Sell positions",
+            entry_order_delay_side: document.getElementById("cfgEntryDelaySide")?.value || "Delay entry of Sell positions",
+            entry_delay_sec: isNaN(parseInt(document.getElementById("cfgEntryDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgEntryDelaySec")?.value, 10),
+            entry_order_delay_sec: isNaN(parseInt(document.getElementById("cfgEntryDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgEntryDelaySec")?.value, 10),
+            exit_order_type: document.getElementById("cfgExitOrderType")?.value || "Limit (L) / Stoploss Limit (SL-L)",
+            exit_buffer_type: document.getElementById("cfgExitBufferType")?.value || "Percentage",
+            exit_buffer_val: isNaN(parseFloat(document.getElementById("cfgExitBufferVal")?.value)) ? 0.1 : parseFloat(document.getElementById("cfgExitBufferVal")?.value),
+            exit_buffer_value: isNaN(parseFloat(document.getElementById("cfgExitBufferVal")?.value)) ? 0.1 : parseFloat(document.getElementById("cfgExitBufferVal")?.value),
+            exit_market_timeout_sec: isNaN(parseInt(document.getElementById("cfgExitMarketTimeoutSec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgExitMarketTimeoutSec")?.value, 10),
+            exit_delay_side: document.getElementById("cfgExitDelaySide")?.value || "Delay exit of Buy positions",
+            exit_order_delay_side: document.getElementById("cfgExitDelaySide")?.value || "Delay exit of Buy positions",
+            exit_delay_sec: isNaN(parseInt(document.getElementById("cfgExitDelaySec")?.value, 10)) ? 3 : parseInt(document.getElementById("cfgExitDelaySec")?.value, 10),
+            exit_order_delay_sec: isNaN(parseInt(document.getElementById("cfgExitDelaySec")?.value, 10)) ? 3 : parseInt(document.getElementById("cfgExitDelaySec")?.value, 10),
             sl_order_placement: document.getElementById("cfgSlOrderPlacement")?.value || "Keep with self",
             target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Keep with self",
-            sl_placement_delay_sec: parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value) || 0,
-            mtm_sl_delay_sec: parseInt(document.getElementById("cfgMtmSlDelaySec")?.value) || 0,
+            sl_placement_delay_sec: isNaN(parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value, 10),
+            mtm_sl_delay_sec: isNaN(parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10),
             auto_handling_sl_cancellation: document.getElementById("cfgAutoHandlingSl")?.checked !== false,
             auto_exit_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
             auto_exit_on_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked

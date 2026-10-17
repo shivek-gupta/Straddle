@@ -362,9 +362,20 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
         try:
             clean_ot = "L" if order_type and order_type.upper() in ("LIMIT", "LMT", "L") else ("MKT" if order_type and order_type.upper() in ("MARKET", "MKT") else "L")
-            clean_price = str(round_to_tick(price)) if price is not None else "0"
-            clean_qty = str(int(quantity)) if quantity is not None else "0"
-            clean_trig = str(round_to_tick(trigger_price)) if trigger_price is not None else "0"
+            clean_price = str(round_to_tick(price)) if (price is not None and clean_ot != "MKT") else "0"
+            clean_trig = str(round_to_tick(trigger_price)) if (trigger_price is not None and clean_ot not in ("MKT", "L")) else "0"
+
+            # If quantity not provided, fetch existing quantity from order history so Kotak RMS doesn't reject with Invalid Quantity
+            if not quantity or int(quantity) <= 0:
+                try:
+                    hist = client.order_history(order_id=str(order_id))
+                    items = hist.get("data") if isinstance(hist, dict) else hist
+                    if isinstance(items, list) and items:
+                        quantity = int(items[0].get("qty") or items[0].get("fldQty") or 65)
+                except Exception:
+                    pass
+
+            clean_qty = str(int(quantity or 65))
 
             res = client.modify_order(
                 order_id=str(order_id),
