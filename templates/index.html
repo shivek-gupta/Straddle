@@ -810,7 +810,7 @@
                                 </div>
                             </div>
                             <div class="straddle-form-group">
-                                <label>Entry with Market order if order Open for (N) secs:</label>
+                                <label>Entry with Market order if order Open for (N) secs (0 = immediate):</label>
                                 <div style="display:flex; align-items:center; gap:8px;">
                                     <input type="number" id="cfgEntryMarketTimeoutSec" class="straddle-input" value="0" min="0" max="300" style="flex:1;">
                                     <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
@@ -820,13 +820,12 @@
                                 <label>Entry delay side (Hedge margin sequencing):</label>
                                 <select id="cfgEntryDelaySide" class="straddle-select">
                                     <option value="Delay entry of Sell positions" selected>Delay entry of Sell positions (Buy Hedge first)</option>
-                                    <option value="Delay entry of Buy positions">Delay entry of Buy positions</option>
-                                    <option value="None">None (Simultaneous)</option>
+                                    <option value="None">None (Buy Hedge first, 0s delay)</option>
                                 </select>
                             </div>
                             <div class="straddle-form-group">
                                 <label>Delay by (seconds):</label>
-                                <input type="number" id="cfgEntryDelaySec" class="straddle-input" value="3" min="0" max="60">
+                                <input type="number" id="cfgEntryDelaySec" class="straddle-input" value="0" min="0" max="60">
                             </div>
                         </div>
 
@@ -853,7 +852,7 @@
                                 </div>
                             </div>
                             <div class="straddle-form-group">
-                                <label>Exit with Market order if order Open for (N) secs:</label>
+                                <label>Exit with Market order if order Open for (N) secs (0 = immediate):</label>
                                 <div style="display:flex; align-items:center; gap:8px;">
                                     <input type="number" id="cfgExitMarketTimeoutSec" class="straddle-input" value="0" min="0" max="300" style="flex:1;">
                                     <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
@@ -863,8 +862,7 @@
                                 <label>Exit delay side:</label>
                                 <select id="cfgExitDelaySide" class="straddle-select">
                                     <option value="Delay exit of Buy positions" selected>Delay exit of Buy positions (Exit Sell first)</option>
-                                    <option value="Delay exit of Sell positions">Delay exit of Sell positions</option>
-                                    <option value="None">None</option>
+                                    <option value="None">None (Exit Sell first, 0s delay)</option>
                                 </select>
                             </div>
                             <div class="straddle-form-group">
@@ -1879,7 +1877,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=4.0"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=4.1"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

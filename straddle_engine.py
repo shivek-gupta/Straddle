@@ -3067,75 +3067,48 @@ class StraddleManager:
             entry_delay_side = str(adv.get("entry_order_delay_side") or adv.get("entry_delay_side") or "Delay entry of Sell positions")
             entry_delay_sec = int(adv.get("entry_order_delay_sec") or adv.get("entry_delay_sec") or 0)
 
-            if "Delay entry of Buy positions" in entry_delay_side and sell_legs and buy_legs:
-                # Phase 1: Execute Sell legs first
-                with ThreadPoolExecutor(max_workers=min(8, len(sell_legs))) as executor:
-                    sell_results = list(executor.map(_place_single, sell_legs))
-                for pos in sell_results:
-                    if pos:
-                        new_positions.append(pos)
-
-                # Delay before executing Buy legs
-                if entry_delay_sec > 0:
-                    self._log_event(f"Waiting {entry_delay_sec}s before executing Long Buy positions (Sequencing)...")
-                    time.sleep(entry_delay_sec)
-                    if not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
-                        return
-
-                # Phase 2: Execute Buy legs
+            # INVIOLABLE SAFETY DIRECTIVE:
+            # Strictly under no conditions are Sell legs executed before Buy (Hedge) legs!
+            # Buy orders are ALWAYS filled first to secure exchange SPAN margin benefits and avoid RMS rejections.
+            # If delay is 0s (or "None"), buffer time is 0: execute Sell legs immediately upon Buy fills!
+            if buy_legs:
+                from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(max_workers=min(8, len(buy_legs))) as executor:
                     buy_results = list(executor.map(_place_single, buy_legs))
                 for pos in buy_results:
                     if pos:
                         new_positions.append(pos)
-            elif "None" in entry_delay_side and (buy_legs or sell_legs):
-                # Simultaneous execution of both sides
-                all_legs = buy_legs + sell_legs
-                with ThreadPoolExecutor(max_workers=min(12, len(all_legs))) as executor:
-                    all_results = list(executor.map(_place_single, all_legs))
-                for pos in all_results:
-                    if pos:
-                        new_positions.append(pos)
-            else:
-                # Quantiply Gold Standard: Buy (Hedge) First for margin release, then Sell legs
-                if buy_legs:
-                    from concurrent.futures import ThreadPoolExecutor
-                    with ThreadPoolExecutor(max_workers=min(8, len(buy_legs))) as executor:
-                        buy_results = list(executor.map(_place_single, buy_legs))
-                    for pos in buy_results:
-                        if pos:
-                            new_positions.append(pos)
 
-                    # Ultra-fast parallel fill confirmation for Buy (Hedge) legs (5ms micro-poll, 200ms timeout)
-                    buy_oids = []
-                    for pos in buy_results:
-                        if pos and pos.get("order_id") and not str(pos.get("order_id")).startswith("ORD_") and not str(pos.get("order_id")).startswith("PAPER_"):
-                            buy_oids.append(str(pos.get("order_id")))
-                            if pos.get("child_order_ids"):
-                                for ch_oid in pos["child_order_ids"]:
-                                    if ch_oid and str(ch_oid) not in buy_oids:
-                                        buy_oids.append(str(ch_oid))
+                # Ultra-fast parallel fill confirmation for Buy (Hedge) legs (5ms micro-poll, 200ms timeout)
+                buy_oids = []
+                for pos in buy_results:
+                    if pos and pos.get("order_id") and not str(pos.get("order_id")).startswith("ORD_") and not str(pos.get("order_id")).startswith("PAPER_"):
+                        buy_oids.append(str(pos.get("order_id")))
+                        if pos.get("child_order_ids"):
+                            for ch_oid in pos["child_order_ids"]:
+                                if ch_oid and str(ch_oid) not in buy_oids:
+                                    buy_oids.append(str(ch_oid))
 
-                    if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
-                        with ThreadPoolExecutor(max_workers=min(12, len(buy_oids) + 1)) as v_exec:
-                            v_futs = [v_exec.submit(broker.wait_for_order_fill, oid, 0.20, 0.005) for oid in buy_oids]
-                            _ = [f.result() for f in concurrent.futures.as_completed(v_futs)]
+                if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
+                    with ThreadPoolExecutor(max_workers=min(12, len(buy_oids) + 1)) as v_exec:
+                        v_futs = [v_exec.submit(broker.wait_for_order_fill, oid, 0.20, 0.005) for oid in buy_oids]
+                        _ = [f.result() for f in concurrent.futures.as_completed(v_futs)]
 
-                # Delay before executing Sell legs if configured
-                if buy_legs and sell_legs and "Delay entry of Sell positions" in entry_delay_side and entry_delay_sec > 0:
+                # Delay before executing Sell legs (0 seconds means immediately upon Buy fills)
+                if sell_legs and entry_delay_sec > 0:
                     self._log_event(f"Waiting {entry_delay_sec}s before executing Short Sell positions (Hedge Margin Optimization)...")
                     time.sleep(entry_delay_sec)
                     if not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
                         return
 
-                # Phase 2: Immediately execute Sell legs in parallel (zero time gap if entry_delay_sec == 0)
-                if sell_legs:
-                    from concurrent.futures import ThreadPoolExecutor
-                    with ThreadPoolExecutor(max_workers=min(8, len(sell_legs))) as executor:
-                        sell_results = list(executor.map(_place_single, sell_legs))
-                    for pos in sell_results:
-                        if pos:
-                            new_positions.append(pos)
+            # Phase 2: Execute Sell legs in parallel (immediately if entry_delay_sec == 0)
+            if sell_legs:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=min(8, len(sell_legs))) as executor:
+                    sell_results = list(executor.map(_place_single, sell_legs))
+                for pos in sell_results:
+                    if pos:
+                        new_positions.append(pos)
 
             with _ENGINE_LOCK:
                 # Discard ONLY if strategy was reset anew while orders were executing
@@ -3524,13 +3497,41 @@ class StraddleManager:
         }
 
         # Quantiply-parity: timeout conversion to market
+        # If N = 0: after trying with limit order, converted to market order immediately.
+        # If N > 0: converted to market order if unfilled after N seconds.
         entry_timeout = int(adv.get("entry_market_timeout_sec") or adv.get("entry_open_for_secs") or 0)
-        if entry_timeout > 0 and order_id and "Limit" in order_type_cfg and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
-            threading.Thread(
-                target=self._watch_limit_order_timeout,
-                args=(broker, order_id, entry_timeout, contract.get("trading_symbol", ""), total_qty, side, prod, contract.get("instrument_key", "")),
-                daemon=True
-            ).start()
+        if order_id and "Limit" in order_type_cfg and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
+            if entry_timeout == 0:
+                # 0 seconds: after trying limit order, immediately convert to market if not filled
+                try:
+                    fill_chk = broker.wait_for_order_fill(str(order_id), timeout_sec=0.05, poll_interval_sec=0.005)
+                    if not fill_chk.get("filled"):
+                        logger.info(f"[Limit 0s Timeout] Entry order {order_id} not filled immediately. Converting to MARKET order...")
+                        mod_res = broker.modify_order(order_id=str(order_id), order_type="MARKET", price=0.0, quantity=total_qty)
+                        if not mod_res.get("success"):
+                            logger.warning(f"[Limit 0s Timeout] Modify failed: {mod_res.get('error')}. Cancelling and punching fresh MARKET order...")
+                            broker.cancel_order(str(order_id))
+                            fresh_res = broker.place_order(
+                                symbol=contract.get("trading_symbol", ""),
+                                instrument_key=contract.get("instrument_key", ""),
+                                transaction_type=side,
+                                quantity=total_qty,
+                                product=prod,
+                                order_type="MARKET",
+                                price=0.0,
+                                tag="to_mkt"
+                            )
+                            if fresh_res.get("order_id"):
+                                order_id = str(fresh_res.get("order_id"))
+                                pos_record["order_id"] = order_id
+                except Exception as ex:
+                    logger.error(f"[Limit 0s Timeout] Error checking immediate fill: {ex}")
+            else:
+                threading.Thread(
+                    target=self._watch_limit_order_timeout,
+                    args=(broker, order_id, entry_timeout, contract.get("trading_symbol", ""), total_qty, side, prod, contract.get("instrument_key", "")),
+                    daemon=True
+                ).start()
 
         # Quantiply-parity: place Stoploss with broker in advance
         if adv.get("sl_order_placement") == "Place in advance" and sl_price > 0:
@@ -4028,14 +4029,17 @@ class StraddleManager:
         product: str = "NRML",
         instrument_key: str = ""
     ):
-        """Quantiply-parity: if order remains OPEN for N seconds, convert to MARKET order."""
-        if not order_id or timeout_sec <= 0:
+        """Quantiply-parity: if order remains OPEN for N seconds (or immediately if N=0), convert to MARKET order."""
+        if not order_id:
             return
-        time.sleep(timeout_sec)
+        if timeout_sec > 0:
+            time.sleep(timeout_sec)
+        else:
+            time.sleep(0.05)
         try:
             status_res = broker.wait_for_order_fill(str(order_id), timeout_sec=0.05, poll_interval_sec=0.005)
             if not status_res.get("filled"):
-                logger.info(f"[Limit Timeout Watcher] Order {order_id} open for {timeout_sec}s. Converting to MARKET order...")
+                logger.info(f"[Limit Timeout Watcher] Order {order_id} open after {timeout_sec}s. Converting to MARKET order immediately...")
                 mod_res = broker.modify_order(order_id=str(order_id), order_type="MARKET", price=0.0, quantity=qty if qty > 0 else None)
                 if not mod_res.get("success"):
                     logger.warning(f"[Limit Timeout Watcher] Modify order {order_id} failed: {mod_res.get('error')}. Cancelling and punching fresh MARKET order...")
@@ -4665,13 +4669,41 @@ class StraddleManager:
             pos.pop("error_message", None)
 
             # Quantiply-parity: timeout conversion to market on exit if order remains open
+            # If N = 0: after trying with limit order, converted to market order immediately.
+            # If N > 0: converted to market order if unfilled after N seconds.
             exit_timeout = int(adv.get("exit_market_timeout_sec", 0))
-            if exit_timeout > 0 and order_id and order_type_str == "LIMIT" and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
-                threading.Thread(
-                    target=self._watch_limit_order_timeout,
-                    args=(broker, order_id, exit_timeout),
-                    daemon=True
-                ).start()
+            if order_id and order_type_str == "LIMIT" and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
+                if exit_timeout == 0:
+                    # 0 seconds: after trying limit order, immediately convert to market if not filled
+                    try:
+                        fill_chk = broker.wait_for_order_fill(order_id, timeout_sec=0.05, poll_interval_sec=0.005)
+                        if not fill_chk.get("filled"):
+                            logger.info(f"[Exit Limit 0s Timeout] Order {order_id} not filled immediately. Converting to MARKET order...")
+                            mod_res = broker.modify_order(order_id=order_id, order_type="MARKET", price=0.0, quantity=qty)
+                            if not mod_res.get("success"):
+                                logger.warning(f"[Exit Limit 0s Timeout] Modify failed: {mod_res.get('error')}. Cancelling and punching fresh MARKET order...")
+                                broker.cancel_order(order_id)
+                                fresh_res = broker.place_order(
+                                    symbol=pos.get("symbol", ""),
+                                    instrument_key=pos.get("instrument_key", ""),
+                                    transaction_type=exit_side,
+                                    quantity=qty,
+                                    product=pos.get("product", "NRML"),
+                                    order_type="MARKET",
+                                    price=0.0,
+                                    tag="exit_to_mkt"
+                                )
+                                if fresh_res.get("order_id"):
+                                    order_id = str(fresh_res.get("order_id"))
+                                    pos["exit_order_id"] = order_id
+                    except Exception as ex:
+                        logger.error(f"[Exit Limit 0s Timeout] Error checking immediate fill: {ex}")
+                else:
+                    threading.Thread(
+                        target=self._watch_limit_order_timeout,
+                        args=(broker, order_id, exit_timeout, pos.get("symbol", ""), qty, exit_side, pos.get("product", "NRML"), pos.get("instrument_key", "")),
+                        daemon=True
+                    ).start()
 
             # Wait briefly (up to 3s) for the broker to confirm fill and get exact traded price
             fill_res = {}
@@ -6731,48 +6763,27 @@ class StraddleManager:
         """Square off all open positions belonging to a single strategy respecting exit delay sequencing."""
         positions = strat.get("positions", [])
         adv = strat.get("advanced_settings") or strat.get("advanced") or {}
-        exit_delay_side = str(adv.get("exit_delay_side") or adv.get("exit_order_delay_side") or "Delay exit of Buy positions")
         exit_delay_sec = int(adv.get("exit_delay_sec") or adv.get("exit_order_delay_sec") or 0)
 
         sells = [p for p in positions if p.get("status") == "OPEN" and p.get("side", "").upper() == "SELL"]
         buys = [p for p in positions if p.get("status") == "OPEN" and p.get("side", "").upper() == "BUY"]
 
-        if "Delay exit of Sell positions" in exit_delay_side and buys and sells:
-            # Exit Long Buy hedge legs first
-            for pos in buys:
-                try:
-                    self._square_off_single_position(pos, broker, reason=reason)
-                except Exception as e:
-                    logger.error(f"Error squaring off long leg {pos.get('symbol')}: {e}")
-            if exit_delay_sec > 0:
-                self._log_event(f"Waiting {exit_delay_sec}s before squaring off Short Sell positions...")
-                time.sleep(exit_delay_sec)
-            for pos in sells:
-                try:
-                    self._square_off_single_position(pos, broker, reason=reason)
-                except Exception as e:
-                    logger.error(f"Error squaring off short leg {pos.get('symbol')}: {e}")
-        elif "None" in exit_delay_side:
-            # Exit all legs simultaneously in parallel
-            all_open = [p for p in positions if p.get("status") == "OPEN"]
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(all_open) + 1)) as executor:
-                _ = [executor.submit(self._square_off_single_position, p, broker, reason) for p in all_open]
-        else:
-            # Standard Hedge Margin Priority (Quantiply gold standard):
-            # Exit Short Sell positions first to release margin obligation, then Long Buy (Hedge) positions
-            for pos in sells:
-                try:
-                    self._square_off_single_position(pos, broker, reason=reason)
-                except Exception as e:
-                    logger.error(f"Error squaring off short leg {pos.get('symbol')}: {e}")
-            if buys and sells and exit_delay_sec > 0:
+        # INVIOLABLE SAFETY DIRECTIVE:
+        # Strictly under no conditions are Buy (Hedge) positions exited before Short Sell positions!
+        # Sell orders are ALWAYS exited first to free up margin obligation and avoid RMS shortfall penalty.
+        # If exit_delay_sec == 0s (or "None"), buffer time is 0: exit Buy hedge legs immediately upon Sell exits!
+        if sells:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(sells))) as executor:
+                _ = list(executor.map(lambda p: self._square_off_single_position(p, broker, reason=reason), sells))
+
+            if buys and exit_delay_sec > 0:
                 self._log_event(f"Waiting {exit_delay_sec}s before squaring off Long Buy (Hedge) positions...")
                 time.sleep(exit_delay_sec)
-            for pos in buys:
-                try:
-                    self._square_off_single_position(pos, broker, reason=reason)
-                except Exception as e:
-                    logger.error(f"Error squaring off long leg {pos.get('symbol')}: {e}")
+
+        # Phase 2: Square off Long Buy (Hedge) positions (immediately if exit_delay_sec == 0)
+        if buys:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(buys))) as executor:
+                _ = list(executor.map(lambda p: self._square_off_single_position(p, broker, reason=reason), buys))
 
         strat_open = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
         if not strat_open:
