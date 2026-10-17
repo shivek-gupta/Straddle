@@ -443,6 +443,34 @@ def api_straddle_search_contracts():
         return jsonify({"success": False, "error": str(e), "results": []}), 500
 
 
+@app.route("/api/straddle/contract_quote", methods=["GET"])
+def api_straddle_contract_quote():
+    try:
+        und = request.args.get("underlying") or "NIFTY"
+        strike_raw = request.args.get("strike", "0")
+        try:
+            strike = float(strike_raw)
+        except ValueError:
+            strike = 0.0
+        opt_type = request.args.get("opt_type") or request.args.get("type") or "CE"
+        exp_date = request.args.get("expiry_date") or request.args.get("expiry")
+        exp_ms_raw = request.args.get("expiry_ms")
+        exp_ms = int(exp_ms_raw) if exp_ms_raw and exp_ms_raw.isdigit() else None
+
+        mgr = get_straddle_manager()
+        quote = mgr.get_contract_quote(
+            underlying=und,
+            strike=strike,
+            opt_type=opt_type,
+            expiry_ms=exp_ms,
+            expiry_date=exp_date
+        )
+        return jsonify({"success": True, "data": quote})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+
 @app.route("/api/straddle/strategy/duplicate", methods=["POST"])
 def api_straddle_strategy_duplicate():
     try:

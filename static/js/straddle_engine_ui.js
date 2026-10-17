@@ -3131,7 +3131,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
         // Check if we can perform smooth in-place DOM update instead of destroying innerHTML
         const existingRows = tbody.querySelectorAll("tr[data-leg-index]:not(.straddle-error-banner-row)");
-        const hasErrors = positions.some(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message));
+        const hasErrors = positions.some(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message || !!p.sl_cancelled_unexpectedly));
         const canUpdateInPlace = (
             existingRows.length === positions.length &&
             positions.length > 0 &&
@@ -3467,6 +3467,33 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         <td style="text-align:center;">${actionHtml}</td>
                     </tr>
                 `;
+
+                // Quantiply Unexpected SL Cancellation Warning Banner (for OPEN legs)
+                if (pos.sl_cancelled_unexpectedly && !isError) {
+                    const legId = pos.id || '';
+                    html += `
+                        <tr class="straddle-error-banner-row">
+                            <td colspan="13">
+                                <div class="straddle-error-banner-cell" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; background:rgba(245, 158, 11, 0.12); border:1px solid rgba(245, 158, 11, 0.45); padding:10px 16px; border-radius:6px; margin: 4px 0;">
+                                    <div style="flex:1; min-width:280px;">
+                                        <div style="display:flex; align-items:center; gap:8px;">
+                                            <span style="font-size:16px;">⚠️</span>
+                                            <span style="color:#f87171; font-weight:800; font-size:12px;">Stoploss order cancelled by the Client or Broker. Cancellation reason not received from the Broker</span>
+                                        </div>
+                                        <div style="color:#fbbf24; font-size:11px; margin-top:4px; font-style:italic; line-height:1.4;">
+                                            You can use the Individual leg RETRY functionality to place the SL order again. If not, the algo will handle this unexpected Cancellation by monitoring the price & exiting this position when Stoploss or Target is hit.
+                                        </div>
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #0284c7, #0ea5e9); color:#ffffff; font-weight:700; font-size:11px; padding:6px 14px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(14,165,233,0.4);" onclick="retrySingleStraddleLeg('${stratId}', '${legId}', ${idx})" title="Place a fresh Stoploss order on broker for this leg">
+                                            🔄 RETRY SL ORDER
+                                        </button>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }
 
                 // If error, append error banner directly underneath row with direct action buttons (Retry with adjusted Settings / Rectify)
                 if (isError) {
@@ -4433,7 +4460,7 @@ function populateStraddleSettingsForm(s) {
     document.getElementById("cfgMtmSlDelaySec").value = adv.mtm_sl_delay_sec !== undefined ? adv.mtm_sl_delay_sec : 0;
 
     document.getElementById("cfgAutoHandlingSl").checked = adv.auto_handling_sl_cancellation !== false;
-    document.getElementById("cfgAutoExitMargin").checked = !!adv.auto_exit_margin_error;
+    document.getElementById("cfgAutoExitMargin").checked = !!(adv.auto_exit_margin_error || adv.auto_exit_on_margin_error);
 
     // Render Leg rows
     const tbody = document.getElementById("straddleLegsBuilderBody");
@@ -4839,8 +4866,9 @@ function serializeCurrentStrategySettings() {
             target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Keep with self",
             sl_placement_delay_sec: parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value) || 0,
             mtm_sl_delay_sec: parseInt(document.getElementById("cfgMtmSlDelaySec")?.value) || 0,
-            auto_handling_sl_cancellation: document.getElementById("cfgAutoHandlingSl")?.checked,
-            auto_exit_margin_error: document.getElementById("cfgAutoExitMargin")?.checked
+            auto_handling_sl_cancellation: document.getElementById("cfgAutoHandlingSl")?.checked !== false,
+            auto_exit_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
+            auto_exit_on_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked
         },
         legs: []
     };
@@ -6524,12 +6552,12 @@ function renderBasketOrdersTable() {
                 <!-- Scrip & Expiry (Merged for compact layout, no horizontal scrollbar) -->
                 <td style="padding:6px 8px;">
                     <div style="display:flex; align-items:center; gap:6px;">
-                        <span style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${o.symbol}</span>
+                        <span class="basket-row-sym" style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${o.symbol}</span>
                         <span title="Duplicate order" style="cursor:pointer; color:#64748b; font-size:11px;" onclick="duplicateBasketOrder(${idx})">📋</span>
                         <span title="Remove from basket" style="cursor:pointer; color:#ef4444; font-size:11px;" onclick="removeBasketOrder(${idx})">🗑️</span>
                     </div>
                     <div style="font-size:10.5px; margin-top:2px; display:flex; align-items:center; gap:5px; font-family:var(--font-mono); color:#94a3b8;">
-                        <span style="color:#cbd5e1; font-weight:700;">₹${Number(o.ltp || o.price || 0).toFixed(2)}</span>
+                        <span class="basket-row-ltp" style="color:#cbd5e1; font-weight:700;">₹${Number(o.ltp || o.price || 0).toFixed(2)}</span>
                         <span>•</span>
                         <span style="color:#38bdf8; font-weight:700; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); border-radius:3px; padding:0 4px;">${o.expiry_date || 'Current Weekly'}</span>
                     </div>
@@ -6635,6 +6663,68 @@ function toggleBasketOrderSide(idx) {
     }
 }
 
+let _basketQuoteDebounceTimers = {};
+
+async function fetchQuoteForBasketOrder(idx) {
+    if (!window._basketOrders || !window._basketOrders[idx]) return;
+    const item = window._basketOrders[idx];
+
+    if (_basketQuoteDebounceTimers[idx]) {
+        clearTimeout(_basketQuoteDebounceTimers[idx]);
+    }
+
+    _basketQuoteDebounceTimers[idx] = setTimeout(async () => {
+        try {
+            const und = encodeURIComponent(item.underlying || "NIFTY");
+            const stk = encodeURIComponent(item.strike || 0);
+            const opt = encodeURIComponent(item.opt_type || "CE");
+            const exp = encodeURIComponent(item.expiry_date || "");
+            const expMs = encodeURIComponent(item.expiry_ms || "");
+
+            const url = `/api/straddle/contract_quote?underlying=${und}&strike=${stk}&opt_type=${opt}&expiry_date=${exp}&expiry_ms=${expMs}`;
+            const res = await fetch(url);
+            const json = await res.json();
+            if (json && json.success && json.data) {
+                const q = json.data;
+                const freshLtp = Number(q.ltp || q.price || 0.05);
+                item.ltp = freshLtp;
+                item.price = freshLtp;
+                item.token = q.token || item.token;
+                item.instrument_key = q.instrument_key || item.instrument_key;
+                item.trading_symbol = q.trading_symbol || item.trading_symbol;
+                item.symbol = q.symbol || `${item.underlying} ${item.strike} ${item.opt_type}`;
+                if (q.lot_size) item.lot_size = q.lot_size;
+
+                try {
+                    localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
+                } catch(e) {}
+
+                // Update row in DOM immediately
+                const row = document.querySelector(`tr[data-idx="${idx}"]`);
+                if (row) {
+                    const ltpEl = row.querySelector(".basket-row-ltp");
+                    if (ltpEl) ltpEl.textContent = `₹${freshLtp.toFixed(2)}`;
+
+                    const priceInput = row.querySelector(".basket-price-input");
+                    if (priceInput && !item.is_market) {
+                        priceInput.value = freshLtp.toFixed(2);
+                        priceInput.setAttribute("data-saved-price", freshLtp.toString());
+                    }
+
+                    const symEl = row.querySelector(".basket-row-sym");
+                    if (symEl) symEl.textContent = item.symbol;
+                } else {
+                    renderBasketOrdersTable();
+                }
+
+                updateBasketMarginCalculation();
+            }
+        } catch (e) {
+            console.warn(`[Basket] Could not fetch quote for row ${idx}:`, e);
+        }
+    }, 120);
+}
+
 function toggleBasketOrderOptType(idx) {
     if (window._basketOrders[idx]) {
         const item = window._basketOrders[idx];
@@ -6644,7 +6734,7 @@ function toggleBasketOrderOptType(idx) {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
         } catch(e) {}
         renderBasketOrdersTable();
-        updateBasketMarginCalculation();
+        fetchQuoteForBasketOrder(idx);
     }
 }
 
@@ -6658,7 +6748,7 @@ function stepBasketOrderStrike(idx, step) {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
         } catch(e) {}
         renderBasketOrdersTable();
-        updateBasketMarginCalculation();
+        fetchQuoteForBasketOrder(idx);
     }
 }
 
@@ -6671,7 +6761,7 @@ function onBasketOrderStrikeChange(idx, val) {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
         } catch(e) {}
         renderBasketOrdersTable();
-        updateBasketMarginCalculation();
+        fetchQuoteForBasketOrder(idx);
     }
 }
 
@@ -7119,6 +7209,7 @@ window.saveCurrentBasket = saveCurrentBasket;
 window.analyseBasketPayoff = analyseBasketPayoff;
 window.handleBasketSearchInput = handleBasketSearchInput;
 window.clearBasketSearch = clearBasketSearch;
+window.fetchQuoteForBasketOrder = fetchQuoteForBasketOrder;
 window.straddleToggleExecutionMode = straddleToggleExecutionMode;
 window.toggleStraddleExecutionMode = straddleToggleExecutionMode;
 window.straddleSquareOffAllAndTerminate = straddleSquareOffAllAndTerminate;
