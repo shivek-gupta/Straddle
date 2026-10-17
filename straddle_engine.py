@@ -4927,11 +4927,11 @@ class StraddleManager:
         total_buy_premium = 0.0
         total_short_margin = 0.0
         
-        # Categorize orders
-        buy_orders = [o for o in orders if str(o.get("transaction_type") or o.get("side") or "").upper() in ("BUY", "B")]
-        sell_orders = [o for o in orders if str(o.get("transaction_type") or o.get("side") or "").upper() in ("SELL", "S")]
-
-        has_hedge = len(buy_orders) > 0 and len(sell_orders) > 0
+        # Categorize and collect margin components
+        buy_margins = []
+        ce_short_margins = []
+        pe_short_margins = []
+        other_short_margins = []
 
         # Try Kotak Neo margin_required for each individual leg if available
         kotak_client = None
@@ -4941,10 +4941,21 @@ class StraddleManager:
             pass
 
         for o in orders:
-            qty = int(o.get("quantity", 65)) * mult
+            qty = int(o.get("quantity") or (int(o.get("lots", 1)) * int(o.get("lot_size", 65)))) * mult
             prc = float(o.get("price", 0.0) or o.get("ltp", 0.0) or 0.0)
             side = str(o.get("transaction_type") or o.get("side") or "BUY").upper()
+            opt_type = str(o.get("opt_type") or "").upper()
+            if not opt_type:
+                sym_upper = str(o.get("symbol") or o.get("trading_symbol") or "").upper()
+                if " CE" in sym_upper or sym_upper.endswith("CE"):
+                    opt_type = "CE"
+                elif " PE" in sym_upper or sym_upper.endswith("PE"):
+                    opt_type = "PE"
+
+            und = str(o.get("underlying") or "NIFTY").upper()
             tok = str(o.get("token") or o.get("instrument_token") or o.get("instrument_key") or "")
+            if "|" in tok:
+                tok = tok.split("|")[-1]
             seg = str(o.get("exchange_segment") or "nse_fo").lower()
             prod = str(o.get("product") or "NRML").upper()
             ot = "MKT" if str(o.get("order_type", "")).upper() in ("MARKET", "MKT") else "L"
@@ -4955,7 +4966,7 @@ class StraddleManager:
                 try:
                     m_resp = kotak_client.margin_required(
                         exchange_segment=seg,
-                        price=str(prc) if ot == "L" else "0",
+                        price=str(round(prc, 2)) if ot == "L" else "0",
                         order_type=ot,
                         product=prod,
                         quantity=str(qty),
@@ -4963,7 +4974,8 @@ class StraddleManager:
                         transaction_type="B" if side.startswith("B") else "S"
                     )
                     if isinstance(m_resp, dict):
-                        m_val = float(m_resp.get("marginRequired") or m_resp.get("margin_required") or m_resp.get("ordMrgnPrsnt") or m_resp.get("totMrgn") or 0.0)
+                        d = m_resp.get("data") if isinstance(m_resp.get("data"), dict) else m_resp
+                        m_val = float(d.get("reqdMrgn") or d.get("ordMrgn") or d.get("marginRequired") or d.get("margin_required") or d.get("ordMrgnPrsnt") or d.get("totMrgn") or 0.0)
                         if m_val > 0:
                             leg_margin = m_val
                             queried = True
@@ -4971,24 +4983,52 @@ class StraddleManager:
                     pass
 
             if not queried:
-                # Heuristic SEBI F&O Margin Calculation
+                # Accurate SEBI/NSE F&O Margin Fallback Heuristics
                 if side.startswith("B"):
-                    # Long option requires premium: Price * Qty
                     leg_margin = prc * qty
                 else:
-                    # Short option: base margin per lot is ~ ₹1,20,000 for Nifty (65 qty)
-                    # If hedged in basket, reduced by exchange spread benefit to ~ ₹35,000 - ₹45,000
-                    base_per_lot = 42000.0 if has_hedge else 125000.0
-                    lots = max(1, qty // 65)
-                    leg_margin = lots * base_per_lot
+                    lot_size = DEFAULT_LOT_SIZES.get(und, 65)
+                    lots = max(1, qty // lot_size)
+                    # For Nifty ~2,04,000; BankNifty ~1,45,000 per lot
+                    base_lot_margin = 204000.0 if und == "NIFTY" else 145000.0
+                    leg_margin = lots * base_lot_margin
 
             if side.startswith("B"):
-                total_buy_premium += leg_margin
+                buy_margins.append(leg_margin)
+            elif opt_type == "CE":
+                ce_short_margins.append(leg_margin)
+            elif opt_type == "PE":
+                pe_short_margins.append(leg_margin)
             else:
-                total_short_margin += leg_margin
+                other_short_margins.append(leg_margin)
 
-        # Net required margin: for hedged baskets, total is max(short_margin, spread_cost) + buy_premium
-        total_required_margin = total_short_margin + total_buy_premium
+        # Calculate Combined Portfolio Margin with SEBI SPAN rules
+        total_buy_premium = sum(buy_margins)
+        has_hedge = len(buy_margins) > 0 and (len(ce_short_margins) > 0 or len(pe_short_margins) > 0 or len(other_short_margins) > 0)
+        is_straddle = (len(ce_short_margins) > 0 and len(pe_short_margins) > 0)
+
+        if has_hedge:
+            # Hedged spread (Long hedges Short): SEBI gives ~75-80% discount on short margin
+            combined_short_raw = sum(ce_short_margins) + sum(pe_short_margins) + sum(other_short_margins)
+            total_short_margin = combined_short_raw * 0.22 # ~ ₹42,000 per hedged lot
+            total_required_margin = total_short_margin + total_buy_premium
+            hedge_savings = max(0.0, combined_short_raw - total_short_margin)
+        elif is_straddle:
+            # Short Straddle / Strangle (Short CE + Short PE):
+            # SPAN margin is on dominant leg + ~0.71% incremental exposure margin on other leg
+            ce_sum = sum(ce_short_margins)
+            pe_sum = sum(pe_short_margins)
+            dom_margin = max(ce_sum, pe_sum)
+            other_margin = min(ce_sum, pe_sum)
+            total_short_margin = dom_margin + (other_margin * 0.0071065) + sum(other_short_margins)
+            total_required_margin = total_short_margin
+            hedge_savings = max(0.0, (ce_sum + pe_sum) - total_short_margin)
+        else:
+            # Naked short or only buy
+            total_short_margin = sum(ce_short_margins) + sum(pe_short_margins) + sum(other_short_margins)
+            total_required_margin = total_short_margin + total_buy_premium
+            hedge_savings = 0.0
+
         if total_required_margin < 0:
             total_required_margin = 0.0
 
@@ -4999,11 +5039,12 @@ class StraddleManager:
             "success": True,
             "available_margin": avail_margin,
             "required_margin": round(total_required_margin, 2),
-            "final_margin": round(total_required_margin * 0.9 if has_hedge else total_required_margin, 2),
+            "final_margin": round(total_required_margin, 2),
+            "hedge_benefit": round(hedge_savings, 2),
             "total_charges": total_charges,
             "orders_count": len(orders),
             "multiplier": mult,
-            "has_hedge_benefit": has_hedge
+            "has_hedge_benefit": has_hedge or is_straddle
         }
 
     def execute_basket_orders(self, orders: List[Dict[str, Any]], multiplier: int = 1) -> Dict[str, Any]:

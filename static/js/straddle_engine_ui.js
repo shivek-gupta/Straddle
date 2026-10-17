@@ -5500,8 +5500,8 @@ async function loadStraddleOptionChain(expiryMs) {
                 ` : `
                     <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
                         <div class="chain-quick-trade-wrap" style="display:inline-flex; align-items:center; gap:4px;">
-                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" title="Direct Trade: BUY ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">B</button>
-                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" title="Direct Trade: SELL ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">S</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:12px; width:26px; height:24px; border-radius:4px; box-shadow:0 0 8px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">B</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:12px; width:26px; height:24px; border-radius:4px; box-shadow:0 0 8px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">S</button>
                         </div>
                     </td>
                 `;
@@ -5522,8 +5522,8 @@ async function loadStraddleOptionChain(expiryMs) {
                 ` : `
                     <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
                         <div class="chain-quick-trade-wrap" style="display:inline-flex; align-items:center; gap:4px;">
-                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" title="Direct Trade: BUY ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">B</button>
-                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" title="Direct Trade: SELL ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">S</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:12px; width:26px; height:24px; border-radius:4px; box-shadow:0 0 8px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">B</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:12px; width:26px; height:24px; border-radius:4px; box-shadow:0 0 8px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">S</button>
                         </div>
                     </td>
                 `;
@@ -6506,6 +6506,14 @@ function renderBasketOrdersTable() {
         const rowBorderLeft = isBuy ? "border-left:3px solid #10b981;" : "border-left:3px solid #ef4444;";
         const rowBg = isBuy ? "background:rgba(16,185,129,0.035);" : "background:rgba(239,68,68,0.035);";
 
+        const actionStyle = isBuy 
+            ? "background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; box-shadow:0 0 10px rgba(16,185,129,0.5) !important;" 
+            : "background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; box-shadow:0 0 10px rgba(239,68,68,0.5) !important;";
+
+        const typeStyle = isCe
+            ? "background:rgba(16,185,129,0.2) !important; color:#34d399 !important; border:1px solid #10b981 !important; box-shadow:0 0 8px rgba(16,185,129,0.3) !important;"
+            : "background:rgba(244,63,94,0.2) !important; color:#fb7185 !important; border:1px solid #f43f5e !important; box-shadow:0 0 8px rgba(244,63,94,0.3) !important;";
+
         rowsHtml += `
             <tr data-order-id="${o.id}" data-idx="${idx}" style="border-bottom:1px solid rgba(255,255,255,0.06); ${rowBorderLeft} ${rowBg}">
                 <!-- Checkbox -->
@@ -6529,7 +6537,7 @@ function renderBasketOrdersTable() {
 
                 <!-- Action (B/S Toggle Badge) -->
                 <td style="text-align:center; padding:6px 4px; width:44px;">
-                    <button type="button" class="basket-action-btn ${actionClass}" title="Click to toggle BUY / SELL" onclick="toggleBasketOrderSide(${idx})" style="padding:3px 8px; font-size:11px; font-weight:900;">
+                    <button type="button" class="basket-action-btn ${actionClass}" title="Click to toggle BUY / SELL" onclick="toggleBasketOrderSide(${idx})" style="${actionStyle} width:32px; height:26px; border-radius:6px; font-weight:900; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">
                         ${actionLabel}
                     </button>
                 </td>
@@ -6545,14 +6553,14 @@ function renderBasketOrdersTable() {
 
                 <!-- CE / PE Toggle -->
                 <td style="text-align:center; padding:6px 4px; width:46px;">
-                    <button type="button" class="basket-badge-type ${typeClass}" onclick="toggleBasketOrderOptType(${idx})" style="padding:2px 6px; font-size:10.5px; font-weight:800;">
+                    <button type="button" class="basket-badge-type ${typeClass}" onclick="toggleBasketOrderOptType(${idx})" style="${typeStyle} padding:3px 8px; border-radius:6px; font-weight:800; font-size:11px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">
                         ${o.opt_type}
                     </button>
                 </td>
 
                 <!-- Product (CF / MIS / NRML) -->
                 <td style="text-align:center; padding:6px 4px; width:62px;">
-                    <select onchange="onBasketOrderProductChange(${idx}, this.value)" style="background:#0c101a; border:1px solid #334155; color:#38bdf8; font-size:11px; font-weight:700; border-radius:4px; padding:2px 4px; outline:none; cursor:pointer;">
+                    <select onchange="onBasketOrderProductChange(${idx}, this.value)" style="background:#0b1329; border:1px solid #2563eb; color:#60a5fa; font-size:11px; font-weight:800; border-radius:5px; padding:3px 6px; outline:none; cursor:pointer;">
                         <option value="CF" ${o.product === 'CF' ? 'selected' : ''}>CF</option>
                         <option value="MIS" ${o.product === 'MIS' ? 'selected' : ''}>MIS</option>
                         <option value="NRML" ${o.product === 'NRML' ? 'selected' : ''}>NRML</option>
@@ -7047,7 +7055,7 @@ async function handleBasketSearchInput(query) {
                         <div style="flex:1; min-width:0;">
                             <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                                 <span style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${r.strike}</span>
-                                <span style="font-size:10.5px; font-weight:800; color:${typeColor}; background:${typeBg}; border:1px solid ${typeColor}55; border-radius:4px; padding:1px 6px;">${r.opt_type}</span>
+                                <span style="font-size:11px; font-weight:900; color:${typeColor} !important; background:${typeBg} !important; border:1px solid ${typeColor} !important; border-radius:4px; padding:2px 7px;">${r.opt_type}</span>
                                 <span style="font-size:11px; color:#cbd5e1; font-family:var(--font-mono);">${r.expiry_date || ''}</span>
                                 ${expTag}
                             </div>
@@ -7056,10 +7064,10 @@ async function handleBasketSearchInput(query) {
                             </div>
                         </div>
                         <div style="display:flex; align-items:center; gap:6px;">
-                            <button type="button" class="search-btn-buy" title="Add BUY leg to basket" onclick="addLegToBasket('${safeSym}', '${safeToken}', ${r.strike}, '${r.opt_type}', 'BUY', ${r.ltp}, ${r.lot_size}, '${expDate}'); clearBasketSearch();">
+                            <button type="button" class="search-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; border-radius:5px; padding:5px 12px; font-size:11.5px; font-weight:900 !important; cursor:pointer; box-shadow:0 0 10px rgba(16,185,129,0.5) !important;" title="Add BUY leg to basket" onclick="addLegToBasket('${safeSym}', '${safeToken}', ${r.strike}, '${r.opt_type}', 'BUY', ${r.ltp}, ${r.lot_size}, '${expDate}'); clearBasketSearch();">
                                 + B Buy
                             </button>
-                            <button type="button" class="search-btn-sell" title="Add SELL leg to basket" onclick="addLegToBasket('${safeSym}', '${safeToken}', ${r.strike}, '${r.opt_type}', 'SELL', ${r.ltp}, ${r.lot_size}, '${expDate}'); clearBasketSearch();">
+                            <button type="button" class="search-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; border-radius:5px; padding:5px 12px; font-size:11.5px; font-weight:900 !important; cursor:pointer; box-shadow:0 0 10px rgba(239,68,68,0.5) !important;" title="Add SELL leg to basket" onclick="addLegToBasket('${safeSym}', '${safeToken}', ${r.strike}, '${r.opt_type}', 'SELL', ${r.ltp}, ${r.lot_size}, '${expDate}'); clearBasketSearch();">
                                 - S Sell
                             </button>
                         </div>
