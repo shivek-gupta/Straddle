@@ -430,6 +430,19 @@ def api_straddle_option_chain():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/search_contracts", methods=["GET"])
+def api_straddle_search_contracts():
+    try:
+        q = request.args.get("query") or request.args.get("q") or ""
+        und = request.args.get("underlying") or ""
+        limit = int(request.args.get("limit", 24))
+        mgr = get_straddle_manager()
+        results = mgr.search_contracts(query=q, underlying=und if und else None, limit=limit)
+        return jsonify({"success": True, "results": results, "count": len(results)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "results": []}), 500
+
+
 @app.route("/api/straddle/strategy/duplicate", methods=["POST"])
 def api_straddle_strategy_duplicate():
     try:

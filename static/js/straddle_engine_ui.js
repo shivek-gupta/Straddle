@@ -5201,8 +5201,8 @@ function toggleOptionChainBasketMode() {
     const isMode = window._optionChainBasketMode;
     const btn = document.getElementById("btnToggleBasketMode");
     const lbl = document.getElementById("basketModeStateLabel");
-    const thCe = document.getElementById("thCeBasketTick");
-    const thPe = document.getElementById("thPeBasketTick");
+    const thCe = document.getElementById("thCeActionHeader") || document.getElementById("thCeBasketTick");
+    const thPe = document.getElementById("thPeActionHeader") || document.getElementById("thPeBasketTick");
     const thCeSuper = document.getElementById("thCeSuperHeader");
     const thPeSuper = document.getElementById("thPeSuperHeader");
     const botBar = document.getElementById("optionChainBasketBottomBar");
@@ -5224,10 +5224,16 @@ function toggleOptionChainBasketMode() {
             btn.style.boxShadow = "none";
         }
     }
-    if (thCe) thCe.style.display = isMode ? "" : "none";
-    if (thPe) thPe.style.display = isMode ? "" : "none";
-    if (thCeSuper) thCeSuper.setAttribute("colspan", isMode ? "3" : "2");
-    if (thPeSuper) thPeSuper.setAttribute("colspan", isMode ? "3" : "2");
+    if (thCe) {
+        thCe.textContent = isMode ? "SELECT" : "ACTION";
+        thCe.style.display = "";
+    }
+    if (thPe) {
+        thPe.textContent = isMode ? "SELECT" : "ACTION";
+        thPe.style.display = "";
+    }
+    if (thCeSuper) thCeSuper.setAttribute("colspan", "3");
+    if (thPeSuper) thPeSuper.setAttribute("colspan", "3");
     if (botBar) botBar.style.display = isMode ? "flex" : "none";
 
     updateOptionChainBasketSummaryBar();
@@ -5421,14 +5427,20 @@ async function loadStraddleOptionChain(expiryMs) {
             const isBasketMode = !!window._optionChainBasketMode;
 
             // Sync Header Colspan & Visibility
-            const thCe = document.getElementById("thCeBasketTick");
-            const thPe = document.getElementById("thPeBasketTick");
+            const thCe = document.getElementById("thCeActionHeader") || document.getElementById("thCeBasketTick");
+            const thPe = document.getElementById("thPeActionHeader") || document.getElementById("thPeBasketTick");
             const thCeSuper = document.getElementById("thCeSuperHeader");
             const thPeSuper = document.getElementById("thPeSuperHeader");
-            if (thCe) thCe.style.display = isBasketMode ? "" : "none";
-            if (thPe) thPe.style.display = isBasketMode ? "" : "none";
-            if (thCeSuper) thCeSuper.setAttribute("colspan", isBasketMode ? "3" : "2");
-            if (thPeSuper) thPeSuper.setAttribute("colspan", isBasketMode ? "3" : "2");
+            if (thCe) {
+                thCe.textContent = isBasketMode ? "SELECT" : "ACTION";
+                thCe.style.display = "";
+            }
+            if (thPe) {
+                thPe.textContent = isBasketMode ? "SELECT" : "ACTION";
+                thPe.style.display = "";
+            }
+            if (thCeSuper) thCeSuper.setAttribute("colspan", "3");
+            if (thPeSuper) thPeSuper.setAttribute("colspan", "3");
 
             let rowsHtml = "";
             chain.rows.forEach(r => {
@@ -5473,7 +5485,7 @@ async function loadStraddleOptionChain(expiryMs) {
                 const isPeSellChecked = !!window._chainSelectedLegs[peSellKey];
 
                 const ceActionCell = isBasketMode ? `
-                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:82px;">
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
                         <div class="chain-tick-wrap">
                             <label class="chain-tick-btn tick-buy ${isCeBuyChecked ? 'checked' : ''}" title="Tick to BUY CE in basket">
                                 <input type="checkbox" ${isCeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'BUY', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
@@ -5485,10 +5497,17 @@ async function loadStraddleOptionChain(expiryMs) {
                             </label>
                         </div>
                     </td>
-                ` : ``;
+                ` : `
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
+                        <div class="chain-quick-trade-wrap" style="display:inline-flex; align-items:center; gap:4px;">
+                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" title="Direct Trade: BUY ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">B</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" title="Direct Trade: SELL ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">S</button>
+                        </div>
+                    </td>
+                `;
 
                 const peActionCell = isBasketMode ? `
-                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:82px;">
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
                         <div class="chain-tick-wrap">
                             <label class="chain-tick-btn tick-buy ${isPeBuyChecked ? 'checked' : ''}" title="Tick to BUY PE in basket">
                                 <input type="checkbox" ${isPeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'BUY', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked)">
@@ -5500,7 +5519,14 @@ async function loadStraddleOptionChain(expiryMs) {
                             </label>
                         </div>
                     </td>
-                ` : ``;
+                ` : `
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
+                        <div class="chain-quick-trade-wrap" style="display:inline-flex; align-items:center; gap:4px;">
+                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" title="Direct Trade: BUY ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">B</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" title="Direct Trade: SELL ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">S</button>
+                        </div>
+                    </td>
+                `;
 
                 rowsHtml += `
                     <tr class="${rowClass}">
@@ -6477,9 +6503,11 @@ function renderBasketOrdersTable() {
         const typeClass = isCe ? "active-ce" : "active-pe";
         const effectiveQty = o.lots * o.lot_size * multiplier;
         const isMarket = (o.order_type === "MARKET");
+        const rowBorderLeft = isBuy ? "border-left:3px solid #10b981;" : "border-left:3px solid #ef4444;";
+        const rowBg = isBuy ? "background:rgba(16,185,129,0.035);" : "background:rgba(239,68,68,0.035);";
 
         rowsHtml += `
-            <tr data-order-id="${o.id}" data-idx="${idx}" style="border-bottom:1px solid rgba(255,255,255,0.04);">
+            <tr data-order-id="${o.id}" data-idx="${idx}" style="border-bottom:1px solid rgba(255,255,255,0.06); ${rowBorderLeft} ${rowBg}">
                 <!-- Checkbox -->
                 <td style="text-align:center; padding:6px 4px; width:32px;">
                     <input type="checkbox" ${o.selected ? "checked" : ""} onchange="toggleBasketOrderSelected(${idx}, this.checked)">
@@ -6495,7 +6523,7 @@ function renderBasketOrdersTable() {
                     <div style="font-size:10.5px; margin-top:2px; display:flex; align-items:center; gap:5px; font-family:var(--font-mono); color:#94a3b8;">
                         <span style="color:#cbd5e1; font-weight:700;">₹${Number(o.ltp || o.price || 0).toFixed(2)}</span>
                         <span>•</span>
-                        <span style="color:#38bdf8; font-weight:600;">${o.expiry_date || 'Current Weekly'}</span>
+                        <span style="color:#38bdf8; font-weight:700; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); border-radius:3px; padding:0 4px;">${o.expiry_date || 'Current Weekly'}</span>
                     </div>
                 </td>
 
@@ -6508,23 +6536,23 @@ function renderBasketOrdersTable() {
 
                 <!-- Strike Price (Stepper) -->
                 <td style="text-align:center; padding:6px 4px; width:90px;">
-                    <div class="basket-stepper-box" style="display:inline-flex; align-items:center;">
-                        <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderStrike(${idx}, -1)">▼</button>
-                        <input type="number" class="basket-input-num" style="width:48px;" value="${o.strike}" onchange="onBasketOrderStrikeChange(${idx}, this.value)">
-                        <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderStrike(${idx}, 1)">▲</button>
+                    <div class="basket-stepper-box" style="display:inline-flex; align-items:center; background:#0c101a; border:1px solid #334155; border-radius:6px; overflow:hidden;">
+                        <button type="button" class="basket-stepper-btn" style="background:#1e293b; color:#cbd5e1; border:none; padding:3px 6px; cursor:pointer; font-size:10px;" onclick="stepBasketOrderStrike(${idx}, -1)">▼</button>
+                        <input type="number" class="basket-input-num" style="width:48px; background:transparent; border:none; text-align:center; color:#f8fafc; font-weight:800; font-family:var(--font-mono); font-size:12px; outline:none;" value="${o.strike}" onchange="onBasketOrderStrikeChange(${idx}, this.value)">
+                        <button type="button" class="basket-stepper-btn" style="background:#1e293b; color:#cbd5e1; border:none; padding:3px 6px; cursor:pointer; font-size:10px;" onclick="stepBasketOrderStrike(${idx}, 1)">▲</button>
                     </div>
                 </td>
 
                 <!-- CE / PE Toggle -->
                 <td style="text-align:center; padding:6px 4px; width:46px;">
-                    <button type="button" class="basket-badge-type ${typeClass}" onclick="toggleBasketOrderOptType(${idx})" style="padding:2px 6px; font-size:10.5px;">
+                    <button type="button" class="basket-badge-type ${typeClass}" onclick="toggleBasketOrderOptType(${idx})" style="padding:2px 6px; font-size:10.5px; font-weight:800;">
                         ${o.opt_type}
                     </button>
                 </td>
 
                 <!-- Product (CF / MIS / NRML) -->
                 <td style="text-align:center; padding:6px 4px; width:62px;">
-                    <select onchange="onBasketOrderProductChange(${idx}, this.value)" style="background:#0c101a; border:1px solid #1e293b; color:#cbd5e1; font-size:11px; font-weight:700; border-radius:4px; padding:2px 4px; outline:none; cursor:pointer;">
+                    <select onchange="onBasketOrderProductChange(${idx}, this.value)" style="background:#0c101a; border:1px solid #334155; color:#38bdf8; font-size:11px; font-weight:700; border-radius:4px; padding:2px 4px; outline:none; cursor:pointer;">
                         <option value="CF" ${o.product === 'CF' ? 'selected' : ''}>CF</option>
                         <option value="MIS" ${o.product === 'MIS' ? 'selected' : ''}>MIS</option>
                         <option value="NRML" ${o.product === 'NRML' ? 'selected' : ''}>NRML</option>
@@ -6533,12 +6561,12 @@ function renderBasketOrdersTable() {
 
                 <!-- Quantity / Lots (Stepper) -->
                 <td style="text-align:center; padding:6px 4px; width:90px;">
-                    <div class="basket-stepper-box" style="display:inline-flex; align-items:center;">
-                        <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderLots(${idx}, -1)">▼</button>
-                        <input type="number" class="basket-input-num" min="1" style="width:36px;" value="${o.lots}" onchange="onBasketOrderLotsChange(${idx}, this.value)">
-                        <button type="button" class="basket-stepper-btn" onclick="stepBasketOrderLots(${idx}, 1)">▲</button>
+                    <div class="basket-stepper-box" style="display:inline-flex; align-items:center; background:#0c101a; border:1px solid #334155; border-radius:6px; overflow:hidden;">
+                        <button type="button" class="basket-stepper-btn" style="background:#1e293b; color:#cbd5e1; border:none; padding:3px 6px; cursor:pointer; font-size:10px;" onclick="stepBasketOrderLots(${idx}, -1)">▼</button>
+                        <input type="number" class="basket-input-num" min="1" style="width:36px; background:transparent; border:none; text-align:center; color:#f8fafc; font-weight:800; font-family:var(--font-mono); font-size:12px; outline:none;" value="${o.lots}" onchange="onBasketOrderLotsChange(${idx}, this.value)">
+                        <button type="button" class="basket-stepper-btn" style="background:#1e293b; color:#cbd5e1; border:none; padding:3px 6px; cursor:pointer; font-size:10px;" onclick="stepBasketOrderLots(${idx}, 1)">▲</button>
                     </div>
-                    <div class="basket-effective-qty-label" style="font-size:10px; color:#60a5fa; margin-top:2px; font-family:var(--font-mono); font-weight:700;">
+                    <div class="basket-effective-qty-label" style="font-size:10.5px; color:#60a5fa; margin-top:2px; font-family:var(--font-mono); font-weight:700;">
                         ${effectiveQty} qty
                     </div>
                 </td>
@@ -6967,7 +6995,9 @@ function analyseBasketPayoff() {
     alert(msg);
 }
 
-function handleBasketSearchInput(query) {
+let _basketSearchDebounceTimer = null;
+
+async function handleBasketSearchInput(query) {
     const drop = document.getElementById("basketSearchResultsDropdown");
     const clearBtn = document.getElementById("basketSearchClear");
     if (!drop) return;
@@ -6980,48 +7010,70 @@ function handleBasketSearchInput(query) {
 
     if (clearBtn) clearBtn.style.display = "inline-block";
 
-    const q = query.trim().toUpperCase();
+    const q = query.trim();
     const und = window._straddleState?.optionChainUnderlying || "NIFTY";
-    const atm = 22650; // default anchor
-    const strikes = [atm - 200, atm - 100, atm - 50, atm, atm + 50, atm + 100, atm + 200];
-    const results = [];
 
-    ["CE", "PE"].forEach(opt => {
-        strikes.forEach(stk => {
-            const sym = `${und} ${stk} ${opt}`;
-            if (sym.includes(q) || stk.toString().includes(q)) {
-                results.push({
-                    symbol: sym,
-                    underlying: und,
-                    strike: stk,
-                    opt_type: opt,
-                    ltp: Math.max(5, Math.abs(stk - atm) * 0.4 + 45),
-                    lot_size: und === "BANKNIFTY" ? 15 : 65
-                });
-            }
-        });
-    });
-
-    if (results.length === 0) {
-        drop.innerHTML = `<div style="padding:12px; color:#64748b; font-size:12px; text-align:center;">No matching option strikes found</div>`;
-        drop.style.display = "block";
-        return;
+    if (_basketSearchDebounceTimer) {
+        clearTimeout(_basketSearchDebounceTimer);
     }
 
-    drop.innerHTML = results.slice(0, 8).map(r => `
-        <div class="basket-search-result-item" onclick="addLegToBasket('${r.symbol}', '', ${r.strike}, '${r.opt_type}', 'SELL', ${r.ltp.toFixed(2)}, ${r.lot_size}); clearBasketSearch();">
-            <div>
-                <strong style="color:#f8fafc; font-size:12px; font-family:var(--font-mono);">${r.symbol}</strong>
-                <div style="font-size:10.5px; color:#94a3b8;">${r.underlying} • NFO • ${r.lot_size} lot</div>
-            </div>
-            <div style="text-align:right;">
-                <div style="color:#10b981; font-weight:800; font-family:var(--font-mono); font-size:12px;">₹${r.ltp.toFixed(2)}</div>
-                <div style="font-size:10px; color:#38bdf8;">+ Click to add</div>
-            </div>
-        </div>
-    `).join("");
-
+    // Show searching spinner
+    drop.innerHTML = `<div style="padding:14px; color:#38bdf8; font-size:12px; text-align:center;"><span style="display:inline-block; animation:spin 1s linear infinite;">⏳</span> Searching strikes & expiries for <strong>${q}</strong>...</div>`;
     drop.style.display = "block";
+
+    _basketSearchDebounceTimer = setTimeout(async () => {
+        try {
+            const resp = await fetch(`/api/straddle/search_contracts?query=${encodeURIComponent(q)}&underlying=${encodeURIComponent(und)}&limit=24`);
+            const data = await resp.json();
+
+            if (!data.success || !data.results || data.results.length === 0) {
+                drop.innerHTML = `<div style="padding:14px; color:#94a3b8; font-size:12px; text-align:center;">No matching option strikes found for "<span style="color:#f8fafc;">${q}</span>"</div>`;
+                drop.style.display = "block";
+                return;
+            }
+
+            const html = data.results.map(r => {
+                const isCe = (r.opt_type === "CE");
+                const typeColor = isCe ? "#34d399" : "#fb7185";
+                const typeBg = isCe ? "rgba(16, 185, 129, 0.15)" : "rgba(244, 63, 94, 0.15)";
+                const ltpFormatted = Number(r.ltp || 0).toFixed(2);
+                const safeSym = (r.symbol || "").replace(/'/g, "\\'");
+                const safeToken = (r.token || r.instrument_key || "").replace(/'/g, "\\'");
+                const expDate = (r.expiry_date || "").replace(/'/g, "\\'");
+                const expTag = r.expiry_tag ? `<span style="font-size:10px; color:#60a5fa; background:rgba(37,99,235,0.15); border:1px solid rgba(59,130,246,0.3); border-radius:3px; padding:1px 5px; margin-left:4px;">${r.expiry_tag}</span>` : "";
+
+                return `
+                    <div class="basket-search-result-item" style="display:flex; justify-content:space-between; align-items:center; padding:9px 12px; border-bottom:1px solid rgba(255,255,255,0.06); gap:10px;">
+                        <div style="flex:1; min-width:0;">
+                            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                <span style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${r.strike}</span>
+                                <span style="font-size:10.5px; font-weight:800; color:${typeColor}; background:${typeBg}; border:1px solid ${typeColor}55; border-radius:4px; padding:1px 6px;">${r.opt_type}</span>
+                                <span style="font-size:11px; color:#cbd5e1; font-family:var(--font-mono);">${r.expiry_date || ''}</span>
+                                ${expTag}
+                            </div>
+                            <div style="font-size:10.5px; color:#94a3b8; margin-top:3px; font-family:var(--font-mono);">
+                                ${r.underlying} • Lot: ${r.lot_size} • LTP: <strong style="color:#10b981; font-size:11.5px;">₹${ltpFormatted}</strong>
+                            </div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <button type="button" class="search-btn-buy" title="Add BUY leg to basket" onclick="addLegToBasket('${safeSym}', '${safeToken}', ${r.strike}, '${r.opt_type}', 'BUY', ${r.ltp}, ${r.lot_size}, '${expDate}'); clearBasketSearch();">
+                                + B Buy
+                            </button>
+                            <button type="button" class="search-btn-sell" title="Add SELL leg to basket" onclick="addLegToBasket('${safeSym}', '${safeToken}', ${r.strike}, '${r.opt_type}', 'SELL', ${r.ltp}, ${r.lot_size}, '${expDate}'); clearBasketSearch();">
+                                - S Sell
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join("");
+
+            drop.innerHTML = html;
+            drop.style.display = "block";
+        } catch (e) {
+            drop.innerHTML = `<div style="padding:12px; color:#ef4444; font-size:12px; text-align:center;">Search error: ${e.message}</div>`;
+            drop.style.display = "block";
+        }
+    }, 180);
 }
 
 function clearBasketSearch() {

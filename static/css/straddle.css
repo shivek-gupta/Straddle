@@ -8859,6 +8859,169 @@ table .flag-cell {
     text-overflow: ellipsis;
 }
 
+/* ==========================================================
+   Expressive Basket & Option Chain Color Coding (Buy/Sell, CE/PE)
+   ========================================================== */
+.basket-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 26px;
+    border-radius: 6px;
+    font-weight: 900;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    letter-spacing: 0.5px;
+    border: none;
+    outline: none;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+.basket-action-buy {
+    background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+    color: #ffffff !important;
+    border: 1px solid #34d399 !important;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.45) !important;
+}
+.basket-action-buy:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.7) !important;
+    filter: brightness(1.12);
+}
+.basket-action-sell {
+    background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%) !important;
+    color: #ffffff !important;
+    border: 1px solid #f87171 !important;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.45) !important;
+}
+.basket-action-sell:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.7) !important;
+    filter: brightness(1.12);
+}
+
+/* CE & PE Badges */
+.basket-badge-type {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 24px;
+    border-radius: 6px;
+    font-weight: 800;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: none;
+    outline: none;
+}
+.active-ce {
+    background: rgba(16, 185, 129, 0.18) !important;
+    color: #34d399 !important;
+    border: 1px solid rgba(16, 185, 129, 0.55) !important;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.25) !important;
+}
+.active-ce:hover {
+    background: rgba(16, 185, 129, 0.3) !important;
+    border-color: #10b981 !important;
+    transform: scale(1.05);
+}
+.active-pe {
+    background: rgba(244, 63, 94, 0.18) !important;
+    color: #fb7185 !important;
+    border: 1px solid rgba(244, 63, 94, 0.55) !important;
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.25) !important;
+}
+.active-pe:hover {
+    background: rgba(244, 63, 94, 0.3) !important;
+    border-color: #f43f5e !important;
+    transform: scale(1.05);
+}
+
+/* Option Chain Quick Action Trade Buttons */
+.chain-quick-trade-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 24px;
+    border-radius: 5px;
+    font-size: 11.5px;
+    font-weight: 900;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+}
+.chain-btn-buy {
+    background: linear-gradient(135deg, rgba(5, 150, 105, 0.25), rgba(16, 185, 129, 0.35));
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.5);
+}
+.chain-btn-buy:hover {
+    background: linear-gradient(135deg, #059669, #10b981);
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.7);
+    transform: translateY(-1px);
+    border-color: #34d399;
+}
+.chain-btn-sell {
+    background: linear-gradient(135deg, rgba(220, 38, 38, 0.25), rgba(239, 68, 68, 0.35));
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.5);
+}
+.chain-btn-sell:hover {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+    transform: translateY(-1px);
+    border-color: #f87171;
+}
+
+/* Search Dropdown Items & Buttons */
+.basket-search-result-item {
+    background: #0f172a;
+    transition: background 0.15s ease;
+}
+.basket-search-result-item:hover {
+    background: #1e293b;
+}
+.search-btn-buy {
+    background: linear-gradient(135deg, #059669, #10b981);
+    color: #ffffff;
+    border: 1px solid #34d399;
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);
+}
+.search-btn-buy:hover {
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
+    transform: translateY(-1px);
+}
+.search-btn-sell {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: #ffffff;
+    border: 1px solid #f87171;
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);
+}
+.search-btn-sell:hover {
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+    transform: translateY(-1px);
+}
+
+
 
 
 

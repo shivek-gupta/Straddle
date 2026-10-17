@@ -765,6 +765,130 @@ class StraddleManager:
             })
         return result
 
+    def search_contracts(
+        self,
+        query: str,
+        underlying: Optional[str] = None,
+        limit: int = 24
+    ) -> List[Dict[str, Any]]:
+        """
+        Searches option contracts across available expiries matching query.
+        E.g. query='23100' returns 23100 CE & 23100 PE across multiple upcoming expiries.
+        Supports query terms like '23100', '23100 CE', 'NIFTY 23100', 'BANKNIFTY 50000', etc.
+        """
+        raw_q = str(query or "").strip().upper()
+        if not raw_q:
+            return []
+
+        # Detect underlying
+        clean_und = None
+        for cand in ["BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX", "NIFTY"]:
+            if cand in raw_q:
+                clean_und = cand
+                break
+        if not clean_und:
+            clean_und = (underlying or self._state.get("underlying_symbol") or "NIFTY").upper()
+
+        step = STRIKE_STEPS.get(clean_und, 50)
+        spot_price = self._get_underlying_spot_price(clean_und)
+        if spot_price <= 0:
+            spot_price = 23146.0 if clean_und == "NIFTY" else 51200.0
+
+        # Extract strike numbers if present
+        strike_matches = re.findall(r"\b(\d{4,6})\b", raw_q)
+        target_strike = float(strike_matches[0]) if strike_matches else None
+
+        # Detect option type preference if any
+        opt_type_pref = None
+        if " CE" in raw_q or raw_q.endswith("CE") or "CALL" in raw_q:
+            opt_type_pref = "CE"
+        elif " PE" in raw_q or raw_q.endswith("PE") or "PUT" in raw_q:
+            opt_type_pref = "PE"
+
+        # Load instruments
+        instruments = self._load_instruments_data()
+        expiries = self.get_expiries_for_underlying(clean_und)
+        expiry_map = {e["expiry_ms"]: e for e in expiries}
+        valid_expiries = set(e["expiry_ms"] for e in expiries)
+
+        # Filter candidate instruments
+        matches = []
+        for r in instruments:
+            if (
+                r.get("segment") in ("NSE_FO", "BSE_FO")
+                and r.get("name") == clean_und
+                and r.get("instrument_type") in ("CE", "PE")
+                and r.get("expiry") in valid_expiries
+            ):
+                stk = float(r.get("strike_price", 0.0))
+                itype = str(r.get("instrument_type", "")).upper()
+
+                if opt_type_pref and itype != opt_type_pref:
+                    continue
+
+                if target_strike is not None:
+                    # Match exact strike or strike within 1 step
+                    if abs(stk - target_strike) > (step * 0.5):
+                        continue
+                else:
+                    # If no number specified, check symbol match or near ATM
+                    sym = str(r.get("trading_symbol", "")).upper()
+                    if raw_q not in sym and abs(stk - spot_price) > (step * 5):
+                        continue
+
+                matches.append(r)
+
+        # Sort matches by expiry ascending, then strike, then option type (CE first, then PE)
+        matches.sort(key=lambda m: (
+            m.get("expiry", 0),
+            abs(float(m.get("strike_price", 0)) - spot_price),
+            0 if m.get("instrument_type") == "CE" else 1
+        ))
+
+        # Format output list
+        results = []
+        lot_size = DEFAULT_LOT_SIZES.get(clean_und, 65)
+
+        for m in matches[:limit]:
+            exp_ms = m.get("expiry")
+            exp_info = expiry_map.get(exp_ms, {})
+            exp_label = exp_info.get("formatted_label", "")
+            exp_tag = exp_info.get("tag", "Weekly")
+            stk = float(m.get("strike_price", 0.0))
+            itype = str(m.get("instrument_type", "CE")).upper()
+            ikey = m.get("instrument_key", "")
+            tok = str(m.get("exchange_token") or m.get("instrument_token") or ikey.split("|")[-1])
+            tsym = m.get("trading_symbol") or f"{clean_und} {int(stk)} {itype}"
+            lot = int(m.get("lot_size", lot_size))
+
+            # Calculate DTE & BS Price
+            exp_sec = (exp_ms / 1000) if exp_ms else time.time() + 86400 * 3
+            dte_days = max(0.1, (exp_sec - time.time()) / 86400.0)
+            iv_est = 0.135 if clean_und == "NIFTY" else 0.155
+            bs = _calc_bs_greeks(spot_price, stk, dte_days=dte_days, iv=iv_est, opt_type=itype)
+
+            results.append({
+                "symbol": tsym,
+                "trading_symbol": tsym,
+                "underlying": clean_und,
+                "strike": int(stk) if stk == int(stk) else stk,
+                "opt_type": itype,
+                "expiry_ms": exp_ms,
+                "expiry_date": exp_label,
+                "expiry_tag": exp_tag,
+                "lot_size": lot,
+                "instrument_key": ikey,
+                "token": tok,
+                "ltp": bs["ltp"],
+                "bid": bs["bid"],
+                "ask": bs["ask"],
+                "iv": bs["iv"],
+                "delta": bs["delta"],
+            })
+
+        return results
+
+
     def get_option_chain_snapshot(self, underlying: str = "NIFTY", expiry_ms: Optional[int] = None, strike_range: int = 15) -> Dict[str, Any]:
         """Build real-time Option Chain for an underlying with spot, ATM strike, PCR, Max Pain, and Greeks."""
         instruments = self._load_instruments_data()
@@ -3864,7 +3988,7 @@ class StraddleManager:
         broker: BaseBrokerAdapter,
         reason: str = "TARGET HIT",
     ) -> Dict[str, Any]:
-        if pos.get("status") != "OPEN":
+        if pos.get("status") not in ("OPEN", "EXIT_PENDING"):
             return {"success": False, "error": "Position is not OPEN"}
 
         exit_side = "BUY" if pos.get("side") == "SELL" else "SELL"
@@ -3906,9 +4030,9 @@ class StraddleManager:
         exit_buffer = float(adv.get("exit_buffer_value", 0.1))
 
         # Check if exit order should be Limit with buffer
-        # For auto end-time, square-off, or emergency exits, always force MARKET order
-        # so orders fill instantly with 0 delay before market closing at 15:30:00!
-        is_urgent_exit = any(k in reason.upper() for k in ("END TIME", "SQUARE OFF", "EMERGENCY", "TIME EXIT"))
+        # For auto end-time, square-off, emergency, or stoploss exits, always force MARKET order
+        # so orders fill instantly with 0 delay before market closing or adverse price slippage!
+        is_urgent_exit = any(k in reason.upper() for k in ("END TIME", "SQUARE OFF", "EMERGENCY", "TIME EXIT", "STOPLOSS", "SL HIT", "SL "))
         use_limit_exit = "Limit" in exit_order_type_cfg and ltp > 0 and not is_urgent_exit
         if use_limit_exit:
             if exit_side == "BUY":
@@ -4014,11 +4138,13 @@ class StraddleManager:
                 f"Exited {pos['symbol']} @ ₹{exit_price:.2f} [{reason}]. Leg MTM: ₹{pos['mtm']:.2f}",
                 details=order_res,
             )
+            pos["_exit_in_progress"] = False
             return {"success": True, "order_id": order_id, "filled": fill_res.get("filled", False), "price": exit_price, "pos": pos}
         else:
             err = str(order_res.get("error") or order_res.get("status_message") or "Broker order rejected")
             failed_oid = str(order_res.get("order_id") or ("261008000" + str(int(time.time()*1000))[-6:]))
             pos["status"] = "ERROR"
+            pos["_exit_in_progress"] = False
             pos["error"] = err
             pos["error_message"] = f"[EXIT FAILED] {err}"
             pos["avg_exit_price"] = 0.0
@@ -5264,6 +5390,9 @@ class StraddleManager:
                         break
 
                 if matched_strat and matched_leg_pos:
+                    # Never revert or overwrite a position that is currently exiting or already complete/error
+                    if matched_leg_pos.get("_exit_in_progress") or matched_leg_pos.get("status") in ("COMPLETE", "EXIT_PENDING", "ERROR", "TERMINATED"):
+                        continue
                     # Update live price and MTM on the existing leg position
                     matched_leg_pos["status"] = "OPEN"
                     matched_leg_pos["quantity"] = abs(net_qty)
@@ -5578,7 +5707,7 @@ class StraddleManager:
                 strat_mtm = 0.0
 
                 for pos in strat_positions:
-                    if pos.get("status") != "OPEN":
+                    if pos.get("status") != "OPEN" or pos.get("_exit_in_progress"):
                         strat_mtm += pos.get("mtm", 0.0)
                         continue
 
@@ -5665,6 +5794,7 @@ class StraddleManager:
                             except Exception as e_c:
                                 logger.warning(f"OCO: Error cancelling SL order {adv_sl_oid}: {e_c}")
                         pos["status"] = "COMPLETE"
+                        pos["_exit_in_progress"] = False
                         pos["exit_reason"] = "TARGET HIT (Broker OCO)"
                         pos["exit_order_id"] = str(adv_tgt_oid)
                         pos["exit_time"] = time.strftime("%H:%M:%S")
@@ -5680,6 +5810,7 @@ class StraddleManager:
                             except Exception as e_c:
                                 logger.warning(f"OCO: Error cancelling Target order {adv_tgt_oid}: {e_c}")
                         pos["status"] = "COMPLETE"
+                        pos["_exit_in_progress"] = False
                         pos["exit_reason"] = "STOPLOSS HIT (Broker OCO)"
                         pos["exit_order_id"] = str(adv_sl_oid)
                         pos["exit_time"] = time.strftime("%H:%M:%S")
@@ -5689,8 +5820,10 @@ class StraddleManager:
 
                     # Check Target Hit
                     tgt_price = float(pos.get("target_price", 0.0))
-                    if tgt_price > 0:
+                    if tgt_price > 0 and not pos.get("_exit_in_progress"):
                         if (side == "SELL" and ltp <= tgt_price) or (side == "BUY" and ltp >= tgt_price):
+                            pos["_exit_in_progress"] = True
+                            pos["status"] = "EXIT_PENDING"
                             self._log_event(f"Target Hit for {pos['symbol']} @ ₹{ltp:.2f} (Target was ₹{tgt_price:.2f})")
                             res_sq = self._square_off_single_position(pos, broker, reason=f"TARGET HIT (₹{tgt_price:.2f})")
                             exit_oid = (res_sq or {}).get("order_id") or pos.get("exit_order_id")
@@ -5699,8 +5832,10 @@ class StraddleManager:
 
                     # Check Stoploss Hit
                     sl_price = float(pos.get("sl_price", 0.0))
-                    if sl_price > 0:
+                    if sl_price > 0 and not pos.get("_exit_in_progress"):
                         if (side == "SELL" and ltp >= sl_price) or (side == "BUY" and ltp <= sl_price):
+                            pos["_exit_in_progress"] = True
+                            pos["status"] = "EXIT_PENDING"
                             self._log_event(f"Stoploss Hit for {pos['symbol']} @ ₹{ltp:.2f} (SL was ₹{sl_price:.2f})")
                             res_sq = self._square_off_single_position(pos, broker, reason=f"STOPLOSS HIT (₹{sl_price:.2f})")
                             exit_oid = (res_sq or {}).get("order_id") or pos.get("exit_order_id")
