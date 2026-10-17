@@ -395,13 +395,14 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         self,
         order_id: str,
         timeout_sec: float = 15.0,
-        poll_interval_sec: float = 0.1,
+        poll_interval_sec: float = 0.005,
     ) -> Dict[str, Any]:
         """
         Polls Kotak Neo OMS/RMS order history until the order status is confirmed
         'TRADED' / 'COMPLETE', or fails if 'REJECTED' / 'CANCELLED'.
         Guarantees that exit orders are completely filled before re-entries fire,
         eliminating concurrent position margin spikes.
+        Default poll interval is 5ms (0.005s) for ultra-low latency execution.
         """
         client = self._get_client()
         if client is None:
@@ -409,7 +410,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
         oid_str = str(order_id).strip()
         start_t = time.time()
-        logger.info(f"[Kotak Neo] Polling order {oid_str} until FILLED (timeout={timeout_sec}s, poll={poll_interval_sec}s)...")
+        logger.debug(f"[Kotak Neo] Polling order {oid_str} until FILLED (timeout={timeout_sec}s, poll={poll_interval_sec}s)...")
 
         while time.time() - start_t < timeout_sec:
             try:

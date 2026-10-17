@@ -5173,6 +5173,7 @@ async function straddleToggleExecutionMode() {
 // =========================================================================
 
 let _optChainTickerInterval = null;
+let _isLoadingOptionChain = false;
 
 function startOptionChainTicker() {
     stopOptionChainTicker();
@@ -5183,7 +5184,7 @@ function startOptionChainTicker() {
         } else {
             stopOptionChainTicker();
         }
-    }, 1500); // Continuous 1.5s tick feed for Option Chain LTP & Bid/Ask
+    }, 500); // Continuous 500ms ultra-fast tick feed for Option Chain LTP & Bid/Ask
 }
 
 function stopOptionChainTicker() {
@@ -5450,6 +5451,9 @@ function addSelectedLegsToBasketModal() {
 window.addSelectedLegsToBasketModal = addSelectedLegsToBasketModal;
 
 async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
+    if (isBackgroundUpdate && _isLoadingOptionChain) return;
+    _isLoadingOptionChain = true;
+
     const undSel = document.getElementById("optChainUnderlyingSelect");
     const und = undSel?.value || window._straddleState.optionChainUnderlying || "NIFTY";
     
@@ -5461,7 +5465,10 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
 
     const tbody = document.getElementById("straddleOptionChainBody");
     const spotLabel = document.getElementById("optChainSpotTicker");
-    if (!tbody) return;
+    if (!tbody) {
+        _isLoadingOptionChain = false;
+        return;
+    }
 
     if (!isBackgroundUpdate && (!tbody.children.length || tbody.querySelector("td[colspan]"))) {
         tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:35px; color:#94a3b8;"><span style="font-size:16px;">⏳</span> Loading Real-Time Option Depth & Greeks...</td></tr>`;
@@ -5659,7 +5666,11 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
             updateOptionChainBasketSummaryBar();
         }
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#f43f5e; padding:30px;">Error loading Option Matrix: ${e.message}</td></tr>`;
+        if (!isBackgroundUpdate) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#f43f5e; padding:30px;">Error loading Option Matrix: ${e.message}</td></tr>`;
+        }
+    } finally {
+        _isLoadingOptionChain = false;
     }
 }
 
@@ -6511,9 +6522,12 @@ function updateBasketBadges() {
 }
 
 let _basketQuoteTickerInterval = null;
+let _isRefreshingBasketQuotes = false;
 
 async function refreshAllBasketQuotes() {
+    if (_isRefreshingBasketQuotes) return;
     if (!window._basketOrders || window._basketOrders.length === 0) return;
+    _isRefreshingBasketQuotes = true;
     try {
         const resp = await fetch("/api/straddle/basket/quotes", {
             method: "POST",
@@ -6563,6 +6577,8 @@ async function refreshAllBasketQuotes() {
         }
     } catch (e) {
         console.warn("[Basket] Live quotes ticker fetch error:", e);
+    } finally {
+        _isRefreshingBasketQuotes = false;
     }
 }
 
@@ -6576,7 +6592,7 @@ function startBasketQuoteTicker() {
         } else {
             stopBasketQuoteTicker();
         }
-    }, 1000); // 1-second continuous tick refresh
+    }, 250); // Continuous 250ms ultra-fast tick feed (4 updates/sec)
 }
 
 function stopBasketQuoteTicker() {

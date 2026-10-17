@@ -1088,6 +1088,176 @@ class StraddleManager:
             "delta": bs["delta"],
         }
 
+    def get_batch_contract_quotes(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        High-Speed Batched Contract Quotes Resolver.
+        Resolves instruments and fetches real-time broker quotes for an entire list of contracts/orders
+        in a SINGLE ultra-low latency broker roundtrip.
+        """
+        if not items:
+            return []
+
+        instruments = self._load_instruments_data()
+        
+        # Pre-cache expiries for unique underlyings
+        expiries_cache = {}
+        def _get_exp(und):
+            if und not in expiries_cache:
+                expiries_cache[und] = self.get_expiries_for_underlying(und)
+            return expiries_cache[und]
+
+        resolved_meta = []
+        all_keys = []
+
+        for idx, it in enumerate(items):
+            clean_und = str(it.get("underlying") or "NIFTY").strip().upper()
+            clean_opt = str(it.get("opt_type") or "CE").strip().upper()
+            try:
+                clean_strike = float(it.get("strike", 0.0) or 0.0)
+            except (ValueError, TypeError):
+                clean_strike = 0.0
+
+            expiries = _get_exp(clean_und)
+            expiry_map = {e["expiry_ms"]: e for e in expiries}
+
+            target_exp_ms = None
+            raw_exp_ms = it.get("expiry_ms")
+            raw_exp_date = it.get("expiry_date")
+            if raw_exp_ms and int(raw_exp_ms) in expiry_map:
+                target_exp_ms = int(raw_exp_ms)
+            elif raw_exp_date:
+                date_clean = str(raw_exp_date).strip().upper()
+                for e in expiries:
+                    if (
+                        e["formatted_label"].upper() == date_clean
+                        or e["date_str"] == date_clean
+                        or date_clean in e["formatted_label"].upper()
+                    ):
+                        target_exp_ms = e["expiry_ms"]
+                        break
+
+            if not target_exp_ms and expiries:
+                target_exp_ms = expiries[0]["expiry_ms"]
+
+            matched = None
+            for r in instruments:
+                if (
+                    r.get("segment") in ("NSE_FO", "BSE_FO")
+                    and r.get("name") == clean_und
+                    and str(r.get("instrument_type", "")).upper() == clean_opt
+                    and abs(float(r.get("strike_price", 0.0)) - clean_strike) < 0.5
+                ):
+                    if target_exp_ms and r.get("expiry") == target_exp_ms:
+                        matched = r
+                        break
+                    elif not matched:
+                        matched = r
+
+            lot_size = DEFAULT_LOT_SIZES.get(clean_und, 65)
+            exp_info = expiry_map.get(target_exp_ms, {})
+            exp_label = exp_info.get("formatted_label", "")
+            tok = ""
+            ikey = it.get("token") or it.get("instrument_key") or ""
+            tsym = it.get("symbol") or it.get("trading_symbol") or f"{clean_und} {int(clean_strike) if clean_strike == int(clean_strike) else clean_strike} {clean_opt}"
+            if matched:
+                tok = str(matched.get("exchange_token") or matched.get("instrument_token") or "")
+                ikey = matched.get("instrument_key", ikey)
+                tsym = matched.get("trading_symbol") or tsym
+                lot_size = int(matched.get("lot_size", lot_size))
+                if not target_exp_ms:
+                    target_exp_ms = matched.get("expiry")
+                exp_info = expiry_map.get(target_exp_ms, {})
+                exp_label = exp_info.get("formatted_label", exp_label)
+
+            if ikey:
+                all_keys.append(ikey)
+            if tok:
+                all_keys.append(tok)
+
+            resolved_meta.append({
+                "idx": idx,
+                "id": it.get("id"),
+                "clean_und": clean_und,
+                "clean_opt": clean_opt,
+                "clean_strike": clean_strike,
+                "target_exp_ms": target_exp_ms,
+                "exp_label": exp_label,
+                "lot_size": lot_size,
+                "tok": tok,
+                "ikey": ikey,
+                "tsym": tsym,
+            })
+
+        # Fetch all live quotes in a single ultra-fast broker call
+        live_prices, live_quotes = self._fetch_live_quotes(list(set(all_keys))) if all_keys else ({}, {})
+
+        results = []
+        for meta in resolved_meta:
+            clean_und = meta["clean_und"]
+            clean_strike = meta["clean_strike"]
+            clean_opt = meta["clean_opt"]
+            ikey = meta["ikey"]
+            tok = meta["tok"]
+            tsym = meta["tsym"]
+
+            # Fallback BS Greek calculations
+            spot_price = self._get_underlying_spot_price(clean_und)
+            if spot_price <= 0:
+                spot_price = 23146.0 if clean_und == "NIFTY" else 51200.0
+            target_exp_ms = meta["target_exp_ms"]
+            exp_sec = (target_exp_ms / 1000) if target_exp_ms else time.time() + 86400 * 3
+            dte_days = max(0.1, (exp_sec - time.time()) / 86400.0)
+            iv_est = 0.135 if clean_und == "NIFTY" else 0.155
+            bs = _calc_bs_greeks(spot_price, clean_strike, dte_days=dte_days, iv=iv_est, opt_type=clean_opt)
+
+            ltp = bs["ltp"]
+            bid = bs["bid"]
+            ask = bs["ask"]
+
+            candidates = [ikey, ikey.replace("|", ":"), tsym, tok, ikey.split("|")[-1] if "|" in ikey else None]
+            found_q = None
+            for cand in candidates:
+                if cand and cand in live_prices and float(live_prices[cand]) > 0:
+                    ltp = round(float(live_prices[cand]), 2)
+                if cand and cand in live_quotes and isinstance(live_quotes[cand], dict):
+                    found_q = live_quotes[cand]
+                    if found_q.get("ltp") and float(found_q["ltp"]) > 0:
+                        ltp = round(float(found_q["ltp"]), 2)
+                    break
+
+            if found_q and found_q.get("bid") and float(found_q["bid"]) > 0:
+                bid = round(float(found_q["bid"]), 2)
+            else:
+                bid = round(max(0.05, ltp - 0.4), 2)
+
+            if found_q and found_q.get("ask") and float(found_q["ask"]) > 0:
+                ask = round(float(found_q["ask"]), 2)
+            else:
+                ask = round(ltp + 0.4, 2)
+
+            results.append({
+                "idx": meta["idx"],
+                "id": meta["id"],
+                "symbol": f"{clean_und} {int(clean_strike) if clean_strike == int(clean_strike) else clean_strike} {clean_opt}",
+                "trading_symbol": tsym,
+                "underlying": clean_und,
+                "strike": int(clean_strike) if clean_strike == int(clean_strike) else clean_strike,
+                "opt_type": clean_opt,
+                "expiry_ms": meta["target_exp_ms"],
+                "expiry_date": meta["exp_label"],
+                "lot_size": meta["lot_size"],
+                "token": tok or ikey,
+                "instrument_key": ikey,
+                "ltp": ltp,
+                "price": ltp,
+                "bid": bid,
+                "ask": ask,
+                "iv": bs["iv"],
+                "delta": bs["delta"],
+            })
+
+        return results
+
 
     def get_option_chain_snapshot(self, underlying: str = "NIFTY", expiry_ms: Optional[int] = None, strike_range: int = 15) -> Dict[str, Any]:
         """Build real-time Option Chain for an underlying with spot, ATM strike, PCR, Max Pain, and Greeks."""
@@ -1222,8 +1392,15 @@ class StraddleManager:
 
                 if ltp_val is not None and ltp_val > 0:
                     opt_item["ltp"] = round(ltp_val, 2)
-                    opt_item["bid"] = round(max(0.05, ltp_val - 0.4), 2)
-                    opt_item["ask"] = round(ltp_val + 0.4, 2)
+                    if q_obj and q_obj.get("bid") and float(q_obj["bid"]) > 0:
+                        opt_item["bid"] = round(float(q_obj["bid"]), 2)
+                    else:
+                        opt_item["bid"] = round(max(0.05, ltp_val - 0.4), 2)
+
+                    if q_obj and q_obj.get("ask") and float(q_obj["ask"]) > 0:
+                        opt_item["ask"] = round(float(q_obj["ask"]), 2)
+                    else:
+                        opt_item["ask"] = round(ltp_val + 0.4, 2)
 
                 if q_obj:
                     if q_obj.get("net_change") is not None:
@@ -2896,6 +3073,21 @@ class StraddleManager:
                     if pos:
                         new_positions.append(pos)
 
+                # Ultra-fast parallel fill confirmation for Buy (Hedge) legs (5ms micro-poll, 200ms timeout)
+                buy_oids = []
+                for pos in buy_results:
+                    if pos and pos.get("order_id") and not str(pos.get("order_id")).startswith("ORD_") and not str(pos.get("order_id")).startswith("PAPER_"):
+                        buy_oids.append(str(pos.get("order_id")))
+                        if pos.get("child_order_ids"):
+                            for ch_oid in pos["child_order_ids"]:
+                                if ch_oid and str(ch_oid) not in buy_oids:
+                                    buy_oids.append(str(ch_oid))
+
+                if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
+                    with ThreadPoolExecutor(max_workers=min(12, len(buy_oids) + 1)) as v_exec:
+                        v_futs = [v_exec.submit(broker.wait_for_order_fill, oid, 0.20, 0.005) for oid in buy_oids]
+                        _ = [f.result() for f in concurrent.futures.as_completed(v_futs)]
+
             # Delay before executing Sell legs if configured
             entry_delay_side = adv.get("entry_order_delay_side", "")
             entry_delay_sec = int(adv.get("entry_order_delay_sec", 0))
@@ -2905,7 +3097,7 @@ class StraddleManager:
                 if not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
                     return
 
-            # Step 2: Execute Sell legs in parallel
+            # Step 2: Immediately execute Sell legs in parallel (zero time gap)
             if sell_legs:
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(max_workers=min(8, len(sell_legs))) as executor:
@@ -5503,17 +5695,15 @@ class StraddleManager:
                         "error": br["error"] or "Order rejected"
                     })
 
-            # Ultra-fast verification of BUY fills (15ms tight polling loop)
+            # Ultra-fast parallel verification of BUY fills (5ms micro-poll, 200ms timeout)
             if buy_order_ids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
-                for b_oid in buy_order_ids:
-                    try:
-                        broker.wait_for_order_fill(b_oid, timeout_sec=0.25, poll_interval_sec=0.015)
-                    except Exception:
-                        pass
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, len(buy_order_ids) + 1)) as v_exec:
+                    v_futs = [v_exec.submit(broker.wait_for_order_fill, b_oid, 0.20, 0.005) for b_oid in buy_order_ids]
+                    _ = [f.result() for f in concurrent.futures.as_completed(v_futs)]
 
         # PHASE 2: IMMEDIATELY DISPATCH ALL SELL SLICES PARALLELY (ZERO TIME GAP)
         if sell_slices:
-            self._log_event(f"[Basket Margin Priority] Dispathing {len(sell_slices)} SELL slice(s) in parallel...", level="INFO")
+            self._log_event(f"[Basket Margin Priority] Dispatching {len(sell_slices)} SELL slice(s) in parallel...", level="INFO")
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, len(sell_slices) + 1)) as executor:
                 sell_futures = [executor.submit(_fire_single_slice, s) for s in sell_slices]
                 sell_results = [f.result() for f in concurrent.futures.as_completed(sell_futures)]
