@@ -53,7 +53,20 @@
     ],
     "enabled": true,
     "_manual_reset": false,
-    "entry_error": "-",
-    "repair_needed": false
+    "entry_error": "Not scheduled for Sunday",
+    "repair_needed": false,
+    "mtm": 0.0,
+    "_pnl_history": [
+      {
+        "time": "15:26",
+        "date": "2026-10-18",
+        "pnl": 0.0
+      }
+    ],
+    "multiplier_type": "AUTO",
+    "cushion_margin": 15000.0,
+    "available_capital": 1400000.0,
+    "broker_margin_per_lot": 175369.87,
+    "effective_multiplier": 7
   }
 ]

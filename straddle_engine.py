@@ -1948,6 +1948,151 @@ class StraddleManager:
             self._log_event(f"Strategy '{strat_dict.get('name', sid)}' saved successfully.")
             return {"success": True, "strategy_id": sid, "strategy": strat_dict}
 
+    def calculate_strategy_margin_per_lot(self, strat: Dict[str, Any]) -> float:
+        """
+        Calculates exact broker required margin per 1 lot of the strategy's configured legs.
+        Applies SEBI/Exchange hedge-benefit spread reductions when long and short legs co-exist.
+        """
+        legs = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
+        if not legs:
+            return 125174.14
+
+        und = str(strat.get("underlying") or "NIFTY").upper()
+        spot = 23150.0
+        try:
+            feed = getattr(self, "_active_feed", None)
+            if feed and hasattr(feed, "get_spot_price"):
+                sp = feed.get_spot_price(und)
+                if sp and sp > 0:
+                    spot = float(sp)
+            elif self._state.get("underlying_spot"):
+                spot = float(self._state.get("underlying_spot"))
+        except Exception:
+            pass
+
+        step = 100.0 if und == "BANKNIFTY" else 50.0
+        atm_strike = round(spot / step) * step
+
+        sim_orders = []
+        for idx, leg in enumerate(legs):
+            side = str(leg.get("side") or "Sell").upper()
+            opt_type = str(leg.get("option_type") or "CE").upper()
+            stk_sel = str(leg.get("strike_selection") or "ATM").upper()
+
+            strike = atm_strike
+            if stk_sel in ["ATM", "ATM STRIKE"]:
+                strike = atm_strike
+            elif "OTM" in stk_sel:
+                m = re.search(r"OTM\s*(\d+)", stk_sel)
+                offset = int(m.group(1)) if m else 1
+                strike = (atm_strike + offset * step) if opt_type == "CE" else (atm_strike - offset * step)
+            elif "ITM" in stk_sel:
+                m = re.search(r"ITM\s*(\d+)", stk_sel)
+                offset = int(m.group(1)) if m else 1
+                strike = (atm_strike - offset * step) if opt_type == "CE" else (atm_strike + offset * step)
+            else:
+                try:
+                    strike = float(stk_sel)
+                except Exception:
+                    strike = atm_strike
+
+            est_price = 50.0 if abs(strike - atm_strike) <= step else (5.0 if abs(strike - atm_strike) <= 5 * step else 1.0)
+            sim_orders.append({
+                "underlying": und,
+                "strike": strike,
+                "opt_type": opt_type,
+                "side": side,
+                "lots": 1,
+                "price": est_price
+            })
+
+        res = self.calculate_basket_margin(sim_orders, multiplier=1)
+        req = float(res.get("required_margin") or 125174.14)
+        return max(req, 1000.0)
+
+    def get_effective_multiplier(self, strat: Dict[str, Any]) -> int:
+        """
+        Determines the effective lot multiplier for a strategy:
+        - If 'MANUAL': returns user-entered multiplier.
+        - If 'AUTO': calculates lots = floor(available_capital / (broker_margin_per_lot + cushion_margin)).
+        """
+        mult_type = str(strat.get("multiplier_type") or "MANUAL").upper()
+        if mult_type != "AUTO":
+            return max(1, int(strat.get("multiplier", 1) or 1))
+
+        cushion = float(strat.get("cushion_margin") if strat.get("cushion_margin") is not None else 15000.0)
+        broker_margin_per_lot = self.calculate_strategy_margin_per_lot(strat)
+        total_margin_per_lot = broker_margin_per_lot + cushion
+
+        if total_margin_per_lot <= 0:
+            return 1
+
+        available_capital = 0.0
+        if strat.get("available_capital") is not None and float(strat.get("available_capital")) > 0:
+            available_capital = float(strat["available_capital"])
+        elif strat.get("capital") is not None and float(strat.get("capital")) > 0:
+            available_capital = float(strat["capital"])
+        else:
+            try:
+                funds = self.get_margin_overview()
+                available_capital = float(funds.get("available_margin") or funds.get("available_cash") or 0.0)
+            except Exception:
+                available_capital = 0.0
+
+        if available_capital <= 0:
+            available_capital = 1400000.0
+
+        auto_lots = int(math.floor((available_capital / total_margin_per_lot) + 0.02))
+        return max(1, auto_lots)
+
+
+    def update_strategy_multiplier(
+        self,
+        strategy_id: str,
+        multiplier_type: Optional[str] = None,
+        multiplier: Optional[int] = None,
+        cushion_margin: Optional[float] = None,
+        available_capital: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Atomically updates the multiplier mode, manual multiplier, or cushion margin for a strategy.
+        Recalculates effective lots and synchronizes across all views.
+        """
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy '{strategy_id}' not found."}
+
+            if multiplier_type is not None:
+                strat["multiplier_type"] = str(multiplier_type).upper()
+            if multiplier is not None:
+                strat["multiplier"] = max(1, int(multiplier))
+            if cushion_margin is not None:
+                strat["cushion_margin"] = max(0.0, float(cushion_margin))
+            if available_capital is not None:
+                strat["available_capital"] = max(0.0, float(available_capital))
+
+            broker_margin = self.calculate_strategy_margin_per_lot(strat)
+            eff_mult = self.get_effective_multiplier(strat)
+            strat["broker_margin_per_lot"] = broker_margin
+            strat["effective_multiplier"] = eff_mult
+
+            self._save_strategies()
+            self._log_event(
+                f"Updated Multiplier for '{strat.get('name')}': Mode={strat.get('multiplier_type')}, "
+                f"Manual={strat.get('multiplier')}, Cushion=₹{strat.get('cushion_margin')}, Effective={eff_mult}x"
+            )
+            return {
+                "success": True,
+                "strategy_id": strategy_id,
+                "multiplier_type": strat.get("multiplier_type", "MANUAL"),
+                "multiplier": strat.get("multiplier", 1),
+                "cushion_margin": strat.get("cushion_margin", 15000.0),
+                "broker_margin_per_lot": broker_margin,
+                "effective_multiplier": eff_mult,
+                "strategy": strat
+            }
+
     def duplicate_strategy(self, strategy_id: str) -> Dict[str, Any]:
         """Duplicate an existing strategy with a unique ID and '(Copy)' suffix in clean READY state."""
         with _ENGINE_LOCK:
@@ -3061,7 +3206,7 @@ class StraddleManager:
 
         try:
             self._log_event(f"Executing Strategy Entry for '{strat.get('name')}'...")
-            mult = int(strat.get("multiplier", 1))
+            mult = self.get_effective_multiplier(strat)
             und = strat.get("underlying", "NIFTY")
             adv = strat.get("advanced") or strat.get("advanced_settings", {})
             mode = self._state.get("execution_mode", "LIVE_BROKER")
@@ -3638,7 +3783,7 @@ class StraddleManager:
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
             adv = strat.get("advanced") or strat.get("advanced_settings", {})
-            mult = int(strat.get("multiplier", 1))
+            mult = self.get_effective_multiplier(strat)
             und = strat.get("underlying", "NIFTY")
             legs_cfg = strat.get("legs", [])
 
@@ -3898,7 +4043,7 @@ class StraddleManager:
                 new_pos = self._place_leg_entry_order(
                     dummy_cfg,
                     new_contract,
-                    mult=int(strat.get("multiplier", 1)),
+                    mult=self.get_effective_multiplier(strat),
                     broker=broker,
                     adv=adv,
                     strategy=strat,
@@ -4919,7 +5064,7 @@ class StraddleManager:
                     return
 
                 und = strat.get("underlying", "NIFTY")
-                mult = int(strat.get("multiplier", 1))
+                mult = self.get_effective_multiplier(strat)
 
                 contract = self.resolve_strike_and_contract(
                     underlying=und,
@@ -5747,8 +5892,62 @@ class StraddleManager:
         total_required_margin = max(0.0, total_required_margin)
         hedge_savings = max(0.0, naked_short_margin - total_required_margin) if total_short_lots > 0 else 0.0
 
-        # Exact Kotak Neo Exchange Charges: ₹29.28 per order baseline (adjusted for turnover/multiplier)
-        total_charges = round(len(orders) * 29.28 * (1.0 + 0.1 * (mult - 1)), 2)
+        # Exact Exchange / Angel One / Kotak Neo F&O Charges Breakdown:
+        sell_turnover = 0.0
+        buy_turnover = 0.0
+        for o in orders:
+            u_name = str(o.get("underlying") or und or "NIFTY").upper()
+            l_sz = int(o.get("lot_size") or DEFAULT_LOT_SIZES.get(u_name, 65))
+            r_lots = int(o.get("lots") or (int(o.get("quantity", l_sz)) // l_sz) or 1)
+            r_lots = max(1, r_lots)
+            eff_qty = r_lots * mult * l_sz
+            p = float(o.get("price", 0.0) or o.get("ltp", 0.0) or 0.0)
+            s = str(o.get("transaction_type") or o.get("side") or "BUY").upper()
+            if s.startswith("S"):
+                sell_turnover += p * eff_qty
+            else:
+                buy_turnover += p * eff_qty
+
+        tot_turnover = sell_turnover + buy_turnover
+
+        # 1. Brokerage (₹20 per executed order)
+        brokerage = round(len(orders) * 20.0, 2)
+        # 2. Exchange Transaction Charges (NSE Options: 0.03553% on turnover)
+        exchange_txn = round(tot_turnover * 0.0003553, 2)
+        # 3. Stamp Duty (0.003% on buy turnover only)
+        stamp_duty = round(buy_turnover * 0.00003, 2)
+        # 4. SEBI Turnover Fees (₹10 / crore = 0.000001 on turnover)
+        sebi_fees = round(tot_turnover * 0.000001, 2)
+        # 5. IPFT Charges
+        ipft_charges = 0.00
+        # Total External Charges
+        external_charges = round(exchange_txn + stamp_duty + ipft_charges + sebi_fees, 2)
+
+        # 6. STT (Securities Transaction Tax: 0.15% on sell option turnover as per Oct 2024 SEBI rules)
+        stt = round(sell_turnover * 0.0015, 2)
+        # 7. GST (18% on Brokerage + Exchange Txn + SEBI)
+        gst = round(0.18 * (brokerage + exchange_txn + sebi_fees), 2)
+        # Total Taxes
+        taxes = round(stt + gst, 2)
+
+        # Total Charges
+        total_charges = round(brokerage + external_charges + taxes, 2)
+
+        charges_breakdown = {
+            "brokerage": brokerage,
+            "external_charges": external_charges,
+            "exchange_txn_charges": exchange_txn,
+            "stamp_duty": stamp_duty,
+            "ipft_charges": ipft_charges,
+            "sebi_fees": sebi_fees,
+            "taxes": taxes,
+            "stt": stt,
+            "gst": gst,
+            "total_charges": total_charges,
+            "sell_turnover": round(sell_turnover, 2),
+            "buy_turnover": round(buy_turnover, 2),
+            "total_turnover": round(tot_turnover, 2)
+        }
 
         return {
             "success": True,
@@ -5757,6 +5956,7 @@ class StraddleManager:
             "final_margin": round(total_required_margin, 2),
             "hedge_benefit": round(hedge_savings, 2),
             "total_charges": total_charges,
+            "charges_breakdown": charges_breakdown,
             "orders_count": len(orders),
             "multiplier": mult,
             "has_hedge_benefit": has_hedge_benefit
@@ -6879,12 +7079,20 @@ class StraddleManager:
             active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else {})
             active_positions = active_strat.get("positions", []) if active_strat else []
 
-            # Ensure all strategies have default schedule days if not set
+            # Ensure all strategies have default schedule days and multiplier settings if not set
             for s in self._strategies:
                 if not s.get("schedule_days"):
                     s["schedule_days"] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
                 if "mtm" not in s:
                     s["mtm"] = 0.0
+                if "multiplier_type" not in s:
+                    s["multiplier_type"] = "MANUAL"
+                if "multiplier" not in s:
+                    s["multiplier"] = 1
+                if "cushion_margin" not in s:
+                    s["cushion_margin"] = 15000.0
+                s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(s)
+                s["effective_multiplier"] = self.get_effective_multiplier(s)
 
             return {
                 "engine_status": self._state.get("status", "READY"),

@@ -1147,7 +1147,14 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             isEnabled = true;
         }
 
+        const multType = (s.multiplier_type || "MANUAL").toUpperCase();
+        const isManual = (multType !== "AUTO");
         const multiplier = s.multiplier || 1;
+        const cushionMargin = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? s.cushion_margin : 15000;
+        const brokerMargin = s.broker_margin_per_lot || 125174.14;
+        const totalMarginPerLot = brokerMargin + cushionMargin;
+        const effMult = s.effective_multiplier || (isManual ? multiplier : Math.max(1, Math.floor(1400000 / Math.max(1, totalMarginPerLot))));
+
         const mtm = s.mtm || 0.0;
         const mtmClass = mtm >= 0 ? "color:#10b981;" : "color:#f43f5e;";
         const mtmFormatted = (mtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1190,8 +1197,21 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 <td>
                     ${daysHtml}
                 </td>
-                <td style="text-align:center;">
-                    <input type="number" class="straddle-input" style="width:50px; text-align:center; padding:2px 4px; font-weight:700;" value="${multiplier}" min="1" max="100" onchange="onChangeAlgoMultiplier('${s.strategy_id}', this.value)">
+                <td style="text-align:center; min-width:115px; padding:6px 6px;">
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                        <div style="display:inline-flex; background:#0b1120; border:1px solid #334155; border-radius:4px; padding:1px;">
+                            <button type="button" onclick="setAlgoMultiplierMode('${s.strategy_id}', 'MANUAL')" style="background:${isManual ? '#2563eb' : 'transparent'}; color:${isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Manual Lots Multiplier">Manual</button>
+                            <button type="button" onclick="setAlgoMultiplierMode('${s.strategy_id}', 'AUTO')" style="background:${!isManual ? '#059669' : 'transparent'}; color:${!isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Auto Multiplier based on Available Capital & Cushion Margin">Auto</button>
+                        </div>
+                        ${isManual ? `
+                            <input type="number" class="straddle-input" style="width:52px; text-align:center; padding:2px 4px; font-weight:800;" value="${multiplier}" min="1" max="100" onchange="onChangeAlgoMultiplier('${s.strategy_id}', this.value)" title="Manual Lots Multiplier">
+                        ` : `
+                            <div style="display:flex; align-items:center; gap:4px;" title="Auto Determined: ${effMult} Lots&#10;Broker Req: ₹${(brokerMargin/100000).toFixed(2)}L + Cushion: ₹${(cushionMargin/1000).toFixed(0)}k = ₹${(totalMarginPerLot/100000).toFixed(2)}L per lot">
+                                <span style="font-size:11px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:1px 5px; border-radius:3px; white-space:nowrap;">⚡ ${effMult}x</span>
+                                <input type="number" class="straddle-input" style="width:58px; text-align:center; padding:1px 2px; font-size:10.5px; font-weight:700;" value="${cushionMargin}" step="1000" min="0" onchange="onChangeAlgoCushionMargin('${s.strategy_id}', this.value)" title="Cushion Margin per lot (₹)">
+                            </div>
+                        `}
+                    </div>
                 </td>
                 <td id="algo_mtm_${s.strategy_id}" style="text-align:right; font-family:var(--font-mono); font-weight:800; ${mtmClass}">
                     ${mtmFormatted}
@@ -1357,24 +1377,111 @@ async function onToggleAlgoEnable(strategyId, isChecked) {
     }
 }
 
+async function setAlgoMultiplierMode(strategyId, mode) {
+    const strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === strategyId);
+    if (!strat) return;
+    strat.multiplier_type = mode;
+    showStraddleToast(`'${strat.name}' switched to ${mode} Multiplier`, "info", 1500);
+
+    // Sync to strategy builder form if this strategy is active
+    if (window._straddleState?.activeStrategyId === strategyId || window._straddleState?.activeStrategy?.strategy_id === strategyId) {
+        setFormMultiplierMode(mode, false);
+    }
+
+    renderStraddleAlgosTable(true);
+
+    try {
+        const resp = await fetch("/api/straddle/strategy/update_multiplier", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                strategy_id: strategyId,
+                multiplier_type: mode
+            })
+        });
+        const res = await resp.json();
+        if (res.success && res.strategy) {
+            Object.assign(strat, res.strategy);
+            renderStraddleAlgosTable(true);
+        }
+    } catch (e) {
+        console.error("Error setting multiplier mode:", e);
+    }
+}
+window.setAlgoMultiplierMode = setAlgoMultiplierMode;
+
+async function onChangeAlgoCushionMargin(strategyId, val) {
+    const cushion = Math.max(0, parseFloat(val) || 0);
+    const strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === strategyId);
+    if (!strat) return;
+    strat.cushion_margin = cushion;
+
+    // Sync to strategy builder form if active
+    if (window._straddleState?.activeStrategyId === strategyId || window._straddleState?.activeStrategy?.strategy_id === strategyId) {
+        const formInput = document.getElementById("cfgCushionMargin");
+        if (formInput && parseFloat(formInput.value) !== cushion) formInput.value = cushion;
+        updateFormAutoMultiplierPreview();
+    }
+
+    renderStraddleAlgosTable(true);
+
+    try {
+        const resp = await fetch("/api/straddle/strategy/update_multiplier", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                strategy_id: strategyId,
+                cushion_margin: cushion
+            })
+        });
+        const res = await resp.json();
+        if (res.success && res.strategy) {
+            Object.assign(strat, res.strategy);
+            renderStraddleAlgosTable(true);
+        }
+    } catch (e) {
+        console.error("Error updating cushion margin:", e);
+    }
+}
+window.onChangeAlgoCushionMargin = onChangeAlgoCushionMargin;
+
 async function onChangeAlgoMultiplier(strategyId, val) {
-    const num = parseInt(val) || 1;
-    const strat = window._straddleState.allStrategies.find(s => s.strategy_id === strategyId);
+    const num = Math.max(1, parseInt(val) || 1);
+    const strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === strategyId);
     if (strat) {
         strat.multiplier = num;
+        strat.multiplier_type = "MANUAL";
+
+        if (window._straddleState?.activeStrategyId === strategyId || window._straddleState?.activeStrategy?.strategy_id === strategyId) {
+            const formInput = document.getElementById("cfgMultiplier");
+            if (formInput && parseInt(formInput.value) !== num) formInput.value = num;
+            setFormMultiplierMode("MANUAL", false);
+        }
+
         showStraddleToast(`Multiplier set to ${num}x for '${strat.name}'`, "info", 1500);
+        renderStraddleAlgosTable(true);
+
         try {
-            await fetch("/api/straddle/strategy/save", {
+            const resp = await fetch("/api/straddle/strategy/update_multiplier", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ strategy: strat })
+                body: JSON.stringify({
+                    strategy_id: strategyId,
+                    multiplier: num,
+                    multiplier_type: "MANUAL"
+                })
             });
-            await fetchStraddleState();
+            const res = await resp.json();
+            if (res.success && res.strategy) {
+                Object.assign(strat, res.strategy);
+                renderStraddleAlgosTable(true);
+            }
         } catch (e) {
             console.error("Error updating multiplier:", e);
         }
     }
 }
+window.onChangeAlgoMultiplier = onChangeAlgoMultiplier;
 
 function openStrategyInTerminal(strategyId) {
     const strat = (window._straddleState.allStrategies || []).find(s => s.strategy_id === strategyId);
@@ -4412,7 +4519,14 @@ function populateStraddleSettingsForm(s) {
     }
 
     document.getElementById("cfgSegment").value = s.segment || "Options";
+    const multType = (s.multiplier_type || "MANUAL").toUpperCase();
+    setFormMultiplierMode(multType, false);
     document.getElementById("cfgMultiplier").value = s.multiplier || 1;
+    const cushionInput = document.getElementById("cfgCushionMargin");
+    if (cushionInput) {
+        cushionInput.value = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? s.cushion_margin : 15000;
+    }
+    updateFormAutoMultiplierPreview();
     setStraddleTimeInputValue("cfgStartTime", s.start_time || "09:15:56");
     setStraddleTimeInputValue("cfgEndTime", s.end_time || "15:29:50");
 
@@ -4826,7 +4940,9 @@ function serializeCurrentStrategySettings() {
         strategy_id: inputSid || active.strategy_id || ("strat_" + Date.now()),
         name: (inputName && inputName.trim()) ? inputName.trim() : (active.name || "Custom Straddle Strategy"),
         enabled: active.enabled !== false,
+        multiplier_type: (document.getElementById("grpAutoMultiplier")?.style.display !== "none") ? "AUTO" : "MANUAL",
         multiplier: parseInt(document.getElementById("cfgMultiplier")?.value) || 1,
+        cushion_margin: parseFloat(document.getElementById("cfgCushionMargin")?.value) || 15000,
         segment: document.getElementById("cfgSegment")?.value || "Options",
         start_time: document.getElementById("cfgStartTime")?.value || "09:15:56",
         end_time: document.getElementById("cfgEndTime")?.value || "15:29:50",
@@ -6616,6 +6732,7 @@ function openBasketOrderModal() {
     if (multInput) multInput.value = window._basketMultiplier || 1;
     updateBasketBadges();
     renderBasketOrdersTable();
+    updateBasketAutoName();
     updateBasketMarginCalculation();
     startBasketQuoteTicker();
 }
@@ -6695,6 +6812,7 @@ function renderBasketOrdersTable() {
         if (emptyState) emptyState.style.display = "block";
         if (noticeBanner) noticeBanner.style.display = "none";
         updateBasketBadges();
+        updateBasketAutoName();
         return;
     }
 
@@ -6811,6 +6929,7 @@ function renderBasketOrdersTable() {
 
     tbody.innerHTML = rowsHtml;
     updateBasketBadges();
+    updateBasketAutoName();
 }
 
 function toggleSelectAllBasketOrders(checked) {
@@ -7143,14 +7262,12 @@ async function updateBasketMarginCalculation() {
         const reqEl = document.getElementById("basketRequiredMarginText");
         const availEl = document.getElementById("basketAvailableMarginText");
         const chargesEl = document.getElementById("basketTotalChargesText");
-        const hedgeBox = document.getElementById("basketMarginHedgeSavings");
-        const hedgeText = document.getElementById("basketHedgeSavingsText");
 
         const selected = window._basketOrders.filter(o => o.selected);
         if (selected.length === 0) {
             if (reqEl) reqEl.textContent = "0.00";
             if (chargesEl) chargesEl.textContent = "0.00";
-            if (hedgeBox) hedgeBox.style.display = "none";
+            populateBasketChargesBreakdown(null);
             return;
         }
 
@@ -7169,11 +7286,9 @@ async function updateBasketMarginCalculation() {
                 if (availEl) availEl.textContent = Number(data.available_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
                 if (chargesEl) chargesEl.textContent = Number(data.total_charges || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
 
-                if (data.hedge_benefit > 0 && hedgeBox && hedgeText) {
-                    hedgeBox.style.display = "inline-flex";
-                    hedgeText.textContent = Number(data.hedge_benefit).toLocaleString('en-IN', {minimumFractionDigits: 2});
-                } else if (hedgeBox) {
-                    hedgeBox.style.display = "none";
+                // Populate Angel One exact charges breakdown popover
+                if (data.charges_breakdown) {
+                    populateBasketChargesBreakdown(data.charges_breakdown);
                 }
             }
         } catch (e) {
@@ -7181,6 +7296,270 @@ async function updateBasketMarginCalculation() {
         }
     }, 200);
 }
+
+function populateBasketChargesBreakdown(b) {
+    if (!b) return;
+    const setT = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = Number(val || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    };
+    setT("chgBreakdownBrokerage", b.brokerage);
+    setT("chgBreakdownExternal", b.external_charges);
+    setT("chgBreakdownExchange", b.exchange_txn_charges);
+    setT("chgBreakdownStamp", b.stamp_duty);
+    setT("chgBreakdownIpft", b.ipft_charges);
+    setT("chgBreakdownSebi", b.sebi_fees);
+    setT("chgBreakdownTaxes", b.taxes);
+    setT("chgBreakdownStt", b.stt);
+    setT("chgBreakdownGst", b.gst);
+    setT("chgBreakdownTotal", b.total_charges);
+}
+window.populateBasketChargesBreakdown = populateBasketChargesBreakdown;
+
+let _chargesPopoverTimer = null;
+function showBasketChargesPopover() {
+    clearTimeout(_chargesPopoverTimer);
+    const pop = document.getElementById("basketChargesPopover");
+    if (pop) pop.style.display = "block";
+}
+window.showBasketChargesPopover = showBasketChargesPopover;
+
+function hideBasketChargesPopoverDelayed() {
+    _chargesPopoverTimer = setTimeout(() => {
+        const pop = document.getElementById("basketChargesPopover");
+        if (pop) pop.style.display = "none";
+    }, 300);
+}
+window.hideBasketChargesPopoverDelayed = hideBasketChargesPopoverDelayed;
+
+function clearBasketChargesPopoverTimer() {
+    clearTimeout(_chargesPopoverTimer);
+}
+window.clearBasketChargesPopoverTimer = clearBasketChargesPopoverTimer;
+
+function toggleBasketChargesPopover(e) {
+    if (e) e.stopPropagation();
+    const pop = document.getElementById("basketChargesPopover");
+    if (!pop) return;
+    pop.style.display = (pop.style.display === "block") ? "none" : "block";
+}
+window.toggleBasketChargesPopover = toggleBasketChargesPopover;
+
+// Close popover when clicking anywhere outside
+document.addEventListener("click", function(e) {
+    const pop = document.getElementById("basketChargesPopover");
+    const icon = document.getElementById("basketChargesInfoIcon");
+    const text = document.getElementById("basketTotalChargesText");
+    if (pop && pop.style.display === "block") {
+        if (!pop.contains(e.target) && e.target !== icon && e.target !== text && !text?.contains(e.target)) {
+            pop.style.display = "none";
+        }
+    }
+});
+
+// =========================================================================
+// BASKET AUTO-NAMING SYSTEM (Matches prompt: "ATM Straddle - 20OTM Hedge")
+// =========================================================================
+
+window._basketNameIsManual = false;
+
+function generateBasketAutoName() {
+    const orders = (window._basketOrders || []).filter(o => o.selected);
+    if (!orders || orders.length === 0) return "MY BASKET";
+
+    const und = orders[0].underlying || "NIFTY";
+    const step = (und === "BANKNIFTY" || und === "SENSEX") ? 100 : 50;
+
+    const sellLegs = orders.filter(o => String(o.side).toUpperCase().startsWith("S"));
+    const buyLegs = orders.filter(o => String(o.side).toUpperCase().startsWith("B"));
+
+    const sellCE = sellLegs.filter(o => o.opt_type === "CE");
+    const sellPE = sellLegs.filter(o => o.opt_type === "PE");
+    const buyCE = buyLegs.filter(o => o.opt_type === "CE");
+    const buyPE = buyLegs.filter(o => o.opt_type === "PE");
+
+    // Case 1: Short Straddle (1 CE Sell + 1 PE Sell at same strike)
+    if (sellCE.length === 1 && sellPE.length === 1 && sellCE[0].strike === sellPE[0].strike) {
+        const atm = sellCE[0].strike;
+        // Check for OTM hedges (Iron Butterfly / Hedged Straddle)
+        if (buyCE.length === 1 && buyPE.length === 1) {
+            const ceOffset = buyCE[0].strike - atm;
+            const peOffset = atm - buyPE[0].strike;
+            const ceStrikes = Math.round(ceOffset / step);
+            const peStrikes = Math.round(peOffset / step);
+
+            if (ceStrikes > 0 && peStrikes > 0) {
+                if (ceStrikes === peStrikes) {
+                    return `ATM STRADDLE - ${ceStrikes}OTM HEDGE`;
+                } else {
+                    return `ATM STRADDLE - ${ceStrikes}CE/${peStrikes}PE HEDGE`;
+                }
+            }
+        } else if (buyCE.length === 1 && buyPE.length === 0) {
+            const ceOffset = buyCE[0].strike - atm;
+            const ceStrikes = Math.round(ceOffset / step);
+            return `ATM STRADDLE - ${ceStrikes}OTM CE HEDGE`;
+        } else if (buyPE.length === 1 && buyCE.length === 0) {
+            const peOffset = atm - buyPE[0].strike;
+            const peStrikes = Math.round(peOffset / step);
+            return `ATM STRADDLE - ${peStrikes}OTM PE HEDGE`;
+        }
+        return `ATM STRADDLE (${atm})`;
+    }
+
+    // Case 2: Short Strangle (1 CE Sell + 1 PE Sell at different strikes)
+    if (sellCE.length === 1 && sellPE.length === 1 && sellCE[0].strike !== sellPE[0].strike) {
+        const ceStk = sellCE[0].strike;
+        const peStk = sellPE[0].strike;
+        if (buyCE.length === 1 && buyPE.length === 1) {
+            return `IRON CONDOR (${ceStk}CE/${peStk}PE)`;
+        }
+        return `STRANGLE (${ceStk}CE/${peStk}PE)`;
+    }
+
+    // Case 3: Spreads (1 Buy + 1 Sell)
+    if (orders.length === 2 && buyLegs.length === 1 && sellLegs.length === 1) {
+        const b = buyLegs[0];
+        const s = sellLegs[0];
+        if (b.opt_type === "CE" && s.opt_type === "CE") {
+            return b.strike < s.strike ? `BULL CALL SPREAD (${b.strike}/${s.strike})` : `BEAR CALL SPREAD (${s.strike}/${b.strike})`;
+        }
+        if (b.opt_type === "PE" && s.opt_type === "PE") {
+            return b.strike > s.strike ? `BEAR PUT SPREAD (${b.strike}/${s.strike})` : `BULL PUT SPREAD (${s.strike}/${b.strike})`;
+        }
+    }
+
+    // Case 4: Single Leg
+    if (orders.length === 1) {
+        const o = orders[0];
+        return `${und} ${o.strike} ${o.opt_type} ${o.side}`;
+    }
+
+    // Generic Multi-Leg Basket
+    return `${und} ${orders.length}-LEG BASKET`;
+}
+window.generateBasketAutoName = generateBasketAutoName;
+
+function updateBasketAutoName() {
+    const nameEl = document.getElementById("basketModalName");
+    const resetBtn = document.getElementById("btnResetBasketName");
+    if (!nameEl) return;
+
+    if (window._basketNameIsManual) {
+        if (resetBtn) resetBtn.style.display = "inline-block";
+        return;
+    }
+
+    const autoName = generateBasketAutoName();
+    nameEl.innerText = autoName;
+    if (resetBtn) resetBtn.style.display = "none";
+}
+window.updateBasketAutoName = updateBasketAutoName;
+
+function onBasketNameManualEdit(newVal) {
+    const auto = generateBasketAutoName();
+    const clean = (newVal || "").trim().toUpperCase();
+    if (clean && clean !== auto) {
+        window._basketNameIsManual = true;
+        const resetBtn = document.getElementById("btnResetBasketName");
+        if (resetBtn) resetBtn.style.display = "inline-block";
+    } else {
+        window._basketNameIsManual = false;
+        const resetBtn = document.getElementById("btnResetBasketName");
+        if (resetBtn) resetBtn.style.display = "none";
+        updateBasketAutoName();
+    }
+}
+window.onBasketNameManualEdit = onBasketNameManualEdit;
+
+function resetBasketAutoName() {
+    window._basketNameIsManual = false;
+    const resetBtn = document.getElementById("btnResetBasketName");
+    if (resetBtn) resetBtn.style.display = "none";
+    updateBasketAutoName();
+    showStraddleToast("Basket name reset to auto-generated strategy name", "info", 1500);
+}
+window.resetBasketAutoName = resetBasketAutoName;
+
+// =========================================================================
+// STRATEGY BUILDER MULTIPLIER MODE & CUSHION MARGIN HANDLERS
+// =========================================================================
+
+function setFormMultiplierMode(mode, syncToServer = true) {
+    const isManual = (mode === "MANUAL");
+    const btnMan = document.getElementById("btnMultModeManual");
+    const btnAuto = document.getElementById("btnMultModeAuto");
+    const grpMan = document.getElementById("grpManualMultiplier");
+    const grpAuto = document.getElementById("grpAutoMultiplier");
+
+    if (btnMan) {
+        btnMan.style.background = isManual ? "#2563eb" : "#1e293b";
+        btnMan.style.color = isManual ? "#fff" : "#94a3b8";
+    }
+    if (btnAuto) {
+        btnAuto.style.background = !isManual ? "#059669" : "#1e293b";
+        btnAuto.style.color = !isManual ? "#fff" : "#94a3b8";
+    }
+    if (grpMan) grpMan.style.display = isManual ? "block" : "none";
+    if (grpAuto) grpAuto.style.display = !isManual ? "block" : "none";
+
+    updateFormAutoMultiplierPreview();
+
+    const activeStrat = window._straddleState?.activeStrategy;
+    if (activeStrat) {
+        activeStrat.multiplier_type = mode;
+        if (syncToServer && activeStrat.strategy_id) {
+            fetch("/api/straddle/strategy/update_multiplier", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    strategy_id: activeStrat.strategy_id,
+                    multiplier_type: mode
+                })
+            }).then(r => r.json()).then(res => {
+                if (res.success && res.strategy) {
+                    Object.assign(activeStrat, res.strategy);
+                    renderStraddleAlgosTable(true);
+                }
+            }).catch(e => console.warn(e));
+        }
+    }
+}
+window.setFormMultiplierMode = setFormMultiplierMode;
+
+function updateFormAutoMultiplierPreview() {
+    const cushionVal = parseFloat(document.getElementById("cfgCushionMargin")?.value) || 0;
+    const badge = document.getElementById("cfgAutoMultBadge");
+    if (!badge) return;
+
+    const strat = window._straddleState?.activeStrategy;
+    const brokerMargin = (strat && strat.broker_margin_per_lot) ? strat.broker_margin_per_lot : 125174.14;
+    const totalPerLot = brokerMargin + cushionVal;
+
+    const avail = parseFloat(window._straddleState?.margin?.available_margin || window._straddleMargin?.available_margin || 1400000.0);
+    const lots = Math.max(1, Math.floor(avail / Math.max(1, totalPerLot)));
+
+    badge.innerHTML = `⚡ Auto: <b>${lots} Lots</b> (₹${(totalPerLot / 100000).toFixed(2)}L/lot)`;
+    badge.title = `Broker Required: ₹${brokerMargin.toLocaleString('en-IN', {maximumFractionDigits: 0})} + Cushion: ₹${cushionVal.toLocaleString('en-IN', {maximumFractionDigits: 0})} = ₹${totalPerLot.toLocaleString('en-IN', {maximumFractionDigits: 0})} / lot\nAvailable Capital: ₹${avail.toLocaleString('en-IN', {maximumFractionDigits: 0})} ➔ ${lots} Lots`;
+}
+window.updateFormAutoMultiplierPreview = updateFormAutoMultiplierPreview;
+
+function onFormManualMultiplierChange(val) {
+    const activeStrat = window._straddleState?.activeStrategy;
+    if (activeStrat && activeStrat.strategy_id) {
+        onChangeAlgoMultiplier(activeStrat.strategy_id, val);
+    }
+}
+window.onFormManualMultiplierChange = onFormManualMultiplierChange;
+
+function onFormCushionMarginChange(val) {
+    updateFormAutoMultiplierPreview();
+    const activeStrat = window._straddleState?.activeStrategy;
+    if (activeStrat && activeStrat.strategy_id) {
+        onChangeAlgoCushionMargin(activeStrat.strategy_id, val);
+    }
+}
+window.onFormCushionMarginChange = onFormCushionMarginChange;
 
 async function executeCurrentBasket() {
     const selected = window._basketOrders.filter(o => o.selected);

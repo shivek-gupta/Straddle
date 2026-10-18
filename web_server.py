@@ -177,6 +177,30 @@ def api_straddle_strategy_save():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/strategy/update_multiplier", methods=["POST"])
+def api_straddle_strategy_update_multiplier():
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        if not sid:
+            return jsonify({"success": False, "error": "No strategy ID provided"}), 400
+        mult_type = data.get("multiplier_type")
+        mult = data.get("multiplier")
+        cushion = data.get("cushion_margin")
+        capital = data.get("available_capital")
+        mgr = get_straddle_manager()
+        res = mgr.update_strategy_multiplier(
+            strategy_id=sid,
+            multiplier_type=mult_type,
+            multiplier=mult,
+            cushion_margin=cushion,
+            available_capital=capital
+        )
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/strategy/delete", methods=["POST"])
 def api_straddle_strategy_delete():
     try:

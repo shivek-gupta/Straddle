@@ -492,8 +492,22 @@
                             </select>
                         </div>
                         <div class="straddle-form-group" style="margin-bottom:0;">
-                            <label>Multiplier:</label>
-                            <input type="number" id="cfgMultiplier" class="straddle-input" style="width:80px;" value="1" min="1" max="100">
+                            <label>Multiplier Mode:</label>
+                            <div style="display:inline-flex; background:#0b1120; border:1px solid #334155; border-radius:6px; overflow:hidden;">
+                                <button type="button" id="btnMultModeManual" class="mult-mode-btn active" onclick="setFormMultiplierMode('MANUAL')" style="background:#2563eb; color:#fff; border:none; padding:4px 10px; font-size:11px; font-weight:800; cursor:pointer;">Manual</button>
+                                <button type="button" id="btnMultModeAuto" class="mult-mode-btn" onclick="setFormMultiplierMode('AUTO')" style="background:#1e293b; color:#94a3b8; border:none; padding:4px 10px; font-size:11px; font-weight:800; cursor:pointer;">Auto</button>
+                            </div>
+                        </div>
+                        <div class="straddle-form-group" id="grpManualMultiplier" style="margin-bottom:0;">
+                            <label>Lots Multiplier:</label>
+                            <input type="number" id="cfgMultiplier" class="straddle-input" style="width:70px; text-align:center; font-weight:800;" value="1" min="1" max="100" onchange="onFormManualMultiplierChange(this.value)">
+                        </div>
+                        <div class="straddle-form-group" id="grpAutoMultiplier" style="margin-bottom:0; display:none;">
+                            <label>Cushion Margin / Lot (₹):</label>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <input type="number" id="cfgCushionMargin" class="straddle-input" style="width:110px; text-align:center; font-weight:800;" value="15000" min="0" step="1000" oninput="onFormCushionMarginChange(this.value)">
+                                <span id="cfgAutoMultBadge" style="font-size:11.5px; color:#38bdf8; font-weight:800; padding:4px 8px; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); border-radius:4px; white-space:nowrap;" title="Auto Determined Lots based on Available Capital / (Broker Required + Cushion)">⚡ Auto: 10 Lots</span>
+                            </div>
                         </div>
                         <div class="straddle-form-group" style="margin-bottom:0;">
                             <label>Bulk edit:</label>
@@ -1768,8 +1782,9 @@
             <div class="basket-modal-header" style="padding:14px 20px; background:#070a13; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <div style="display:flex; align-items:center; gap:6px;">
-                        <span id="basketModalName" contenteditable="true" spellcheck="false" title="Click to rename basket" style="font-size:15px; font-weight:800; color:#f8fafc; letter-spacing:0.5px; border-bottom:1px dashed #64748b; padding:1px 4px; outline:none; text-transform:uppercase;">THURSDAY BASKET</span>
-                        <span style="font-size:12px; color:#64748b; cursor:pointer;" onclick="document.getElementById('basketModalName').focus()">✏️</span>
+                        <span id="basketModalName" contenteditable="true" spellcheck="false" title="Click to rename basket (press Enter to finish)" onblur="onBasketNameManualEdit(this.innerText)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" style="font-size:15px; font-weight:800; color:#f8fafc; letter-spacing:0.5px; border-bottom:1px dashed #64748b; padding:1px 4px; outline:none; text-transform:uppercase;">THURSDAY BASKET</span>
+                        <span style="font-size:12px; color:#64748b; cursor:pointer;" onclick="document.getElementById('basketModalName').focus()" title="Rename basket manually">✏️</span>
+                        <span id="btnResetBasketName" style="font-size:11px; color:#38bdf8; cursor:pointer; display:none; padding:1px 6px; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); border-radius:4px; font-weight:700;" onclick="resetBasketAutoName()" title="Reset to auto-generated strategy name">🔄 Auto</span>
                     </div>
                     <span id="basketOrderCountBadge" style="font-size:12px; font-weight:700; color:#94a3b8;">(0/50 orders)</span>
                 </div>
@@ -1842,9 +1857,6 @@
                             <strong style="color:#38bdf8; font-family:var(--font-mono); font-size:14px; margin-left:4px;">₹ <span id="basketRequiredMarginText">0.00</span></strong>
                             <span title="Calculated with SEBI Hedge Benefit: BUY positions discount SELL margin requirement" style="cursor:help; font-size:12px; color:#64748b; margin-left:4px;">ℹ️</span>
                         </div>
-                        <div id="basketMarginHedgeSavings" style="display:none; font-size:11.5px; color:#10b981; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:4px; padding:2px 8px;">
-                            🎉 Hedge Benefit: ₹ <span id="basketHedgeSavingsText">0.00</span> saved
-                        </div>
                     </div>
 
                     <!-- Lot / Quantity Multiplier Stepper (Screenshot 4) -->
@@ -1860,10 +1872,74 @@
 
                 <!-- Row 2: Charges & Action Buttons (Screenshot 4) -->
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; border-top:1px solid rgba(255,255,255,0.04); padding-top:10px;">
-                    <div style="font-size:12.5px; color:#94a3b8; display:flex; align-items:center; gap:6px;">
+                    <div style="font-size:12.5px; color:#94a3b8; display:flex; align-items:center; gap:6px; position:relative;">
                         <span>Total Charges:</span> 
-                        <strong style="color:#f8fafc; font-family:var(--font-mono);">₹ <span id="basketTotalChargesText">0.00</span></strong>
-                        <span title="Estimated Kotak Neo brokerage (₹20/order) + STT, Exchange, GST & Stamp charges" style="cursor:help; font-size:12px; color:#64748b;">ℹ️</span>
+                        <strong style="color:#f8fafc; font-family:var(--font-mono); cursor:pointer;" onclick="toggleBasketChargesPopover(event)">₹ <span id="basketTotalChargesText">0.00</span></strong>
+                        <span id="basketChargesInfoIcon" onclick="toggleBasketChargesPopover(event)" onmouseenter="showBasketChargesPopover()" onmouseleave="hideBasketChargesPopoverDelayed()" style="cursor:pointer; font-size:13px; color:#64748b; padding:2px;" title="Click to view full Angel One / Exchange charges breakup">ℹ️</span>
+
+                        <!-- Angel One Style Charges Breakup Popover (Exact Match to Screenshot 1) -->
+                        <div id="basketChargesPopover" onmouseenter="clearBasketChargesPopoverTimer()" onmouseleave="hideBasketChargesPopoverDelayed()" style="display:none; position:absolute; bottom:34px; left:0; width:340px; background:#0f172a; border:1px solid #334155; border-radius:10px; box-shadow:0 20px 45px rgba(0,0,0,0.92); z-index:12000; padding:14px; font-size:12px; color:#cbd5e1;">
+                            <!-- Angel One Brokerage Row -->
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08); font-weight:700; color:#f8fafc;">
+                                <span>Angel One Brokerage</span>
+                                <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownBrokerage">0.00</span></span>
+                            </div>
+
+                            <!-- External Charges Header & Rows -->
+                            <div style="padding-top:8px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; font-weight:700; color:#f8fafc; margin-bottom:4px;">
+                                    <span>External Charges</span>
+                                    <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownExternal">0.00</span></span>
+                                </div>
+                                <div style="padding-left:10px; display:flex; flex-direction:column; gap:3px; font-size:11.5px; color:#94a3b8;">
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span>Exchange Transaction Charges</span>
+                                        <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownExchange">0.00</span></span>
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span>Stamp Duty</span>
+                                        <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownStamp">0.00</span></span>
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span>IPFT charges</span>
+                                        <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownIpft">0.00</span></span>
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span>SEBI Fees</span>
+                                        <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownSebi">0.00</span></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Taxes Header & Rows -->
+                            <div style="padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; font-weight:700; color:#f8fafc; margin-bottom:4px;">
+                                    <span>Taxes</span>
+                                    <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownTaxes">0.00</span></span>
+                                </div>
+                                <div style="padding-left:10px; display:flex; flex-direction:column; gap:3px; font-size:11.5px; color:#94a3b8;">
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span>Security Transaction Tax</span>
+                                        <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownStt">0.00</span></span>
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between;">
+                                        <span>GST</span>
+                                        <span style="font-family:var(--font-mono);">₹ <span id="chgBreakdownGst">0.00</span></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Total Charges Bar -->
+                            <div style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; border-radius:6px; padding:8px 10px; margin-top:10px; font-weight:800; font-size:13px; color:#f8fafc;">
+                                <span>Total Charges</span>
+                                <span style="font-family:var(--font-mono); color:#38bdf8;">₹ <span id="chgBreakdownTotal">0.00</span></span>
+                            </div>
+
+                            <!-- Disclaimer -->
+                            <div style="font-size:10.5px; color:#64748b; margin-top:8px; line-height:1.3;">
+                                Charges above are approximate, actual charges will reflect on T+1 day.
+                            </div>
+                        </div>
                     </div>
 
                     <div style="display:flex; align-items:center; gap:10px;">
@@ -1877,7 +1953,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=4.1"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=4.2"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
