@@ -6624,13 +6624,25 @@ function closeBasketOrderModal() {
     const modal = document.getElementById("modalBasketOrders");
     if (modal) modal.style.display = "none";
     stopBasketQuoteTicker();
+    clearBasketSearch();
 }
 
 function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSize = 65, exp = "", product = "CF") {
     const und = window._straddleState?.optionChainUnderlying || "NIFTY";
     const resolvedLot = Number(lotSize) > 0 ? Number(lotSize) : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : 65));
     const resolvedStrike = Number(strike) || 0;
-    const resolvedPrice = Number(ltp) || 0.05;
+    let resolvedPrice = Number(ltp) || 0.05;
+
+    // Check if real-time updated quote exists in active search results
+    if (window._basketSearchResults && Array.isArray(window._basketSearchResults)) {
+        const found = window._basketSearchResults.find(r => 
+            (tok && (r.token === tok || r.instrument_key === tok)) ||
+            (Number(r.strike) === resolvedStrike && String(r.opt_type).toUpperCase() === String(optType).toUpperCase() && (!exp || r.expiry_date === exp))
+        );
+        if (found && Number(found.ltp) > 0) {
+            resolvedPrice = Number(found.ltp);
+        }
+    }
 
     const newOrder = {
         id: "b_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
@@ -6666,6 +6678,7 @@ function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSi
     if (modal && modal.style.display === "flex") {
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
+        refreshAllBasketQuotes();
     } else {
         openBasketOrderModal();
     }
@@ -7265,6 +7278,107 @@ function analyseBasketPayoff() {
 }
 
 let _basketSearchDebounceTimer = null;
+let _basketSearchQuoteTickerInterval = null;
+let _isRefreshingBasketSearchQuotes = false;
+window._basketSearchResults = [];
+
+function onBasketSearchAddLeg(searchIdx, side) {
+    if (!window._basketSearchResults || !window._basketSearchResults[searchIdx]) return;
+    const r = window._basketSearchResults[searchIdx];
+    const safeSym = r.symbol || r.trading_symbol || `${r.underlying} ${r.strike} ${r.opt_type}`;
+    const safeToken = r.token || r.instrument_key || "";
+    const currentLtp = Number(r.ltp) || Number(r.price) || 0.05;
+    addLegToBasket(safeSym, safeToken, r.strike, r.opt_type, side, currentLtp, r.lot_size, r.expiry_date);
+    clearBasketSearch();
+}
+
+async function refreshBasketSearchResultsQuotes() {
+    const drop = document.getElementById("basketSearchResultsDropdown");
+    if (!drop || drop.style.display === "none") {
+        stopBasketSearchQuoteTicker();
+        return;
+    }
+    if (_isRefreshingBasketSearchQuotes) return;
+    if (!window._basketSearchResults || window._basketSearchResults.length === 0) return;
+
+    _isRefreshingBasketSearchQuotes = true;
+    try {
+        const contractsToQuote = window._basketSearchResults.map((r, idx) => ({
+            idx: idx,
+            symbol: r.symbol,
+            trading_symbol: r.trading_symbol,
+            underlying: r.underlying,
+            strike: r.strike,
+            opt_type: r.opt_type,
+            expiry_ms: r.expiry_ms,
+            expiry_date: r.expiry_date,
+            lot_size: r.lot_size,
+            token: r.token,
+            instrument_key: r.instrument_key
+        }));
+
+        const resp = await fetch("/api/straddle/basket/quotes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contracts: contractsToQuote })
+        });
+        const data = await resp.json();
+        if (data && data.success && data.quotes) {
+            data.quotes.forEach(q => {
+                const idx = q.idx;
+                if (window._basketSearchResults && window._basketSearchResults[idx]) {
+                    const item = window._basketSearchResults[idx];
+                    const freshLtp = Number(q.ltp) || 0;
+                    if (freshLtp > 0 && Math.abs((item.ltp || 0) - freshLtp) > 0.01) {
+                        const prevLtp = item.ltp || freshLtp;
+                        item.ltp = freshLtp;
+                        item.price = freshLtp;
+
+                        const itemEl = document.querySelector(`.basket-search-result-item[data-search-idx="${idx}"]`);
+                        if (itemEl) {
+                            const ltpEl = itemEl.querySelector(".basket-search-item-ltp");
+                            if (ltpEl) {
+                                ltpEl.textContent = `₹${freshLtp.toFixed(2)}`;
+                                const isUp = (freshLtp >= prevLtp);
+                                ltpEl.style.color = isUp ? "#10b981" : "#f43f5e";
+                                ltpEl.style.textShadow = isUp ? "0 0 10px rgba(16,185,129,0.8)" : "0 0 10px rgba(244,63,94,0.8)";
+                                setTimeout(() => {
+                                    if (ltpEl) {
+                                        ltpEl.style.color = "#10b981";
+                                        ltpEl.style.textShadow = "none";
+                                    }
+                                }, 600);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    } catch (e) {
+        console.warn("[Basket Search] Live ticker error:", e);
+    } finally {
+        _isRefreshingBasketSearchQuotes = false;
+    }
+}
+
+function startBasketSearchQuoteTicker() {
+    stopBasketSearchQuoteTicker();
+    _basketSearchQuoteTickerInterval = setInterval(() => {
+        const drop = document.getElementById("basketSearchResultsDropdown");
+        if (drop && drop.style.display !== "none" && window._basketSearchResults && window._basketSearchResults.length > 0) {
+            refreshBasketSearchResultsQuotes();
+        } else {
+            stopBasketSearchQuoteTicker();
+        }
+    }, 500); // 500ms real-time continuous ticker in live market
+}
+
+function stopBasketSearchQuoteTicker() {
+    if (_basketSearchQuoteTickerInterval) {
+        clearInterval(_basketSearchQuoteTickerInterval);
+        _basketSearchQuoteTickerInterval = null;
+    }
+}
 
 async function handleBasketSearchInput(query) {
     const drop = document.getElementById("basketSearchResultsDropdown");
@@ -7273,7 +7387,10 @@ async function handleBasketSearchInput(query) {
 
     if (!query || query.trim().length < 2) {
         drop.style.display = "none";
+        drop.innerHTML = "";
         if (clearBtn) clearBtn.style.display = "none";
+        stopBasketSearchQuoteTicker();
+        window._basketSearchResults = [];
         return;
     }
 
@@ -7298,21 +7415,22 @@ async function handleBasketSearchInput(query) {
             if (!data.success || !data.results || data.results.length === 0) {
                 drop.innerHTML = `<div style="padding:14px; color:#94a3b8; font-size:12px; text-align:center;">No matching option strikes found for "<span style="color:#f8fafc;">${q}</span>"</div>`;
                 drop.style.display = "block";
+                stopBasketSearchQuoteTicker();
+                window._basketSearchResults = [];
                 return;
             }
 
-            const html = data.results.map(r => {
+            window._basketSearchResults = data.results || [];
+
+            const html = data.results.map((r, sIdx) => {
                 const isCe = (r.opt_type === "CE");
                 const typeColor = isCe ? "#34d399" : "#fb7185";
                 const typeBg = isCe ? "rgba(16, 185, 129, 0.15)" : "rgba(244, 63, 94, 0.15)";
                 const ltpFormatted = Number(r.ltp || 0).toFixed(2);
-                const safeSym = (r.symbol || "").replace(/'/g, "\\'");
-                const safeToken = (r.token || r.instrument_key || "").replace(/'/g, "\\'");
-                const expDate = (r.expiry_date || "").replace(/'/g, "\\'");
                 const expTag = r.expiry_tag ? `<span style="font-size:10px; color:#60a5fa; background:rgba(37,99,235,0.15); border:1px solid rgba(59,130,246,0.3); border-radius:3px; padding:1px 5px; margin-left:4px;">${r.expiry_tag}</span>` : "";
 
                 return `
-                    <div class="basket-search-result-item" style="display:flex; justify-content:space-between; align-items:center; padding:9px 12px; border-bottom:1px solid rgba(255,255,255,0.06); gap:10px;">
+                    <div class="basket-search-result-item" data-search-idx="${sIdx}" style="display:flex; justify-content:space-between; align-items:center; padding:9px 12px; border-bottom:1px solid rgba(255,255,255,0.06); gap:10px;">
                         <div style="flex:1; min-width:0;">
                             <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                                 <span style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${r.strike}</span>
@@ -7321,14 +7439,14 @@ async function handleBasketSearchInput(query) {
                                 ${expTag}
                             </div>
                             <div style="font-size:10.5px; color:#94a3b8; margin-top:3px; font-family:var(--font-mono);">
-                                ${r.underlying} • Lot: ${r.lot_size} • LTP: <strong style="color:#10b981; font-size:11.5px;">₹${ltpFormatted}</strong>
+                                ${r.underlying} • Lot: ${r.lot_size} • LTP: <strong class="basket-search-item-ltp" style="color:#10b981; font-size:11.5px; transition:all 0.25s ease;">₹${ltpFormatted}</strong>
                             </div>
                         </div>
                         <div style="display:flex; align-items:center; gap:6px;">
-                            <button type="button" class="search-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; border-radius:5px; padding:5px 12px; font-size:11.5px; font-weight:900 !important; cursor:pointer; box-shadow:0 0 10px rgba(16,185,129,0.5) !important;" title="Add BUY leg to basket" onclick="addLegToBasket('${safeSym}', '${safeToken}', ${r.strike}, '${r.opt_type}', 'BUY', ${r.ltp}, ${r.lot_size}, '${expDate}'); clearBasketSearch();">
+                            <button type="button" class="search-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; border-radius:5px; padding:5px 12px; font-size:11.5px; font-weight:900 !important; cursor:pointer; box-shadow:0 0 10px rgba(16,185,129,0.5) !important;" title="Add BUY leg to basket" onclick="onBasketSearchAddLeg(${sIdx}, 'BUY')">
                                 + B Buy
                             </button>
-                            <button type="button" class="search-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; border-radius:5px; padding:5px 12px; font-size:11.5px; font-weight:900 !important; cursor:pointer; box-shadow:0 0 10px rgba(239,68,68,0.5) !important;" title="Add SELL leg to basket" onclick="addLegToBasket('${safeSym}', '${safeToken}', ${r.strike}, '${r.opt_type}', 'SELL', ${r.ltp}, ${r.lot_size}, '${expDate}'); clearBasketSearch();">
+                            <button type="button" class="search-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; border-radius:5px; padding:5px 12px; font-size:11.5px; font-weight:900 !important; cursor:pointer; box-shadow:0 0 10px rgba(239,68,68,0.5) !important;" title="Add SELL leg to basket" onclick="onBasketSearchAddLeg(${sIdx}, 'SELL')">
                                 - S Sell
                             </button>
                         </div>
@@ -7338,9 +7456,12 @@ async function handleBasketSearchInput(query) {
 
             drop.innerHTML = html;
             drop.style.display = "block";
+            startBasketSearchQuoteTicker();
         } catch (e) {
             drop.innerHTML = `<div style="padding:12px; color:#ef4444; font-size:12px; text-align:center;">Search error: ${e.message}</div>`;
             drop.style.display = "block";
+            stopBasketSearchQuoteTicker();
+            window._basketSearchResults = [];
         }
     }, 180);
 }
@@ -7350,9 +7471,26 @@ function clearBasketSearch() {
     const drop = document.getElementById("basketSearchResultsDropdown");
     const clearBtn = document.getElementById("basketSearchClear");
     if (input) input.value = "";
-    if (drop) drop.style.display = "none";
+    if (drop) {
+        drop.style.display = "none";
+        drop.innerHTML = "";
+    }
     if (clearBtn) clearBtn.style.display = "none";
+    stopBasketSearchQuoteTicker();
+    window._basketSearchResults = [];
 }
+
+// Close search dropdown on click outside
+document.addEventListener("click", function(e) {
+    const searchBox = document.getElementById("basketSearchInput")?.closest("div");
+    const drop = document.getElementById("basketSearchResultsDropdown");
+    if (drop && drop.style.display !== "none") {
+        if (!searchBox?.contains(e.target) && !drop.contains(e.target)) {
+            drop.style.display = "none";
+            stopBasketSearchQuoteTicker();
+        }
+    }
+});
 
 // Window function exports
 window.openBasketOrderModal = openBasketOrderModal;
@@ -7383,6 +7521,10 @@ window.analyseBasketPayoff = analyseBasketPayoff;
 window.handleBasketSearchInput = handleBasketSearchInput;
 window.clearBasketSearch = clearBasketSearch;
 window.fetchQuoteForBasketOrder = fetchQuoteForBasketOrder;
+window.onBasketSearchAddLeg = onBasketSearchAddLeg;
+window.refreshBasketSearchResultsQuotes = refreshBasketSearchResultsQuotes;
+window.startBasketSearchQuoteTicker = startBasketSearchQuoteTicker;
+window.stopBasketSearchQuoteTicker = stopBasketSearchQuoteTicker;
 window.straddleToggleExecutionMode = straddleToggleExecutionMode;
 window.toggleStraddleExecutionMode = straddleToggleExecutionMode;
 window.straddleSquareOffAllAndTerminate = straddleSquareOffAllAndTerminate;
