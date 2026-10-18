@@ -4529,6 +4529,7 @@ function populateStraddleSettingsForm(s) {
     updateFormAutoMultiplierPreview();
     setStraddleTimeInputValue("cfgStartTime", s.start_time || "09:15:56");
     setStraddleTimeInputValue("cfgEndTime", s.end_time || "15:29:50");
+    initStraddleTimeSteppers();
 
     document.getElementById("cfgToggleMoveSlToCost").checked = !!s.move_sl_to_cost;
     document.getElementById("cfgToggleWaitAndTrade").checked = !!s.wait_and_trade;
@@ -4840,6 +4841,30 @@ function toggleAlgoBuilderSection(secId) {
     }
 }
 
+let _timeStepHoldTimer = null;
+let _timeStepHoldInterval = null;
+
+function startTimeStepHold(baseId, unit, delta) {
+    stepStraddleTimePart(baseId, unit, delta);
+    stopTimeStepHold();
+    _timeStepHoldTimer = setTimeout(() => {
+        _timeStepHoldInterval = setInterval(() => {
+            stepStraddleTimePart(baseId, unit, delta);
+        }, 85);
+    }, 280);
+}
+window.startTimeStepHold = startTimeStepHold;
+
+function stopTimeStepHold() {
+    if (_timeStepHoldTimer) { clearTimeout(_timeStepHoldTimer); _timeStepHoldTimer = null; }
+    if (_timeStepHoldInterval) { clearInterval(_timeStepHoldInterval); _timeStepHoldInterval = null; }
+}
+window.stopTimeStepHold = stopTimeStepHold;
+
+// Global mouseup / touchend safety
+window.addEventListener("mouseup", stopTimeStepHold);
+window.addEventListener("touchend", stopTimeStepHold);
+
 function stepStraddleTimePart(baseId, unit, delta) {
     const hhInput = document.getElementById(baseId + "_hh");
     const mmInput = document.getElementById(baseId + "_mm");
@@ -4863,6 +4888,82 @@ function stepStraddleTimePart(baseId, unit, delta) {
     if (main) main.value = finalStr;
 }
 window.stepStraddleTimePart = stepStraddleTimePart;
+
+function initStraddleTimeSteppers() {
+    document.querySelectorAll(".straddle-time-stepper-group .straddle-stepper-box").forEach(box => {
+        const input = box.querySelector(".straddle-stepper-input");
+        if (!input || box._timeInitDone) return;
+        box._timeInitDone = true;
+
+        const id = input.id || "";
+        const m = id.match(/^(cfg\w+)_(hh|mm|ss)$/);
+        if (!m) return;
+        const baseId = m[1];
+        const unit = m[2];
+
+        // 1. Mouse wheel scroll (Scroll up: +1, Scroll down: -1)
+        box.addEventListener("wheel", (e) => {
+            e.preventDefault();
+            stepStraddleTimePart(baseId, unit, e.deltaY < 0 ? 1 : -1);
+        }, { passive: false });
+
+        // 2. Keyboard Arrow Up / Down keys
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowUp") {
+                e.preventDefault();
+                stepStraddleTimePart(baseId, unit, 1);
+            } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                stepStraddleTimePart(baseId, unit, -1);
+            }
+        });
+
+        // 3. Auto pad to 2 digits on blur
+        input.addEventListener("blur", () => {
+            let num = parseInt(input.value, 10);
+            if (isNaN(num)) num = 0;
+            const maxVal = (unit === "hh") ? 23 : 59;
+            num = Math.min(maxVal, Math.max(0, num));
+            input.value = String(num).padStart(2, "0");
+            syncTimeSegmentsToMain(baseId);
+        });
+
+        // 4. Continuous auto-step on hold
+        const btns = box.querySelectorAll(".time-step-btn");
+        if (btns.length >= 2) {
+            const upBtn = btns[0];
+            const downBtn = btns[1];
+
+            const attachHold = (btn, delta) => {
+                let holdTimer = null;
+                let holdInterval = null;
+                const stopHold = () => {
+                    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+                    if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+                };
+
+                btn.addEventListener("mousedown", (e) => {
+                    if (e.button !== 0) return;
+                    stopHold();
+                    holdTimer = setTimeout(() => {
+                        holdInterval = setInterval(() => {
+                            stepStraddleTimePart(baseId, unit, delta);
+                        }, 80);
+                    }, 300);
+                });
+
+                btn.addEventListener("mouseup", stopHold);
+                btn.addEventListener("mouseleave", stopHold);
+                window.addEventListener("mouseup", stopHold);
+            };
+
+            attachHold(upBtn, 1);
+            attachHold(downBtn, -1);
+        }
+    });
+}
+window.initStraddleTimeSteppers = initStraddleTimeSteppers;
+
 
 function syncTimeSegmentsToMain(baseId) {
     const hhInput = document.getElementById(baseId + "_hh");

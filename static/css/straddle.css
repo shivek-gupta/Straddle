@@ -8487,35 +8487,54 @@ table .flag-cell {
     justify-content: stretch !important;
 }
 
-/* Time Input Stepper Arrows: Horizontal Side-by-Side (Screenshot 5 Match) */
+/* Time Input Stepper Arrows: Vertically Stacked (Image 1 Parity) */
 .straddle-time-stepper-group .straddle-stepper-arrows {
-    flex-direction: row !important;
-    width: 40px !important;
-    align-items: stretch !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 17px !important;
+    border-left: 1px solid #232d3d !important;
     background: #0d121c !important;
+    justify-content: stretch !important;
+    align-items: stretch !important;
+    box-sizing: border-box !important;
 }
 
 .straddle-time-stepper-group .time-step-btn {
     flex: 1 1 50% !important;
-    width: 20px !important;
-    height: 100% !important;
-    font-size: 11px !important;
+    width: 100% !important;
+    height: 50% !important;
+    min-height: 14px !important;
+    font-size: 7.5px !important;
+    line-height: 1 !important;
     font-weight: 900 !important;
-    display: inline-flex !important;
+    display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    color: #cbd5e1 !important;
+    color: #94a3b8 !important;
+    background: transparent !important;
     cursor: pointer !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    user-select: none !important;
+    transition: background 0.12s ease, color 0.12s ease !important;
 }
 
 .straddle-time-stepper-group .time-step-btn:first-child {
-    border-right: 1px solid #1e2638 !important;
+    border-bottom: 1px solid #1e2638 !important;
+    border-right: none !important;
 }
 
 .straddle-time-stepper-group .time-step-btn:hover {
-    background: rgba(56, 189, 248, 0.25) !important;
+    background: #2563eb !important;
+    color: #ffffff !important;
+}
+
+.straddle-time-stepper-group .time-step-btn:active {
+    background: #1d4ed8 !important;
     color: #38bdf8 !important;
 }
+
 
 .straddle-stepper-btn, .time-step-btn, .strike-step-btn, .lot-step-btn {
     flex: 1 1 50% !important;
