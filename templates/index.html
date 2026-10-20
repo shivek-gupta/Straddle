@@ -87,6 +87,74 @@
 <div id="straddle" class="tab-content" style="display:block">
     <div class="straddle-wrap">
 
+        <!-- ====================================================================
+             TOP COMMODITY & NIFTY PILL NAVIGATION BAR (Exact Match to User Screenshot)
+             ==================================================================== -->
+        <div class="commodity-bar-container" id="commodityTopBar">
+            <div class="commodity-pills-strip" id="commodityPillsStrip">
+                <!-- 1. NIFTY -->
+                <button type="button" class="commodity-pill active" data-und="NIFTY" onclick="selectGlobalUnderlying('NIFTY')" style="--pill-color:#38bdf8;">
+                    <span class="pill-dot" style="background:#38bdf8; box-shadow:0 0 8px #38bdf8;"></span>
+                    <span class="pill-name">NIFTY</span>
+                </button>
+                <!-- 2. Crude Oil -->
+                <button type="button" class="commodity-pill" data-und="CRUDEOIL" onclick="selectGlobalUnderlying('CRUDEOIL')" style="--pill-color:#3b82f6;">
+                    <span class="pill-dot" style="background:#3b82f6; box-shadow:0 0 8px #3b82f6;"></span>
+                    <span class="pill-name">Crude Oil</span>
+                </button>
+                <!-- 3. Natural Gas -->
+                <button type="button" class="commodity-pill" data-und="NATURALGAS" onclick="selectGlobalUnderlying('NATURALGAS')" style="--pill-color:#f59e0b;">
+                    <span class="pill-dot" style="background:#f59e0b; box-shadow:0 0 8px #f59e0b;"></span>
+                    <span class="pill-name">Natural Gas</span>
+                </button>
+                <!-- 4. Gold -->
+                <button type="button" class="commodity-pill" data-und="GOLD" onclick="selectGlobalUnderlying('GOLD')" style="--pill-color:#eab308;">
+                    <span class="pill-dot" style="background:#eab308; box-shadow:0 0 8px #eab308;"></span>
+                    <span class="pill-name">Gold</span>
+                </button>
+                <!-- 5. Silver -->
+                <button type="button" class="commodity-pill" data-und="SILVER" onclick="selectGlobalUnderlying('SILVER')" style="--pill-color:#94a3b8;">
+                    <span class="pill-dot" style="background:#94a3b8; box-shadow:0 0 8px #94a3b8;"></span>
+                    <span class="pill-name">Silver</span>
+                </button>
+                <!-- 6. Crude Oil Mini -->
+                <button type="button" class="commodity-pill" data-und="CRUDEOILM" onclick="selectGlobalUnderlying('CRUDEOILM')" style="--pill-color:#60a5fa;">
+                    <span class="pill-dot" style="background:#60a5fa; box-shadow:0 0 8px #60a5fa;"></span>
+                    <span class="pill-name">Crude Oil Mini</span>
+                </button>
+                <!-- 7. Natural Gas Mini -->
+                <button type="button" class="commodity-pill" data-und="NATGASMINI" onclick="selectGlobalUnderlying('NATGASMINI')" style="--pill-color:#fbbf24;">
+                    <span class="pill-dot" style="background:#fbbf24; box-shadow:0 0 8px #fbbf24;"></span>
+                    <span class="pill-name">Natural Gas Mini</span>
+                </button>
+                <!-- 8. Gold Mini -->
+                <button type="button" class="commodity-pill" data-und="GOLDM" onclick="selectGlobalUnderlying('GOLDM')" style="--pill-color:#facc15;">
+                    <span class="pill-dot" style="background:#facc15; box-shadow:0 0 8px #facc15;"></span>
+                    <span class="pill-name">Gold Mini</span>
+                </button>
+                <!-- 9. Silver Mini -->
+                <button type="button" class="commodity-pill" data-und="SILVERM" onclick="selectGlobalUnderlying('SILVERM')" style="--pill-color:#cbd5e1;">
+                    <span class="pill-dot" style="background:#cbd5e1; box-shadow:0 0 8px #cbd5e1;"></span>
+                    <span class="pill-name">Silver Mini</span>
+                </button>
+                <!-- 10. Copper -->
+                <button type="button" class="commodity-pill" data-und="COPPER" onclick="selectGlobalUnderlying('COPPER')" style="--pill-color:#ea580c;">
+                    <span class="pill-dot" style="background:#ea580c; box-shadow:0 0 8px #ea580c;"></span>
+                    <span class="pill-name">Copper</span>
+                </button>
+            </div>
+
+            <!-- Quick Live Chart & Option Chain Launchers -->
+            <div style="display:flex; align-items:center; gap:8px;">
+                <button type="button" class="straddle-btn btn-primary" onclick="openActiveAssetChartModal()" style="padding:6px 14px; font-size:12px; font-weight:800; display:inline-flex; align-items:center; gap:6px; background:linear-gradient(135deg, #0284c7, #0369a1); border:1px solid #38bdf8; box-shadow:0 0 12px rgba(56,189,248,0.25);">
+                    <span>📈</span> <span id="btnActiveAssetChartLabel">Live Chart</span>
+                </button>
+                <button type="button" class="straddle-btn btn-outline" onclick="openStraddleOptionChainModal(window._activeGlobalUnderlying)" style="padding:6px 12px; font-size:12px; font-weight:700;">
+                    <span>⛓️</span> Option Chain
+                </button>
+            </div>
+        </div>
+
         <!-- Master Sub-Navigation Bar -->
         <div class="straddle-sub-nav">
             <div class="straddle-sub-tabs-left">
@@ -1003,6 +1071,15 @@
                             <option value="NIFTY">NIFTY</option>
                             <option value="BANKNIFTY">BANKNIFTY</option>
                             <option value="SENSEX">SENSEX</option>
+                            <option value="CRUDEOIL">Crude Oil (MCX)</option>
+                            <option value="NATURALGAS">Natural Gas (MCX)</option>
+                            <option value="GOLD">Gold (MCX)</option>
+                            <option value="SILVER">Silver (MCX)</option>
+                            <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
+                            <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
+                            <option value="GOLDM">Gold Mini (MCX)</option>
+                            <option value="SILVERM">Silver Mini (MCX)</option>
+                            <option value="COPPER">Copper (MCX)</option>
                         </select>
                     </div>
                 </div>
@@ -1118,6 +1195,15 @@
                             <option value="FINNIFTY">FINNIFTY</option>
                             <option value="MIDCPNIFTY">MIDCPNIFTY</option>
                             <option value="SENSEX">SENSEX</option>
+                            <option value="CRUDEOIL">Crude Oil (MCX)</option>
+                            <option value="NATURALGAS">Natural Gas (MCX)</option>
+                            <option value="GOLD">Gold (MCX)</option>
+                            <option value="SILVER">Silver (MCX)</option>
+                            <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
+                            <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
+                            <option value="GOLDM">Gold Mini (MCX)</option>
+                            <option value="SILVERM">Silver Mini (MCX)</option>
+                            <option value="COPPER">Copper (MCX)</option>
                         </select>
                     </div>
                     <div class="straddle-form-group">
@@ -1379,6 +1465,15 @@
                             <option value="FINNIFTY">FINNIFTY</option>
                             <option value="MIDCPNIFTY">MIDCPNIFTY</option>
                             <option value="SENSEX">SENSEX</option>
+                            <option value="CRUDEOIL">Crude Oil (MCX)</option>
+                            <option value="NATURALGAS">Natural Gas (MCX)</option>
+                            <option value="GOLD">Gold (MCX)</option>
+                            <option value="SILVER">Silver (MCX)</option>
+                            <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
+                            <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
+                            <option value="GOLDM">Gold Mini (MCX)</option>
+                            <option value="SILVERM">Silver Mini (MCX)</option>
+                            <option value="COPPER">Copper (MCX)</option>
                         </select>
 
                         <!-- Expiry Selector -->
@@ -1971,6 +2066,90 @@
                         <button type="button" class="straddle-btn btn-outline" style="font-weight:700; font-size:12px; padding:8px 16px; border-radius:6px;" onclick="saveCurrentBasket()">SAVE BASKET</button>
                         <button type="button" class="straddle-btn btn-primary" id="btnExecuteBasket" onclick="executeCurrentBasket()" style="font-weight:900; font-size:13px; padding:8px 24px; border-radius:6px; letter-spacing:0.3px; background:linear-gradient(135deg, #2563eb, #3b82f6); box-shadow:0 4px 14px rgba(37,99,235,0.4);">⚡ EXECUTE BASKET</button>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================================================================
+         INTERACTIVE LIVE CANDLESTICK CHART MODAL (TradingView Grade)
+         ==================================================================== -->
+    <div id="modalLiveChart" class="straddle-modal-backdrop" style="display:none; z-index:10070;">
+        <div class="straddle-modal-card" style="max-width:1150px; width:96%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.9); overflow:hidden; display:flex; flex-direction:column;">
+            <!-- Header -->
+            <div style="padding:12px 20px; background:#060911; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="chartAssetDot" style="width:10px; height:10px; border-radius:50%; background:#38bdf8; box-shadow:0 0 10px #38bdf8;"></span>
+                        <span id="chartAssetTitle" style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">CRUDE OIL LIVE CHART</span>
+                    </div>
+                    <!-- Real-time Price Stream Strip -->
+                    <div style="display:flex; align-items:center; gap:12px; background:#0e1422; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 12px; font-family:var(--font-mono); font-size:12px;">
+                        <div>
+                            <span style="color:#94a3b8; font-size:11px;">LTP:</span>
+                            <span id="chartLtpDisplay" style="color:#38bdf8; font-weight:800; font-size:14px;">₹ --</span>
+                        </div>
+                        <span style="color:rgba(255,255,255,0.2);">|</span>
+                        <div>
+                            <span style="color:#94a3b8; font-size:11px;">HIGH:</span>
+                            <span id="chartHighDisplay" style="color:#34d399; font-weight:700;">₹ --</span>
+                        </div>
+                        <span style="color:rgba(255,255,255,0.2);">|</span>
+                        <div>
+                            <span style="color:#94a3b8; font-size:11px;">LOW:</span>
+                            <span id="chartLowDisplay" style="color:#fb7185; font-weight:700;">₹ --</span>
+                        </div>
+                        <span style="color:rgba(255,255,255,0.2);">|</span>
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span class="live-tick-pulse" style="width:6px; height:6px;"></span>
+                            <span style="color:#10b981; font-size:10.5px; font-weight:700;">LIVE FEED</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Timeframe Selection & Controls -->
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:4px; background:#0e1422; padding:3px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
+                        <button type="button" class="chart-timeframe-btn" data-tf="1m" onclick="switchChartTimeframe('1m')">1m</button>
+                        <button type="button" class="chart-timeframe-btn" data-tf="3m" onclick="switchChartTimeframe('3m')">3m</button>
+                        <button type="button" class="chart-timeframe-btn active" data-tf="5m" onclick="switchChartTimeframe('5m')">5m</button>
+                        <button type="button" class="chart-timeframe-btn" data-tf="15m" onclick="switchChartTimeframe('15m')">15m</button>
+                        <button type="button" class="chart-timeframe-btn" data-tf="1h" onclick="switchChartTimeframe('1h')">1h</button>
+                        <button type="button" class="chart-timeframe-btn" data-tf="1d" onclick="switchChartTimeframe('1d')">1D</button>
+                    </div>
+
+                    <button type="button" class="straddle-btn btn-outline" onclick="reloadActiveCandlestickChart()" style="padding:4px 10px; font-size:11.5px;" title="Reload historical candles">🔄 Refresh</button>
+                    <button type="button" class="straddle-modal-close" onclick="closeLiveChartModal()" style="font-size:22px; color:#94a3b8; background:none; border:none; cursor:pointer; padding:2px 8px;">✕</button>
+                </div>
+            </div>
+
+            <!-- Canvas Container -->
+            <div style="padding:14px 20px; background:#070a12; position:relative;">
+                <div class="chart-canvas-container" id="chartCanvasContainer">
+                    <!-- Hover Tooltip / OHLC Legend -->
+                    <div class="chart-legend-badge" id="chartHoverLegend">
+                        <span>O: <b id="lblCandleOpen" style="color:#cbd5e1;">--</b></span>
+                        <span>H: <b id="lblCandleHigh" style="color:#34d399;">--</b></span>
+                        <span>L: <b id="lblCandleLow" style="color:#fb7185;">--</b></span>
+                        <span>C: <b id="lblCandleClose" style="color:#38bdf8;">--</b></span>
+                        <span>Time: <b id="lblCandleTime" style="color:#94a3b8;">--</b></span>
+                    </div>
+                    <canvas id="liveCandlestickCanvas" width="1100" height="520" style="width:100%; height:520px; display:block; cursor:crosshair;"></canvas>
+                </div>
+            </div>
+
+            <!-- Bottom Information Footer -->
+            <div style="padding:10px 20px; background:#060911; border-top:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:#64748b; flex-wrap:wrap; gap:10px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <span>⚡ MCX &amp; NSE Continuous Tick Engine</span>
+                    <span>•</span>
+                    <span id="chartCandleCountInfo">0 candles</span>
+                    <span>•</span>
+                    <span id="chartExchangeSegInfo">MCX_FO</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <button type="button" class="straddle-btn btn-outline" onclick="openStraddleOptionChainModal(window._activeGlobalUnderlying)" style="padding:4px 12px; font-size:11.5px; color:#38bdf8; border-color:#38bdf8;">⛓️ Open Option Chain</button>
+                    <button type="button" class="straddle-btn btn-primary" onclick="closeLiveChartModal(); switchStraddleSubView('algos');" style="padding:4px 14px; font-size:11.5px; font-weight:800;">📊 Build Straddle / Algo</button>
                 </div>
             </div>
         </div>

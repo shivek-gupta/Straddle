@@ -63,7 +63,8 @@ def _init_kotak_symbol_maps():
                 with gzip.open(inst_path, "rt", encoding="utf-8") as f:
                     data = json.load(f)
                     for r in data:
-                        if r.get("segment") in ("NSE_FO", "BSE_FO") and r.get("exchange_token"):
+                        seg = r.get("segment")
+                        if seg in ("NSE_FO", "BSE_FO", "MCX_FO") and r.get("exchange_token"):
                             tok = str(r["exchange_token"]).strip()
                             tsym = str(r.get("trading_symbol", "")).strip()
                             is_w = bool(r.get("weekly", True))
@@ -82,22 +83,36 @@ def _init_kotak_symbol_maps():
                                 _KOTAK_TOKEN_MAP[tok] = canon
                                 _KOTAK_DISPLAY_MAP[tsym.upper()] = canon
                                 _KOTAK_DISPLAY_MAP[tsym.upper().replace(" ", "")] = canon
+                            elif len(parts) >= 4 and parts[1].upper() == "FUT":
+                                # Futures contract e.g. CRUDEOIL FUT 19 NOV 26
+                                und = parts[0].upper()
+                                day = parts[2].zfill(2) if len(parts) >= 5 else ""
+                                month = parts[3].upper() if len(parts) >= 5 else parts[2].upper()
+                                year = parts[4][-2:] if len(parts) >= 5 else parts[3][-2:]
+                                canon = f"{und}{year}{month}FUT"
+                                _KOTAK_TOKEN_MAP[tok] = canon
+                                _KOTAK_DISPLAY_MAP[tsym.upper()] = canon
+                                _KOTAK_DISPLAY_MAP[tsym.upper().replace(" ", "")] = canon
         except Exception as e:
             logger.warning(f"[Kotak Adapter] Note indexing instruments.json.gz: {e}")
 
-        # 2. Enrich from Kotak Neo Scrip Master CSV if cached
+        # 2. Enrich from Kotak Neo Scrip Master CSV if cached (NSE, BSE, MCX)
         try:
             import neo_api_client.utils.scrip_cache as sc
             import pandas as pd
-            for seg in ("nse_fo", "bse_fo"):
-                csv_bytes = sc.read_csv(seg)
-                if csv_bytes:
-                    df = pd.read_csv(io.BytesIO(csv_bytes), usecols=["pSymbol", "pTrdSymbol"])
-                    for _, row in df.iterrows():
-                        tok = str(row["pSymbol"]).strip()
-                        trd = str(row["pTrdSymbol"]).strip()
-                        _KOTAK_TOKEN_MAP[tok] = trd
-                        _KOTAK_DISPLAY_MAP[trd.upper()] = trd
+            for seg in ("nse_fo", "bse_fo", "mcx_fo"):
+                try:
+                    csv_bytes = sc.read_csv(seg)
+                    if csv_bytes:
+                        df = pd.read_csv(io.BytesIO(csv_bytes), usecols=["pSymbol", "pTrdSymbol"])
+                        for _, row in df.iterrows():
+                            tok = str(row["pSymbol"]).strip()
+                            trd = str(row["pTrdSymbol"]).strip()
+                            _KOTAK_TOKEN_MAP[tok] = trd
+                            _KOTAK_DISPLAY_MAP[trd.upper()] = trd
+                            _KOTAK_DISPLAY_MAP[trd.upper().replace(" ", "")] = trd
+                except Exception as e_seg:
+                    logger.debug(f"[Kotak Adapter] Note reading {seg} cache: {e_seg}")
         except Exception as e:
             logger.debug(f"[Kotak Adapter] Note loading scrip cache: {e}")
 
@@ -146,11 +161,39 @@ def _resolve_kotak_trading_symbol(symbol: str, instrument_key: str = "") -> str:
     return no_space
 
 
-def round_to_tick(price: float, tick_size: float = 0.05) -> float:
-    """Enforce exchange-mandated price tick multiples (0.05 for NSE/BSE)."""
+def get_tick_size_for_symbol(symbol: str = "", instrument_key: str = "") -> float:
+    s = f"{symbol} {instrument_key}".upper()
+    for comm, ts in getattr(config, "TICK_SIZES", {}).items():
+        if comm in s:
+            return ts
+    return 0.05
+
+
+def get_freeze_limit_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
+    s = f"{symbol} {instrument_key}".upper()
+    for comm, fl in getattr(config, "FREEZE_LIMITS", {}).items():
+        if comm in s:
+            return fl
+    return 1800
+
+
+def get_exchange_segment_for_symbol(symbol: str = "", instrument_key: str = "") -> str:
+    s = f"{symbol} {instrument_key}".upper()
+    if any(m in s for m in ("MCX", "CRUDEOIL", "NATURALGAS", "NATGAS", "GOLD", "SILVER", "COPPER")):
+        return "mcx_fo"
+    if any(b in s for b in ("BSE", "SENSEX", "BANKEX")):
+        return "bse_fo"
+    return "nse_fo"
+
+
+def round_to_tick(price: float, tick_size: float = 0.05, symbol: str = "", instrument_key: str = "") -> float:
+    """Enforce exchange-mandated price tick multiples (0.05 for NSE/BSE, 0.10/1.00 for MCX)."""
     if not price or float(price) <= 0:
         return 0.0
-    return round(round(float(price) / tick_size) * tick_size, 2)
+    ts = tick_size
+    if symbol or instrument_key:
+        ts = get_tick_size_for_symbol(symbol, instrument_key)
+    return round(round(float(price) / ts) * ts, 2)
 
 
 class BaseBrokerAdapter:
@@ -242,6 +285,93 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             "authenticated": status_info.get("is_authenticated", False)
         }
 
+    def _place_single_order(
+        self,
+        client,
+        canonical_symbol: str,
+        transaction_type: str,
+        quantity: int,
+        product: str = "MIS",
+        order_type: str = "LIMIT",
+        price: float = 0.0,
+        trigger_price: float = 0.0,
+        tag: str = "straddle_algo",
+        segment: str = "nse_fo",
+        tick_size: float = 0.05
+    ) -> Dict[str, Any]:
+        """Places a single slice order with Kotak Neo API and confirms RMS status."""
+        clean_tt = "B" if transaction_type.upper() in ("BUY", "B") else "S"
+        clean_ot = "L" if order_type.upper() in ("LIMIT", "LMT", "L") else ("MKT" if order_type.upper() in ("MARKET", "MKT") else ("SL-M" if "M" in order_type.upper() else "SL"))
+        clean_prod = "MIS" if product.upper() in ("MIS", "I", "INTRADAY") else "NRML"
+        clean_price = str(round_to_tick(price, tick_size=tick_size)) if clean_ot in ("L", "SL") else "0"
+        clean_trig = str(round_to_tick(trigger_price, tick_size=tick_size)) if trigger_price and trigger_price > 0 else "0"
+        clean_qty = str(int(quantity))
+
+        tag_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(tag or 'std'))[:6] or 'std'
+        unique_tag = f"{tag_prefix}_{int(time.time()*1000)%1000000}_{uuid.uuid4().hex[:4]}"
+
+        try:
+            res = client.place_order(
+                exchange_segment=segment,
+                product=clean_prod,
+                price=clean_price,
+                order_type=clean_ot,
+                quantity=clean_qty,
+                validity="DAY",
+                trading_symbol=canonical_symbol,
+                transaction_type=clean_tt,
+                trigger_price=clean_trig,
+                tag=unique_tag
+            )
+            logger.info(f"[Kotak Neo] Order slice ({clean_qty} qty) response: {res}")
+
+            if isinstance(res, dict):
+                st_code = res.get("stCode")
+                if st_code and int(st_code) != 200:
+                    err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
+                    logger.warning(f"[Kotak Neo] Order slice rejected: {err_msg} (res: {res})")
+                    return {"success": False, "error": err_msg, "data": res}
+
+            order_id = None
+            if isinstance(res, dict):
+                order_id = res.get("nOrdNo") or res.get("order_id") or (res.get("data") or {}).get("nOrdNo")
+
+            if order_id:
+                confirmed_status = "OPEN"
+                for attempt in range(3):
+                    time.sleep(0.2)
+                    try:
+                        hist = client.order_history(order_id=str(order_id))
+                        d = hist.get("data", {})
+                        items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
+                        if items and isinstance(items, list):
+                            latest = items[0]
+                            st = str(latest.get("ordSt", "")).lower()
+                            if st in ("rejected", "cancelled"):
+                                rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
+                                logger.warning(f"[Kotak Neo] Order slice {order_id} rejected by RMS: {rej_msg}")
+                                return {
+                                    "success": False,
+                                    "status": "REJECTED",
+                                    "order_id": str(order_id),
+                                    "error": rej_msg,
+                                    "status_message": rej_msg,
+                                    "data": latest
+                                }
+                            elif st in ("traded", "complete", "open", "trigger pending"):
+                                confirmed_status = st.upper()
+                                break
+                    except Exception as e_chk:
+                        logger.debug(f"[Kotak Neo] Verification notice: {e_chk}")
+
+                return {"success": True, "status": confirmed_status, "order_id": str(order_id), "data": res, "quantity": int(quantity)}
+
+            err_msg = str(res.get("errMsg") or res.get("message") or res.get("error") or res)
+            return {"success": False, "error": err_msg, "data": res}
+        except Exception as e:
+            logger.error(f"[Kotak Neo] Exception placing order slice: {e}")
+            return {"success": False, "error": str(e)}
+
     def place_order(
         self,
         symbol: str,
@@ -262,91 +392,70 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 "status_code": 401
             }
 
-        # Resolve exact canonical trading symbol required by Kotak Neo
         canonical_symbol = _resolve_kotak_trading_symbol(symbol, instrument_key)
-        logger.info(f"[Kotak Neo] Placing order: symbol='{symbol}', key='{instrument_key}' -> canonical='{canonical_symbol}'")
+        segment = get_exchange_segment_for_symbol(canonical_symbol, instrument_key)
+        tick_size = get_tick_size_for_symbol(canonical_symbol, instrument_key)
+        freeze_limit = get_freeze_limit_for_symbol(canonical_symbol, instrument_key)
 
-        # Normalize parameters for Kotak Neo (Must adhere strictly to allowed canonical values)
-        clean_tt = "B" if transaction_type.upper() in ("BUY", "B") else "S"
-        clean_ot = "L" if order_type.upper() in ("LIMIT", "LMT", "L") else ("MKT" if order_type.upper() in ("MARKET", "MKT") else ("SL-M" if "M" in order_type.upper() else "SL"))
-        clean_prod = "MIS" if product.upper() in ("MIS", "I", "INTRADAY") else "NRML"
-        clean_price = str(round_to_tick(price)) if clean_ot in ("L", "SL") else "0"
-        clean_trig = str(round_to_tick(trigger_price)) if trigger_price and trigger_price > 0 else "0"
-        clean_qty = str(int(quantity))
+        logger.info(f"[Kotak Neo] Order request: sym='{symbol}' -> canon='{canonical_symbol}', seg='{segment}', qty={quantity}, freeze={freeze_limit}")
 
-        # Detect segment (Kotak Neo canonical values: nse_fo, bse_fo, nse_cm, bse_cm)
-        segment = "bse_fo" if any(b in canonical_symbol.upper() for b in ("SENSEX", "BANKEX")) else "nse_fo"
+        total_qty = int(quantity)
+        if total_qty <= 0:
+            return {"success": False, "error": "Invalid quantity <= 0"}
 
-        # Ensure tag is strictly unique to prevent Kotak Neo OMS "Client OrderID already exists" rejection
-        tag_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(tag or 'std'))[:6] or 'std'
-        unique_tag = f"{tag_prefix}_{int(time.time()*1000)%1000000}_{uuid.uuid4().hex[:4]}"
+        # Calculate slices according to exchange freeze limit
+        slices = []
+        rem = total_qty
+        while rem > freeze_limit:
+            slices.append(freeze_limit)
+            rem -= freeze_limit
+        if rem > 0:
+            slices.append(rem)
 
-        try:
-            res = client.place_order(
-                exchange_segment=segment,
-                product=clean_prod,
-                price=clean_price,
-                order_type=clean_ot,
-                quantity=clean_qty,
-                validity="DAY",
-                trading_symbol=canonical_symbol,
-                transaction_type=clean_tt,
-                trigger_price=clean_trig,
-                tag=unique_tag
+        if len(slices) > 1:
+            logger.info(f"[Kotak Neo] Order Slicing triggered: {total_qty} qty sliced into {len(slices)} orders: {slices}")
+
+        slice_results = []
+        order_ids = []
+        all_succeeded = True
+        failed_error = ""
+
+        for s_idx, slice_qty in enumerate(slices):
+            slice_tag = f"{tag}_{s_idx+1}" if len(slices) > 1 else tag
+            res = self._place_single_order(
+                client=client,
+                canonical_symbol=canonical_symbol,
+                transaction_type=transaction_type,
+                quantity=slice_qty,
+                product=product,
+                order_type=order_type,
+                price=price,
+                trigger_price=trigger_price,
+                tag=slice_tag,
+                segment=segment,
+                tick_size=tick_size
             )
-            logger.info(f"[Kotak Neo] Order response: {res}")
+            slice_results.append(res)
+            if res.get("success"):
+                order_ids.append(str(res.get("order_id")))
+            else:
+                all_succeeded = False
+                failed_error = res.get("error", "Slice failed")
+                logger.error(f"[Kotak Neo] Slice {s_idx+1}/{len(slices)} failed: {failed_error}")
 
-            # Check for error status code from Kotak Neo gateway
-            if isinstance(res, dict):
-                st_code = res.get("stCode")
-                if st_code and int(st_code) != 200:
-                    err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
-                    logger.warning(f"[Kotak Neo] Order placement rejected at gateway: {err_msg} (response: {res})")
-                    return {"success": False, "error": err_msg, "data": res}
-            
-            # Extract Order ID
-            order_id = None
-            if isinstance(res, dict):
-                order_id = res.get("nOrdNo") or res.get("order_id") or (res.get("data") or {}).get("nOrdNo")
-            
-            if order_id:
-                # Kotak Neo gateway initially returns 200 upon queuing into OMS (ordSt: 'put order req received').
-                # RMS validation executes asynchronously right after. Verify whether RMS accepted or rejected it.
-                confirmed_status = "OPEN"
-                for attempt in range(3):
-                    time.sleep(0.2)
-                    try:
-                        hist = client.order_history(order_id=str(order_id))
-                        d = hist.get("data", {})
-                        items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
-                        if items and isinstance(items, list):
-                            latest = items[0]
-                            st = str(latest.get("ordSt", "")).lower()
-                            if st in ("rejected", "cancelled"):
-                                rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
-                                logger.warning(f"[Kotak Neo] Order {order_id} rejected by RMS: {rej_msg}")
-                                return {
-                                    "success": False,
-                                    "status": "REJECTED",
-                                    "order_id": str(order_id),
-                                    "error": rej_msg,
-                                    "status_message": rej_msg,
-                                    "data": latest
-                                }
-                            elif st in ("traded", "complete", "open", "trigger pending"):
-                                confirmed_status = st.upper()
-                                break
-                    except Exception as e_chk:
-                        logger.debug(f"[Kotak Neo] Note verifying order {order_id} status: {e_chk}")
+        if order_ids:
+            primary_id = order_ids[0] if len(order_ids) == 1 else ",".join(order_ids)
+            return {
+                "success": all_succeeded,
+                "order_id": primary_id,
+                "status": "COMPLETE" if all_succeeded else "PARTIAL",
+                "slices": slice_results,
+                "sliced": len(slices) > 1,
+                "error": failed_error if not all_succeeded else None,
+                "data": slice_results[0].get("data") if slice_results else {}
+            }
 
-                return {"success": True, "status": confirmed_status, "order_id": str(order_id), "data": res}
-            
-            err_msg = str(res.get("errMsg") or res.get("message") or res.get("error") or res.get("Error") or res)
-            return {"success": False, "error": err_msg, "data": res}
-
-        except Exception as e:
-            logger.error(f"[Kotak Neo] Exception placing order: {e}")
-            return {"success": False, "error": str(e)}
+        return {"success": False, "error": failed_error or "All order slices rejected"}
 
     def modify_order(
         self,
@@ -740,9 +849,16 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             quotes_data[clean_sym] = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
                     except Exception:
                         pass
+                elif clean_sym in ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"):
+                    try:
+                        spot_p = straddle_engine._get_commodity_live_price(clean_sym)
+                        if spot_p > 0:
+                            quotes_data[clean_sym] = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
+                    except Exception:
+                        pass
                 else:
                     token_id = raw_tok.split("|")[-1].strip()
-                    seg = "bse_fo" if any(b in raw_tok.upper() for b in ("SENSEX", "BANKEX")) else "nse_fo"
+                    seg = get_exchange_segment_for_symbol(raw_tok, raw_tok)
                     req_tokens.append({"instrument_token": token_id, "exchange_segment": seg})
             
             if req_tokens:
@@ -766,6 +882,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             quotes_data[tok] = entry
                             quotes_data[f"NSE_FO|{tok}"] = entry
                             quotes_data[f"BSE_FO|{tok}"] = entry
+                            quotes_data[f"MCX_FO|{tok}"] = entry
                         sym = q.get("display_symbol")
                         if sym:
                             quotes_data[sym] = entry
@@ -782,6 +899,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
     """
     High-Fidelity Simulated Paper Trading Engine.
     Executes trades with zero monetary risk, maintains paper positions and order history.
+    Fully supports Equities (NIFTY/BANKNIFTY) and all MCX Commodities with order slicing.
     """
 
     def __init__(self):
@@ -830,28 +948,50 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         tag: str = "straddle_algo",
     ) -> Dict[str, Any]:
         with self._lock:
-            order_id = f"PAPER_{int(time.time()*1000)}"
+            canonical_symbol = _resolve_kotak_trading_symbol(symbol, instrument_key)
+            tick_size = get_tick_size_for_symbol(canonical_symbol, instrument_key)
+            freeze_limit = get_freeze_limit_for_symbol(canonical_symbol, instrument_key)
+            total_qty = int(quantity)
+
+            # Order slicing in simulation according to exchange freeze limits
+            slices = []
+            rem = total_qty
+            while rem > freeze_limit:
+                slices.append(freeze_limit)
+                rem -= freeze_limit
+            if rem > 0:
+                slices.append(rem)
+
             exec_price = price if price and price > 0 else 100.0
+            exec_price = round_to_tick(exec_price, tick_size=tick_size)
 
-            order_entry = {
-                "order_id": order_id,
-                "trading_symbol": symbol,
-                "instrument_key": instrument_key,
-                "transaction_type": transaction_type.upper(),
-                "quantity": int(quantity),
-                "filled_quantity": int(quantity),
-                "price": round_to_tick(exec_price),
-                "average_price": round_to_tick(exec_price),
-                "status": "COMPLETE",
-                "order_timestamp": time.strftime("%H:%M:%S"),
-                "product": product,
-                "tag": tag,
-                "client_id": "PAPER TRADING",
-                "status_message": "Filled in Paper Simulation"
-            }
-
+            order_ids = []
             orders = self._read_json(self._orderbook_file)
-            orders.insert(0, order_entry)
+            now_str = time.strftime("%H:%M:%S")
+
+            for s_idx, slice_qty in enumerate(slices):
+                order_id = f"PAPER_{int(time.time()*1000)}_{s_idx+1}"
+                order_ids.append(order_id)
+                slice_label = f" [Slice {s_idx+1}/{len(slices)}]" if len(slices) > 1 else ""
+                order_entry = {
+                    "order_id": order_id,
+                    "trading_symbol": symbol,
+                    "canonical_symbol": canonical_symbol,
+                    "instrument_key": instrument_key,
+                    "transaction_type": transaction_type.upper(),
+                    "quantity": int(slice_qty),
+                    "filled_quantity": int(slice_qty),
+                    "price": exec_price,
+                    "average_price": exec_price,
+                    "status": "COMPLETE",
+                    "order_timestamp": now_str,
+                    "product": product,
+                    "tag": f"{tag}_{s_idx+1}" if len(slices) > 1 else tag,
+                    "client_id": "PAPER TRADING",
+                    "status_message": f"Filled in Paper Simulation ({slice_qty} qty{slice_label})"
+                }
+                orders.insert(0, order_entry)
+
             self._write_json(self._orderbook_file, orders[:500])
 
             # Update paper positions
@@ -860,7 +1000,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             for p in positions:
                 if p.get("trading_symbol") == symbol:
                     curr_qty = int(p.get("quantity", 0))
-                    change_qty = int(quantity) if transaction_type.upper() == "BUY" else -int(quantity)
+                    change_qty = total_qty if transaction_type.upper() == "BUY" else -total_qty
                     new_qty = curr_qty + change_qty
                     p["quantity"] = new_qty
                     p["last_price"] = exec_price
@@ -870,7 +1010,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             if not found:
                 positions.append({
                     "trading_symbol": symbol,
-                    "quantity": int(quantity) if transaction_type.upper() == "BUY" else -int(quantity),
+                    "quantity": total_qty if transaction_type.upper() == "BUY" else -total_qty,
                     "average_price": exec_price,
                     "last_price": exec_price,
                     "pnl": 0.0,
@@ -879,7 +1019,13 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 })
 
             self._write_json(self._positions_file, positions)
-            return {"success": True, "order_id": order_id, "data": order_entry}
+            return {
+                "success": True,
+                "order_id": order_ids[0] if len(order_ids) == 1 else ",".join(order_ids),
+                "sliced": len(slices) > 1,
+                "status": "COMPLETE",
+                "data": {"order_id": order_ids[0], "filled_quantity": total_qty, "price": exec_price}
+            }
 
     def modify_order(
         self,

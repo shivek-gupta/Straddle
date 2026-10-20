@@ -872,6 +872,46 @@ def api_straddle_expiries():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/commodities", methods=["GET"])
+def api_straddle_commodities():
+    try:
+        commodities = getattr(config, "ALL_UNDERLYINGS_LIST", [])
+        metadata = getattr(config, "COMMODITY_METADATA", {})
+        strike_steps = getattr(config, "STRIKE_STEPS", {})
+        lot_sizes = getattr(config, "DEFAULT_LOT_SIZES", {})
+        freeze_limits = getattr(config, "FREEZE_LIMITS", {})
+        tick_sizes = getattr(config, "TICK_SIZES", {})
+        margins = getattr(config, "DEFAULT_MARGIN_PER_LOT", {})
+        return jsonify({
+            "success": True,
+            "commodities": commodities,
+            "metadata": metadata,
+            "strike_steps": strike_steps,
+            "lot_sizes": lot_sizes,
+            "freeze_limits": freeze_limits,
+            "tick_sizes": tick_sizes,
+            "margins": margins
+        })
+    except Exception as e:
+        logger.error(f"Error in api_straddle_commodities: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/chart_candles", methods=["GET"])
+def api_straddle_chart_candles():
+    try:
+        und = request.args.get("underlying") or request.args.get("symbol") or "NIFTY"
+        tf = request.args.get("timeframe") or request.args.get("interval") or "5m"
+        rng = request.args.get("range") or "1d"
+        mgr = get_straddle_manager()
+        candles_res = mgr.get_chart_candles(underlying=und, timeframe=tf, range_str=rng)
+        return jsonify(candles_res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_chart_candles: {e}")
+        return jsonify({"status": "error", "success": False, "error": str(e), "candles": []}), 500
+
+
+
 
 # ==========================================================
 # SYSTEM, GIT UPDATES & ZERO DATA LOSS RESTORATION

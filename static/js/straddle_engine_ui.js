@@ -219,11 +219,14 @@ function updateSpotPriceDisplay(spot, atm, und) {
 
 async function fetchLiveSpotTick() {
     try {
-        const und = (window._straddleState.activeStrategy && window._straddleState.activeStrategy.underlying) || "NIFTY";
+        const und = window._activeGlobalUnderlying || (window._straddleState.activeStrategy && window._straddleState.activeStrategy.underlying) || "NIFTY";
         const resp = await fetch(`/api/straddle/spot?underlying=${encodeURIComponent(und)}`);
         const data = await resp.json();
         if (data && data.success && data.spot > 0) {
             updateSpotPriceDisplay(data.spot, data.atm, data.underlying);
+            if (typeof updateLiveCandleTick === "function" && window._activeChartUnderlying === und) {
+                updateLiveCandleTick(data.spot);
+            }
         }
     } catch (e) {
         // quiet for sub-second interval
@@ -8009,3 +8012,436 @@ window.straddleToggleExecutionMode = straddleToggleExecutionMode;
 window.toggleStraddleExecutionMode = straddleToggleExecutionMode;
 window.straddleSquareOffAllAndTerminate = straddleSquareOffAllAndTerminate;
 window.emergencySquareOffAllStraddles = straddleSquareOffAllAndTerminate;
+
+// =========================================================================
+// GLOBAL COMMODITY & NIFTY SELECTION & LIVE CANDLESTICK CHART CONTROLLER
+// =========================================================================
+
+window._activeGlobalUnderlying = "NIFTY";
+window._activeChartTimeframe = "5m";
+window._activeChartUnderlying = "NIFTY";
+window._activeCandles = [];
+window._chartCrosshairPos = null;
+window._chartTickTimer = null;
+
+const COMMODITY_DISPLAY_NAMES = {
+    "NIFTY": "NIFTY 50",
+    "CRUDEOIL": "Crude Oil",
+    "NATURALGAS": "Natural Gas",
+    "GOLD": "Gold",
+    "SILVER": "Silver",
+    "CRUDEOILM": "Crude Oil Mini",
+    "NATGASMINI": "Natural Gas Mini",
+    "GOLDM": "Gold Mini",
+    "SILVERM": "Silver Mini",
+    "COPPER": "Copper"
+};
+
+const COMMODITY_COLOR_MAP = {
+    "NIFTY": "#38bdf8",
+    "CRUDEOIL": "#3b82f6",
+    "NATURALGAS": "#f59e0b",
+    "GOLD": "#eab308",
+    "SILVER": "#94a3b8",
+    "CRUDEOILM": "#60a5fa",
+    "NATGASMINI": "#fbbf24",
+    "GOLDM": "#facc15",
+    "SILVERM": "#cbd5e1",
+    "COPPER": "#ea580c"
+};
+
+function selectGlobalUnderlying(undKey) {
+    if (!undKey) return;
+    const cleanKey = undKey.toUpperCase().replace(/\s+/g, '');
+    window._activeGlobalUnderlying = cleanKey;
+
+    // 1. Update UI pill states
+    const pills = document.querySelectorAll(".commodity-pill");
+    pills.forEach(p => {
+        const isMatch = (p.getAttribute("data-und") === cleanKey);
+        p.classList.toggle("active", isMatch);
+    });
+
+    // 2. Update Header Spot Label & Ticker
+    const labelEl = document.getElementById("straddleUnderlyingLabel");
+    if (labelEl) {
+        const dispName = COMMODITY_DISPLAY_NAMES[cleanKey] || cleanKey;
+        labelEl.textContent = `${dispName.toUpperCase()}:`;
+        labelEl.style.color = COMMODITY_COLOR_MAP[cleanKey] || "#38bdf8";
+    }
+
+    const chartBtnLabel = document.getElementById("btnActiveAssetChartLabel");
+    if (chartBtnLabel) {
+        chartBtnLabel.textContent = `Chart (${cleanKey})`;
+    }
+
+    // 3. Sync Option Chain underlying selector if modal exists
+    const optUndSel = document.getElementById("optChainUnderlyingSelect");
+    if (optUndSel && optUndSel.value !== cleanKey) {
+        optUndSel.value = cleanKey;
+        if (typeof onChangeOptChainUnderlying === "function") {
+            const modal = document.getElementById("straddleOptionChainModal");
+            if (modal && modal.style.display === "flex") {
+                onChangeOptChainUnderlying(cleanKey);
+            }
+        }
+    }
+
+    // 4. Sync Algo builder modal default underlying
+    const newAlgoUnd = document.getElementById("newAlgoUnderlying");
+    if (newAlgoUnd) newAlgoUnd.value = cleanKey;
+
+    // 5. If Live Chart modal is currently open, switch chart immediately
+    const chartModal = document.getElementById("modalLiveChart");
+    if (chartModal && chartModal.style.display === "flex") {
+        openActiveAssetChartModal(cleanKey);
+    }
+
+    // 6. Fetch live tick immediately
+    fetchLiveSpotTick();
+
+    showStraddleToast(`Active Asset: ${COMMODITY_DISPLAY_NAMES[cleanKey] || cleanKey}`, "info", 1500);
+}
+window.selectGlobalUnderlying = selectGlobalUnderlying;
+
+function openActiveAssetChartModal(undParam) {
+    const und = undParam || window._activeGlobalUnderlying || "NIFTY";
+    window._activeChartUnderlying = und;
+    const modal = document.getElementById("modalLiveChart");
+    if (!modal) return;
+    modal.style.display = "flex";
+
+    const dispName = COMMODITY_DISPLAY_NAMES[und] || und;
+    const color = COMMODITY_COLOR_MAP[und] || "#38bdf8";
+
+    const titleEl = document.getElementById("chartAssetTitle");
+    if (titleEl) {
+        titleEl.textContent = `${dispName.toUpperCase()} LIVE CANDLESTICK CHART`;
+    }
+    const dotEl = document.getElementById("chartAssetDot");
+    if (dotEl) {
+        dotEl.style.background = color;
+        dotEl.style.boxShadow = `0 0 10px ${color}`;
+    }
+
+    const segEl = document.getElementById("chartExchangeSegInfo");
+    if (segEl) {
+        segEl.textContent = (und === "NIFTY") ? "NSE_FO" : "MCX_FO";
+    }
+
+    setupChartCanvasEvents();
+    loadAndRenderCandleChart(und, window._activeChartTimeframe || "5m");
+    startChartTickStream();
+}
+window.openActiveAssetChartModal = openActiveAssetChartModal;
+
+function closeLiveChartModal() {
+    const modal = document.getElementById("modalLiveChart");
+    if (modal) modal.style.display = "none";
+    stopChartTickStream();
+}
+window.closeLiveChartModal = closeLiveChartModal;
+
+function switchChartTimeframe(tf) {
+    window._activeChartTimeframe = tf;
+    document.querySelectorAll(".chart-timeframe-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.getAttribute("data-tf") === tf);
+    });
+    loadAndRenderCandleChart(window._activeChartUnderlying, tf);
+}
+window.switchChartTimeframe = switchChartTimeframe;
+
+function reloadActiveCandlestickChart() {
+    loadAndRenderCandleChart(window._activeChartUnderlying, window._activeChartTimeframe);
+}
+window.reloadActiveCandlestickChart = reloadActiveCandlestickChart;
+
+function startChartTickStream() {
+    stopChartTickStream();
+    window._chartTickTimer = setInterval(() => {
+        const modal = document.getElementById("modalLiveChart");
+        if (modal && modal.style.display === "flex") {
+            fetchLiveSpotTick();
+        } else {
+            stopChartTickStream();
+        }
+    }, 1000);
+}
+
+function stopChartTickStream() {
+    if (window._chartTickTimer) {
+        clearInterval(window._chartTickTimer);
+        window._chartTickTimer = null;
+    }
+}
+
+async function loadAndRenderCandleChart(und, tf) {
+    const countEl = document.getElementById("chartCandleCountInfo");
+    if (countEl) countEl.textContent = "Loading candles...";
+    try {
+        const resp = await fetch(`/api/straddle/chart_candles?underlying=${encodeURIComponent(und)}&timeframe=${encodeURIComponent(tf)}&range=1d`);
+        const data = await resp.json();
+        if (data && data.status === "success" && Array.isArray(data.candles)) {
+            window._activeCandles = data.candles;
+            if (countEl) countEl.textContent = `${data.candles.length} candles (${tf})`;
+            
+            const ltpEl = document.getElementById("chartLtpDisplay");
+            const curP = data.current_price || (data.candles.length ? data.candles[data.candles.length - 1].close : 0);
+            if (ltpEl && curP > 0) ltpEl.textContent = "₹" + curP.toFixed(2);
+
+            let maxH = 0, minL = Infinity;
+            data.candles.forEach(c => {
+                if (c.high > maxH) maxH = c.high;
+                if (c.low < minL) minL = c.low;
+            });
+            const highEl = document.getElementById("chartHighDisplay");
+            const lowEl = document.getElementById("chartLowDisplay");
+            if (highEl && maxH > 0) highEl.textContent = "₹" + maxH.toFixed(2);
+            if (lowEl && minL < Infinity) lowEl.textContent = "₹" + minL.toFixed(2);
+
+            renderCandlestickCanvas();
+        }
+    } catch (e) {
+        console.error("Error loading candles:", e);
+        if (countEl) countEl.textContent = "Error loading candles";
+    }
+}
+
+function renderCandlestickCanvas() {
+    const canvas = document.getElementById("liveCandlestickCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const container = canvas.parentElement;
+    
+    // Responsive sizing
+    const dpr = window.devicePixelRatio || 1;
+    const rect = container.getBoundingClientRect();
+    const w = rect.width || 1050;
+    const h = rect.height || 520;
+
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    ctx.scale(dpr, dpr);
+
+    // Clear background
+    ctx.fillStyle = "#070a12";
+    ctx.fillRect(0, 0, w, h);
+
+    const candles = window._activeCandles;
+    if (!candles || candles.length === 0) {
+        ctx.fillStyle = "#64748b";
+        ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("No candlestick data available", w / 2, h / 2);
+        return;
+    }
+
+    // Chart margins
+    const margin = { top: 20, right: 75, bottom: 30, left: 15 };
+    const chartW = w - margin.left - margin.right;
+    const chartH = h - margin.top - margin.bottom;
+    const volumeH = chartH * 0.16;
+    const priceH = chartH - volumeH - 10;
+
+    // Calculate High / Low price ranges
+    let minPrice = Infinity;
+    let maxPrice = -Infinity;
+    let maxVolume = 0;
+
+    candles.forEach(c => {
+        if (c.low < minPrice) minPrice = c.low;
+        if (c.high > maxPrice) maxPrice = c.high;
+        if (c.volume > maxVolume) maxVolume = c.volume;
+    });
+
+    if (minPrice === maxPrice) {
+        minPrice *= 0.99;
+        maxPrice *= 1.01;
+    }
+    const pricePadding = (maxPrice - minPrice) * 0.05;
+    minPrice -= pricePadding;
+    maxPrice += pricePadding;
+    const priceRange = maxPrice - minPrice;
+
+    // Draw Price Grid Lines
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "#64748b";
+    ctx.font = "11px JetBrains Mono, monospace";
+    ctx.textAlign = "left";
+
+    const steps = 6;
+    for (let i = 0; i <= steps; i++) {
+        const p = minPrice + (priceRange * (i / steps));
+        const y = margin.top + priceH - (priceH * (i / steps));
+        ctx.beginPath();
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(w - margin.right, y);
+        ctx.stroke();
+
+        ctx.fillText("₹" + p.toFixed(2), w - margin.right + 6, y + 4);
+    }
+
+    // Candle widths and spacing
+    const numCandles = candles.length;
+    const slotW = chartW / numCandles;
+    const candleW = Math.max(2, Math.min(18, slotW * 0.72));
+
+    // Draw Candles & Volumes
+    candles.forEach((c, i) => {
+        const x = margin.left + (i * slotW) + (slotW / 2);
+        const isUp = c.close >= c.open;
+        const color = isUp ? "#10b981" : "#ef4444";
+
+        // Y positions
+        const yOpen = margin.top + priceH - ((c.open - minPrice) / priceRange * priceH);
+        const yClose = margin.top + priceH - ((c.close - minPrice) / priceRange * priceH);
+        const yHigh = margin.top + priceH - ((c.high - minPrice) / priceRange * priceH);
+        const yLow = margin.top + priceH - ((c.low - minPrice) / priceRange * priceH);
+
+        // Wick
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, yHigh);
+        ctx.lineTo(x, yLow);
+        ctx.stroke();
+
+        // Body
+        const bodyTop = Math.min(yOpen, yClose);
+        const bodyH = Math.max(1.5, Math.abs(yClose - yOpen));
+        ctx.fillStyle = color;
+        ctx.fillRect(x - (candleW / 2), bodyTop, candleW, bodyH);
+
+        // Volume bar
+        if (maxVolume > 0 && c.volume > 0) {
+            const vBarH = (c.volume / maxVolume) * volumeH;
+            const yVol = margin.top + chartH - vBarH;
+            ctx.fillStyle = isUp ? "rgba(16, 185, 129, 0.25)" : "rgba(239, 68, 68, 0.25)";
+            ctx.fillRect(x - (candleW / 2), yVol, candleW, vBarH);
+        }
+
+        // Time axis labels every N candles
+        const labelInterval = Math.max(1, Math.floor(numCandles / 7));
+        if (i % labelInterval === 0 || i === numCandles - 1) {
+            const date = new Date(c.time * 1000);
+            const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            ctx.fillStyle = "#64748b";
+            ctx.textAlign = "center";
+            ctx.fillText(timeStr, x, h - 8);
+        }
+    });
+
+    // Current Price Line
+    const lastCandle = candles[candles.length - 1];
+    const curP = lastCandle.close;
+    const curY = margin.top + priceH - ((curP - minPrice) / priceRange * priceH);
+
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(margin.left, curY);
+    ctx.lineTo(w - margin.right, curY);
+    ctx.stroke();
+    ctx.restore();
+
+    // Price tag badge on right axis
+    ctx.fillStyle = "#0284c7";
+    ctx.fillRect(w - margin.right + 2, curY - 10, margin.right - 4, 20);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 11px JetBrains Mono, monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("₹" + curP.toFixed(2), w - margin.right + 6, curY + 4);
+
+    // Crosshair if hovering
+    if (window._chartCrosshairPos) {
+        const mx = window._chartCrosshairPos.x;
+        const my = window._chartCrosshairPos.y;
+
+        if (mx >= margin.left && mx <= w - margin.right && my >= margin.top && my <= h - margin.bottom) {
+            ctx.save();
+            ctx.setLineDash([2, 2]);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+            ctx.lineWidth = 1;
+            
+            // Vertical
+            ctx.beginPath();
+            ctx.moveTo(mx, margin.top);
+            ctx.lineTo(mx, h - margin.bottom);
+            ctx.stroke();
+
+            // Horizontal
+            ctx.beginPath();
+            ctx.moveTo(margin.left, my);
+            ctx.lineTo(w - margin.right, my);
+            ctx.stroke();
+            ctx.restore();
+
+            // Index of hovered candle
+            const hoveredIdx = Math.floor((mx - margin.left) / slotW);
+            if (hoveredIdx >= 0 && hoveredIdx < candles.length) {
+                const c = candles[hoveredIdx];
+                const d = new Date(c.time * 1000);
+                const openEl = document.getElementById("lblCandleOpen");
+                const highEl = document.getElementById("lblCandleHigh");
+                const lowEl = document.getElementById("lblCandleLow");
+                const closeEl = document.getElementById("lblCandleClose");
+                const timeEl = document.getElementById("lblCandleTime");
+                if (openEl) openEl.textContent = "₹" + c.open.toFixed(2);
+                if (highEl) highEl.textContent = "₹" + c.high.toFixed(2);
+                if (lowEl) lowEl.textContent = "₹" + c.low.toFixed(2);
+                if (closeEl) closeEl.textContent = "₹" + c.close.toFixed(2);
+                if (timeEl) timeEl.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            }
+        }
+    }
+}
+
+function updateLiveCandleTick(newPrice) {
+    if (!newPrice || Number(newPrice) <= 0) return;
+    const p = Number(newPrice);
+    const candles = window._activeCandles;
+    if (candles && candles.length > 0) {
+        const last = candles[candles.length - 1];
+        last.close = p;
+        if (p > last.high) last.high = p;
+        if (p < last.low) last.low = p;
+
+        const ltpEl = document.getElementById("chartLtpDisplay");
+        if (ltpEl) ltpEl.textContent = "₹" + p.toFixed(2);
+
+        renderCandlestickCanvas();
+    }
+}
+
+function setupChartCanvasEvents() {
+    const canvas = document.getElementById("liveCandlestickCanvas");
+    if (!canvas || canvas._eventsSetup) return;
+    canvas._eventsSetup = true;
+
+    canvas.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        window._chartCrosshairPos = {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+        };
+        renderCandlestickCanvas();
+    });
+
+    canvas.addEventListener("mouseleave", () => {
+        window._chartCrosshairPos = null;
+        renderCandlestickCanvas();
+    });
+
+    window.addEventListener("resize", () => {
+        const modal = document.getElementById("modalLiveChart");
+        if (modal && modal.style.display === "flex") {
+            renderCandlestickCanvas();
+        }
+    });
+}
+
