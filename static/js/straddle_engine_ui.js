@@ -178,8 +178,9 @@ async function initStraddlePlatform() {
 
     await fetchStraddleState();
     await loadStraddleOpenPositions();
+    loadActiveBasketFromStorage();
     fetchLiveSpotTick();
-    window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 1000);
+    window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 300);
     window._straddleState.pollTimer = setInterval(pollStraddleCycle, 1500);
 
     // Attach global click listener to close dropdowns
@@ -197,10 +198,12 @@ window._lastKnownSpot = 0.0;
 
 function updateSpotPriceDisplay(spot, atm, und) {
     const spotEl = document.getElementById("straddleSpotPrice");
-    const atmEl = document.getElementById("straddleAtmStrike");
     const undLabel = document.getElementById("straddleUnderlyingLabel");
-    if (undLabel && und) undLabel.textContent = und + ":";
-    if (atmEl && atm) atmEl.textContent = atm;
+    if (undLabel && und) {
+        const clean = String(und).toUpperCase().replace(/\s+/g, "");
+        const disp = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[clean]) ? COMMODITY_DISPLAY_NAMES[clean] : und;
+        undLabel.textContent = disp.toUpperCase() + ":";
+    }
     if (spotEl && spot && Number(spot) > 0) {
         const numSpot = Number(spot);
         const prev = window._lastKnownSpot;
@@ -211,7 +214,7 @@ function updateSpotPriceDisplay(spot, atm, und) {
             spotEl.classList.add(isUp ? "tick-flash-up" : "tick-flash-down");
             setTimeout(() => {
                 if (spotEl) spotEl.classList.remove("tick-flash-up", "tick-flash-down");
-            }, 450);
+            }, 300);
         }
         window._lastKnownSpot = numSpot;
     }
@@ -223,7 +226,7 @@ async function fetchLiveSpotTick() {
         const resp = await fetch(`/api/straddle/spot?underlying=${encodeURIComponent(und)}`);
         const data = await resp.json();
         if (data && data.success && data.spot > 0) {
-            updateSpotPriceDisplay(data.spot, data.atm, data.underlying);
+            updateSpotPriceDisplay(data.spot, data.atm, data.underlying || und);
             if (typeof updateLiveCandleTick === "function" && window._activeChartUnderlying === und) {
                 updateLiveCandleTick(data.spot);
             }
@@ -341,7 +344,9 @@ function renderStraddleHeader(state) {
         modeDot.style.boxShadow = "0 0 8px #10b981";
     }
 
-    updateSpotPriceDisplay(state.underlying_spot, state.underlying_atm_strike, state.underlying_symbol);
+    if (!window._activeGlobalUnderlying || window._activeGlobalUnderlying === state.underlying_symbol) {
+        updateSpotPriceDisplay(state.underlying_spot, state.underlying_atm_strike, state.underlying_symbol);
+    }
 
     // Top Nav Total MTM
     const navMtm = document.getElementById("straddleNavTotalMtm");
@@ -5701,22 +5706,23 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
     }
 
     try {
-        let url = `/api/straddle/option_chain?underlying=${und}&strike_range=${strikeRange}`;
-        if (exp) url += `&expiry_ms=${exp}`;
-        const resp = await fetch(url);
-        const data = await resp.json();
-        if (data.success && data.data) {
-            const chain = data.data;
-            const currentExpDateStr = chain.expiry_date || (expSel?.selectedOptions && expSel.selectedOptions[0] ? expSel.selectedOptions[0].text : "Weekly");
-
-            // Update Header Spot Ticker
+                   // Update Header Spot Ticker (remove ATM from title bar as requested)
             if (spotLabel) {
-                spotLabel.textContent = `${chain.underlying}: ₹${chain.spot_price.toFixed(2)} • ATM: ${chain.atm_strike}`;
+                spotLabel.textContent = `${chain.underlying}: ₹${chain.spot_price.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            }
+
+            // Sync Tradeable Only Checkbox state
+            const chkTradeable = document.getElementById("chkOptTradeableOnly");
+            if (chkTradeable) {
+                if (typeof window._optChainTradeableOnly === "undefined") {
+                    window._optChainTradeableOnly = (localStorage.getItem("straddle_opt_tradeable_only") === "true");
+                }
+                chkTradeable.checked = !!window._optChainTradeableOnly;
             }
 
             // Update Market Insights Ribbon
             const spotEl = document.getElementById("optInsightSpot");
-            if (spotEl) spotEl.textContent = `₹${chain.spot_price.toFixed(2)} (ATM: ${chain.atm_strike})`;
+            if (spotEl) spotEl.textContent = `₹${chain.spot_price.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})} (ATM: ${chain.atm_strike})`;
 
             const pcrEl = document.getElementById("optInsightPcr");
             const pcrTag = document.getElementById("optInsightPcrTag");
@@ -5754,53 +5760,76 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
             const isBasketMode = !!window._optionChainBasketMode;
 
             // Sync Header Colspan & Visibility
-            const thCe = document.getElementById("thCeActionHeader") || document.getElementById("thCeBasketTick");
-            const thPe = document.getElementById("thPeActionHeader") || document.getElementById("thPeBasketTick");
-            const thCeSuper = document.getElementById("thCeSuperHeader");
-            const thPeSuper = document.getElementById("thPeSuperHeader");
-            if (thCe) {
-                thCe.textContent = isBasketMode ? "SELECT" : "ACTION";
-                thCe.style.display = "";
+            const thCe = document.getElementById("thCeActionHeader");
+            const thPe = document.getElementById("thPeActionHeader");
+            if (thCe) thCe.textContent = isBasketMode ? "SELECT" : "ACTION";
+            if (thPe) thPe.textContent = isBasketMode ? "SELECT" : "ACTION";
+
+            // Filter rows based on "Tradeable Only" switch (Exact Match to User Screenshots 3 & 4)
+            let renderRows = chain.rows || [];
+            if (window._optChainTradeableOnly) {
+                renderRows = renderRows.filter(r => {
+                    const hasCe = r.ce && (Number(r.ce.ltp) > 0 || Number(r.ce.oi) > 0 || Number(r.ce.volume) > 0);
+                    const hasPe = r.pe && (Number(r.pe.ltp) > 0 || Number(r.pe.oi) > 0 || Number(r.pe.volume) > 0);
+                    return hasCe || hasPe;
+                });
             }
-            if (thPe) {
-                thPe.textContent = isBasketMode ? "SELECT" : "ACTION";
-                thPe.style.display = "";
-            }
-            if (thCeSuper) thCeSuper.setAttribute("colspan", "3");
-            if (thPeSuper) thPeSuper.setAttribute("colspan", "3");
 
             let rowsHtml = "";
-            chain.rows.forEach(r => {
+            let spotDividerInserted = false;
+            const spotP = chain.spot_price || 0;
+
+            renderRows.forEach(r => {
                 const isAtm = r.is_atm;
                 const strike = r.strike_price;
-                const isCeItm = strike < chain.spot_price;
-                const isPeItm = strike > chain.spot_price;
+                const isCeItm = strike < spotP;
+                const isPeItm = strike > spotP;
+
+                // Center Spot Price Divider Line (Exact Match to User Screenshots 3 & 4)
+                if (!spotDividerInserted && spotP > 0 && strike >= spotP) {
+                    rowsHtml += `
+                        <tr class="opt-spot-divider-row">
+                            <td colspan="7">
+                                <div class="opt-spot-divider-line">
+                                    <span class="opt-spot-divider-badge">${spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                    spotDividerInserted = true;
+                }
 
                 const rowClass = isAtm ? "opt-chain-atm-row" : "";
                 const ceCellClass = isCeItm ? "opt-chain-itm-ce" : "";
                 const peCellClass = isPeItm ? "opt-chain-itm-pe" : "";
 
-                // CE Data
-                const ceLtp = r.ce ? r.ce.ltp.toFixed(2) : "-";
-                const ceLtpNum = r.ce ? (r.ce.ltp || 0) : 0;
-                const ceBidAsk = r.ce ? `${r.ce.bid.toFixed(1)} / ${r.ce.ask.toFixed(1)}` : "-";
+                // CE Data & Formatting
+                const ceHasPrice = r.ce && Number(r.ce.ltp) > 0;
+                const ceLtpNum = ceHasPrice ? Number(r.ce.ltp) : 0;
+                const ceLtpText = ceHasPrice ? `₹${ceLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
+                const ceChgPct = r.ce ? (Number(r.ce.net_change_pct) || 0) : 0;
+                const ceChgColor = ceChgPct > 0 ? "#10b981" : (ceChgPct < 0 ? "#f43f5e" : "#94a3b8");
+                const ceChgSign = ceChgPct > 0 ? "+" : "";
+                const ceChgText = ceHasPrice ? `${ceChgSign}${ceChgPct.toFixed(2)}%` : "--";
                 const ceSym = r.ce ? (r.ce.trading_symbol || `${und} ${strike} CE`) : `${und} ${strike} CE`;
                 const ceKey = r.ce ? (r.ce.instrument_key || "") : "";
                 const ceLot = r.ce ? (r.ce.lot_size || 65) : 65;
                 const ceChg = r.ce ? (r.ce.net_change || 0) : 0;
-                const ceChgPct = r.ce ? (r.ce.net_change_pct || 0) : 0;
 
-                // PE Data
-                const peLtp = r.pe ? r.pe.ltp.toFixed(2) : "-";
-                const peLtpNum = r.pe ? (r.pe.ltp || 0) : 0;
-                const peBidAsk = r.pe ? `${r.pe.bid.toFixed(1)} / ${r.pe.ask.toFixed(1)}` : "-";
+                // PE Data & Formatting
+                const peHasPrice = r.pe && Number(r.pe.ltp) > 0;
+                const peLtpNum = peHasPrice ? Number(r.pe.ltp) : 0;
+                const peLtpText = peHasPrice ? `₹${peLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
+                const peChgPct = r.pe ? (Number(r.pe.net_change_pct) || 0) : 0;
+                const peChgColor = peChgPct > 0 ? "#10b981" : (peChgPct < 0 ? "#f43f5e" : "#94a3b8");
+                const peChgSign = peChgPct > 0 ? "+" : "";
+                const peChgText = peHasPrice ? `${peChgSign}${peChgPct.toFixed(2)}%` : "--";
                 const peSym = r.pe ? (r.pe.trading_symbol || `${und} ${strike} PE`) : `${und} ${strike} PE`;
                 const peKey = r.pe ? (r.pe.instrument_key || "") : "";
                 const peLot = r.pe ? (r.pe.lot_size || 65) : 65;
                 const peChg = r.pe ? (r.pe.net_change || 0) : 0;
-                const peChgPct = r.pe ? (r.pe.net_change_pct || 0) : 0;
 
-                // Checkbox state in Basket Mode (inspect both chainSelection and active basketOrders)
+                // Checkbox state in Basket Mode
                 const ceBuyKey = `${strike}_CE_BUY`;
                 const ceSellKey = `${strike}_CE_SELL`;
                 const peBuyKey = `${strike}_PE_BUY`;
@@ -5812,7 +5841,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 const isPeSellChecked = !!(window._chainSelectedLegs[peSellKey] || (window._basketOrders || []).some(o => Number(o.strike) === strike && o.opt_type === "PE" && o.side === "SELL"));
 
                 const ceActionCell = isBasketMode ? `
-                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:70px;">
                         <div class="chain-tick-wrap">
                             <label class="chain-tick-btn tick-buy ${isCeBuyChecked ? 'checked' : ''}" title="Tick to BUY CE in basket">
                                 <input type="checkbox" ${isCeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'BUY', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked); this.parentElement.querySelector('.tick-box').textContent = this.checked ? '☑' : '☐'">
@@ -5825,16 +5854,16 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         </div>
                     </td>
                 ` : `
-                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:70px;">
                         <div class="chain-quick-trade-wrap" style="display:inline-flex; align-items:center; gap:4px;">
-                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:12px; width:26px; height:24px; border-radius:4px; box-shadow:0 0 8px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">B</button>
-                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:12px; width:26px; height:24px; border-radius:4px; box-shadow:0 0 8px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">S</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:11px; width:24px; height:22px; border-radius:9999px; box-shadow:0 0 6px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">B</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:11px; width:24px; height:22px; border-radius:9999px; box-shadow:0 0 6px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">S</button>
                         </div>
                     </td>
                 `;
 
                 const peActionCell = isBasketMode ? `
-                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:70px;">
                         <div class="chain-tick-wrap">
                             <label class="chain-tick-btn tick-buy ${isPeBuyChecked ? 'checked' : ''}" title="Tick to BUY PE in basket">
                                 <input type="checkbox" ${isPeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'BUY', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked); this.parentElement.querySelector('.tick-box').textContent = this.checked ? '☑' : '☐'">
@@ -5847,10 +5876,10 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         </div>
                     </td>
                 ` : `
-                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:80px;">
+                    <td style="text-align:center; padding:4px 2px; white-space:nowrap; width:70px;">
                         <div class="chain-quick-trade-wrap" style="display:inline-flex; align-items:center; gap:4px;">
-                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:12px; width:26px; height:24px; border-radius:4px; box-shadow:0 0 8px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">B</button>
-                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:12px; width:26px; height:24px; border-radius:4px; box-shadow:0 0 8px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">S</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:11px; width:24px; height:22px; border-radius:9999px; box-shadow:0 0 6px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">B</button>
+                            <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:11px; width:24px; height:22px; border-radius:9999px; box-shadow:0 0 6px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">S</button>
                         </div>
                     </td>
                 `;
@@ -5858,35 +5887,45 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 rowsHtml += `
                     <tr class="${rowClass}">
                         ${ceActionCell}
+                        <!-- CE Change% -->
+                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:${ceChgColor}; font-weight:700; font-size:12px; padding:6px 10px;">
+                            ${ceChgText}
+                        </td>
                         <!-- CE LTP -->
-                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#10b981; font-weight:800; font-size:12.5px; padding:6px 10px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})" title="Click to trade ${ceSym}">
-                            ₹${ceLtp}
-                        </td>
-                        <!-- CE Bid/Ask -->
-                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#94a3b8; font-size:11px; padding:6px 8px;">
-                            ${ceBidAsk}
+                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#2dd4bf; font-weight:800; font-size:12.5px; padding:6px 10px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})" title="Click to trade ${ceSym}">
+                            ${ceLtpText}
                         </td>
 
-                        <!-- STRIKE (Center) -->
-                        <td style="text-align:center; padding:6px 4px; width:100px; background:#0f172a; border-left:1px solid rgba(255,255,255,0.08); border-right:1px solid rgba(255,255,255,0.08);">
-                            ${isAtm ? 
-                                `<span class="opt-chain-atm-strike-badge">${strike} ★ ATM</span>` : 
-                                `<span style="font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:13px;">${strike}</span>`
-                            }
+                        <!-- STRIKE PRICE (Center) -->
+                        <td style="text-align:center; padding:6px 4px; width:110px; background:#0b1120; border-left:1px solid rgba(255,255,255,0.08); border-right:1px solid rgba(255,255,255,0.08); font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:13px;">
+                            ${strike}
                         </td>
 
-                        <!-- PE Bid/Ask -->
-                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#94a3b8; font-size:11px; padding:6px 8px;">
-                            ${peBidAsk}
-                        </td>
                         <!-- PE LTP -->
-                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#f43f5e; font-weight:800; font-size:12.5px; padding:6px 10px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})" title="Click to trade ${peSym}">
-                            ₹${peLtp}
+                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#fb7185; font-weight:800; font-size:12.5px; padding:6px 10px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})" title="Click to trade ${peSym}">
+                            ${peLtpText}
+                        </td>
+                        <!-- PE Change% -->
+                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:${peChgColor}; font-weight:700; font-size:12px; padding:6px 10px;">
+                            ${peChgText}
                         </td>
                         ${peActionCell}
                     </tr>
                 `;
             });
+
+            // If divider hasn't been drawn (spot price higher than all strikes), append at bottom
+            if (!spotDividerInserted && spotP > 0) {
+                rowsHtml += `
+                    <tr class="opt-spot-divider-row">
+                        <td colspan="7">
+                            <div class="opt-spot-divider-line">
+                                <span class="opt-spot-divider-badge">${spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
 
             tbody.innerHTML = rowsHtml;
             updateOptionChainBasketSummaryBar();
@@ -5899,6 +5938,15 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
         _isLoadingOptionChain = false;
     }
 }
+
+function toggleOptTradeableOnly(isChecked) {
+    window._optChainTradeableOnly = !!isChecked;
+    try {
+        localStorage.setItem("straddle_opt_tradeable_only", isChecked ? "true" : "false");
+    } catch(e) {}
+    loadStraddleOptionChain(null, true);
+}
+window.toggleOptTradeableOnly = toggleOptTradeableOnly;
 
 // =========================================================================
 // DIRECT BUY / SELL ORDER MODAL (UPSTOX / ZERODHA GRADE)
@@ -6714,15 +6762,248 @@ window.addEventListener("resize", () => {
 
 
 // =========================================================================
-// ANGELONE-GRADE BASKET ORDERS SYSTEM
+// ANGELONE-GRADE MULTI-BASKET ORDERS SYSTEM
 // =========================================================================
 
+const STORAGE_SAVED_BASKETS = "straddle_saved_baskets";
+const STORAGE_LAST_BASKET_ID = "straddle_last_active_basket_id";
+const STORAGE_LEGACY_ORDERS = "straddle_basket_orders";
+const STORAGE_LEGACY_NAME = "straddle_basket_name";
+
 window._basketOrders = [];
-try {
-    const saved = localStorage.getItem("straddle_basket_orders");
-    if (saved) {
-        window._basketOrders = JSON.parse(saved) || [];
+window._activeBasketId = "basket_default";
+
+function getSavedBasketsList() {
+    let list = [];
+    try {
+        const raw = localStorage.getItem(STORAGE_SAVED_BASKETS);
+        if (raw) {
+            list = JSON.parse(raw);
+        }
+    } catch (e) {
+        console.error("Error reading saved baskets:", e);
     }
+
+    if (!Array.isArray(list) || list.length === 0) {
+        // Check for legacy migration
+        let legacyOrders = [];
+        let legacyName = "DEFAULT BASKET";
+        try {
+            const rawLegacy = localStorage.getItem(STORAGE_LEGACY_ORDERS);
+            if (rawLegacy) legacyOrders = JSON.parse(rawLegacy) || [];
+            const rawName = localStorage.getItem(STORAGE_LEGACY_NAME);
+            if (rawName) legacyName = rawName.toUpperCase();
+        } catch (e) {}
+
+        list = [
+            {
+                id: "basket_default",
+                name: legacyName || "DEFAULT BASKET",
+                orders: legacyOrders,
+                updated_at: Date.now()
+            }
+        ];
+        try {
+            localStorage.setItem(STORAGE_SAVED_BASKETS, JSON.stringify(list));
+        } catch (e) {}
+    }
+    return list;
+}
+
+function saveBasketsList(list) {
+    try {
+        localStorage.setItem(STORAGE_SAVED_BASKETS, JSON.stringify(list));
+    } catch (e) {
+        console.error("Failed saving baskets list:", e);
+    }
+}
+
+function syncBasketDropdown() {
+    const sel = document.getElementById("savedBasketsSelect");
+    if (!sel) return;
+    const list = getSavedBasketsList();
+    sel.innerHTML = "";
+    list.forEach(b => {
+        const opt = document.createElement("option");
+        opt.value = b.id;
+        const count = Array.isArray(b.orders) ? b.orders.length : 0;
+        opt.textContent = `${b.name} (${count})`;
+        if (b.id === window._activeBasketId) {
+            opt.selected = true;
+        }
+        sel.appendChild(opt);
+    });
+}
+
+function loadActiveBasketFromStorage() {
+    const list = getSavedBasketsList();
+    let targetId = localStorage.getItem(STORAGE_LAST_BASKET_ID);
+    let basket = list.find(b => b.id === targetId);
+    if (!basket) {
+        basket = list[0];
+        targetId = basket ? basket.id : "basket_default";
+    }
+    window._activeBasketId = targetId;
+    window._basketOrders = Array.isArray(basket.orders) ? JSON.parse(JSON.stringify(basket.orders)) : [];
+    
+    // Set UI elements
+    const nameEl = document.getElementById("basketModalName");
+    if (nameEl) nameEl.innerText = basket.name || "DEFAULT BASKET";
+
+    syncBasketDropdown();
+    updateBasketBadges();
+}
+
+function onSwitchSavedBasket(newBasketId) {
+    if (!newBasketId || newBasketId === window._activeBasketId) return;
+    // Auto-save current basket first so modifications are not lost
+    saveCurrentBasket(false);
+
+    const list = getSavedBasketsList();
+    const target = list.find(b => b.id === newBasketId);
+    if (!target) return;
+
+    window._activeBasketId = target.id;
+    window._basketOrders = Array.isArray(target.orders) ? JSON.parse(JSON.stringify(target.orders)) : [];
+    localStorage.setItem(STORAGE_LAST_BASKET_ID, target.id);
+
+    const nameEl = document.getElementById("basketModalName");
+    if (nameEl) nameEl.innerText = target.name || "DEFAULT BASKET";
+
+    syncBasketDropdown();
+    renderBasketOrdersTable();
+    updateBasketBadges();
+    updateBasketMarginCalculation();
+    showStraddleToast(`Loaded basket: ${target.name}`, "info", 1500);
+}
+
+function createNewBasket() {
+    // Save current active basket first
+    saveCurrentBasket(false);
+
+    const list = getSavedBasketsList();
+    const newIdx = list.length + 1;
+    const newId = "basket_" + Date.now();
+    const newName = `BASKET ${newIdx}`;
+
+    const newBasket = {
+        id: newId,
+        name: newName,
+        orders: [],
+        updated_at: Date.now()
+    };
+
+    list.push(newBasket);
+    saveBasketsList(list);
+
+    window._activeBasketId = newId;
+    window._basketOrders = [];
+    localStorage.setItem(STORAGE_LAST_BASKET_ID, newId);
+
+    const nameEl = document.getElementById("basketModalName");
+    if (nameEl) nameEl.innerText = newName;
+
+    syncBasketDropdown();
+    renderBasketOrdersTable();
+    updateBasketBadges();
+    updateBasketMarginCalculation();
+    showStraddleToast(`Created "${newName}". Add legs or rename it!`, "success", 2500);
+
+    // Focus name for immediate user convenience
+    if (nameEl) {
+        setTimeout(() => {
+            nameEl.focus();
+        }, 100);
+    }
+}
+
+function saveCurrentBasket(notify = false) {
+    const list = getSavedBasketsList();
+    let current = list.find(b => b.id === window._activeBasketId);
+    const nameEl = document.getElementById("basketModalName");
+    const resolvedName = (nameEl ? nameEl.innerText.trim().toUpperCase() : "") || "MY BASKET";
+
+    if (!current) {
+        current = {
+            id: window._activeBasketId || ("basket_" + Date.now()),
+            name: resolvedName,
+            orders: window._basketOrders || [],
+            updated_at: Date.now()
+        };
+        list.push(current);
+        window._activeBasketId = current.id;
+    } else {
+        current.name = resolvedName;
+        current.orders = window._basketOrders || [];
+        current.updated_at = Date.now();
+    }
+
+    saveBasketsList(list);
+    try {
+        localStorage.setItem(STORAGE_LAST_BASKET_ID, window._activeBasketId);
+        localStorage.setItem(STORAGE_LEGACY_ORDERS, JSON.stringify(window._basketOrders));
+        localStorage.setItem(STORAGE_LEGACY_NAME, resolvedName);
+    } catch (e) {}
+
+    syncBasketDropdown();
+    if (notify) {
+        showStraddleToast(`💾 Basket "${resolvedName}" saved successfully!`, "success", 2000);
+    }
+}
+
+function deleteCurrentBasket() {
+    const list = getSavedBasketsList();
+    if (list.length <= 1) {
+        if (confirm("This is your only basket. Do you want to clear all orders in it?")) {
+            window._basketOrders = [];
+            saveCurrentBasket(false);
+            renderBasketOrdersTable();
+            updateBasketBadges();
+            updateBasketMarginCalculation();
+            showStraddleToast("Cleared all legs from basket.", "info", 2000);
+        }
+        return;
+    }
+
+    const current = list.find(b => b.id === window._activeBasketId);
+    const basketName = current ? current.name : "this basket";
+    if (!confirm(`Are you sure you want to delete "${basketName}"?`)) {
+        return;
+    }
+
+    const filtered = list.filter(b => b.id !== window._activeBasketId);
+    saveBasketsList(filtered);
+
+    // Switch to first remaining basket
+    const nextBasket = filtered[0];
+    window._activeBasketId = nextBasket.id;
+    window._basketOrders = Array.isArray(nextBasket.orders) ? JSON.parse(JSON.stringify(nextBasket.orders)) : [];
+    localStorage.setItem(STORAGE_LAST_BASKET_ID, nextBasket.id);
+
+    const nameEl = document.getElementById("basketModalName");
+    if (nameEl) nameEl.innerText = nextBasket.name;
+
+    syncBasketDropdown();
+    renderBasketOrdersTable();
+    updateBasketBadges();
+    updateBasketMarginCalculation();
+    showStraddleToast(`Deleted basket. Switched to "${nextBasket.name}".`, "info", 2000);
+}
+
+function onBasketNameManualEdit(newName) {
+    const clean = (newName || "").trim().toUpperCase() || "MY BASKET";
+    const nameEl = document.getElementById("basketModalName");
+    if (nameEl) nameEl.innerText = clean;
+    saveCurrentBasket(false);
+}
+
+function persistActiveBasketState() {
+    saveCurrentBasket(false);
+}
+
+// Load default / last active basket on script execution
+try {
+    loadActiveBasketFromStorage();
 } catch (e) {}
 
 try {
@@ -6832,11 +7113,11 @@ function openBasketOrderModal() {
     const modal = document.getElementById("modalBasketOrders");
     if (!modal) return;
     modal.style.display = "flex";
+    loadActiveBasketFromStorage();
     const multInput = document.getElementById("basketMultiplierInput");
     if (multInput) multInput.value = window._basketMultiplier || 1;
     updateBasketBadges();
     renderBasketOrdersTable();
-    updateBasketAutoName();
     updateBasketMarginCalculation();
     startBasketQuoteTicker();
 }
@@ -7549,30 +7830,33 @@ function updateBasketAutoName() {
     const resetBtn = document.getElementById("btnResetBasketName");
     if (!nameEl) return;
 
+    const list = getSavedBasketsList();
+    const current = list.find(b => b.id === window._activeBasketId);
+    if (current && current.name && current.name !== "DEFAULT BASKET" && !current.name.startsWith("BASKET ")) {
+        nameEl.innerText = current.name;
+        if (resetBtn) resetBtn.style.display = "inline-block";
+        return;
+    }
+
     if (window._basketNameIsManual) {
         if (resetBtn) resetBtn.style.display = "inline-block";
         return;
     }
 
-    const autoName = generateBasketAutoName();
+    const autoName = current?.name || generateBasketAutoName();
     nameEl.innerText = autoName;
     if (resetBtn) resetBtn.style.display = "none";
 }
 window.updateBasketAutoName = updateBasketAutoName;
 
 function onBasketNameManualEdit(newVal) {
-    const auto = generateBasketAutoName();
-    const clean = (newVal || "").trim().toUpperCase();
-    if (clean && clean !== auto) {
-        window._basketNameIsManual = true;
-        const resetBtn = document.getElementById("btnResetBasketName");
-        if (resetBtn) resetBtn.style.display = "inline-block";
-    } else {
-        window._basketNameIsManual = false;
-        const resetBtn = document.getElementById("btnResetBasketName");
-        if (resetBtn) resetBtn.style.display = "none";
-        updateBasketAutoName();
-    }
+    const clean = (newVal || "").trim().toUpperCase() || "MY BASKET";
+    window._basketNameIsManual = true;
+    const nameEl = document.getElementById("basketModalName");
+    if (nameEl) nameEl.innerText = clean;
+    const resetBtn = document.getElementById("btnResetBasketName");
+    if (resetBtn) resetBtn.style.display = "inline-block";
+    saveCurrentBasket(false);
 }
 window.onBasketNameManualEdit = onBasketNameManualEdit;
 
@@ -7721,17 +8005,6 @@ async function executeCurrentBasket() {
             btn.disabled = false;
             btn.innerHTML = "⚡ EXECUTE BASKET";
         }
-    }
-}
-
-function saveCurrentBasket() {
-    try {
-        localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        const name = document.getElementById("basketModalName")?.innerText || "MY BASKET";
-        localStorage.setItem("straddle_basket_name", name);
-        showStraddleToast(`Basket "${name}" saved successfully!`, "success", 2500);
-    } catch (e) {
-        showStraddleToast("Error saving basket: " + e.message, "error", 2500);
     }
 }
 
@@ -8000,6 +8273,15 @@ window.onBasketMultiplierChange = onBasketMultiplierChange;
 window.updateBasketMarginCalculation = updateBasketMarginCalculation;
 window.executeCurrentBasket = executeCurrentBasket;
 window.saveCurrentBasket = saveCurrentBasket;
+window.getSavedBasketsList = getSavedBasketsList;
+window.saveBasketsList = saveBasketsList;
+window.syncBasketDropdown = syncBasketDropdown;
+window.loadActiveBasketFromStorage = loadActiveBasketFromStorage;
+window.onSwitchSavedBasket = onSwitchSavedBasket;
+window.createNewBasket = createNewBasket;
+window.deleteCurrentBasket = deleteCurrentBasket;
+window.onBasketNameManualEdit = onBasketNameManualEdit;
+window.persistActiveBasketState = persistActiveBasketState;
 window.analyseBasketPayoff = analyseBasketPayoff;
 window.handleBasketSearchInput = handleBasketSearchInput;
 window.clearBasketSearch = clearBasketSearch;
@@ -8213,19 +8495,22 @@ function renderCandlestickCanvas() {
     const ctx = canvas.getContext("2d");
     const container = canvas.parentElement;
     
-    // Responsive sizing
+    // Fixed container bounds & device pixel ratio handling
     const dpr = window.devicePixelRatio || 1;
-    const rect = container.getBoundingClientRect();
-    const w = rect.width || 1050;
-    const h = rect.height || 520;
+    const w = Math.floor(container.clientWidth || 1050);
+    const h = 500; // Fixed height in sync with container CSS
 
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
+    if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+    }
     canvas.style.width = w + "px";
     canvas.style.height = h + "px";
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
 
-    // Clear background
+    // Deep modern dark background
     ctx.fillStyle = "#070a12";
     ctx.fillRect(0, 0, w, h);
 
@@ -8239,34 +8524,41 @@ function renderCandlestickCanvas() {
     }
 
     // Chart margins
-    const margin = { top: 20, right: 75, bottom: 30, left: 15 };
+    const margin = { top: 25, right: 85, bottom: 30, left: 15 };
     const chartW = w - margin.left - margin.right;
     const chartH = h - margin.top - margin.bottom;
     const volumeH = chartH * 0.16;
-    const priceH = chartH - volumeH - 10;
+    const priceH = chartH - volumeH - 12;
 
-    // Calculate High / Low price ranges
+    // Filter valid positive candles and compute price range
     let minPrice = Infinity;
     let maxPrice = -Infinity;
     let maxVolume = 0;
 
     candles.forEach(c => {
-        if (c.low < minPrice) minPrice = c.low;
-        if (c.high > maxPrice) maxPrice = c.high;
+        if (c.low && c.low < minPrice && c.low > 0) minPrice = c.low;
+        if (c.high && c.high > maxPrice) maxPrice = c.high;
         if (c.volume > maxVolume) maxVolume = c.volume;
     });
+
+    if (minPrice === Infinity || maxPrice === -Infinity || minPrice <= 0) {
+        minPrice = 100;
+        maxPrice = 110;
+    }
 
     if (minPrice === maxPrice) {
         minPrice *= 0.99;
         maxPrice *= 1.01;
     }
-    const pricePadding = (maxPrice - minPrice) * 0.05;
+
+    // 12% vertical margins prevent wicks from touching canvas edges
+    const pricePadding = (maxPrice - minPrice) * 0.12;
     minPrice -= pricePadding;
     maxPrice += pricePadding;
     const priceRange = maxPrice - minPrice;
 
-    // Draw Price Grid Lines
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+    // Subtle Grid lines
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
     ctx.lineWidth = 1;
     ctx.fillStyle = "#64748b";
     ctx.font = "11px JetBrains Mono, monospace";
@@ -8275,13 +8567,13 @@ function renderCandlestickCanvas() {
     const steps = 6;
     for (let i = 0; i <= steps; i++) {
         const p = minPrice + (priceRange * (i / steps));
-        const y = margin.top + priceH - (priceH * (i / steps));
+        const y = Math.floor(margin.top + priceH - (priceH * (i / steps))) + 0.5;
         ctx.beginPath();
         ctx.moveTo(margin.left, y);
         ctx.lineTo(w - margin.right, y);
         ctx.stroke();
 
-        ctx.fillText("₹" + p.toFixed(2), w - margin.right + 6, y + 4);
+        ctx.fillText("₹" + p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w - margin.right + 6, y + 4);
     }
 
     // Candle widths and spacing
@@ -8289,11 +8581,16 @@ function renderCandlestickCanvas() {
     const slotW = chartW / numCandles;
     const candleW = Math.max(2, Math.min(18, slotW * 0.72));
 
+    // TradingView Standard Color Coding
+    // Jade Green Bullish: #089981 | Coral Red Bearish: #f23645
+    const COLOR_BULLISH = "#089981";
+    const COLOR_BEARISH = "#f23645";
+
     // Draw Candles & Volumes
     candles.forEach((c, i) => {
         const x = margin.left + (i * slotW) + (slotW / 2);
         const isUp = c.close >= c.open;
-        const color = isUp ? "#10b981" : "#ef4444";
+        const color = isUp ? COLOR_BULLISH : COLOR_BEARISH;
 
         // Y positions
         const yOpen = margin.top + priceH - ((c.open - minPrice) / priceRange * priceH);
@@ -8301,26 +8598,28 @@ function renderCandlestickCanvas() {
         const yHigh = margin.top + priceH - ((c.high - minPrice) / priceRange * priceH);
         const yLow = margin.top + priceH - ((c.low - minPrice) / priceRange * priceH);
 
-        // Wick
+        // Pixel-crisp 1px Wick
+        const wickX = Math.floor(x) + 0.5;
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.moveTo(x, yHigh);
-        ctx.lineTo(x, yLow);
+        ctx.moveTo(wickX, yHigh);
+        ctx.lineTo(wickX, yLow);
         ctx.stroke();
 
         // Body
         const bodyTop = Math.min(yOpen, yClose);
         const bodyH = Math.max(1.5, Math.abs(yClose - yOpen));
+        const bodyLeft = Math.floor(x - (candleW / 2));
         ctx.fillStyle = color;
-        ctx.fillRect(x - (candleW / 2), bodyTop, candleW, bodyH);
+        ctx.fillRect(bodyLeft, bodyTop, Math.floor(candleW), bodyH);
 
         // Volume bar
         if (maxVolume > 0 && c.volume > 0) {
             const vBarH = (c.volume / maxVolume) * volumeH;
             const yVol = margin.top + chartH - vBarH;
-            ctx.fillStyle = isUp ? "rgba(16, 185, 129, 0.25)" : "rgba(239, 68, 68, 0.25)";
-            ctx.fillRect(x - (candleW / 2), yVol, candleW, vBarH);
+            ctx.fillStyle = isUp ? "rgba(8, 153, 129, 0.35)" : "rgba(242, 54, 69, 0.35)";
+            ctx.fillRect(bodyLeft, yVol, Math.floor(candleW), vBarH);
         }
 
         // Time axis labels every N candles
@@ -8338,10 +8637,12 @@ function renderCandlestickCanvas() {
     const lastCandle = candles[candles.length - 1];
     const curP = lastCandle.close;
     const curY = margin.top + priceH - ((curP - minPrice) / priceRange * priceH);
+    const lastIsUp = lastCandle.close >= lastCandle.open;
+    const lastColor = lastIsUp ? COLOR_BULLISH : COLOR_BEARISH;
 
     ctx.save();
     ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = "#38bdf8";
+    ctx.strokeStyle = lastColor;
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.moveTo(margin.left, curY);
@@ -8350,12 +8651,14 @@ function renderCandlestickCanvas() {
     ctx.restore();
 
     // Price tag badge on right axis
-    ctx.fillStyle = "#0284c7";
-    ctx.fillRect(w - margin.right + 2, curY - 10, margin.right - 4, 20);
+    ctx.fillStyle = lastColor;
+    ctx.beginPath();
+    ctx.roundRect(w - margin.right + 2, curY - 10, margin.right - 4, 20, 4);
+    ctx.fill();
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 11px JetBrains Mono, monospace";
     ctx.textAlign = "left";
-    ctx.fillText("₹" + curP.toFixed(2), w - margin.right + 6, curY + 4);
+    ctx.fillText("₹" + curP.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w - margin.right + 6, curY + 4);
 
     // Crosshair if hovering
     if (window._chartCrosshairPos) {
@@ -8391,10 +8694,10 @@ function renderCandlestickCanvas() {
                 const lowEl = document.getElementById("lblCandleLow");
                 const closeEl = document.getElementById("lblCandleClose");
                 const timeEl = document.getElementById("lblCandleTime");
-                if (openEl) openEl.textContent = "₹" + c.open.toFixed(2);
-                if (highEl) highEl.textContent = "₹" + c.high.toFixed(2);
-                if (lowEl) lowEl.textContent = "₹" + c.low.toFixed(2);
-                if (closeEl) closeEl.textContent = "₹" + c.close.toFixed(2);
+                if (openEl) openEl.textContent = "₹" + c.open.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                if (highEl) highEl.textContent = "₹" + c.high.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                if (lowEl) lowEl.textContent = "₹" + c.low.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                if (closeEl) closeEl.textContent = "₹" + c.close.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (timeEl) timeEl.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
             }
         }
@@ -8407,12 +8710,21 @@ function updateLiveCandleTick(newPrice) {
     const candles = window._activeCandles;
     if (candles && candles.length > 0) {
         const last = candles[candles.length - 1];
+        // Guard against cross-symbol tick leakage or extreme bad tick corruption
+        // (e.g. NIFTY price ~24000 leaking into SILVER ~211000)
+        if (last.close > 0) {
+            const ratioDiff = Math.abs(p - last.close) / last.close;
+            if (ratioDiff > 0.35) {
+                console.warn(`[Chart] Ignoring anomalous tick ₹${p} (last was ₹${last.close})`);
+                return;
+            }
+        }
         last.close = p;
         if (p > last.high) last.high = p;
         if (p < last.low) last.low = p;
 
         const ltpEl = document.getElementById("chartLtpDisplay");
-        if (ltpEl) ltpEl.textContent = "₹" + p.toFixed(2);
+        if (ltpEl) ltpEl.textContent = "₹" + p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
         renderCandlestickCanvas();
     }

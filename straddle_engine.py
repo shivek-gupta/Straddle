@@ -531,7 +531,7 @@ def _get_commodity_live_price(und: str) -> float:
     clean_und = und.upper()
     now_ts = time.time()
     with _SPOT_FETCH_LOCK:
-        if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 1.0:
+        if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 0.25:
             return _SPOT_CACHE[clean_und]
 
     # 1. Try Kotak Neo broker quote for active future
@@ -1682,9 +1682,9 @@ class StraddleManager:
 
         now_ts = time.time()
         
-        # Check high-speed memory cache (valid for 1.0 second)
+        # Check high-speed memory cache (valid for 0.25 second for fast live ticks)
         with _SPOT_FETCH_LOCK:
-            if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 1.0:
+            if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 0.25:
                 return _SPOT_CACHE[clean_und]
 
         # 1. Try Kotak Neo broker quotes if connected
@@ -6610,9 +6610,7 @@ class StraddleManager:
                         
                 dynamic_mult = base_mult
                 if last_valid_close and last_valid_close > 0 and live_spot > 0 and clean_und != "NIFTY":
-                    est_inr = last_valid_close * base_mult
-                    if abs(est_inr - live_spot) / max(1.0, live_spot) < 0.25:
-                        dynamic_mult = live_spot / last_valid_close
+                    dynamic_mult = live_spot / last_valid_close
                 
                 raw_candles = []
                 for i in range(len(timestamps)):
@@ -6683,14 +6681,15 @@ class StraddleManager:
                     "volume": 100,
                 })
 
-        # Ensure latest candle is updated with live_spot
+        # Ensure latest candle is updated with live_spot cleanly
         if candles and live_spot > 0:
             last = candles[-1]
-            last["close"] = round(live_spot, 2)
-            if live_spot > last["high"]:
-                last["high"] = round(live_spot, 2)
-            if live_spot < last["low"]:
-                last["low"] = round(live_spot, 2)
+            if last.get("close", 0) <= 0 or abs(live_spot - last["close"]) / max(1.0, last["close"]) < 0.25:
+                last["close"] = round(live_spot, 2)
+                if live_spot > last["high"]:
+                    last["high"] = round(live_spot, 2)
+                if live_spot < last["low"]:
+                    last["low"] = round(live_spot, 2)
 
         return {
             "status": "success",
