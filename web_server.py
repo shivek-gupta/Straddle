@@ -1118,12 +1118,17 @@ def init_services():
         logger.warning(f"Straddle Engine startup notice: {e}")
 
     try:
-        # Check authentication on startup
-        if not kotak_auth.is_session_active_for_today():
-            logger.info("Attempting startup authentication with Kotak Neo...")
-            kotak_auth.get_authenticated_client(force=False)
+        # Check authentication on startup in background so web server starts immediately
+        def _bg_auth_check():
+            try:
+                if not kotak_auth.is_session_active_for_today():
+                    logger.info("Attempting startup authentication with Kotak Neo...")
+                    kotak_auth.get_authenticated_client(force=False)
+            except Exception as ex:
+                logger.warning(f"Startup auth check notice: {ex}")
+        Thread(target=_bg_auth_check, daemon=True, name="StartupAuthWorker").start()
     except Exception as e:
-        logger.warning(f"Startup auth check notice: {e}")
+        logger.warning(f"Startup auth thread notice: {e}")
 
 
 if __name__ == "__main__":

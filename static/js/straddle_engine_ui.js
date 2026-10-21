@@ -5706,7 +5706,15 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
     }
 
     try {
-                   // Update Header Spot Ticker (remove ATM from title bar as requested)
+        let url = `/api/straddle/option_chain?underlying=${und}&strike_range=${strikeRange}`;
+        if (exp) url += `&expiry_ms=${exp}`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (data.success && data.data) {
+            const chain = data.data;
+            const currentExpDateStr = chain.expiry_date || (expSel?.selectedOptions && expSel.selectedOptions[0] ? expSel.selectedOptions[0].text : "Weekly");
+
+            // Update Header Spot Ticker (remove ATM from title bar as requested)
             if (spotLabel) {
                 spotLabel.textContent = `${chain.underlying}: ₹${chain.spot_price.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
             }
