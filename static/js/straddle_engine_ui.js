@@ -8378,15 +8378,15 @@ const COMMODITY_DISPLAY_NAMES = {
 
 const COMMODITY_COLOR_MAP = {
     "NIFTY": "#38bdf8",
-    "CRUDEOIL": "#3b82f6",
+    "CRUDEOIL": "#f43f5e",
     "NATURALGAS": "#f59e0b",
     "GOLD": "#eab308",
     "SILVER": "#94a3b8",
-    "CRUDEOILM": "#60a5fa",
-    "NATGASMINI": "#fbbf24",
-    "GOLDM": "#facc15",
-    "SILVERM": "#cbd5e1",
-    "COPPER": "#ea580c"
+    "CRUDEOILM": "#10b981",
+    "NATGASMINI": "#ea580c",
+    "GOLDM": "#84cc16",
+    "SILVERM": "#8b5cf6",
+    "COPPER": "#f97316"
 };
 
 function selectGlobalUnderlying(undKey) {
