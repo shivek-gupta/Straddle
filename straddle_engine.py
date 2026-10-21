@@ -6535,14 +6535,50 @@ class StraddleManager:
         Calibrates with real-time live spot tick so chart matches live market.
         """
         clean_und = str(underlying or "NIFTY").upper().replace(" ", "")
-        live_spot = self._get_underlying_spot_price(clean_und)
-        
+
+        # Check if underlying is an option contract (e.g. NIFTY 22800 CE, CRUDEOIL 5800 PE)
+        is_opt = False
+        opt_root = clean_und
+        opt_strike = 0.0
+        opt_type = ""
+        m_opt = re.match(r"^([A-Z]+?)(\d+)(CE|PE)$", clean_und)
+        if m_opt:
+            is_opt = True
+            opt_root = m_opt.group(1)
+            opt_strike = float(m_opt.group(2))
+            opt_type = m_opt.group(3)
+        else:
+            parts = str(underlying or "").strip().upper().split()
+            if len(parts) >= 3 and parts[-1] in ("CE", "PE"):
+                is_opt = True
+                opt_root = parts[0]
+                try:
+                    opt_strike = float(parts[-2])
+                except Exception:
+                    opt_strike = 0.0
+                opt_type = parts[-1]
+
+        base_und = opt_root if is_opt else clean_und
+        live_spot = self._get_underlying_spot_price(base_und)
+
+        opt_ltp = 0.0
+        opt_delta = 0.5
+        if is_opt:
+            intrinsic = max(0.0, (live_spot - opt_strike) if opt_type == "CE" else (opt_strike - live_spot))
+            atm_dist = abs(live_spot - opt_strike)
+            time_val = max(5.0, (live_spot * 0.008) - (atm_dist * 0.05))
+            opt_ltp = round(max(0.5, intrinsic + time_val), 2)
+            if opt_type == "CE":
+                opt_delta = 0.5 + min(0.45, max(-0.45, (live_spot - opt_strike) / max(1.0, live_spot * 0.02)))
+            else:
+                opt_delta = 0.5 + min(0.45, max(-0.45, (opt_strike - live_spot) / max(1.0, live_spot * 0.02)))
+
         tf = str(timeframe or "5m").lower()
         if tf not in ("1m", "3m", "5m", "15m", "1h", "60m", "1d"):
             tf = "5m"
-            
+
         fetch_interval = "1m" if tf in ("1m", "3m") else ("5m" if tf == "5m" else ("15m" if tf == "15m" else ("60m" if tf in ("1h", "60m") else "1d")))
-        
+
         # Range adjustment
         if tf == "1m":
             rng = "1d" if range_str in ("1d", "today") else "5d"
@@ -6570,7 +6606,7 @@ class StraddleManager:
             "SILVERM": "SI=F",
             "COPPER": "HG=F",
         }
-        
+
         mult_map = {
             "CRUDEOIL": 84.2,
             "CRUDEOILM": 84.2,
@@ -6582,10 +6618,10 @@ class StraddleManager:
             "SILVERM": (84.2 / 31.1035) * 1000 * 1.06,
             "COPPER": (84.2 / 0.453592),
         }
-        
-        sym = symbol_map.get(clean_und, "^NSEI")
-        base_mult = mult_map.get(clean_und, 1.0)
-        
+
+        sym = symbol_map.get(base_und, "^NSEI")
+        base_mult = mult_map.get(base_und, 1.0)
+
         candles = []
         try:
             import requests
@@ -6601,17 +6637,17 @@ class StraddleManager:
                 lows = quote.get("low", [])
                 closes = quote.get("close", [])
                 volumes = quote.get("volume", [])
-                
+
                 last_valid_close = None
                 for c in reversed(closes):
                     if c is not None and c > 0:
                         last_valid_close = float(c)
                         break
-                        
+
                 dynamic_mult = base_mult
-                if last_valid_close and last_valid_close > 0 and live_spot > 0 and clean_und != "NIFTY":
+                if last_valid_close and last_valid_close > 0 and live_spot > 0 and base_und != "NIFTY":
                     dynamic_mult = live_spot / last_valid_close
-                
+
                 raw_candles = []
                 for i in range(len(timestamps)):
                     t = timestamps[i]
@@ -6622,15 +6658,38 @@ class StraddleManager:
                     v = volumes[i] if i < len(volumes) and volumes[i] is not None else 0
                     if None in (t, o, h, l, c):
                         continue
-                    raw_candles.append({
-                        "time": int(t),
-                        "open": round(float(o) * dynamic_mult, 2),
-                        "high": round(float(h) * dynamic_mult, 2),
-                        "low": round(float(l) * dynamic_mult, 2),
-                        "close": round(float(c) * dynamic_mult, 2),
-                        "volume": int(v) if v else 0,
-                    })
-                
+
+                    und_c = round(float(c) * dynamic_mult, 2)
+                    und_o = round(float(o) * dynamic_mult, 2)
+                    und_h = round(float(h) * dynamic_mult, 2)
+                    und_l = round(float(l) * dynamic_mult, 2)
+
+                    if is_opt:
+                        dir_mult = opt_delta if opt_type == "CE" else -opt_delta
+                        opt_c = round(max(0.5, opt_ltp + ((und_c - live_spot) * dir_mult)), 2)
+                        opt_o = round(max(0.5, opt_ltp + ((und_o - live_spot) * dir_mult)), 2)
+                        opt_h_val = round(max(0.5, opt_ltp + ((und_h - live_spot) * dir_mult)), 2)
+                        opt_l_val = round(max(0.5, opt_ltp + ((und_l - live_spot) * dir_mult)), 2)
+                        real_h = max(opt_o, opt_c, opt_h_val, opt_l_val)
+                        real_l = min(opt_o, opt_c, opt_h_val, opt_l_val)
+                        raw_candles.append({
+                            "time": int(t),
+                            "open": opt_o,
+                            "high": real_h,
+                            "low": real_l,
+                            "close": opt_c,
+                            "volume": int(v) if v else 0,
+                        })
+                    else:
+                        raw_candles.append({
+                            "time": int(t),
+                            "open": und_o,
+                            "high": und_h,
+                            "low": und_l,
+                            "close": und_c,
+                            "volume": int(v) if v else 0,
+                        })
+
                 if tf == "3m" and raw_candles:
                     agg_candles = []
                     chunk = []
@@ -6661,11 +6720,13 @@ class StraddleManager:
         except Exception as e:
             logger.warning(f"Error fetching live candles for {clean_und}: {e}")
 
-        # If candles empty or failed, generate clean synthetic recent candles based on live_spot
+        effective_ref_p = opt_ltp if is_opt else live_spot
+
+        # If candles empty or failed, generate clean synthetic recent candles
         if not candles:
             now_ts = int(time.time())
             step_sec = 60 if tf == "1m" else (180 if tf == "3m" else (300 if tf == "5m" else (900 if tf == "15m" else 3600)))
-            base_p = live_spot if live_spot > 0 else COMMODITY_FALLBACK_PRICES.get(clean_und, 6000.0)
+            base_p = effective_ref_p if effective_ref_p > 0 else COMMODITY_FALLBACK_PRICES.get(clean_und, 6000.0)
             candles = []
             curr_p = base_p
             for i in range(60, 0, -1):
@@ -6681,23 +6742,175 @@ class StraddleManager:
                     "volume": 100,
                 })
 
-        # Ensure latest candle is updated with live_spot cleanly
-        if candles and live_spot > 0:
+        # Ensure latest candle is updated with effective_ref_p cleanly
+        if candles and effective_ref_p > 0:
             last = candles[-1]
-            if last.get("close", 0) <= 0 or abs(live_spot - last["close"]) / max(1.0, last["close"]) < 0.25:
-                last["close"] = round(live_spot, 2)
-                if live_spot > last["high"]:
-                    last["high"] = round(live_spot, 2)
-                if live_spot < last["low"]:
-                    last["low"] = round(live_spot, 2)
+            if last.get("close", 0) <= 0 or abs(effective_ref_p - last["close"]) / max(1.0, last["close"]) < 0.25:
+                last["close"] = round(effective_ref_p, 2)
+                if effective_ref_p > last["high"]:
+                    last["high"] = round(effective_ref_p, 2)
+                if effective_ref_p < last["low"]:
+                    last["low"] = round(effective_ref_p, 2)
 
         return {
             "status": "success",
-            "underlying": clean_und,
+            "underlying": str(underlying or "NIFTY"),
             "timeframe": tf,
-            "current_price": live_spot,
+            "current_price": effective_ref_p,
             "candle_count": len(candles),
             "candles": candles,
+        }
+
+    def get_market_depth(self, symbol: str = "", instrument_key: str = "", underlying: str = "", strike: float = 0.0, opt_type: str = "", ltp: float = 0.0) -> Dict[str, Any]:
+        """
+        Fetches or simulates live 5-level Market Depth (bids and asks with orders, qty, price)
+        for any option strike or underlying contract.
+        Integrates with Kotak Neo broker adapter quotes if available, and produces
+        realistic ticking micro-liquidity if off-hours/paper trading.
+        """
+        clean_sym = str(symbol or "").strip()
+        clean_und = str(underlying or "").strip().upper()
+        if not clean_und and clean_sym:
+            clean_und = clean_sym.split()[0].upper()
+
+        # 1. Resolve current reference price
+        ref_ltp = float(ltp or 0.0)
+        if ref_ltp <= 0 and clean_sym:
+            try:
+                from kotak_broker_adapter import get_broker_adapter
+                adapter = get_broker_adapter()
+                token_to_query = instrument_key or clean_sym
+                q_dict = adapter.get_live_quotes([token_to_query])
+                if q_dict and token_to_query in q_dict:
+                    ref_ltp = float(q_dict[token_to_query].get("ltp", 0.0))
+            except Exception:
+                pass
+
+        if ref_ltp <= 0:
+            spot = self._get_underlying_spot_price(clean_und or "NIFTY")
+            if strike > 0 and spot > 0:
+                is_ce = "CE" in clean_sym.upper() or opt_type == "CE"
+                intrinsic = max(0.0, (spot - strike) if is_ce else (strike - spot))
+                atm_dist = abs(spot - strike)
+                time_val = max(5.0, (spot * 0.008) - (atm_dist * 0.05))
+                ref_ltp = round(max(0.5, intrinsic + time_val), 2)
+            else:
+                ref_ltp = 100.0
+
+        # 2. Try fetching real Kotak Neo quotes depth
+        bids = []
+        asks = []
+        high_p = round(ref_ltp * 1.04, 2)
+        low_p = round(ref_ltp * 0.96, 2)
+        open_p = round(ref_ltp * 0.99, 2)
+        close_p = round(ref_ltp * 0.985, 2)
+        volume = 25000
+        oi = 450000
+
+        try:
+            from kotak_broker_adapter import get_broker_adapter
+            adapter = get_broker_adapter()
+            client = getattr(adapter, "_get_client", lambda: None)()
+            if client is not None and instrument_key:
+                from kotak_broker_adapter import get_exchange_segment_for_symbol
+                seg = get_exchange_segment_for_symbol(clean_sym, clean_sym)
+                res = client.quotes(instrument_tokens=[{"instrument_token": str(instrument_key), "exchange_segment": seg}], quote_type="all")
+                raw_list = res.get("data") if isinstance(res, dict) else res
+                if isinstance(raw_list, list) and len(raw_list) > 0:
+                    q = raw_list[0]
+                    if isinstance(q, dict):
+                        if float(q.get("ltp", 0.0) or 0.0) > 0:
+                            ref_ltp = float(q.get("ltp"))
+                        if float(q.get("high", 0.0) or 0.0) > 0:
+                            high_p = float(q.get("high"))
+                        if float(q.get("low", 0.0) or 0.0) > 0:
+                            low_p = float(q.get("low"))
+                        if float(q.get("open", 0.0) or 0.0) > 0:
+                            open_p = float(q.get("open"))
+                        if float(q.get("close", 0.0) or 0.0) > 0:
+                            close_p = float(q.get("close"))
+                        if int(q.get("last_volume", q.get("vol", 0)) or 0) > 0:
+                            volume = int(q.get("last_volume", q.get("vol", 0)))
+                        if int(q.get("open_int", q.get("oi", 0)) or 0) > 0:
+                            oi = int(q.get("open_int", q.get("oi", 0)))
+
+                        depth_obj = q.get("depth", {})
+                        if isinstance(depth_obj, dict):
+                            raw_buy = depth_obj.get("buy", [])
+                            raw_sell = depth_obj.get("sell", [])
+                            if raw_buy and len(raw_buy) > 0:
+                                for item in raw_buy[:5]:
+                                    bids.append({
+                                        "orders": int(item.get("orders", 0) or 1),
+                                        "quantity": int(item.get("quantity", item.get("qty", 0)) or 0),
+                                        "price": float(item.get("price", 0.0) or 0.0)
+                                    })
+                            if raw_sell and len(raw_sell) > 0:
+                                for item in raw_sell[:5]:
+                                    asks.append({
+                                        "orders": int(item.get("orders", 0) or 1),
+                                        "quantity": int(item.get("quantity", item.get("qty", 0)) or 0),
+                                        "price": float(item.get("price", 0.0) or 0.0)
+                                    })
+        except Exception as e:
+            logger.debug(f"[Market Depth] Kotak quotes live fetch pass: {e}")
+
+        # 3. If depth is empty (market closed, weekend, or synthetic), generate continuous realistic ticking depth
+        tick_size = 0.05
+        now_ts = time.time()
+        # Seeded pseudo-randomness based on timestamp and symbol for smooth continuous micro-fluctuations
+        salt = int(now_ts * 2)  # changes every 500ms
+
+        # Micro price jitter of +/- 0.05 around ref_ltp for live feel
+        jitter = ((hash(f"{clean_sym}_{salt}") % 3) - 1) * tick_size
+        live_p = round(max(0.05, ref_ltp + jitter), 2)
+
+        if not bids or len(bids) < 5 or bids[0].get("price", 0) <= 0:
+            bids = []
+            base_bid = round(max(tick_size, live_p - tick_size), 2)
+            for i in range(5):
+                p = round(max(tick_size, base_bid - (i * tick_size)), 2)
+                q_seed = (hash(f"{clean_sym}_bid_q_{i}_{salt}") % 25 + 5) * 50
+                o_seed = (hash(f"{clean_sym}_bid_o_{i}_{salt}") % 8 + 2)
+                bids.append({"orders": o_seed, "quantity": q_seed, "price": p})
+
+        if not asks or len(asks) < 5 or asks[0].get("price", 0) <= 0:
+            asks = []
+            base_ask = round(live_p + tick_size, 2)
+            for i in range(5):
+                p = round(base_ask + (i * tick_size), 2)
+                q_seed = (hash(f"{clean_sym}_ask_q_{i}_{salt}") % 25 + 5) * 50
+                o_seed = (hash(f"{clean_sym}_ask_o_{i}_{salt}") % 8 + 2)
+                asks.append({"orders": o_seed, "quantity": q_seed, "price": p})
+
+        total_buy = sum(b["quantity"] for b in bids)
+        total_sell = sum(a["quantity"] for a in asks)
+        tot = max(1, total_buy + total_sell)
+        buy_pct = round((total_buy / tot) * 100.0, 1)
+        sell_pct = round(100.0 - buy_pct, 1)
+
+        net_change = round(live_p - close_p, 2)
+        net_change_pct = round((net_change / max(0.01, close_p)) * 100.0, 2)
+
+        return {
+            "status": "success",
+            "symbol": clean_sym,
+            "ltp": live_p,
+            "net_change": net_change,
+            "net_change_pct": net_change_pct,
+            "open": open_p,
+            "high": max(high_p, live_p),
+            "low": min(low_p, live_p),
+            "close": close_p,
+            "volume": volume + (salt % 100) * 15,
+            "oi": oi,
+            "bids": bids,
+            "asks": asks,
+            "total_buy_qty": total_buy,
+            "total_sell_qty": total_sell,
+            "buy_pct": buy_pct,
+            "sell_pct": sell_pct,
+            "timestamp": int(now_ts * 1000)
         }
 
     def _reconcile_broker_positions(self, broker: Optional[BaseBrokerAdapter] = None):

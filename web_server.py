@@ -932,6 +932,23 @@ def api_straddle_chart_candles():
         return jsonify({"status": "error", "success": False, "error": str(e), "candles": []}), 500
 
 
+@app.route("/api/straddle/market_depth", methods=["GET"])
+def api_straddle_market_depth():
+    try:
+        sym = request.args.get("symbol", "")
+        key = request.args.get("instrument_key", "")
+        und = request.args.get("underlying", "")
+        strike = float(request.args.get("strike", 0) or 0)
+        opt_type = request.args.get("opt_type", "").upper()
+        ltp = float(request.args.get("ltp", 0) or 0)
+        mgr = get_straddle_manager()
+        res = mgr.get_market_depth(symbol=sym, instrument_key=key, underlying=und, strike=strike, opt_type=opt_type, ltp=ltp)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_market_depth: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 
 
 # ==========================================================
