@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261021_pills3">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261021_pills4">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -213,6 +213,20 @@
                 background: var(--pill-color, #38bdf8) !important;
                 border-color: var(--pill-color, #38bdf8) !important;
                 box-shadow: 0 0 12px var(--pill-color, #38bdf8) !important;
+            }
+
+            /* Robust Modal Backdrop Protection: Default to NONE */
+            .straddle-modal-backdrop {
+                display: none;
+            }
+            .straddle-modal-backdrop[style*="display:none"],
+            .straddle-modal-backdrop[style*="display: none"],
+            .straddle-modal-backdrop.hidden {
+                display: none !important;
+            }
+            .straddle-modal-backdrop[style*="display:flex"],
+            .straddle-modal-backdrop[style*="display: flex"] {
+                display: flex !important;
             }
         </style>
 
@@ -2245,14 +2259,14 @@
     <!-- ====================================================================
          INTERACTIVE LIVE CANDLESTICK CHART MODAL (TradingView Grade)
          ==================================================================== -->
-    <div id="modalLiveChart" class="straddle-modal-backdrop" style="display:none; z-index:10070;">
+    <div id="modalLiveChart" class="straddle-modal-backdrop hidden" style="display:none !important; z-index:10070;" onclick="if(event.target === this) closeLiveChartModal()">
         <div class="straddle-modal-card" style="max-width:1150px; width:96%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.9); overflow:hidden; display:flex; flex-direction:column;">
             <!-- Header -->
             <div style="padding:12px 20px; background:#060911; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chartAssetDot" style="width:10px; height:10px; border-radius:50%; background:#38bdf8; box-shadow:0 0 10px #38bdf8;"></span>
-                        <span id="chartAssetTitle" style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">CRUDE OIL LIVE CHART</span>
+                        <span id="chartAssetTitle" style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">LIVE CANDLESTICK CHART</span>
                     </div>
                     <!-- Real-time Price Stream Strip -->
                     <div style="display:flex; align-items:center; gap:12px; background:#0e1422; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 12px; font-family:var(--font-mono); font-size:12px;">
@@ -2290,7 +2304,7 @@
                     </div>
 
                     <button type="button" class="straddle-btn btn-outline" onclick="reloadActiveCandlestickChart()" style="padding:4px 10px; font-size:11.5px;" title="Reload historical candles">🔄 Refresh</button>
-                    <button type="button" class="straddle-modal-close" onclick="closeLiveChartModal()" style="font-size:22px; color:#94a3b8; background:none; border:none; cursor:pointer; padding:2px 8px;">✕</button>
+                    <button type="button" class="straddle-modal-close" onclick="closeLiveChartModal()" style="font-size:20px; font-weight:800; color:#f8fafc; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.25); border-radius:6px; cursor:pointer; padding:3px 12px; line-height:1; transition:all 0.15s ease;" title="Close Chart (Esc)">✕</button>
                 </div>
             </div>
 
@@ -2327,7 +2341,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261021_pills3"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261021_pills4"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

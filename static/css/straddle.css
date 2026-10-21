@@ -156,7 +156,6 @@ body {
     background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(8px);
     z-index: 99999;
-    display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
@@ -1009,7 +1008,6 @@ body {
     background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(8px);
     z-index: 9999;
-    display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
@@ -8613,11 +8611,21 @@ table .flag-cell {
     height: 100vh !important;
     background: rgba(3, 7, 18, 0.78) !important;
     backdrop-filter: blur(5px) !important;
-    display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     z-index: 99999 !important;
     padding: 16px !important;
+}
+
+.straddle-modal-backdrop[style*="display:none"],
+.straddle-modal-backdrop[style*="display: none"],
+.straddle-modal-backdrop.hidden {
+    display: none !important;
+}
+
+.straddle-modal-backdrop[style*="display:flex"],
+.straddle-modal-backdrop[style*="display: flex"] {
+    display: flex !important;
 }
 
 .straddle-modal-card {

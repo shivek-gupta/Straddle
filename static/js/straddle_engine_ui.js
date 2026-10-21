@@ -192,6 +192,15 @@ async function initStraddlePlatform() {
         }
     });
 
+    // Global ESC key listener to close modals
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" || e.keyCode === 27) {
+            closeLiveChartModal();
+            closeStraddleOptionChainModal();
+            if (typeof closeBasketOrderModal === "function") closeBasketOrderModal();
+        }
+    });
+
     // Attach mouse interaction for P&L Canvas crosshair
     setupPnlCanvasEvents();
 }
@@ -5477,7 +5486,8 @@ function stopOptionChainTicker() {
 async function openStraddleOptionChainModal(undParam) {
     const modal = document.getElementById("straddleOptionChainModal");
     if (!modal) return;
-    modal.style.display = "flex";
+    modal.classList.remove("hidden");
+    modal.style.setProperty("display", "flex", "important");
 
     const undSel = document.getElementById("optChainUnderlyingSelect");
     const targetUnd = undParam || undSel?.value || window._straddleState.activeStrategy?.underlying || "NIFTY";
@@ -5489,7 +5499,10 @@ async function openStraddleOptionChainModal(undParam) {
 
 function closeStraddleOptionChainModal() {
     const modal = document.getElementById("straddleOptionChainModal");
-    if (modal) modal.style.display = "none";
+    if (modal) {
+        modal.classList.add("hidden");
+        modal.style.setProperty("display", "none", "important");
+    }
     stopOptionChainTicker();
 }
 
@@ -8448,7 +8461,8 @@ function openActiveAssetChartModal(undParam) {
     window._activeChartUnderlying = und;
     const modal = document.getElementById("modalLiveChart");
     if (!modal) return;
-    modal.style.display = "flex";
+    modal.classList.remove("hidden");
+    modal.style.setProperty("display", "flex", "important");
 
     const dispName = COMMODITY_DISPLAY_NAMES[und] || und;
     const color = COMMODITY_COLOR_MAP[und] || "#38bdf8";
@@ -8476,7 +8490,10 @@ window.openActiveAssetChartModal = openActiveAssetChartModal;
 
 function closeLiveChartModal() {
     const modal = document.getElementById("modalLiveChart");
-    if (modal) modal.style.display = "none";
+    if (modal) {
+        modal.classList.add("hidden");
+        modal.style.setProperty("display", "none", "important");
+    }
     stopChartTickStream();
 }
 window.closeLiveChartModal = closeLiveChartModal;
