@@ -155,6 +155,27 @@ def api_straddle_spot():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/spots", methods=["GET"])
+def api_straddle_spots():
+    """Return cached live spot LTP for all tracked commodity & equity underlyings."""
+    try:
+        mgr = get_straddle_manager()
+        tracked = [
+            "NIFTY", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER",
+            "CRUDEOILM", "NATGASMINI", "GOLDM", "SILVERM", "COPPER"
+        ]
+        spots = {}
+        for und in tracked:
+            spots[und] = mgr.get_cached_spot_price(und)
+        return jsonify({
+            "success": True,
+            "spots": spots,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/logs", methods=["GET"])
 def api_straddle_logs():
     try:

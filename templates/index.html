@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261021_revive">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261021_pills2">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -90,68 +90,101 @@
         <!-- ====================================================================
              TOP COMMODITY & NIFTY PILL NAVIGATION BAR (Exact Match to User Screenshot)
              ==================================================================== -->
+        <!-- ====================================================================
+             TOP COMMODITY & NIFTY PILL NAVIGATION BAR
+             Dual Action Pills: Click Name -> Candlestick Chart | Click Price -> Option Chain
+             ==================================================================== -->
         <div class="commodity-bar-container" id="commodityTopBar">
             <div class="commodity-pills-strip" id="commodityPillsStrip">
                 <!-- 1. NIFTY -->
-                <button type="button" class="commodity-pill active" data-und="NIFTY" onclick="selectGlobalUnderlying('NIFTY')" style="--pill-color:#38bdf8;">
-                    <span class="pill-dot" style="background:#38bdf8; box-shadow:0 0 8px #38bdf8;"></span>
-                    <span class="pill-name">NIFTY</span>
-                </button>
-                <!-- 2. Crude Oil -->
-                <button type="button" class="commodity-pill" data-und="CRUDEOIL" onclick="selectGlobalUnderlying('CRUDEOIL')" style="--pill-color:#3b82f6;">
-                    <span class="pill-dot" style="background:#3b82f6; box-shadow:0 0 8px #3b82f6;"></span>
-                    <span class="pill-name">Crude Oil</span>
-                </button>
-                <!-- 3. Natural Gas -->
-                <button type="button" class="commodity-pill" data-und="NATURALGAS" onclick="selectGlobalUnderlying('NATURALGAS')" style="--pill-color:#f59e0b;">
-                    <span class="pill-dot" style="background:#f59e0b; box-shadow:0 0 8px #f59e0b;"></span>
-                    <span class="pill-name">Natural Gas</span>
-                </button>
-                <!-- 4. Gold -->
-                <button type="button" class="commodity-pill" data-und="GOLD" onclick="selectGlobalUnderlying('GOLD')" style="--pill-color:#eab308;">
-                    <span class="pill-dot" style="background:#eab308; box-shadow:0 0 8px #eab308;"></span>
-                    <span class="pill-name">Gold</span>
-                </button>
-                <!-- 5. Silver -->
-                <button type="button" class="commodity-pill" data-und="SILVER" onclick="selectGlobalUnderlying('SILVER')" style="--pill-color:#94a3b8;">
-                    <span class="pill-dot" style="background:#94a3b8; box-shadow:0 0 8px #94a3b8;"></span>
-                    <span class="pill-name">Silver</span>
-                </button>
-                <!-- 6. Crude Oil Mini -->
-                <button type="button" class="commodity-pill" data-und="CRUDEOILM" onclick="selectGlobalUnderlying('CRUDEOILM')" style="--pill-color:#60a5fa;">
-                    <span class="pill-dot" style="background:#60a5fa; box-shadow:0 0 8px #60a5fa;"></span>
-                    <span class="pill-name">Crude Oil Mini</span>
-                </button>
-                <!-- 7. Natural Gas Mini -->
-                <button type="button" class="commodity-pill" data-und="NATGASMINI" onclick="selectGlobalUnderlying('NATGASMINI')" style="--pill-color:#fbbf24;">
-                    <span class="pill-dot" style="background:#fbbf24; box-shadow:0 0 8px #fbbf24;"></span>
-                    <span class="pill-name">Natural Gas Mini</span>
-                </button>
-                <!-- 8. Gold Mini -->
-                <button type="button" class="commodity-pill" data-und="GOLDM" onclick="selectGlobalUnderlying('GOLDM')" style="--pill-color:#facc15;">
-                    <span class="pill-dot" style="background:#facc15; box-shadow:0 0 8px #facc15;"></span>
-                    <span class="pill-name">Gold Mini</span>
-                </button>
-                <!-- 9. Silver Mini -->
-                <button type="button" class="commodity-pill" data-und="SILVERM" onclick="selectGlobalUnderlying('SILVERM')" style="--pill-color:#cbd5e1;">
-                    <span class="pill-dot" style="background:#cbd5e1; box-shadow:0 0 8px #cbd5e1;"></span>
-                    <span class="pill-name">Silver Mini</span>
-                </button>
-                <!-- 10. Copper -->
-                <button type="button" class="commodity-pill" data-und="COPPER" onclick="selectGlobalUnderlying('COPPER')" style="--pill-color:#ea580c;">
-                    <span class="pill-dot" style="background:#ea580c; box-shadow:0 0 8px #ea580c;"></span>
-                    <span class="pill-name">Copper</span>
-                </button>
-            </div>
+                <div class="commodity-pill active" data-und="NIFTY" id="pill_NIFTY" onclick="selectGlobalUnderlying('NIFTY')"
+                    style="--pill-color:#38bdf8; --pill-bg:rgba(56,189,248,0.12); --pill-border:rgba(56,189,248,0.45); --pill-glow:rgba(56,189,248,0.4); --pill-name-color:#38bdf8; --pill-active-bg:rgba(12,28,56,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('NIFTY')" title="📈 Click to open NIFTY Candlestick Chart">NIFTY</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_NIFTY" onclick="event.stopPropagation(); onPillPriceClick('NIFTY')" title="⛓️ Click to open NIFTY Option Chain">--</span>
+                </div>
 
-            <!-- Quick Live Chart & Option Chain Launchers -->
-            <div style="display:flex; align-items:center; gap:8px;">
-                <button type="button" class="straddle-btn btn-primary" onclick="openActiveAssetChartModal()" style="padding:6px 14px; font-size:12px; font-weight:800; display:inline-flex; align-items:center; gap:6px; background:linear-gradient(135deg, #0284c7, #0369a1); border:1px solid #38bdf8; box-shadow:0 0 12px rgba(56,189,248,0.25);">
-                    <span>📈</span> <span id="btnActiveAssetChartLabel">Live Chart</span>
-                </button>
-                <button type="button" class="straddle-btn btn-outline" onclick="openStraddleOptionChainModal(window._activeGlobalUnderlying)" style="padding:6px 12px; font-size:12px; font-weight:700;">
-                    <span>⛓️</span> Option Chain
-                </button>
+                <!-- 2. Crude Oil -->
+                <div class="commodity-pill" data-und="CRUDEOIL" id="pill_CRUDEOIL" onclick="selectGlobalUnderlying('CRUDEOIL')"
+                    style="--pill-color:#3b82f6; --pill-bg:rgba(59,130,246,0.12); --pill-border:rgba(59,130,246,0.45); --pill-glow:rgba(59,130,246,0.4); --pill-name-color:#60a5fa; --pill-active-bg:rgba(15,28,68,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('CRUDEOIL')" title="📈 Click to open Crude Oil Candlestick Chart">Crude Oil</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_CRUDEOIL" onclick="event.stopPropagation(); onPillPriceClick('CRUDEOIL')" title="⛓️ Click to open Crude Oil Option Chain">--</span>
+                </div>
+
+                <!-- 3. Natural Gas -->
+                <div class="commodity-pill" data-und="NATURALGAS" id="pill_NATURALGAS" onclick="selectGlobalUnderlying('NATURALGAS')"
+                    style="--pill-color:#f59e0b; --pill-bg:rgba(245,158,11,0.12); --pill-border:rgba(245,158,11,0.45); --pill-glow:rgba(245,158,11,0.4); --pill-name-color:#fbbf24; --pill-active-bg:rgba(45,28,10,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('NATURALGAS')" title="📈 Click to open Natural Gas Candlestick Chart">Natural Gas</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_NATURALGAS" onclick="event.stopPropagation(); onPillPriceClick('NATURALGAS')" title="⛓️ Click to open Natural Gas Option Chain">--</span>
+                </div>
+
+                <!-- 4. Gold -->
+                <div class="commodity-pill" data-und="GOLD" id="pill_GOLD" onclick="selectGlobalUnderlying('GOLD')"
+                    style="--pill-color:#eab308; --pill-bg:rgba(234,179,8,0.14); --pill-border:rgba(234,179,8,0.5); --pill-glow:rgba(234,179,8,0.45); --pill-name-color:#facc15; --pill-active-bg:rgba(42,32,8,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('GOLD')" title="📈 Click to open Gold Candlestick Chart">Gold</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_GOLD" onclick="event.stopPropagation(); onPillPriceClick('GOLD')" title="⛓️ Click to open Gold Option Chain">--</span>
+                </div>
+
+                <!-- 5. Silver -->
+                <div class="commodity-pill" data-und="SILVER" id="pill_SILVER" onclick="selectGlobalUnderlying('SILVER')"
+                    style="--pill-color:#a855f7; --pill-bg:rgba(168,85,247,0.12); --pill-border:rgba(168,85,247,0.45); --pill-glow:rgba(168,85,247,0.4); --pill-name-color:#c084fc; --pill-active-bg:rgba(35,16,56,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('SILVER')" title="📈 Click to open Silver Candlestick Chart">Silver</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_SILVER" onclick="event.stopPropagation(); onPillPriceClick('SILVER')" title="⛓️ Click to open Silver Option Chain">--</span>
+                </div>
+
+                <!-- 6. Crude Oil Mini -->
+                <div class="commodity-pill" data-und="CRUDEOILM" id="pill_CRUDEOILM" onclick="selectGlobalUnderlying('CRUDEOILM')"
+                    style="--pill-color:#06b6d4; --pill-bg:rgba(6,182,212,0.12); --pill-border:rgba(6,182,212,0.45); --pill-glow:rgba(6,182,212,0.4); --pill-name-color:#22d3ee; --pill-active-bg:rgba(10,32,45,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('CRUDEOILM')" title="📈 Click to open Crude Oil Mini Candlestick Chart">Crude Oil Mini</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_CRUDEOILM" onclick="event.stopPropagation(); onPillPriceClick('CRUDEOILM')" title="⛓️ Click to open Crude Oil Mini Option Chain">--</span>
+                </div>
+
+                <!-- 7. Natural Gas Mini -->
+                <div class="commodity-pill" data-und="NATGASMINI" id="pill_NATGASMINI" onclick="selectGlobalUnderlying('NATGASMINI')"
+                    style="--pill-color:#d97706; --pill-bg:rgba(217,119,6,0.12); --pill-border:rgba(217,119,6,0.45); --pill-glow:rgba(217,119,6,0.4); --pill-name-color:#f59e0b; --pill-active-bg:rgba(42,24,8,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('NATGASMINI')" title="📈 Click to open Natural Gas Mini Candlestick Chart">Natural Gas Mini</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_NATGASMINI" onclick="event.stopPropagation(); onPillPriceClick('NATGASMINI')" title="⛓️ Click to open Natural Gas Mini Option Chain">--</span>
+                </div>
+
+                <!-- 8. Gold Mini -->
+                <div class="commodity-pill" data-und="GOLDM" id="pill_GOLDM" onclick="selectGlobalUnderlying('GOLDM')"
+                    style="--pill-color:#eab308; --pill-bg:rgba(234,179,8,0.14); --pill-border:rgba(234,179,8,0.5); --pill-glow:rgba(234,179,8,0.45); --pill-name-color:#fbbf24; --pill-active-bg:rgba(40,30,8,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('GOLDM')" title="📈 Click to open Gold Mini Candlestick Chart">Gold Mini</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_GOLDM" onclick="event.stopPropagation(); onPillPriceClick('GOLDM')" title="⛓️ Click to open Gold Mini Option Chain">--</span>
+                </div>
+
+                <!-- 9. Silver Mini -->
+                <div class="commodity-pill" data-und="SILVERM" id="pill_SILVERM" onclick="selectGlobalUnderlying('SILVERM')"
+                    style="--pill-color:#818cf8; --pill-bg:rgba(129,140,248,0.12); --pill-border:rgba(129,140,248,0.45); --pill-glow:rgba(129,140,248,0.4); --pill-name-color:#a5b4fc; --pill-active-bg:rgba(25,24,60,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('SILVERM')" title="📈 Click to open Silver Mini Candlestick Chart">Silver Mini</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_SILVERM" onclick="event.stopPropagation(); onPillPriceClick('SILVERM')" title="⛓️ Click to open Silver Mini Option Chain">--</span>
+                </div>
+
+                <!-- 10. Copper -->
+                <div class="commodity-pill" data-und="COPPER" id="pill_COPPER" onclick="selectGlobalUnderlying('COPPER')"
+                    style="--pill-color:#ea580c; --pill-bg:rgba(234,88,12,0.14); --pill-border:rgba(234,88,12,0.5); --pill-glow:rgba(234,88,12,0.45); --pill-name-color:#fb923c; --pill-active-bg:rgba(45,20,8,0.95);">
+                    <span class="pill-dot"></span>
+                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('COPPER')" title="📈 Click to open Copper Candlestick Chart">Copper</span>
+                    <span class="pill-separator">:</span>
+                    <span class="pill-ltp" id="pillLtp_COPPER" onclick="event.stopPropagation(); onPillPriceClick('COPPER')" title="⛓️ Click to open Copper Option Chain">--</span>
+                </div>
             </div>
         </div>
 
@@ -2172,7 +2205,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261021_revive"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261021_pills2"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

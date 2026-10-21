@@ -180,7 +180,9 @@ async function initStraddlePlatform() {
     await loadStraddleOpenPositions();
     loadActiveBasketFromStorage();
     fetchLiveSpotTick();
+    updateAllCommodityPillsLtp();
     window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 300);
+    window._straddleState.spotsAllTimer = setInterval(updateAllCommodityPillsLtp, 1200);
     window._straddleState.pollTimer = setInterval(pollStraddleCycle, 1500);
 
     // Attach global click listener to close dropdowns
@@ -199,26 +201,73 @@ window._lastKnownSpot = 0.0;
 function updateSpotPriceDisplay(spot, atm, und) {
     const spotEl = document.getElementById("straddleSpotPrice");
     const undLabel = document.getElementById("straddleUnderlyingLabel");
+    const clean = String(und || window._activeGlobalUnderlying || "NIFTY").toUpperCase().replace(/\s+/g, "");
     if (undLabel && und) {
-        const clean = String(und).toUpperCase().replace(/\s+/g, "");
         const disp = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[clean]) ? COMMODITY_DISPLAY_NAMES[clean] : und;
         undLabel.textContent = disp.toUpperCase() + ":";
     }
-    if (spotEl && spot && Number(spot) > 0) {
+    if (spot && Number(spot) > 0) {
         const numSpot = Number(spot);
         const prev = window._lastKnownSpot;
-        spotEl.textContent = "₹" + numSpot.toFixed(2);
-        if (prev > 0 && Math.abs(numSpot - prev) > 0.01) {
-            const isUp = numSpot > prev;
-            spotEl.classList.remove("tick-flash-up", "tick-flash-down");
-            spotEl.classList.add(isUp ? "tick-flash-up" : "tick-flash-down");
-            setTimeout(() => {
-                if (spotEl) spotEl.classList.remove("tick-flash-up", "tick-flash-down");
-            }, 300);
+        const fmtPrice = (numSpot >= 1000) ? 
+            numSpot.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 
+            numSpot.toFixed(2);
+
+        if (spotEl) {
+            spotEl.textContent = "₹" + fmtPrice;
+            if (prev > 0 && Math.abs(numSpot - prev) > 0.01) {
+                const isUp = numSpot > prev;
+                spotEl.classList.remove("tick-flash-up", "tick-flash-down");
+                spotEl.classList.add(isUp ? "tick-flash-up" : "tick-flash-down");
+                setTimeout(() => {
+                    if (spotEl) spotEl.classList.remove("tick-flash-up", "tick-flash-down");
+                }, 300);
+            }
         }
+
+        // Live update active asset's pill LTP
+        const pillLtpEl = document.getElementById(`pillLtp_${clean}`);
+        if (pillLtpEl) {
+            pillLtpEl.textContent = "₹" + fmtPrice;
+        }
+
         window._lastKnownSpot = numSpot;
     }
 }
+
+async function updateAllCommodityPillsLtp() {
+    try {
+        const resp = await fetch("/api/straddle/spots");
+        const data = await resp.json();
+        if (data && data.success && data.spots) {
+            Object.entries(data.spots).forEach(([und, price]) => {
+                const el = document.getElementById(`pillLtp_${und}`);
+                if (el && price && Number(price) > 0) {
+                    const numP = Number(price);
+                    const fmtPrice = (numP >= 1000) ? 
+                        numP.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 
+                        numP.toFixed(2);
+                    el.textContent = "₹" + fmtPrice;
+                }
+            });
+        }
+    } catch (_) {}
+}
+window.updateAllCommodityPillsLtp = updateAllCommodityPillsLtp;
+
+function onPillNameClick(und) {
+    if (!und) return;
+    selectGlobalUnderlying(und);
+    openActiveAssetChartModal(und);
+}
+window.onPillNameClick = onPillNameClick;
+
+function onPillPriceClick(und) {
+    if (!und) return;
+    selectGlobalUnderlying(und);
+    openStraddleOptionChainModal(und);
+}
+window.onPillPriceClick = onPillPriceClick;
 
 async function fetchLiveSpotTick() {
     try {
