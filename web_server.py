@@ -142,8 +142,8 @@ def api_straddle_spot():
         und = request.args.get("underlying", "NIFTY").upper()
         mgr = get_straddle_manager()
         spot = mgr.get_cached_spot_price(und)
-        step = 50 if und == "NIFTY" else (100 if und in ("BANKNIFTY", "SENSEX") else 50)
-        atm = round(spot / step) * step if spot > 0 else 0
+        step = float(STRIKE_STEPS.get(und, 50))
+        atm = round(spot / step) * step if (spot > 0 and step > 0) else 0
         return jsonify({
             "success": True,
             "underlying": und,
@@ -903,6 +903,8 @@ def api_straddle_commodities():
         freeze_limits = getattr(config, "FREEZE_LIMITS", {})
         tick_sizes = getattr(config, "TICK_SIZES", {})
         margins = getattr(config, "DEFAULT_MARGIN_PER_LOT", {})
+        span_margins = getattr(config, "BASE_SPAN_PER_LOT", {})
+        exp_margins = getattr(config, "BASE_EXP_PER_LOT", {})
         return jsonify({
             "success": True,
             "commodities": commodities,
@@ -911,7 +913,9 @@ def api_straddle_commodities():
             "lot_sizes": lot_sizes,
             "freeze_limits": freeze_limits,
             "tick_sizes": tick_sizes,
-            "margins": margins
+            "margins": margins,
+            "span_margins": span_margins,
+            "exp_margins": exp_margins
         })
     except Exception as e:
         logger.error(f"Error in api_straddle_commodities: {e}")

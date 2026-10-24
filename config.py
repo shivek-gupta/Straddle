@@ -116,6 +116,7 @@ DEFAULT_MARGIN_PER_LOT = {
     "FINNIFTY": 95000.0,
     "MIDCPNIFTY": 90000.0,
     "SENSEX": 125000.0,
+    "BANKEX": 115000.0,
     "CRUDEOIL": 220000.0,
     "CRUDEOILM": 25000.0,
     "NATURALGAS": 175000.0,
@@ -125,6 +126,44 @@ DEFAULT_MARGIN_PER_LOT = {
     "SILVER": 320000.0,
     "SILVERM": 58000.0,
     "COPPER": 240000.0,
+}
+
+# Accurate Exchange SPAN Margin per Short Lot for Equity Indices & MCX Commodities
+BASE_SPAN_PER_LOT = {
+    "NIFTY": 145282.80,
+    "BANKNIFTY": 115000.0,
+    "FINNIFTY": 110000.0,
+    "MIDCPNIFTY": 95000.0,
+    "SENSEX": 125000.0,
+    "BANKEX": 115000.0,
+    "CRUDEOIL": 165000.0,
+    "CRUDEOILM": 18500.0,
+    "NATURALGAS": 130000.0,
+    "NATGASMINI": 28000.0,
+    "GOLD": 360000.0,
+    "GOLDM": 42000.0,
+    "SILVER": 240000.0,
+    "SILVERM": 44000.0,
+    "COPPER": 180000.0,
+}
+
+# Accurate Exchange Exposure Margin per Short Lot for Equity Indices & MCX Commodities
+BASE_EXP_PER_LOT = {
+    "NIFTY": 60174.14,
+    "BANKNIFTY": 32500.0,
+    "FINNIFTY": 31000.0,
+    "MIDCPNIFTY": 28000.0,
+    "SENSEX": 35000.0,
+    "BANKEX": 32500.0,
+    "CRUDEOIL": 55000.0,
+    "CRUDEOILM": 6500.0,
+    "NATURALGAS": 45000.0,
+    "NATGASMINI": 10000.0,
+    "GOLD": 120000.0,
+    "GOLDM": 13000.0,
+    "SILVER": 80000.0,
+    "SILVERM": 14000.0,
+    "COPPER": 60000.0,
 }
 
 # Comprehensive Underlying / Commodity Metadata (Order, Labels, Color Codes, Segments)

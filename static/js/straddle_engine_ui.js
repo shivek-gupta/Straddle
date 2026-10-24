@@ -5484,11 +5484,105 @@ function stopOptionChainTicker() {
     }
 }
 
+const STRADDLE_STRIKE_STEPS = {
+    "NIFTY": 50,
+    "BANKNIFTY": 100,
+    "FINNIFTY": 50,
+    "MIDCPNIFTY": 25,
+    "SENSEX": 100,
+    "BANKEX": 100,
+    "CRUDEOIL": 50,
+    "CRUDEOILM": 50,
+    "NATURALGAS": 5,
+    "NATGASMINI": 5,
+    "GOLD": 500,
+    "GOLDM": 500,
+    "SILVER": 1000,
+    "SILVERM": 1000,
+    "COPPER": 10
+};
+
+const STRADDLE_LOT_SIZES = {
+    "NIFTY": 65,
+    "BANKNIFTY": 15,
+    "FINNIFTY": 65,
+    "MIDCPNIFTY": 50,
+    "SENSEX": 10,
+    "BANKEX": 15,
+    "CRUDEOIL": 100,
+    "CRUDEOILM": 10,
+    "NATURALGAS": 1250,
+    "NATGASMINI": 250,
+    "GOLD": 1,
+    "GOLDM": 1,
+    "SILVER": 1,
+    "SILVERM": 1,
+    "COPPER": 2500
+};
+
+function getLotSizeForUnderlying(und) {
+    if (!und) return 65;
+    const u = String(und).toUpperCase();
+    return STRADDLE_LOT_SIZES[u] || 65;
+}
+window.getLotSizeForUnderlying = getLotSizeForUnderlying;
+
+function getStrikeStepForUnderlying(und) {
+    if (!und) return 50;
+    const u = String(und).toUpperCase();
+    return STRADDLE_STRIKE_STEPS[u] || 50;
+}
+window.getStrikeStepForUnderlying = getStrikeStepForUnderlying;
+
+function toggleOptionChainInsights(forceState = null) {
+    const bar = document.getElementById("optChainInsightsBar");
+    const arrow = document.getElementById("optChainInsightsArrow");
+    const badge = document.getElementById("optChainInsightsStateBadge");
+    if (!bar) return;
+
+    let isCollapsed;
+    if (forceState !== null) {
+        isCollapsed = forceState;
+    } else {
+        isCollapsed = (bar.style.display !== "none");
+    }
+
+    if (isCollapsed) {
+        bar.style.display = "none";
+        if (arrow) arrow.textContent = "▶";
+        if (badge) {
+            badge.textContent = "COLLAPSED";
+            badge.style.color = "#94a3b8";
+            badge.style.background = "rgba(148, 163, 184, 0.1)";
+            badge.style.borderColor = "rgba(148, 163, 184, 0.3)";
+        }
+    } else {
+        bar.style.display = "grid";
+        if (arrow) arrow.textContent = "▼";
+        if (badge) {
+            badge.textContent = "EXPANDED";
+            badge.style.color = "#38bdf8";
+            badge.style.background = "rgba(56, 189, 248, 0.15)";
+            badge.style.borderColor = "rgba(56, 189, 248, 0.4)";
+        }
+    }
+
+    try {
+        localStorage.setItem("straddle_opt_chain_insights_collapsed", isCollapsed ? "true" : "false");
+    } catch(e) {}
+}
+window.toggleOptionChainInsights = toggleOptionChainInsights;
+
 async function openStraddleOptionChainModal(undParam) {
     const modal = document.getElementById("straddleOptionChainModal");
     if (!modal) return;
     modal.classList.remove("hidden");
     modal.style.setProperty("display", "flex", "important");
+
+    // Collapsed by default unless user explicitly expanded
+    const savedCollapsed = localStorage.getItem("straddle_opt_chain_insights_collapsed");
+    const shouldCollapse = (savedCollapsed === null || savedCollapsed === "true");
+    toggleOptionChainInsights(shouldCollapse);
 
     const undSel = document.getElementById("optChainUnderlyingSelect");
     const targetUnd = undParam || undSel?.value || window._straddleState.activeStrategy?.underlying || "NIFTY";
@@ -5541,6 +5635,54 @@ async function onChangeOptChainUnderlying(und) {
 
 window._optionChainBasketMode = false;
 window._chainSelectedLegs = {};
+window._basketOpeningForOptionChain = null;
+
+function openOptionChainForActiveBasket() {
+    window._basketOpeningForOptionChain = window._activeBasketId || "basket_default";
+    const basketModal = document.getElementById("modalBasketOrders");
+    if (basketModal) basketModal.style.display = "none";
+    stopBasketQuoteTicker();
+
+    // Determine target underlying from active basket
+    const list = getSavedBasketsList();
+    const current = list.find(b => b.id === window._activeBasketId);
+    const basketUnderlying = current?.underlying || document.getElementById("basketUnderlyingSelect")?.value || "NIFTY";
+
+    // Set Basket Mode ON by default when invoked from Basket
+    window._optionChainBasketMode = true;
+
+    // Open option chain modal
+    openStraddleOptionChainModal(basketUnderlying);
+
+    // Sync basket mode button visual state
+    const btn = document.getElementById("btnToggleBasketMode");
+    const lbl = document.getElementById("basketModeStateLabel");
+    if (lbl) {
+        lbl.textContent = "ON";
+        lbl.style.color = "#10b981";
+    }
+    if (btn) {
+        btn.style.background = "#1d4ed8";
+        btn.style.borderColor = "#60a5fa";
+        btn.style.color = "#ffffff";
+        btn.style.boxShadow = "0 0 12px rgba(37,99,235,0.6)";
+    }
+    const thCe = document.getElementById("thCeActionHeader");
+    const thPe = document.getElementById("thPeActionHeader");
+    if (thCe) {
+        thCe.textContent = "SELECT";
+        thCe.style.width = "145px";
+    }
+    if (thPe) {
+        thPe.textContent = "SELECT";
+        thPe.style.width = "145px";
+    }
+    const botBar = document.getElementById("optionChainBasketBottomBar");
+    if (botBar) botBar.style.display = "flex";
+
+    showStraddleToast(`Select option legs for "${current?.name || 'Current Basket'}"`, "info", 2000);
+}
+window.openOptionChainForActiveBasket = openOptionChainForActiveBasket;
 
 function toggleOptionChainBasketMode() {
     window._optionChainBasketMode = !window._optionChainBasketMode;
@@ -5573,10 +5715,14 @@ function toggleOptionChainBasketMode() {
     if (thCe) {
         thCe.textContent = isMode ? "SELECT" : "ACTION";
         thCe.style.display = "";
+        thCe.style.width = "145px";
+        thCe.className = "opt-action-col";
     }
     if (thPe) {
         thPe.textContent = isMode ? "SELECT" : "ACTION";
         thPe.style.display = "";
+        thPe.style.width = "145px";
+        thPe.className = "opt-action-col";
     }
     if (thCeSuper) thCeSuper.setAttribute("colspan", "3");
     if (thPeSuper) thPeSuper.setAttribute("colspan", "3");
@@ -5590,7 +5736,7 @@ window.toggleOptionChainBasketMode = toggleOptionChainBasketMode;
 function onToggleChainBasketLeg(strike, optType, side, symbol, token, ltp, lotSize, expDate, isChecked) {
     const key = `${strike}_${optType}_${side}`;
     const und = window._straddleState?.optionChainUnderlying || "NIFTY";
-    const resolvedLot = Number(lotSize) > 0 ? Number(lotSize) : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : 65));
+    const resolvedLot = Number(lotSize) > 0 ? Number(lotSize) : getLotSizeForUnderlying(und);
     const resolvedStrike = Number(strike) || 0;
     const resolvedPrice = Number(ltp) || 0.05;
 
@@ -5672,9 +5818,6 @@ function updateOptionChainBasketSummaryBar() {
         pillsWrap.innerHTML = keys.map(k => {
             const item = window._chainSelectedLegs[k];
             const isBuy = item.side === "BUY";
-            const bg = isBuy ? "rgba(16,185,129,0.2)" : "rgba(244,63,94,0.2)";
-            const border = isBuy ? "rgba(16,185,129,0.4)" : "rgba(244,63,94,0.4)";
-            const text = isBuy ? "#34d399" : "#fb7185";
             return `<span class="basket-pill-chip ${isBuy ? 'chip-buy' : 'chip-sell'}">
                 ${isBuy ? '+B' : '-S'} ${item.strike} ${item.opt_type}
                 <span style="cursor:pointer; font-size:10px; margin-left:3px;" onclick="onToggleChainBasketLeg(${item.strike}, '${item.opt_type}', '${item.side}', '', '', 0, 0, '', false); loadStraddleOptionChain();">✕</span>
@@ -5699,48 +5842,69 @@ function addSelectedLegsToBasketModal() {
     }
 
     const und = window._straddleState?.optionChainUnderlying || "NIFTY";
-    let addedCount = 0;
+    const targetBasketId = window._basketOpeningForOptionChain || window._activeBasketId || "basket_default";
 
+    // Switch to target basket if needed
+    const list = getSavedBasketsList();
+    let currentBasket = list.find(b => b.id === targetBasketId);
+    if (!currentBasket) {
+        currentBasket = list[0] || { id: "basket_default", name: "DEFAULT BASKET", orders: [], underlying: und };
+    }
+    window._activeBasketId = currentBasket.id;
+    if (!Array.isArray(window._basketOrders)) window._basketOrders = [];
+
+    let addedCount = 0;
     keys.forEach(k => {
         const leg = window._chainSelectedLegs[k];
-        const resolvedLot = Number(leg.lot_size) > 0 ? Number(leg.lot_size) : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : 65));
+        const resolvedLot = Number(leg.lot_size) > 0 ? Number(leg.lot_size) : getLotSizeForUnderlying(und);
         const resolvedStrike = Number(leg.strike) || 0;
         const resolvedPrice = Number(leg.ltp) || 0.05;
 
-        const newOrder = {
-            id: "b_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
-            selected: true,
-            underlying: und,
-            symbol: leg.symbol || `${und} ${resolvedStrike} ${leg.opt_type}`,
-            trading_symbol: leg.symbol || `${und} ${resolvedStrike} ${leg.opt_type}`,
-            token: leg.token || "",
-            strike: resolvedStrike,
-            opt_type: (leg.opt_type || "CE").toUpperCase(),
-            side: (leg.side || "SELL").toUpperCase(),
-            expiry_date: leg.expiry_date || "Weekly",
-            product: "CF",
-            lots: 1,
-            lot_size: resolvedLot,
-            quantity: resolvedLot,
-            price: resolvedPrice,
-            order_type: "LIMIT",
-            ltp: resolvedPrice,
-            change: 0,
-            change_pct: 0
-        };
-        window._basketOrders.push(newOrder);
-        addedCount++;
+        const exists = window._basketOrders.some(o => Number(o.strike) === resolvedStrike && o.opt_type === leg.opt_type && o.side === leg.side);
+        if (!exists) {
+            const newOrder = {
+                id: "b_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
+                selected: true,
+                underlying: und,
+                symbol: leg.symbol || `${und} ${resolvedStrike} ${leg.opt_type}`,
+                trading_symbol: leg.symbol || `${und} ${resolvedStrike} ${leg.opt_type}`,
+                token: leg.token || "",
+                strike: resolvedStrike,
+                opt_type: (leg.opt_type || "CE").toUpperCase(),
+                side: (leg.side || "SELL").toUpperCase(),
+                expiry_date: leg.expiry_date || "Weekly",
+                product: "CF",
+                lots: 1,
+                lot_size: resolvedLot,
+                quantity: resolvedLot,
+                price: resolvedPrice,
+                order_type: "LIMIT",
+                ltp: resolvedPrice,
+                change: 0,
+                change_pct: 0
+            };
+            window._basketOrders.push(newOrder);
+            addedCount++;
+        }
     });
+
+    currentBasket.orders = window._basketOrders;
+    currentBasket.underlying = und;
+    saveBasketsList(list);
 
     try {
         localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
     } catch(e) {}
 
     window._chainSelectedLegs = {};
+    window._basketOpeningForOptionChain = null;
     updateOptionChainBasketSummaryBar();
     updateBasketBadges();
-    showStraddleToast(`🧺 Added ${addedCount} leg(s) directly to your Basket!`, "success", 2500);
+
+    // Close option chain and reopen the basket modal
+    closeStraddleOptionChainModal();
     openBasketOrderModal();
+    showStraddleToast(`🧺 Added ${addedCount} leg(s) into "${currentBasket.name}"!`, "success", 2500);
 }
 window.addSelectedLegsToBasketModal = addSelectedLegsToBasketModal;
 
@@ -5906,7 +6070,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 const isPeSellChecked = !!(window._chainSelectedLegs[peSellKey] || (window._basketOrders || []).some(o => Number(o.strike) === strike && o.opt_type === "PE" && o.side === "SELL"));
 
                 const ceActionCell = isBasketMode ? `
-                    <td style="text-align:center; padding:3px 2px; white-space:nowrap; width:100px;">
+                    <td class="opt-action-col" style="text-align:center; padding:3px 2px; white-space:nowrap; width:145px;">
                         <div class="chain-tick-wrap" style="display:inline-flex; align-items:center; gap:2px;">
                             <label class="chain-tick-btn tick-buy ${isCeBuyChecked ? 'checked' : ''}" style="padding:1px 3px; font-size:10px;" title="Tick to BUY CE in basket">
                                 <input type="checkbox" ${isCeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'CE', 'BUY', '${ceSym}', '${ceKey}', ${ceLtpNum}, ${ceLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked); this.parentElement.querySelector('.tick-box').textContent = this.checked ? '☑' : '☐'">
@@ -5921,7 +6085,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         </div>
                     </td>
                 ` : `
-                    <td style="text-align:center; padding:3px 2px; white-space:nowrap; width:100px;">
+                    <td class="opt-action-col" style="text-align:center; padding:3px 2px; white-space:nowrap; width:145px;">
                         <div class="chain-quick-trade-wrap" style="display:inline-flex; align-items:center; gap:2px;">
                             <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:10px; width:22px; height:20px; border-radius:4px; box-shadow:0 0 4px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">B</button>
                             <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:10px; width:22px; height:20px; border-radius:4px; box-shadow:0 0 4px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">S</button>
@@ -5932,7 +6096,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 `;
 
                 const peActionCell = isBasketMode ? `
-                    <td style="text-align:center; padding:3px 2px; white-space:nowrap; width:100px;">
+                    <td class="opt-action-col" style="text-align:center; padding:3px 2px; white-space:nowrap; width:145px;">
                         <div class="chain-tick-wrap" style="display:inline-flex; align-items:center; gap:2px;">
                             <label class="chain-tick-btn tick-buy ${isPeBuyChecked ? 'checked' : ''}" style="padding:1px 3px; font-size:10px;" title="Tick to BUY PE in basket">
                                 <input type="checkbox" ${isPeBuyChecked ? 'checked' : ''} onchange="onToggleChainBasketLeg(${strike}, 'PE', 'BUY', '${peSym}', '${peKey}', ${peLtpNum}, ${peLot}, '${currentExpDateStr}', this.checked); this.parentElement.classList.toggle('checked', this.checked); this.parentElement.querySelector('.tick-box').textContent = this.checked ? '☑' : '☐'">
@@ -5947,7 +6111,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         </div>
                     </td>
                 ` : `
-                    <td style="text-align:center; padding:3px 2px; white-space:nowrap; width:100px;">
+                    <td class="opt-action-col" style="text-align:center; padding:3px 2px; white-space:nowrap; width:145px;">
                         <div class="chain-quick-trade-wrap" style="display:inline-flex; align-items:center; gap:2px;">
                             <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:10px; width:22px; height:20px; border-radius:4px; box-shadow:0 0 4px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">B</button>
                             <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:10px; width:22px; height:20px; border-radius:4px; box-shadow:0 0 4px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">S</button>
@@ -5966,7 +6130,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         </td>
 
                         <!-- STRIKE PRICE (Center) -->
-                        <td style="text-align:center; padding:5px 3px; width:85px; background:#0b1120; border-left:1px solid rgba(255,255,255,0.08); border-right:1px solid rgba(255,255,255,0.08); font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:12.5px;">
+                        <td style="text-align:center; padding:5px 3px; width:90px; background:#0b1120; border-left:1px solid rgba(255,255,255,0.08); border-right:1px solid rgba(255,255,255,0.08); font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:12.5px;">
                             ${strike}
                         </td>
 
@@ -7103,9 +7267,33 @@ function loadActiveBasketFromStorage() {
     const nameEl = document.getElementById("basketModalName");
     if (nameEl) nameEl.innerText = basket.name || "DEFAULT BASKET";
 
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    if (undSel) {
+        undSel.value = basket.underlying || "NIFTY";
+        const searchInput = document.getElementById("basketSearchInput");
+        if (searchInput) searchInput.placeholder = `Search ${undSel.value} strikes (e.g. 23500, CE, PE)...`;
+    }
+
     syncBasketDropdown();
     updateBasketBadges();
 }
+
+function onBasketUnderlyingChange(newUnd) {
+    if (!newUnd) return;
+    const list = getSavedBasketsList();
+    const current = list.find(b => b.id === window._activeBasketId);
+    if (current) {
+        current.underlying = newUnd;
+        saveBasketsList(list);
+    }
+    const searchInput = document.getElementById("basketSearchInput");
+    if (searchInput) {
+        searchInput.placeholder = `Search ${newUnd} strikes (e.g. 23500, CE, PE)...`;
+    }
+    clearBasketSearch();
+    showStraddleToast(`Basket underlying set to ${newUnd}`, "info", 1500);
+}
+window.onBasketUnderlyingChange = onBasketUnderlyingChange;
 
 function onSwitchSavedBasket(newBasketId) {
     if (!newBasketId || newBasketId === window._activeBasketId) return;
@@ -7123,6 +7311,13 @@ function onSwitchSavedBasket(newBasketId) {
     const nameEl = document.getElementById("basketModalName");
     if (nameEl) nameEl.innerText = target.name || "DEFAULT BASKET";
 
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    if (undSel) {
+        undSel.value = target.underlying || "NIFTY";
+        const searchInput = document.getElementById("basketSearchInput");
+        if (searchInput) searchInput.placeholder = `Search ${undSel.value} strikes (e.g. 23500, CE, PE)...`;
+    }
+
     syncBasketDropdown();
     renderBasketOrdersTable();
     updateBasketBadges();
@@ -7138,10 +7333,13 @@ function createNewBasket() {
     const newIdx = list.length + 1;
     const newId = "basket_" + Date.now();
     const newName = `BASKET ${newIdx}`;
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    const currentUnd = undSel?.value || "NIFTY";
 
     const newBasket = {
         id: newId,
         name: newName,
+        underlying: currentUnd,
         orders: [],
         updated_at: Date.now()
     };
@@ -7175,11 +7373,14 @@ function saveCurrentBasket(notify = false) {
     let current = list.find(b => b.id === window._activeBasketId);
     const nameEl = document.getElementById("basketModalName");
     const resolvedName = (nameEl ? nameEl.innerText.trim().toUpperCase() : "") || "MY BASKET";
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    const resolvedUnd = undSel?.value || current?.underlying || "NIFTY";
 
     if (!current) {
         current = {
             id: window._activeBasketId || ("basket_" + Date.now()),
             name: resolvedName,
+            underlying: resolvedUnd,
             orders: window._basketOrders || [],
             updated_at: Date.now()
         };
@@ -7187,6 +7388,7 @@ function saveCurrentBasket(notify = false) {
         window._activeBasketId = current.id;
     } else {
         current.name = resolvedName;
+        current.underlying = resolvedUnd;
         current.orders = window._basketOrders || [];
         current.updated_at = Date.now();
     }
@@ -7382,9 +7584,10 @@ function closeBasketOrderModal() {
     clearBasketSearch();
 }
 
-function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSize = 65, exp = "", product = "CF") {
-    const und = window._straddleState?.optionChainUnderlying || "NIFTY";
-    const resolvedLot = Number(lotSize) > 0 ? Number(lotSize) : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : 65));
+function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSize = 0, exp = "", product = "CF") {
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    const und = undSel?.value || window._straddleState?.optionChainUnderlying || "NIFTY";
+    const resolvedLot = Number(lotSize) > 0 ? Number(lotSize) : getLotSizeForUnderlying(und);
     const resolvedStrike = Number(strike) || 0;
     let resolvedPrice = Number(ltp) || 0.05;
 
@@ -7679,7 +7882,7 @@ function toggleBasketOrderOptType(idx) {
 function stepBasketOrderStrike(idx, step) {
     if (window._basketOrders[idx]) {
         const item = window._basketOrders[idx];
-        const stepSize = (item.underlying === "BANKNIFTY" || item.underlying === "SENSEX") ? 100 : 50;
+        const stepSize = getStrikeStepForUnderlying(item.underlying);
         item.strike = Math.max(0, item.strike + (step * stepSize));
         item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
         try {
@@ -8006,7 +8209,7 @@ function generateBasketAutoName() {
     if (!orders || orders.length === 0) return "MY BASKET";
 
     const und = orders[0].underlying || "NIFTY";
-    const step = (und === "BANKNIFTY" || und === "SENSEX") ? 100 : 50;
+    const step = getStrikeStepForUnderlying(und);
 
     const sellLegs = orders.filter(o => String(o.side).toUpperCase().startsWith("S"));
     const buyLegs = orders.filter(o => String(o.side).toUpperCase().startsWith("B"));
@@ -8406,7 +8609,8 @@ async function handleBasketSearchInput(query) {
     if (clearBtn) clearBtn.style.display = "inline-block";
 
     const q = query.trim();
-    const und = window._straddleState?.optionChainUnderlying || "NIFTY";
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    const und = undSel?.value || window._straddleState?.optionChainUnderlying || "NIFTY";
 
     if (_basketSearchDebounceTimer) {
         clearTimeout(_basketSearchDebounceTimer);
@@ -8501,6 +8705,419 @@ document.addEventListener("click", function(e) {
     }
 });
 
+// =========================================================================
+// BASKET PRESETS ENGINE (BUILT-IN STRATEGIES & CUSTOM USER SAVED PRESETS)
+// =========================================================================
+
+const STORAGE_CUSTOM_PRESETS = "straddle_custom_presets";
+
+function getCustomBasketPresets() {
+    try {
+        const raw = localStorage.getItem(STORAGE_CUSTOM_PRESETS);
+        if (raw) return JSON.parse(raw) || [];
+    } catch(e) {}
+    return [];
+}
+window.getCustomBasketPresets = getCustomBasketPresets;
+
+function saveCustomBasketPresets(presets) {
+    try {
+        localStorage.setItem(STORAGE_CUSTOM_PRESETS, JSON.stringify(presets));
+    } catch(e) {}
+}
+
+const BUILTIN_PRESETS = [
+    {
+        id: "iron_condor_hedged",
+        name: "🛡️ Hedged Straddle / Iron Condor",
+        desc: "Sell ATM CE+PE, Buy OTM Hedge CE+PE",
+        tag: "Popular",
+        legs: [
+            { type: "CE", side: "SELL", offset_step: 0 },
+            { type: "PE", side: "SELL", offset_step: 0 },
+            { type: "CE", side: "BUY", offset_step: 4 },
+            { type: "PE", side: "BUY", offset_step: -4 }
+        ]
+    },
+    {
+        id: "atm_straddle",
+        name: "⚡ ATM Short Straddle",
+        desc: "Sell ATM Call + Sell ATM Put",
+        tag: "Standard",
+        legs: [
+            { type: "CE", side: "SELL", offset_step: 0 },
+            { type: "PE", side: "SELL", offset_step: 0 }
+        ]
+    },
+    {
+        id: "otm1_strangle",
+        name: "🎯 OTM 1 Short Strangle (Crude Favorite)",
+        desc: "Sell OTM 1 Call + Sell OTM 1 Put",
+        tag: "Crude",
+        legs: [
+            { type: "CE", side: "SELL", offset_step: 1 },
+            { type: "PE", side: "SELL", offset_step: -1 }
+        ]
+    },
+    {
+        id: "otm2_strangle",
+        name: "🎯 OTM 2 Short Strangle",
+        desc: "Sell OTM 2 Call + Sell OTM 2 Put",
+        tag: "Conservative",
+        legs: [
+            { type: "CE", side: "SELL", offset_step: 2 },
+            { type: "PE", side: "SELL", offset_step: -2 }
+        ]
+    },
+    {
+        id: "otm3_strangle",
+        name: "🎯 OTM 3 Short Strangle (Silver Favorite)",
+        desc: "Sell OTM 3 Call + Sell OTM 3 Put",
+        tag: "Silver",
+        legs: [
+            { type: "CE", side: "SELL", offset_step: 3 },
+            { type: "PE", side: "SELL", offset_step: -3 }
+        ]
+    },
+    {
+        id: "bull_call_spread",
+        name: "📈 Bull Call Spread",
+        desc: "Buy ATM Call + Sell OTM 1 Call",
+        tag: "Directional",
+        legs: [
+            { type: "CE", side: "BUY", offset_step: 0 },
+            { type: "CE", side: "SELL", offset_step: 1 }
+        ]
+    },
+    {
+        id: "bear_put_spread",
+        name: "📉 Bear Put Spread",
+        desc: "Buy ATM Put + Sell OTM 1 Put",
+        tag: "Directional",
+        legs: [
+            { type: "PE", side: "BUY", offset_step: 0 },
+            { type: "PE", side: "SELL", offset_step: -1 }
+        ]
+    }
+];
+
+function toggleBasketPresetsDropdown(event) {
+    if (event) event.stopPropagation();
+    const drop = document.getElementById("basketPresetsDropdown");
+    if (!drop) return;
+    if (drop.style.display === "block") {
+        drop.style.display = "none";
+    } else {
+        renderBasketPresetsDropdown();
+        drop.style.display = "block";
+    }
+}
+window.toggleBasketPresetsDropdown = toggleBasketPresetsDropdown;
+
+// Close presets dropdown on outside click
+document.addEventListener("click", function(e) {
+    const drop = document.getElementById("basketPresetsDropdown");
+    const btn = document.getElementById("btnBasketPresetsToggle");
+    if (drop && drop.style.display === "block") {
+        if (!drop.contains(e.target) && e.target !== btn && !btn?.contains(e.target)) {
+            drop.style.display = "none";
+        }
+    }
+});
+
+function renderBasketPresetsDropdown() {
+    const drop = document.getElementById("basketPresetsDropdown");
+    if (!drop) return;
+
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    const currentUnd = undSel?.value || "NIFTY";
+    const customList = getCustomBasketPresets();
+
+    let html = `
+        <div class="preset-dropdown-header">
+            ⚡ Quick Strategy Presets for ${currentUnd}
+        </div>
+    `;
+
+    BUILTIN_PRESETS.forEach(p => {
+        html += `
+            <div class="preset-dropdown-item" onclick="applyBasketPreset('${p.id}')">
+                <div style="flex:1;">
+                    <div class="preset-item-title">${p.name} <span class="preset-item-tag">${p.tag}</span></div>
+                    <div class="preset-item-desc">${p.desc}</div>
+                </div>
+                <span style="font-size:12px; color:#38bdf8; font-weight:800;">Apply ➔</span>
+            </div>
+        `;
+    });
+
+    if (customList.length > 0) {
+        html += `
+            <div class="preset-dropdown-header" style="border-top:1px solid rgba(255,255,255,0.08); margin-top:4px;">
+                ⭐ My Saved Presets
+            </div>
+        `;
+        customList.forEach(cp => {
+            html += `
+                <div class="preset-dropdown-item" onclick="applyCustomBasketPreset('${cp.id}')">
+                    <div style="flex:1;">
+                        <div class="preset-item-title">${cp.name} <span class="preset-item-tag" style="background:rgba(234,179,8,0.15); color:#facc15; border-color:rgba(234,179,8,0.3);">${cp.underlying || 'CUSTOM'}</span></div>
+                        <div class="preset-item-desc">${cp.desc || `${cp.legs.length} legs`}</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:12px; color:#38bdf8; font-weight:800;">Load</span>
+                        <span title="Delete Preset" style="color:#ef4444; cursor:pointer; font-size:12px; padding:2px 4px;" onclick="event.stopPropagation(); deleteCustomBasketPreset('${cp.id}')">🗑️</span>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    drop.innerHTML = html;
+}
+window.renderBasketPresetsDropdown = renderBasketPresetsDropdown;
+
+async function applyBasketPreset(presetId) {
+    const drop = document.getElementById("basketPresetsDropdown");
+    if (drop) drop.style.display = "none";
+
+    const preset = BUILTIN_PRESETS.find(p => p.id === presetId);
+    if (!preset) return;
+
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    const und = undSel?.value || "NIFTY";
+    const step = getStrikeStepForUnderlying(und);
+    const lotSize = getLotSizeForUnderlying(und);
+
+    showStraddleToast(`Resolving live ATM strike for ${und}...`, "info", 1500);
+
+    try {
+        const spotResp = await fetch(`/api/straddle/spot?underlying=${encodeURIComponent(und)}`);
+        const spotData = await spotResp.json();
+        let atm = spotData.atm || 0;
+        let spot = spotData.spot || 0;
+
+        if (atm <= 0 && spot > 0) {
+            atm = Math.round(spot / step) * step;
+        }
+        if (atm <= 0) {
+            atm = (und === "NIFTY" ? 22600 : (und === "BANKNIFTY" ? 48500 : (und === "CRUDEOIL" ? 6100 : (und === "SILVER" ? 85000 : 25000))));
+        }
+
+        // Fetch near expiry
+        let nearExpiry = "Weekly";
+        try {
+            const expResp = await fetch(`/api/straddle/expiries?underlying=${encodeURIComponent(und)}`);
+            const expData = await expResp.json();
+            if (expData.success && expData.expiries && expData.expiries.length > 0) {
+                nearExpiry = expData.expiries[0].formatted_label || expData.expiries[0].tag || "Weekly";
+            }
+        } catch(e) {}
+
+        // For commodities in iron condor, adjust offset
+        let legsConfig = JSON.parse(JSON.stringify(preset.legs));
+        if (preset.id === "iron_condor_hedged") {
+            const hedgeSteps = (und === "SILVER" || und === "SILVERM") ? 3 : ((und === "CRUDEOIL" || und === "CRUDEOILM") ? 2 : 4);
+            legsConfig.forEach(l => {
+                if (l.side === "BUY") {
+                    l.offset_step = (l.type === "CE" ? hedgeSteps : -hedgeSteps);
+                }
+            });
+        }
+
+        const newOrders = [];
+        legsConfig.forEach(legDef => {
+            const strike = Math.round(atm + (legDef.offset_step * step));
+            newOrders.push({
+                id: "b_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
+                selected: true,
+                underlying: und,
+                symbol: `${und} ${strike} ${legDef.type}`,
+                trading_symbol: `${und} ${strike} ${legDef.type}`,
+                token: "",
+                strike: strike,
+                opt_type: legDef.type,
+                side: legDef.side,
+                expiry_date: nearExpiry,
+                product: "CF",
+                lots: 1,
+                lot_size: lotSize,
+                quantity: lotSize,
+                price: 0.05,
+                order_type: "LIMIT",
+                ltp: 0.05,
+                change: 0,
+                change_pct: 0
+            });
+        });
+
+        // Set to basket orders and save
+        window._basketOrders = newOrders;
+        const list = getSavedBasketsList();
+        const current = list.find(b => b.id === window._activeBasketId);
+        if (current) {
+            current.orders = newOrders;
+            current.underlying = und;
+            saveBasketsList(list);
+        }
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(newOrders));
+        } catch(e) {}
+
+        renderBasketOrdersTable();
+        updateBasketBadges();
+        updateBasketMarginCalculation();
+        refreshAllBasketQuotes();
+        showStraddleToast(`Applied preset "${preset.name}" at ATM ${atm}!`, "success", 2500);
+
+    } catch (e) {
+        showStraddleToast(`Error applying preset: ${e.message}`, "error", 3000);
+    }
+}
+window.applyBasketPreset = applyBasketPreset;
+
+function saveCurrentBasketAsPreset() {
+    if (!window._basketOrders || window._basketOrders.length === 0) {
+        showStraddleToast("Current basket has no orders to save as preset.", "warning", 2500);
+        return;
+    }
+
+    const defaultName = generateBasketAutoName();
+    const presetName = prompt("Enter a name for this Custom Strategy Preset:", defaultName);
+    if (!presetName || !presetName.trim()) return;
+
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    const und = undSel?.value || "NIFTY";
+    const step = getStrikeStepForUnderlying(und);
+
+    // Calculate reference strike from median strike
+    const strikes = window._basketOrders.map(o => o.strike);
+    const minStrike = Math.min(...strikes);
+    const maxStrike = Math.max(...strikes);
+    const refAtm = Math.round(((minStrike + maxStrike) / 2) / step) * step;
+
+    const legs = window._basketOrders.map(o => ({
+        type: o.opt_type,
+        side: o.side,
+        offset_step: Math.round((o.strike - refAtm) / step),
+        lots: o.lots || 1,
+        product: o.product || "CF"
+    }));
+
+    const newPreset = {
+        id: "custom_" + Date.now(),
+        name: presetName.trim(),
+        desc: `${legs.length} legs (${legs.map(l => (l.side === "BUY" ? "+B " : "-S ") + (l.offset_step >= 0 ? "+" : "") + l.offset_step + l.type).join(", ")})`,
+        underlying: und,
+        legs: legs,
+        created_at: Date.now()
+    };
+
+    const customList = getCustomBasketPresets();
+    customList.push(newPreset);
+    saveCustomBasketPresets(customList);
+
+    showStraddleToast(`💾 Saved custom preset "${newPreset.name}"!`, "success", 2500);
+    renderBasketPresetsDropdown();
+}
+window.saveCurrentBasketAsPreset = saveCurrentBasketAsPreset;
+
+async function applyCustomBasketPreset(presetId) {
+    const drop = document.getElementById("basketPresetsDropdown");
+    if (drop) drop.style.display = "none";
+
+    const customList = getCustomBasketPresets();
+    const preset = customList.find(p => p.id === presetId);
+    if (!preset) return;
+
+    const undSel = document.getElementById("basketUnderlyingSelect");
+    const und = preset.underlying || undSel?.value || "NIFTY";
+    if (undSel) undSel.value = und;
+
+    const step = getStrikeStepForUnderlying(und);
+    const lotSize = getLotSizeForUnderlying(und);
+
+    showStraddleToast(`Loading custom preset "${preset.name}" for ${und}...`, "info", 1500);
+
+    try {
+        const spotResp = await fetch(`/api/straddle/spot?underlying=${encodeURIComponent(und)}`);
+        const spotData = await spotResp.json();
+        let atm = spotData.atm || 0;
+        let spot = spotData.spot || 0;
+        if (atm <= 0 && spot > 0) atm = Math.round(spot / step) * step;
+        if (atm <= 0) atm = (und === "NIFTY" ? 22600 : 25000);
+
+        let nearExpiry = "Weekly";
+        try {
+            const expResp = await fetch(`/api/straddle/expiries?underlying=${encodeURIComponent(und)}`);
+            const expData = await expResp.json();
+            if (expData.success && expData.expiries && expData.expiries.length > 0) {
+                nearExpiry = expData.expiries[0].formatted_label || expData.expiries[0].tag || "Weekly";
+            }
+        } catch(e) {}
+
+        const newOrders = [];
+        preset.legs.forEach(legDef => {
+            const strike = Math.round(atm + (legDef.offset_step * step));
+            newOrders.push({
+                id: "b_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
+                selected: true,
+                underlying: und,
+                symbol: `${und} ${strike} ${legDef.type}`,
+                trading_symbol: `${und} ${strike} ${legDef.type}`,
+                token: "",
+                strike: strike,
+                opt_type: legDef.type,
+                side: legDef.side,
+                expiry_date: nearExpiry,
+                product: legDef.product || "CF",
+                lots: legDef.lots || 1,
+                lot_size: lotSize,
+                quantity: (legDef.lots || 1) * lotSize,
+                price: 0.05,
+                order_type: "LIMIT",
+                ltp: 0.05,
+                change: 0,
+                change_pct: 0
+            });
+        });
+
+        window._basketOrders = newOrders;
+        const list = getSavedBasketsList();
+        const current = list.find(b => b.id === window._activeBasketId);
+        if (current) {
+            current.orders = newOrders;
+            current.underlying = und;
+            saveBasketsList(list);
+        }
+        try {
+            localStorage.setItem("straddle_basket_orders", JSON.stringify(newOrders));
+        } catch(e) {}
+
+        renderBasketOrdersTable();
+        updateBasketBadges();
+        updateBasketMarginCalculation();
+        refreshAllBasketQuotes();
+        showStraddleToast(`Loaded preset "${preset.name}" at ATM ${atm}!`, "success", 2500);
+    } catch(e) {
+        showStraddleToast(`Error loading preset: ${e.message}`, "error", 3000);
+    }
+}
+window.applyCustomBasketPreset = applyCustomBasketPreset;
+
+function deleteCustomBasketPreset(presetId) {
+    let customList = getCustomBasketPresets();
+    const target = customList.find(p => p.id === presetId);
+    if (!target) return;
+    if (!confirm(`Delete preset "${target.name}"?`)) return;
+
+    customList = customList.filter(p => p.id !== presetId);
+    saveCustomBasketPresets(customList);
+    renderBasketPresetsDropdown();
+    showStraddleToast(`Deleted preset "${target.name}".`, "info", 1500);
+}
+window.deleteCustomBasketPreset = deleteCustomBasketPreset;
+
 // Window function exports
 window.openBasketOrderModal = openBasketOrderModal;
 window.openBasketModal = openBasketOrderModal;
@@ -8547,6 +9164,15 @@ window.straddleToggleExecutionMode = straddleToggleExecutionMode;
 window.toggleStraddleExecutionMode = straddleToggleExecutionMode;
 window.straddleSquareOffAllAndTerminate = straddleSquareOffAllAndTerminate;
 window.emergencySquareOffAllStraddles = straddleSquareOffAllAndTerminate;
+window.toggleBasketPresetsDropdown = toggleBasketPresetsDropdown;
+window.renderBasketPresetsDropdown = renderBasketPresetsDropdown;
+window.applyBasketPreset = applyBasketPreset;
+window.saveCurrentBasketAsPreset = saveCurrentBasketAsPreset;
+window.applyCustomBasketPreset = applyCustomBasketPreset;
+window.deleteCustomBasketPreset = deleteCustomBasketPreset;
+window.openOptionChainForActiveBasket = openOptionChainForActiveBasket;
+window.toggleOptionChainInsights = toggleOptionChainInsights;
+window.onBasketUnderlyingChange = onBasketUnderlyingChange;
 
 // =========================================================================
 // GLOBAL COMMODITY & NIFTY SELECTION & LIVE CANDLESTICK CHART CONTROLLER

@@ -969,20 +969,23 @@ class StraddleManager:
 
         # Detect underlying
         clean_und = None
-        for cand in ["BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX", "NIFTY"]:
-            if cand in raw_q:
-                clean_und = cand
-                break
+        if underlying:
+            clean_und = str(underlying).strip().upper()
+        else:
+            for cand in ["CRUDEOILM", "CRUDEOIL", "NATGASMINI", "NATURALGAS", "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX", "NIFTY"]:
+                if cand in raw_q:
+                    clean_und = cand
+                    break
         if not clean_und:
-            clean_und = (underlying or self._state.get("underlying_symbol") or "NIFTY").upper()
+            clean_und = (self._state.get("underlying_symbol") or "NIFTY").upper()
 
         step = STRIKE_STEPS.get(clean_und, 50)
         spot_price = self._get_underlying_spot_price(clean_und)
         if spot_price <= 0:
             spot_price = 23146.0 if clean_und == "NIFTY" else 51200.0
 
-        # Extract strike numbers if present
-        strike_matches = re.findall(r"\b(\d{4,6})\b", raw_q)
+        # Extract strike numbers if present (support 2 to 6 digits, e.g. NatGas 180, Crude 6100, Nifty 22600)
+        strike_matches = re.findall(r"\b(\d{2,6})\b", raw_q)
         target_strike = float(strike_matches[0]) if strike_matches else None
 
         # Detect option type preference if any
@@ -998,12 +1001,21 @@ class StraddleManager:
         expiry_map = {e["expiry_ms"]: e for e in expiries}
         valid_expiries = set(e["expiry_ms"] for e in expiries)
 
+        # Resolve exchange segment for underlying (MCX for commodities, BSE for Sensex, NSE for Nifty)
+        is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+        target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
+        r_clean_und = clean_und.replace(" ", "")
+
         # Filter candidate instruments
         matches = []
         for r in instruments:
+            if r.get("segment") != target_seg:
+                continue
+            r_name = str(r.get("name", "")).upper().replace(" ", "")
+            r_tsym = str(r.get("trading_symbol", "")).upper()
+            matches_und = (r_name == r_clean_und or r_tsym.startswith(r_clean_und + " ") or r_name.startswith(r_clean_und))
             if (
-                r.get("segment") in ("NSE_FO", "BSE_FO")
-                and r.get("name") == clean_und
+                matches_und
                 and r.get("instrument_type") in ("CE", "PE")
                 and r.get("expiry") in valid_expiries
             ):
@@ -2091,7 +2103,7 @@ class StraddleManager:
         except Exception:
             pass
 
-        step = 100.0 if und == "BANKNIFTY" else 50.0
+        step = float(STRIKE_STEPS.get(und, 50.0))
         atm_strike = round(spot / step) * step
 
         sim_orders = []
@@ -2128,7 +2140,8 @@ class StraddleManager:
             })
 
         res = self.calculate_basket_margin(sim_orders, multiplier=1)
-        req = float(res.get("required_margin") or 125174.14)
+        fallback_margin = float(getattr(config, "DEFAULT_MARGIN_PER_LOT", {}).get(und, 125174.14))
+        req = float(res.get("required_margin") or fallback_margin)
         return max(req, 1000.0)
 
     def get_effective_multiplier(self, strat: Dict[str, Any]) -> int:
@@ -5861,157 +5874,166 @@ class StraddleManager:
         funds = self.get_margin_overview()
         avail_margin = float(funds.get("available_margin") or funds.get("available_cash") or 0.0)
 
-        ce_shorts = []
-        pe_shorts = []
-        ce_longs = []
-        pe_longs = []
-        other_shorts = []
-        buy_premiums = []
-        und = "NIFTY"
-
+        # Multi-underlying support: group orders by underlying to compute accurate margin per asset class
+        orders_by_und: Dict[str, List[Dict[str, Any]]] = {}
         for o in orders:
-            und = str(o.get("underlying") or und or "NIFTY").upper()
-            lot_size = int(o.get("lot_size") or DEFAULT_LOT_SIZES.get(und, 65))
-            raw_lots = int(o.get("lots") or (int(o.get("quantity", lot_size)) // lot_size) or 1)
-            raw_lots = max(1, raw_lots)
-            lots = raw_lots * mult
-            qty = lots * lot_size
-            prc = float(o.get("price", 0.0) or o.get("ltp", 0.0) or 0.0)
-            side = str(o.get("transaction_type") or o.get("side") or "BUY").upper()
-            opt_type = str(o.get("opt_type") or "").upper()
-            if not opt_type:
-                sym_upper = str(o.get("symbol") or o.get("trading_symbol") or "").upper()
-                if " CE" in sym_upper or sym_upper.endswith("CE"):
-                    opt_type = "CE"
-                elif " PE" in sym_upper or sym_upper.endswith("PE"):
-                    opt_type = "PE"
-
-            strike = float(o.get("strike", 0.0))
-            if strike <= 0:
-                sym_upper = str(o.get("symbol") or o.get("trading_symbol") or "")
-                stk_match = re.findall(r"\b(\d{4,6})\b", sym_upper)
-                if stk_match:
-                    strike = float(stk_match[0])
-
-            if side.startswith("B"):
-                buy_premiums.append(prc * qty)
-                if opt_type == "CE":
-                    ce_longs.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
-                elif opt_type == "PE":
-                    pe_longs.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
-            else:
-                if opt_type == "CE":
-                    ce_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
-                elif opt_type == "PE":
-                    pe_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
-                else:
-                    other_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
-
-        # Standard Exchange Lot Parameters
-        base_span_lot = 145282.80 if und == "NIFTY" else (115000.0 if und == "BANKNIFTY" else (110000.0 if und == "FINNIFTY" else (95000.0 if und == "MIDCPNIFTY" else 155000.0)))
-        base_exp_lot = 60174.14 if und == "NIFTY" else (32500.0 if und == "BANKNIFTY" else (31000.0 if und == "FINNIFTY" else (28000.0 if und == "MIDCPNIFTY" else 46000.0)))
-
-        # 1. Evaluate CE Wing Risk (Call Credit Spreads)
-        ce_wing_risk = 0.0
-        ce_hedged_qty = 0
-        rem_ce_longs = [{"strike": l["strike"], "rem_qty": l["qty"]} for l in ce_longs]
-        sorted_ce_shorts = sorted(ce_shorts, key=lambda x: x["strike"])
-
-        for s in sorted_ce_shorts:
-            s_rem = s["qty"]
-            matching_longs = [l for l in rem_ce_longs if l["rem_qty"] > 0 and l["strike"] > s["strike"]]
-            matching_longs.sort(key=lambda x: x["strike"])
-            for l in matching_longs:
-                if s_rem <= 0:
-                    break
-                h_qty = min(s_rem, l["rem_qty"])
-                ce_wing_risk += (l["strike"] - s["strike"]) * h_qty
-                ce_hedged_qty += h_qty
-                s_rem -= h_qty
-                l["rem_qty"] -= h_qty
-
-        # 2. Evaluate PE Wing Risk (Put Credit Spreads)
-        pe_wing_risk = 0.0
-        pe_hedged_qty = 0
-        rem_pe_longs = [{"strike": l["strike"], "rem_qty": l["qty"]} for l in pe_longs]
-        sorted_pe_shorts = sorted(pe_shorts, key=lambda x: x["strike"], reverse=True)
-
-        for s in sorted_pe_shorts:
-            s_rem = s["qty"]
-            matching_longs = [l for l in rem_pe_longs if l["rem_qty"] > 0 and l["strike"] < s["strike"]]
-            matching_longs.sort(key=lambda x: x["strike"], reverse=True)
-            for l in matching_longs:
-                if s_rem <= 0:
-                    break
-                h_qty = min(s_rem, l["rem_qty"])
-                pe_wing_risk += (s["strike"] - l["strike"]) * h_qty
-                pe_hedged_qty += h_qty
-                s_rem -= h_qty
-                l["rem_qty"] -= h_qty
-
-        curr_lot_size = DEFAULT_LOT_SIZES.get(und, 65)
-        total_ce_short_lots = sum(s["lots"] for s in ce_shorts)
-        total_pe_short_lots = sum(s["lots"] for s in pe_shorts)
-        total_other_short_lots = sum(s["lots"] for s in other_shorts)
-        total_short_lots = total_ce_short_lots + total_pe_short_lots + total_other_short_lots
-
-        hedged_ce_lots = ce_hedged_qty // curr_lot_size
-        hedged_pe_lots = pe_hedged_qty // curr_lot_size
-        unhedged_ce_lots = total_ce_short_lots - hedged_ce_lots
-        unhedged_pe_lots = total_pe_short_lots - hedged_pe_lots
-
-        # Baseline naked short margin (All short positions unhedged)
-        naked_short_margin = total_short_lots * (base_span_lot + base_exp_lot * 0.5)
+            u = str(o.get("underlying") or "NIFTY").upper()
+            if u not in orders_by_und:
+                orders_by_und[u] = []
+            orders_by_und[u].append(o)
 
         total_required_margin = 0.0
+        total_naked_margin = 0.0
         has_hedge_benefit = False
 
-        if total_short_lots == 0:
-            # Buy-only basket
-            total_required_margin = sum(buy_premiums)
-            has_hedge_benefit = False
-        else:
-            # A. Iron Condor / Iron Butterfly Component (where both CE and PE wings are hedged)
-            condor_lots = min(hedged_ce_lots, hedged_pe_lots)
-            if condor_lots > 0:
-                has_hedge_benefit = True
-                ce_condor_risk = (ce_wing_risk / max(1, hedged_ce_lots)) * condor_lots
-                pe_condor_risk = (pe_wing_risk / max(1, hedged_pe_lots)) * condor_lots
-                span_condor = max(ce_condor_risk, pe_condor_risk)
-                exp_condor = base_exp_lot * condor_lots
-                total_required_margin += (span_condor + exp_condor)
+        for u_und, u_orders in orders_by_und.items():
+            curr_lot_size = int(DEFAULT_LOT_SIZES.get(u_und, 65))
+            base_span_lot = float(getattr(config, "BASE_SPAN_PER_LOT", {}).get(u_und, 145282.80))
+            base_exp_lot = float(getattr(config, "BASE_EXP_PER_LOT", {}).get(u_und, 60174.14))
 
-            # B. Excess Hedged CE (Bear Call Credit Spread)
-            excess_ce_hedged_lots = hedged_ce_lots - condor_lots
-            if excess_ce_hedged_lots > 0:
-                has_hedge_benefit = True
-                ce_excess_risk = (ce_wing_risk / max(1, hedged_ce_lots)) * excess_ce_hedged_lots
-                exp_spread = base_exp_lot * 0.5 * excess_ce_hedged_lots
-                total_required_margin += (ce_excess_risk + exp_spread)
+            u_ce_shorts = []
+            u_pe_shorts = []
+            u_ce_longs = []
+            u_pe_longs = []
+            u_other_shorts = []
+            u_buy_premiums = []
 
-            # C. Excess Hedged PE (Bull Put Credit Spread)
-            excess_pe_hedged_lots = hedged_pe_lots - condor_lots
-            if excess_pe_hedged_lots > 0:
-                has_hedge_benefit = True
-                pe_excess_risk = (pe_wing_risk / max(1, hedged_pe_lots)) * excess_pe_hedged_lots
-                exp_spread = base_exp_lot * 0.5 * excess_pe_hedged_lots
-                total_required_margin += (pe_excess_risk + exp_spread)
+            for o in u_orders:
+                lot_size = int(o.get("lot_size") or curr_lot_size)
+                raw_lots = int(o.get("lots") or (int(o.get("quantity", lot_size)) // lot_size) or 1)
+                raw_lots = max(1, raw_lots)
+                lots = raw_lots * mult
+                qty = lots * lot_size
+                prc = float(o.get("price", 0.0) or o.get("ltp", 0.0) or 0.0)
+                side = str(o.get("transaction_type") or o.get("side") or "BUY").upper()
+                opt_type = str(o.get("opt_type") or "").upper()
+                if not opt_type:
+                    sym_upper = str(o.get("symbol") or o.get("trading_symbol") or "").upper()
+                    if " CE" in sym_upper or sym_upper.endswith("CE"):
+                        opt_type = "CE"
+                    elif " PE" in sym_upper or sym_upper.endswith("PE"):
+                        opt_type = "PE"
 
-            # D. Unhedged Short Legs (Straddles/Strangles or Naked Shorts)
-            unhedged_straddle_lots = min(unhedged_ce_lots, unhedged_pe_lots)
-            if unhedged_straddle_lots > 0:
-                has_hedge_benefit = True
-                total_required_margin += (base_span_lot + base_exp_lot) * unhedged_straddle_lots
+                strike = float(o.get("strike", 0.0))
+                if strike <= 0:
+                    sym_upper = str(o.get("symbol") or o.get("trading_symbol") or "")
+                    stk_match = re.findall(r"\b(\d{2,6})\b", sym_upper)
+                    if stk_match:
+                        strike = float(stk_match[0])
 
-            naked_single_ce_lots = unhedged_ce_lots - unhedged_straddle_lots
-            naked_single_pe_lots = unhedged_pe_lots - unhedged_straddle_lots
-            naked_remaining_lots = naked_single_ce_lots + naked_single_pe_lots + total_other_short_lots
+                if side.startswith("B"):
+                    u_buy_premiums.append(prc * qty)
+                    if opt_type == "CE":
+                        u_ce_longs.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
+                    elif opt_type == "PE":
+                        u_pe_longs.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
+                else:
+                    if opt_type == "CE":
+                        u_ce_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
+                    elif opt_type == "PE":
+                        u_pe_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
+                    else:
+                        u_other_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
 
-            if naked_remaining_lots > 0:
-                total_required_margin += naked_remaining_lots * (base_span_lot + base_exp_lot * 0.5)
+            # 1. Evaluate CE Wing Risk (Call Credit Spreads)
+            u_ce_wing_risk = 0.0
+            u_ce_hedged_qty = 0
+            rem_ce_longs = [{"strike": l["strike"], "rem_qty": l["qty"]} for l in u_ce_longs]
+            sorted_ce_shorts = sorted(u_ce_shorts, key=lambda x: x["strike"])
+
+            for s in sorted_ce_shorts:
+                s_rem = s["qty"]
+                matching_longs = [l for l in rem_ce_longs if l["rem_qty"] > 0 and l["strike"] > s["strike"]]
+                matching_longs.sort(key=lambda x: x["strike"])
+                for l in matching_longs:
+                    if s_rem <= 0:
+                        break
+                    h_qty = min(s_rem, l["rem_qty"])
+                    u_ce_wing_risk += (l["strike"] - s["strike"]) * h_qty
+                    u_ce_hedged_qty += h_qty
+                    s_rem -= h_qty
+                    l["rem_qty"] -= h_qty
+
+            # 2. Evaluate PE Wing Risk (Put Credit Spreads)
+            u_pe_wing_risk = 0.0
+            u_pe_hedged_qty = 0
+            rem_pe_longs = [{"strike": l["strike"], "rem_qty": l["qty"]} for l in u_pe_longs]
+            sorted_pe_shorts = sorted(u_pe_shorts, key=lambda x: x["strike"], reverse=True)
+
+            for s in sorted_pe_shorts:
+                s_rem = s["qty"]
+                matching_longs = [l for l in rem_pe_longs if l["rem_qty"] > 0 and l["strike"] < s["strike"]]
+                matching_longs.sort(key=lambda x: x["strike"], reverse=True)
+                for l in matching_longs:
+                    if s_rem <= 0:
+                        break
+                    h_qty = min(s_rem, l["rem_qty"])
+                    u_pe_wing_risk += (s["strike"] - l["strike"]) * h_qty
+                    u_pe_hedged_qty += h_qty
+                    s_rem -= h_qty
+                    l["rem_qty"] -= h_qty
+
+            u_total_ce_short_lots = sum(s["lots"] for s in u_ce_shorts)
+            u_total_pe_short_lots = sum(s["lots"] for s in u_pe_shorts)
+            u_total_other_short_lots = sum(s["lots"] for s in u_other_shorts)
+            u_total_short_lots = u_total_ce_short_lots + u_total_pe_short_lots + u_total_other_short_lots
+
+            u_hedged_ce_lots = u_ce_hedged_qty // curr_lot_size
+            u_hedged_pe_lots = u_pe_hedged_qty // curr_lot_size
+            u_unhedged_ce_lots = u_total_ce_short_lots - u_hedged_ce_lots
+            u_unhedged_pe_lots = u_total_pe_short_lots - u_hedged_pe_lots
+
+            u_naked_margin = u_total_short_lots * (base_span_lot + base_exp_lot * 0.5)
+            total_naked_margin += u_naked_margin
+
+            u_req_margin = 0.0
+            if u_total_short_lots == 0:
+                # Buy-only basket for this underlying
+                u_req_margin = sum(u_buy_premiums)
+            else:
+                # A. Iron Condor / Iron Butterfly Component (where both CE and PE wings are hedged)
+                condor_lots = min(u_hedged_ce_lots, u_hedged_pe_lots)
+                if condor_lots > 0:
+                    has_hedge_benefit = True
+                    ce_condor_risk = (u_ce_wing_risk / max(1, u_hedged_ce_lots)) * condor_lots
+                    pe_condor_risk = (u_pe_wing_risk / max(1, u_hedged_pe_lots)) * condor_lots
+                    span_condor = max(ce_condor_risk, pe_condor_risk)
+                    exp_condor = base_exp_lot * condor_lots
+                    u_req_margin += (span_condor + exp_condor)
+
+                # B. Excess Hedged CE (Bear Call Credit Spread)
+                excess_ce_hedged_lots = u_hedged_ce_lots - condor_lots
+                if excess_ce_hedged_lots > 0:
+                    has_hedge_benefit = True
+                    ce_excess_risk = (u_ce_wing_risk / max(1, u_hedged_ce_lots)) * excess_ce_hedged_lots
+                    exp_spread = base_exp_lot * 0.5 * excess_ce_hedged_lots
+                    u_req_margin += (ce_excess_risk + exp_spread)
+
+                # C. Excess Hedged PE (Bull Put Credit Spread)
+                excess_pe_hedged_lots = u_hedged_pe_lots - condor_lots
+                if excess_pe_hedged_lots > 0:
+                    has_hedge_benefit = True
+                    pe_excess_risk = (u_pe_wing_risk / max(1, u_hedged_pe_lots)) * excess_pe_hedged_lots
+                    exp_spread = base_exp_lot * 0.5 * excess_pe_hedged_lots
+                    u_req_margin += (pe_excess_risk + exp_spread)
+
+                # D. Unhedged Short Legs (Straddles/Strangles or Naked Shorts)
+                unhedged_straddle_lots = min(u_unhedged_ce_lots, u_unhedged_pe_lots)
+                if unhedged_straddle_lots > 0:
+                    has_hedge_benefit = True
+                    u_req_margin += (base_span_lot + base_exp_lot) * unhedged_straddle_lots
+
+                naked_single_ce_lots = u_unhedged_ce_lots - unhedged_straddle_lots
+                naked_single_pe_lots = u_unhedged_pe_lots - unhedged_straddle_lots
+                naked_remaining_lots = naked_single_ce_lots + naked_single_pe_lots + u_total_other_short_lots
+
+                if naked_remaining_lots > 0:
+                    u_req_margin += naked_remaining_lots * (base_span_lot + base_exp_lot * 0.5)
+
+            total_required_margin += max(0.0, u_req_margin)
 
         total_required_margin = max(0.0, total_required_margin)
-        hedge_savings = max(0.0, naked_short_margin - total_required_margin) if total_short_lots > 0 else 0.0
+        hedge_savings = max(0.0, total_naked_margin - total_required_margin) if total_naked_margin > 0 else 0.0
 
         # Exact Exchange / Angel One / Kotak Neo F&O Charges Breakdown:
         sell_turnover = 0.0

@@ -1433,7 +1433,7 @@ body {
    ========================================================================== */
 .opt-chain-modal-dialog {
     width: 95vw !important;
-    max-width: 760px !important;
+    max-width: 880px !important;
     max-height: 88vh !important;
     background: #080c14 !important;
     border: 1px solid rgba(59, 130, 246, 0.35) !important;
@@ -8921,6 +8921,57 @@ table .flag-cell {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.opt-chain-table th.opt-action-col,
+.opt-chain-table td.opt-action-col {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+}
+
+/* ==========================================================
+   Basket Presets Dropdown Styles
+   ========================================================== */
+.preset-dropdown-header {
+    padding: 6px 14px;
+    font-size: 10.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+    background: #090e18;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    margin: 4px 0 2px 0;
+}
+.preset-dropdown-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.preset-dropdown-item:hover {
+    background: rgba(99, 102, 241, 0.2);
+}
+.preset-item-title {
+    font-weight: 800;
+    color: #f8fafc;
+    font-size: 12px;
+}
+.preset-item-desc {
+    font-size: 10px;
+    color: #94a3b8;
+    margin-top: 2px;
+}
+.preset-item-tag {
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
 }
 
 .basket-orders-table {
