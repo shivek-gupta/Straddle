@@ -9610,4 +9610,29 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     pointer-events: none;
 }
 
+/* ====================================================================
+   KRONOS FOUNDATION MODEL FORECASTING STYLES
+   ==================================================================== */
+.straddle-btn.btn-ai-kronos-active {
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(56, 189, 248, 0.4)) !important;
+    border-color: #c084fc !important;
+    box-shadow: 0 0 18px rgba(168, 85, 247, 0.6), inset 0 0 10px rgba(168, 85, 247, 0.3) !important;
+    color: #ffffff !important;
+}
+
+.kronos-horizon-btn {
+    transition: all 0.15s ease;
+}
+
+.kronos-horizon-btn:hover {
+    color: #ffffff !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.kronos-horizon-btn.active {
+    background: #a855f7 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 8px rgba(168, 85, 247, 0.6) !important;
+}
+
 

@@ -936,6 +936,36 @@ def api_straddle_chart_candles():
         return jsonify({"status": "error", "success": False, "error": str(e), "candles": []}), 500
 
 
+@app.route("/api/straddle/kronos_forecast", methods=["GET"])
+def api_straddle_kronos_forecast():
+    """
+    Returns Kronos foundation model future candlestick predictions,
+    volatility envelope corridors, and Straddle strategy theta analytics.
+    """
+    try:
+        und = request.args.get("underlying") or request.args.get("symbol") or "NIFTY"
+        tf = request.args.get("timeframe") or request.args.get("interval") or "5m"
+        horizon = int(request.args.get("horizon", 24) or 24)
+        mgr = get_straddle_manager()
+        forecast_res = mgr.get_kronos_forecast(underlying=und, timeframe=tf, horizon=horizon)
+        return jsonify(forecast_res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_kronos_forecast: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e), "candles": []}), 500
+
+
+@app.route("/api/straddle/kronos_status", methods=["GET"])
+def api_straddle_kronos_status():
+    """
+    Returns current initialization, device, and runtime health status of Kronos service.
+    """
+    try:
+        from kronos_service import KronosService
+        return jsonify(KronosService.get_instance().get_status())
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/market_depth", methods=["GET"])
 def api_straddle_market_depth():
     try:

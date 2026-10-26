@@ -6783,6 +6783,29 @@ class StraddleManager:
             "candles": candles,
         }
 
+    def get_kronos_forecast(self, underlying: str = "NIFTY", timeframe: str = "5m", horizon: int = 24) -> Dict[str, Any]:
+        """
+        Runs Kronos Foundation Model financial time-series prediction for the requested asset.
+        """
+        try:
+            from kronos_service import KronosService
+            chart_res = self.get_chart_candles(underlying=underlying, timeframe=timeframe, range_str="1d")
+            candles = chart_res.get("candles", []) if isinstance(chart_res, dict) else []
+            svc = KronosService.get_instance()
+            return svc.forecast(
+                underlying=underlying,
+                historical_candles=candles,
+                timeframe=timeframe,
+                horizon=horizon
+            )
+        except Exception as e:
+            logger.error(f"Error in StraddleProManager.get_kronos_forecast: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "underlying": underlying
+            }
+
     def get_market_depth(self, symbol: str = "", instrument_key: str = "", underlying: str = "", strike: float = 0.0, opt_type: str = "", ltp: float = 0.0) -> Dict[str, Any]:
         """
         Fetches or simulates live 5-level Market Depth (bids and asks with orders, qty, price)

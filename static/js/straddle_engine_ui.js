@@ -9365,12 +9365,148 @@ async function loadAndRenderCandleChart(und, tf) {
             if (lowEl && minL < Infinity) lowEl.textContent = "₹" + minL.toFixed(2);
 
             renderCandlestickCanvas();
+            if (window._kronosForecastActive) {
+                triggerKronosForecast(false);
+            }
         }
     } catch (e) {
         console.error("Error loading candles:", e);
         if (countEl) countEl.textContent = "Error loading candles";
     }
 }
+
+// Global Kronos AI Forecast State
+window._kronosForecastActive = false;
+window._kronosForecastHorizon = 24;
+window._kronosForecastData = null;
+window._kronosForecastLoading = false;
+
+function toggleKronosForecast() {
+    window._kronosForecastActive = !window._kronosForecastActive;
+    const btn = document.getElementById("btnToggleKronosForecast");
+    const badge = document.getElementById("kronosBadgeState");
+    const panel = document.getElementById("kronosForecastPanel");
+
+    if (window._kronosForecastActive) {
+        if (btn) btn.classList.add("btn-ai-kronos-active");
+        if (badge) {
+            badge.textContent = "ON";
+            badge.style.background = "#a855f7";
+            badge.style.boxShadow = "0 0 8px rgba(168, 85, 247, 0.8)";
+        }
+        if (panel) panel.style.display = "flex";
+        triggerKronosForecast(true);
+    } else {
+        if (btn) btn.classList.remove("btn-ai-kronos-active");
+        if (badge) {
+            badge.textContent = "OFF";
+            badge.style.background = "#475569";
+            badge.style.boxShadow = "none";
+        }
+        if (panel) panel.style.display = "none";
+        window._kronosForecastData = null;
+        renderCandlestickCanvas();
+    }
+}
+window.toggleKronosForecast = toggleKronosForecast;
+
+function setKronosHorizon(horizon) {
+    window._kronosForecastHorizon = parseInt(horizon) || 24;
+    document.querySelectorAll(".kronos-horizon-btn").forEach(btn => {
+        const h = parseInt(btn.getAttribute("data-horizon"));
+        btn.classList.toggle("active", h === window._kronosForecastHorizon);
+    });
+    if (window._kronosForecastActive) {
+        triggerKronosForecast(true);
+    }
+}
+window.setKronosHorizon = setKronosHorizon;
+
+async function triggerKronosForecast(force = false) {
+    if (!window._kronosForecastActive) return;
+    const und = window._activeChartUnderlying || "NIFTY";
+    const tf = window._activeChartTimeframe || "5m";
+    const horizon = window._kronosForecastHorizon || 24;
+
+    const statusBadge = document.getElementById("kronosStatusText");
+    const dirBadge = document.getElementById("kronosDirectionBadge");
+    if (statusBadge) statusBadge.textContent = "Generating Autoregressive Forecast...";
+    if (dirBadge) dirBadge.innerHTML = "<span>⚡</span> <span>CALCULATING...</span>";
+
+    window._kronosForecastLoading = true;
+    try {
+        const resp = await fetch(`/api/straddle/kronos_forecast?underlying=${encodeURIComponent(und)}&timeframe=${encodeURIComponent(tf)}&horizon=${horizon}`);
+        const data = await resp.json();
+        if (data && data.success && Array.isArray(data.candles)) {
+            window._kronosForecastData = data;
+            updateKronosForecastUI(data);
+            renderCandlestickCanvas();
+        } else {
+            if (statusBadge) statusBadge.textContent = "Notice: " + (data.error || "Unable to forecast");
+        }
+    } catch (e) {
+        console.error("Error fetching Kronos forecast:", e);
+        if (statusBadge) statusBadge.textContent = "Network Error";
+    } finally {
+        window._kronosForecastLoading = false;
+    }
+}
+window.triggerKronosForecast = triggerKronosForecast;
+
+function updateKronosForecastUI(data) {
+    if (!data) return;
+    const summary = data.summary || {};
+    const corridor = data.volatility_corridor || {};
+    const edge = data.straddle_edge || {};
+
+    const statusText = document.getElementById("kronosStatusText");
+    if (statusText) {
+        statusText.textContent = `${data.engine || "Kronos"} (${data.device || "cpu"})`;
+    }
+
+    const dirBadge = document.getElementById("kronosDirectionBadge");
+    if (dirBadge) {
+        dirBadge.style.color = summary.direction_color || "#38bdf8";
+        dirBadge.innerHTML = `<span>${summary.direction_icon || "📈"}</span> <span>${summary.direction || "NEUTRAL"}</span>`;
+    }
+
+    const changePtsEl = document.getElementById("kronosChangePoints");
+    if (changePtsEl) {
+        const chg = summary.change_points || 0;
+        const pct = summary.change_percent || 0;
+        const prefix = chg >= 0 ? "+" : "";
+        changePtsEl.textContent = `(${prefix}${chg.toFixed(2)} pts / ${prefix}${pct.toFixed(2)}%)`;
+        changePtsEl.style.color = summary.direction_color || "#38bdf8";
+    }
+
+    const highEl = document.getElementById("kronosProjectedHigh");
+    const lowEl = document.getElementById("kronosProjectedLow");
+    const spreadEl = document.getElementById("kronosProjectedSpread");
+
+    if (highEl) highEl.textContent = "₹" + (summary.projected_high || 0).toFixed(2);
+    if (lowEl) lowEl.textContent = "₹" + (summary.projected_low || 0).toFixed(2);
+    if (spreadEl) spreadEl.textContent = (summary.projected_range_pts || 0).toFixed(2) + " pts";
+
+    const edgePill = document.getElementById("kronosStraddleEdgePill");
+    if (edgePill) {
+        edgePill.textContent = edge.assessment || "STANDARD THETA ZONE";
+        edgePill.title = edge.recommendation || "";
+        if (edge.safe_rating === "HIGH") {
+            edgePill.style.background = "rgba(16, 185, 129, 0.2)";
+            edgePill.style.borderColor = "rgba(16, 185, 129, 0.6)";
+            edgePill.style.color = "#34d399";
+        } else if (edge.safe_rating === "CAUTION") {
+            edgePill.style.background = "rgba(239, 68, 68, 0.2)";
+            edgePill.style.borderColor = "rgba(239, 68, 68, 0.6)";
+            edgePill.style.color = "#f87171";
+        } else {
+            edgePill.style.background = "rgba(56, 189, 248, 0.2)";
+            edgePill.style.borderColor = "rgba(56, 189, 248, 0.6)";
+            edgePill.style.color = "#38bdf8";
+        }
+    }
+}
+window.updateKronosForecastUI = updateKronosForecastUI;
 
 function renderCandlestickCanvas() {
     const canvas = document.getElementById("liveCandlestickCanvas");
@@ -9397,7 +9533,10 @@ function renderCandlestickCanvas() {
     ctx.fillStyle = "#070a12";
     ctx.fillRect(0, 0, w, h);
 
-    const candles = window._activeCandles;
+    const baseCandles = window._activeCandles || [];
+    const forecastCandles = (window._kronosForecastActive && window._kronosForecastData && Array.isArray(window._kronosForecastData.candles)) ? window._kronosForecastData.candles : [];
+    const candles = [...baseCandles, ...forecastCandles];
+
     if (!candles || candles.length === 0) {
         ctx.fillStyle = "#64748b";
         ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
@@ -9464,16 +9603,76 @@ function renderCandlestickCanvas() {
     const slotW = chartW / numCandles;
     const candleW = Math.max(2, Math.min(18, slotW * 0.72));
 
-    // TradingView Standard Color Coding
-    // Jade Green Bullish: #089981 | Coral Red Bearish: #f23645
     const COLOR_BULLISH = "#089981";
     const COLOR_BEARISH = "#f23645";
 
-    // Draw Candles & Volumes
+    // 1. Draw Volatility Corridor Ribbon if Kronos forecast is active
+    if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.volatility_corridor) {
+        const vc = window._kronosForecastData.volatility_corridor;
+        const upper = vc.upper || [];
+        const lower = vc.lower || [];
+        if (upper.length === forecastCandles.length && lower.length === forecastCandles.length) {
+            ctx.save();
+            ctx.fillStyle = "rgba(168, 85, 247, 0.10)";
+            ctx.strokeStyle = "rgba(168, 85, 247, 0.35)";
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([3, 3]);
+
+            ctx.beginPath();
+            for (let f = 0; f < forecastCandles.length; f++) {
+                const idx = baseCandles.length + f;
+                const fx = margin.left + (idx * slotW) + (slotW / 2);
+                const fy = margin.top + priceH - ((upper[f].value - minPrice) / priceRange * priceH);
+                if (f === 0) ctx.moveTo(fx, fy);
+                else ctx.lineTo(fx, fy);
+            }
+            for (let f = forecastCandles.length - 1; f >= 0; f--) {
+                const idx = baseCandles.length + f;
+                const fx = margin.left + (idx * slotW) + (slotW / 2);
+                const fy = margin.top + priceH - ((lower[f].value - minPrice) / priceRange * priceH);
+                ctx.lineTo(fx, fy);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    // 2. Draw Vertical Divider between Historical and Forecast Horizon
+    if (forecastCandles.length > 0 && baseCandles.length > 0) {
+        const divX = Math.floor(margin.left + (baseCandles.length * slotW)) + 0.5;
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "#a855f7";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(divX, margin.top);
+        ctx.lineTo(divX, h - margin.bottom);
+        ctx.stroke();
+
+        // Glowing Forecast Horizon Badge
+        ctx.fillStyle = "#a855f7";
+        ctx.beginPath();
+        ctx.roundRect(divX - 42, margin.top - 20, 84, 18, 4);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 9.5px JetBrains Mono, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("🔮 KRONOS AI", divX, margin.top - 7);
+        ctx.restore();
+    }
+
+    // 3. Draw Candles & Volumes
     candles.forEach((c, i) => {
         const x = margin.left + (i * slotW) + (slotW / 2);
         const isUp = c.close >= c.open;
-        const color = isUp ? COLOR_BULLISH : COLOR_BEARISH;
+        const isForecast = !!c.is_forecast;
+
+        let color = isUp ? COLOR_BULLISH : COLOR_BEARISH;
+        if (isForecast) {
+            color = isUp ? "#34d399" : "#fb7185";
+        }
 
         // Y positions
         const yOpen = margin.top + priceH - ((c.open - minPrice) / priceRange * priceH);
@@ -9481,67 +9680,117 @@ function renderCandlestickCanvas() {
         const yHigh = margin.top + priceH - ((c.high - minPrice) / priceRange * priceH);
         const yLow = margin.top + priceH - ((c.low - minPrice) / priceRange * priceH);
 
-        // Pixel-crisp 1px Wick
+        // Wick
         const wickX = Math.floor(x) + 0.5;
+        ctx.save();
         ctx.strokeStyle = color;
-        ctx.lineWidth = 1.2;
+        ctx.lineWidth = isForecast ? 1.4 : 1.2;
+        if (isForecast) {
+            ctx.setLineDash([3, 2]);
+        }
         ctx.beginPath();
         ctx.moveTo(wickX, yHigh);
         ctx.lineTo(wickX, yLow);
         ctx.stroke();
+        ctx.restore();
 
         // Body
         const bodyTop = Math.min(yOpen, yClose);
         const bodyH = Math.max(1.5, Math.abs(yClose - yOpen));
         const bodyLeft = Math.floor(x - (candleW / 2));
-        ctx.fillStyle = color;
-        ctx.fillRect(bodyLeft, bodyTop, Math.floor(candleW), bodyH);
+
+        if (isForecast) {
+            ctx.save();
+            ctx.fillStyle = isUp ? "rgba(16, 185, 129, 0.45)" : "rgba(244, 63, 94, 0.45)";
+            ctx.fillRect(bodyLeft, bodyTop, Math.floor(candleW), bodyH);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([2, 2]);
+            ctx.strokeRect(bodyLeft, bodyTop, Math.floor(candleW), bodyH);
+            ctx.restore();
+        } else {
+            ctx.fillStyle = color;
+            ctx.fillRect(bodyLeft, bodyTop, Math.floor(candleW), bodyH);
+        }
 
         // Volume bar
         if (maxVolume > 0 && c.volume > 0) {
             const vBarH = (c.volume / maxVolume) * volumeH;
             const yVol = margin.top + chartH - vBarH;
-            ctx.fillStyle = isUp ? "rgba(8, 153, 129, 0.35)" : "rgba(242, 54, 69, 0.35)";
+            if (isForecast) {
+                ctx.fillStyle = isUp ? "rgba(52, 211, 153, 0.25)" : "rgba(251, 113, 133, 0.25)";
+            } else {
+                ctx.fillStyle = isUp ? "rgba(8, 153, 129, 0.35)" : "rgba(242, 54, 69, 0.35)";
+            }
             ctx.fillRect(bodyLeft, yVol, Math.floor(candleW), vBarH);
         }
 
         // Time axis labels every N candles
         const labelInterval = Math.max(1, Math.floor(numCandles / 7));
-        if (i % labelInterval === 0 || i === numCandles - 1) {
+        if (i % labelInterval === 0 || i === numCandles - 1 || i === baseCandles.length - 1) {
             const date = new Date(c.time * 1000);
             const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-            ctx.fillStyle = "#64748b";
+            ctx.fillStyle = isForecast ? "#c084fc" : "#64748b";
+            ctx.font = isForecast ? "bold 10.5px JetBrains Mono, monospace" : "11px JetBrains Mono, monospace";
             ctx.textAlign = "center";
             ctx.fillText(timeStr, x, h - 8);
         }
     });
 
-    // Current Price Line
-    const lastCandle = candles[candles.length - 1];
-    const curP = lastCandle.close;
-    const curY = margin.top + priceH - ((curP - minPrice) / priceRange * priceH);
-    const lastIsUp = lastCandle.close >= lastCandle.open;
-    const lastColor = lastIsUp ? COLOR_BULLISH : COLOR_BEARISH;
+    // Current Price Line on last historical candle
+    if (baseCandles.length > 0) {
+        const lastCandle = baseCandles[baseCandles.length - 1];
+        const curP = lastCandle.close;
+        const curY = margin.top + priceH - ((curP - minPrice) / priceRange * priceH);
+        const lastIsUp = lastCandle.close >= lastCandle.open;
+        const lastColor = lastIsUp ? COLOR_BULLISH : COLOR_BEARISH;
 
-    ctx.save();
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = lastColor;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(margin.left, curY);
-    ctx.lineTo(w - margin.right, curY);
-    ctx.stroke();
-    ctx.restore();
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = lastColor;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(margin.left, curY);
+        ctx.lineTo(w - margin.right, curY);
+        ctx.stroke();
+        ctx.restore();
 
-    // Price tag badge on right axis
-    ctx.fillStyle = lastColor;
-    ctx.beginPath();
-    ctx.roundRect(w - margin.right + 2, curY - 10, margin.right - 4, 20, 4);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 11px JetBrains Mono, monospace";
-    ctx.textAlign = "left";
-    ctx.fillText("₹" + curP.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w - margin.right + 6, curY + 4);
+        // Price tag badge on right axis
+        ctx.fillStyle = lastColor;
+        ctx.beginPath();
+        ctx.roundRect(w - margin.right + 2, curY - 10, margin.right - 4, 20, 4);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 11px JetBrains Mono, monospace";
+        ctx.textAlign = "left";
+        ctx.fillText("₹" + curP.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w - margin.right + 6, curY + 4);
+    }
+
+    // Kronos Target Line if Forecast Active
+    if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.summary) {
+        const targetP = window._kronosForecastData.summary.final_projected_price;
+        const targetY = margin.top + priceH - ((targetP - minPrice) / priceRange * priceH);
+
+        ctx.save();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = "#a855f7";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(margin.left + (baseCandles.length * slotW), targetY);
+        ctx.lineTo(w - margin.right, targetY);
+        ctx.stroke();
+
+        // Right axis target badge
+        ctx.fillStyle = "#a855f7";
+        ctx.beginPath();
+        ctx.roundRect(w - margin.right + 2, targetY - 10, margin.right - 4, 20, 4);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 10px JetBrains Mono, monospace";
+        ctx.textAlign = "left";
+        ctx.fillText("🎯 ₹" + targetP.toFixed(2), w - margin.right + 4, targetY + 4);
+        ctx.restore();
+    }
 
     // Crosshair if hovering
     if (window._chartCrosshairPos) {
@@ -9581,7 +9830,11 @@ function renderCandlestickCanvas() {
                 if (highEl) highEl.textContent = "₹" + c.high.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (lowEl) lowEl.textContent = "₹" + c.low.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (closeEl) closeEl.textContent = "₹" + c.close.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                if (timeEl) timeEl.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                if (timeEl) {
+                    const tStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                    timeEl.textContent = c.is_forecast ? `🔮 FORECAST (${tStr})` : tStr;
+                    timeEl.style.color = c.is_forecast ? "#c084fc" : "#94a3b8";
+                }
             }
         }
     }
@@ -9593,8 +9846,6 @@ function updateLiveCandleTick(newPrice) {
     const candles = window._activeCandles;
     if (candles && candles.length > 0) {
         const last = candles[candles.length - 1];
-        // Guard against cross-symbol tick leakage or extreme bad tick corruption
-        // (e.g. NIFTY price ~24000 leaking into SILVER ~211000)
         if (last.close > 0) {
             const ratioDiff = Math.abs(p - last.close) / last.close;
             if (ratioDiff > 0.35) {
