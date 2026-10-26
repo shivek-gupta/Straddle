@@ -9800,21 +9800,61 @@ function renderCandlestickCanvas() {
         if (mx >= margin.left && mx <= w - margin.right && my >= margin.top && my <= h - margin.bottom) {
             ctx.save();
             ctx.setLineDash([2, 2]);
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
             ctx.lineWidth = 1;
             
-            // Vertical
+            // Vertical line
             ctx.beginPath();
             ctx.moveTo(mx, margin.top);
             ctx.lineTo(mx, h - margin.bottom);
             ctx.stroke();
 
-            // Horizontal
+            // Horizontal line
             ctx.beginPath();
             ctx.moveTo(margin.left, my);
             ctx.lineTo(w - margin.right, my);
             ctx.stroke();
             ctx.restore();
+
+            // Compute price under crosshair cursor and render on right price scale
+            let cursorPrice = null;
+            if (my >= margin.top && my <= margin.top + priceH + 6) {
+                cursorPrice = Math.max(minPrice, minPrice + ((margin.top + priceH - my) / priceH) * priceRange);
+            }
+
+            if (cursorPrice !== null && cursorPrice > 0) {
+                const badgeY = Math.min(margin.top + priceH + 2, Math.max(margin.top - 2, my));
+                const badgeX = w - margin.right + 2;
+                const badgeW = margin.right - 4;
+                const badgeH = 20;
+
+                ctx.save();
+                // High-visibility royal blue badge with bright border on right price scale
+                ctx.fillStyle = "#2563eb";
+                ctx.strokeStyle = "#93c5fd";
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.roundRect(badgeX, badgeY - 10, badgeW, badgeH, 4);
+                ctx.fill();
+                ctx.stroke();
+
+                // Format cursor price with Indian numbering format
+                const fmtCursorPrice = (cursorPrice >= 1000) ? 
+                    cursorPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 
+                    cursorPrice.toFixed(2);
+
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 11px JetBrains Mono, monospace";
+                ctx.textAlign = "left";
+                ctx.fillText("₹" + fmtCursorPrice, badgeX + 5, badgeY + 4);
+                ctx.restore();
+
+                // Also update legend badge price display
+                const cursorPriceLegendEl = document.getElementById("lblCursorPrice");
+                if (cursorPriceLegendEl) {
+                    cursorPriceLegendEl.textContent = "₹" + fmtCursorPrice;
+                }
+            }
 
             // Index of hovered candle
             const hoveredIdx = Math.floor((mx - margin.left) / slotW);
@@ -9835,6 +9875,22 @@ function renderCandlestickCanvas() {
                     timeEl.textContent = c.is_forecast ? `🔮 FORECAST (${tStr})` : tStr;
                     timeEl.style.color = c.is_forecast ? "#c084fc" : "#94a3b8";
                 }
+
+                // Draw sleek time pill on bottom X-axis at cursor X
+                const tStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                ctx.save();
+                ctx.fillStyle = c.is_forecast ? "#7e22ce" : "#1e293b";
+                ctx.strokeStyle = c.is_forecast ? "#c084fc" : "#64748b";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(mx - 28, h - margin.bottom + 3, 56, 18, 4);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 10px JetBrains Mono, monospace";
+                ctx.textAlign = "center";
+                ctx.fillText(tStr, mx, h - margin.bottom + 15);
+                ctx.restore();
             }
         }
     }
@@ -9880,6 +9936,8 @@ function setupChartCanvasEvents() {
 
     canvas.addEventListener("mouseleave", () => {
         window._chartCrosshairPos = null;
+        const cursorPriceLegendEl = document.getElementById("lblCursorPrice");
+        if (cursorPriceLegendEl) cursorPriceLegendEl.textContent = "--";
         renderCandlestickCanvas();
     });
 

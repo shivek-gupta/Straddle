@@ -97,122 +97,139 @@
              ==================================================================== -->
         <style>
             #commodityTopBar {
-                display: flex !important;
-                flex-direction: row !important;
-                align-items: center !important;
-                justify-content: flex-start !important;
+                display: block !important;
                 width: 100% !important;
                 box-sizing: border-box !important;
-                overflow-x: auto !important;
-                overflow-y: hidden !important;
+                overflow: hidden !important;
                 background: #080c14 !important;
                 border: 1px solid rgba(255, 255, 255, 0.12) !important;
-                border-radius: 12px !important;
-                padding: 8px 12px !important;
-                margin-bottom: 12px !important;
+                border-radius: 10px !important;
+                padding: 6px 8px !important;
+                margin-bottom: 10px !important;
                 box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45) !important;
             }
             #commodityPillsStrip {
-                display: flex !important;
-                flex-direction: row !important;
-                flex-wrap: nowrap !important;
-                align-items: center !important;
-                gap: 8px !important;
+                display: grid !important;
+                grid-template-columns: repeat(10, minmax(0, 1fr)) !important;
+                gap: 5px !important;
                 width: 100% !important;
-                overflow-x: auto !important;
-                white-space: nowrap !important;
-                padding: 2px 0 !important;
-                -webkit-overflow-scrolling: touch !important;
-                scrollbar-width: thin !important;
-                scrollbar-color: rgba(255, 255, 255, 0.2) transparent !important;
-            }
-            #commodityPillsStrip::-webkit-scrollbar {
-                height: 4px !important;
-            }
-            #commodityPillsStrip::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.2) !important;
-                border-radius: 9999px !important;
+                box-sizing: border-box !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                overflow: visible !important;
             }
             .commodity-pill {
-                display: inline-flex !important;
-                flex-direction: row !important;
+                display: flex !important;
+                flex-direction: column !important;
                 align-items: center !important;
-                flex-shrink: 0 !important;
-                border-radius: 9999px !important;
-                padding: 5px 12px !important;
-                font-size: 12px !important;
-                font-weight: 700 !important;
+                justify-content: center !important;
+                border-radius: 8px !important;
+                padding: 4px 3px !important;
+                gap: 2px !important;
                 cursor: pointer !important;
-                white-space: nowrap !important;
                 user-select: none !important;
-                transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+                min-width: 0 !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+                transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
                 background: var(--pill-bg, rgba(15, 23, 42, 0.8)) !important;
-                border: 1.5px solid var(--pill-border, rgba(255, 255, 255, 0.2)) !important;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+                border: 1.5px solid var(--pill-border, rgba(255, 255, 255, 0.18)) !important;
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
             }
             .commodity-pill:hover {
                 border-color: var(--pill-color, #38bdf8) !important;
                 transform: translateY(-1.5px) !important;
-                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 14px var(--pill-glow, rgba(56, 189, 248, 0.4)) !important;
+                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6), 0 0 12px var(--pill-glow, rgba(56, 189, 248, 0.35)) !important;
             }
             .commodity-pill.active {
                 background: var(--pill-active-bg, rgba(12, 28, 56, 0.95)) !important;
                 border-color: var(--pill-color, #38bdf8) !important;
-                box-shadow: 0 0 18px var(--pill-glow, rgba(56, 189, 248, 0.55)), inset 0 0 10px rgba(0, 0, 0, 0.5) !important;
+                box-shadow: 0 0 14px var(--pill-glow, rgba(56, 189, 248, 0.5)), inset 0 0 8px rgba(0, 0, 0, 0.4) !important;
+            }
+            .commodity-pill .pill-name-row {
+                display: flex !important;
+                flex-direction: row !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 4px !important;
+                width: 100% !important;
+                overflow: hidden !important;
+                cursor: pointer !important;
+                line-height: 1.2 !important;
+                padding: 1px 2px !important;
+                border-radius: 4px !important;
+                transition: all 0.15s ease !important;
+            }
+            .commodity-pill .pill-name-row:hover {
+                background: rgba(255, 255, 255, 0.1) !important;
             }
             .commodity-pill .pill-dot {
-                width: 8px !important;
-                height: 8px !important;
+                width: 6px !important;
+                height: 6px !important;
                 border-radius: 50% !important;
                 background: var(--pill-color, #38bdf8) !important;
-                box-shadow: 0 0 8px var(--pill-color, #38bdf8) !important;
+                box-shadow: 0 0 6px var(--pill-color, #38bdf8) !important;
                 flex-shrink: 0 !important;
                 display: inline-block !important;
             }
             .commodity-pill .pill-name {
-                font-size: 12px !important;
+                font-size: 11px !important;
                 font-weight: 800 !important;
-                letter-spacing: 0.3px !important;
+                letter-spacing: 0.1px !important;
                 color: var(--pill-name-color, #f8fafc) !important;
-                cursor: pointer !important;
-                padding: 2px 4px !important;
-                border-radius: 6px !important;
-                transition: all 0.15s ease !important;
-                display: inline-flex !important;
-                align-items: center !important;
-            }
-            .commodity-pill .pill-name:hover {
-                color: #ffffff !important;
-                text-shadow: 0 0 8px var(--pill-color, #38bdf8) !important;
-                background: rgba(255, 255, 255, 0.14) !important;
-            }
-            .commodity-pill .pill-separator {
-                color: rgba(255, 255, 255, 0.4) !important;
-                font-weight: 700 !important;
-                margin: 0 2px !important;
+                white-space: nowrap !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+                text-align: center !important;
                 user-select: none !important;
+            }
+            .commodity-pill .pill-price-row {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: 100% !important;
+                cursor: pointer !important;
+                box-sizing: border-box !important;
             }
             .commodity-pill .pill-ltp {
                 font-family: var(--font-mono, "JetBrains Mono", monospace) !important;
-                font-size: 12px !important;
+                font-size: 11px !important;
                 font-weight: 800 !important;
                 color: var(--pill-color, #38bdf8) !important;
                 cursor: pointer !important;
-                padding: 2px 8px !important;
-                border-radius: 9999px !important;
+                padding: 1px 4px !important;
+                border-radius: 4px !important;
                 background: rgba(0, 0, 0, 0.45) !important;
-                border: 1px solid rgba(255, 255, 255, 0.1) !important;
-                letter-spacing: 0.2px !important;
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+                letter-spacing: -0.2px !important;
+                white-space: nowrap !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+                text-align: center !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                box-sizing: border-box !important;
+                line-height: 1.25 !important;
+                display: block !important;
                 transition: all 0.15s ease !important;
-                display: inline-flex !important;
-                align-items: center !important;
-                gap: 3px !important;
             }
             .commodity-pill .pill-ltp:hover {
                 color: #ffffff !important;
                 background: var(--pill-color, #38bdf8) !important;
                 border-color: var(--pill-color, #38bdf8) !important;
-                box-shadow: 0 0 12px var(--pill-color, #38bdf8) !important;
+                box-shadow: 0 0 10px var(--pill-color, #38bdf8) !important;
+            }
+            @media (max-width: 900px) {
+                #commodityPillsStrip {
+                    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+                    gap: 6px !important;
+                }
+            }
+            @media (max-width: 520px) {
+                #commodityPillsStrip {
+                    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+                    gap: 6px !important;
+                }
             }
 
             /* Robust Modal Backdrop Protection: Default to NONE */
@@ -230,96 +247,136 @@
             }
         </style>
 
-        <div class="commodity-bar-container" id="commodityTopBar" style="display:flex !important; flex-direction:row !important; align-items:center !important; width:100% !important; overflow-x:auto !important; padding:8px 12px !important; background:#080c14 !important; border:1px solid rgba(255,255,255,0.12) !important; border-radius:12px !important; margin-bottom:12px !important; box-sizing:border-box !important;">
-            <div class="commodity-pills-strip" id="commodityPillsStrip" style="display:flex !important; flex-direction:row !important; flex-wrap:nowrap !important; align-items:center !important; gap:8px !important; width:100% !important; overflow-x:auto !important; white-space:nowrap !important; padding:2px 0 !important;">
+        <div class="commodity-bar-container" id="commodityTopBar">
+            <div class="commodity-pills-strip" id="commodityPillsStrip">
                 <!-- 1. NIFTY (Sky Blue) -->
                 <div class="commodity-pill active" data-und="NIFTY" id="pill_NIFTY" onclick="selectGlobalUnderlying('NIFTY')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#38bdf8; --pill-bg:rgba(56,189,248,0.14); --pill-border:rgba(56,189,248,0.55); --pill-glow:rgba(56,189,248,0.5); --pill-name-color:#38bdf8; --pill-active-bg:rgba(12,28,56,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('NIFTY')" title="📈 Click to open NIFTY Candlestick Chart">NIFTY</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_NIFTY" onclick="event.stopPropagation(); onPillPriceClick('NIFTY')" title="⛓️ Click to open NIFTY Option Chain">--</span>
+                    style="--pill-color:#38bdf8; --pill-bg:rgba(56,189,248,0.12); --pill-border:rgba(56,189,248,0.5); --pill-glow:rgba(56,189,248,0.45); --pill-name-color:#38bdf8; --pill-active-bg:rgba(12,28,56,0.95);"
+                    title="NIFTY - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('NIFTY')" title="📈 Click to open NIFTY Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">NIFTY</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('NIFTY')" title="⛓️ Click to open NIFTY Option Chain">
+                        <span class="pill-ltp" id="pillLtp_NIFTY">--</span>
+                    </div>
                 </div>
 
                 <!-- 2. Crude Oil (Crimson Rose) -->
                 <div class="commodity-pill" data-und="CRUDEOIL" id="pill_CRUDEOIL" onclick="selectGlobalUnderlying('CRUDEOIL')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#f43f5e; --pill-bg:rgba(244,63,94,0.14); --pill-border:rgba(244,63,94,0.55); --pill-glow:rgba(244,63,94,0.5); --pill-name-color:#fb7185; --pill-active-bg:rgba(45,12,24,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('CRUDEOIL')" title="📈 Click to open Crude Oil Candlestick Chart">Crude Oil</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_CRUDEOIL" onclick="event.stopPropagation(); onPillPriceClick('CRUDEOIL')" title="⛓️ Click to open Crude Oil Option Chain">--</span>
+                    style="--pill-color:#f43f5e; --pill-bg:rgba(244,63,94,0.12); --pill-border:rgba(244,63,94,0.5); --pill-glow:rgba(244,63,94,0.45); --pill-name-color:#fb7185; --pill-active-bg:rgba(45,12,24,0.95);"
+                    title="Crude Oil - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('CRUDEOIL')" title="📈 Click to open Crude Oil Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Crude Oil</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('CRUDEOIL')" title="⛓️ Click to open Crude Oil Option Chain">
+                        <span class="pill-ltp" id="pillLtp_CRUDEOIL">--</span>
+                    </div>
                 </div>
 
                 <!-- 3. Natural Gas (Amber Flame) -->
                 <div class="commodity-pill" data-und="NATURALGAS" id="pill_NATURALGAS" onclick="selectGlobalUnderlying('NATURALGAS')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#f59e0b; --pill-bg:rgba(245,158,11,0.14); --pill-border:rgba(245,158,11,0.55); --pill-glow:rgba(245,158,11,0.5); --pill-name-color:#fbbf24; --pill-active-bg:rgba(45,28,10,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('NATURALGAS')" title="📈 Click to open Natural Gas Candlestick Chart">Natural Gas</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_NATURALGAS" onclick="event.stopPropagation(); onPillPriceClick('NATURALGAS')" title="⛓️ Click to open Natural Gas Option Chain">--</span>
+                    style="--pill-color:#f59e0b; --pill-bg:rgba(245,158,11,0.12); --pill-border:rgba(245,158,11,0.5); --pill-glow:rgba(245,158,11,0.45); --pill-name-color:#fbbf24; --pill-active-bg:rgba(45,28,10,0.95);"
+                    title="Natural Gas - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('NATURALGAS')" title="📈 Click to open Natural Gas Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Natural Gas</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('NATURALGAS')" title="⛓️ Click to open Natural Gas Option Chain">
+                        <span class="pill-ltp" id="pillLtp_NATURALGAS">--</span>
+                    </div>
                 </div>
 
                 <!-- 4. Gold (Yellow Gold) -->
                 <div class="commodity-pill" data-und="GOLD" id="pill_GOLD" onclick="selectGlobalUnderlying('GOLD')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#eab308; --pill-bg:rgba(234,179,8,0.16); --pill-border:rgba(234,179,8,0.6); --pill-glow:rgba(234,179,8,0.5); --pill-name-color:#facc15; --pill-active-bg:rgba(42,32,8,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('GOLD')" title="📈 Click to open Gold Candlestick Chart">Gold</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_GOLD" onclick="event.stopPropagation(); onPillPriceClick('GOLD')" title="⛓️ Click to open Gold Option Chain">--</span>
+                    style="--pill-color:#eab308; --pill-bg:rgba(234,179,8,0.14); --pill-border:rgba(234,179,8,0.55); --pill-glow:rgba(234,179,8,0.45); --pill-name-color:#facc15; --pill-active-bg:rgba(42,32,8,0.95);"
+                    title="Gold - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('GOLD')" title="📈 Click to open Gold Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Gold</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('GOLD')" title="⛓️ Click to open Gold Option Chain">
+                        <span class="pill-ltp" id="pillLtp_GOLD">--</span>
+                    </div>
                 </div>
 
                 <!-- 5. Silver (Platinum Silver) -->
                 <div class="commodity-pill" data-und="SILVER" id="pill_SILVER" onclick="selectGlobalUnderlying('SILVER')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#94a3b8; --pill-bg:rgba(148,163,184,0.16); --pill-border:rgba(148,163,184,0.55); --pill-glow:rgba(148,163,184,0.45); --pill-name-color:#cbd5e1; --pill-active-bg:rgba(30,41,59,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('SILVER')" title="📈 Click to open Silver Candlestick Chart">Silver</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_SILVER" onclick="event.stopPropagation(); onPillPriceClick('SILVER')" title="⛓️ Click to open Silver Option Chain">--</span>
+                    style="--pill-color:#94a3b8; --pill-bg:rgba(148,163,184,0.14); --pill-border:rgba(148,163,184,0.5); --pill-glow:rgba(148,163,184,0.4); --pill-name-color:#cbd5e1; --pill-active-bg:rgba(30,41,59,0.95);"
+                    title="Silver - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('SILVER')" title="📈 Click to open Silver Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Silver</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('SILVER')" title="⛓️ Click to open Silver Option Chain">
+                        <span class="pill-ltp" id="pillLtp_SILVER">--</span>
+                    </div>
                 </div>
 
                 <!-- 6. Crude Oil Mini (Neon Emerald) -->
                 <div class="commodity-pill" data-und="CRUDEOILM" id="pill_CRUDEOILM" onclick="selectGlobalUnderlying('CRUDEOILM')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#10b981; --pill-bg:rgba(16,185,129,0.14); --pill-border:rgba(16,185,129,0.55); --pill-glow:rgba(16,185,129,0.45); --pill-name-color:#34d399; --pill-active-bg:rgba(8,36,24,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('CRUDEOILM')" title="📈 Click to open Crude Oil Mini Candlestick Chart">Crude Oil Mini</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_CRUDEOILM" onclick="event.stopPropagation(); onPillPriceClick('CRUDEOILM')" title="⛓️ Click to open Crude Oil Mini Option Chain">--</span>
+                    style="--pill-color:#10b981; --pill-bg:rgba(16,185,129,0.12); --pill-border:rgba(16,185,129,0.5); --pill-glow:rgba(16,185,129,0.4); --pill-name-color:#34d399; --pill-active-bg:rgba(8,36,24,0.95);"
+                    title="Crude Oil Mini - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('CRUDEOILM')" title="📈 Click to open Crude Oil Mini Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Crude Oil Mini</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('CRUDEOILM')" title="⛓️ Click to open Crude Oil Mini Option Chain">
+                        <span class="pill-ltp" id="pillLtp_CRUDEOILM">--</span>
+                    </div>
                 </div>
 
                 <!-- 7. Natural Gas Mini (Deep Orange) -->
                 <div class="commodity-pill" data-und="NATGASMINI" id="pill_NATGASMINI" onclick="selectGlobalUnderlying('NATGASMINI')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#ea580c; --pill-bg:rgba(234,88,12,0.14); --pill-border:rgba(234,88,12,0.55); --pill-glow:rgba(234,88,12,0.45); --pill-name-color:#fb923c; --pill-active-bg:rgba(45,18,8,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('NATGASMINI')" title="📈 Click to open Natural Gas Mini Candlestick Chart">Natural Gas Mini</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_NATGASMINI" onclick="event.stopPropagation(); onPillPriceClick('NATGASMINI')" title="⛓️ Click to open Natural Gas Mini Option Chain">--</span>
+                    style="--pill-color:#ea580c; --pill-bg:rgba(234,88,12,0.12); --pill-border:rgba(234,88,12,0.5); --pill-glow:rgba(234,88,12,0.4); --pill-name-color:#fb923c; --pill-active-bg:rgba(45,18,8,0.95);"
+                    title="Natural Gas Mini - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('NATGASMINI')" title="📈 Click to open Natural Gas Mini Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Nat Gas Mini</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('NATGASMINI')" title="⛓️ Click to open Natural Gas Mini Option Chain">
+                        <span class="pill-ltp" id="pillLtp_NATGASMINI">--</span>
+                    </div>
                 </div>
 
                 <!-- 8. Gold Mini (Lime Chartreuse) -->
                 <div class="commodity-pill" data-und="GOLDM" id="pill_GOLDM" onclick="selectGlobalUnderlying('GOLDM')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#84cc16; --pill-bg:rgba(132,204,22,0.14); --pill-border:rgba(132,204,22,0.55); --pill-glow:rgba(132,204,22,0.45); --pill-name-color:#a3e635; --pill-active-bg:rgba(28,38,8,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('GOLDM')" title="📈 Click to open Gold Mini Candlestick Chart">Gold Mini</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_GOLDM" onclick="event.stopPropagation(); onPillPriceClick('GOLDM')" title="⛓️ Click to open Gold Mini Option Chain">--</span>
+                    style="--pill-color:#84cc16; --pill-bg:rgba(132,204,22,0.12); --pill-border:rgba(132,204,22,0.5); --pill-glow:rgba(132,204,22,0.4); --pill-name-color:#a3e635; --pill-active-bg:rgba(28,38,8,0.95);"
+                    title="Gold Mini - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('GOLDM')" title="📈 Click to open Gold Mini Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Gold Mini</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('GOLDM')" title="⛓️ Click to open Gold Mini Option Chain">
+                        <span class="pill-ltp" id="pillLtp_GOLDM">--</span>
+                    </div>
                 </div>
 
                 <!-- 9. Silver Mini (Royal Violet) -->
                 <div class="commodity-pill" data-und="SILVERM" id="pill_SILVERM" onclick="selectGlobalUnderlying('SILVERM')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#8b5cf6; --pill-bg:rgba(139,92,246,0.14); --pill-border:rgba(139,92,246,0.55); --pill-glow:rgba(139,92,246,0.45); --pill-name-color:#a78bfa; --pill-active-bg:rgba(28,18,54,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('SILVERM')" title="📈 Click to open Silver Mini Candlestick Chart">Silver Mini</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_SILVERM" onclick="event.stopPropagation(); onPillPriceClick('SILVERM')" title="⛓️ Click to open Silver Mini Option Chain">--</span>
+                    style="--pill-color:#8b5cf6; --pill-bg:rgba(139,92,246,0.12); --pill-border:rgba(139,92,246,0.5); --pill-glow:rgba(139,92,246,0.4); --pill-name-color:#a78bfa; --pill-active-bg:rgba(28,18,54,0.95);"
+                    title="Silver Mini - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('SILVERM')" title="📈 Click to open Silver Mini Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Silver Mini</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('SILVERM')" title="⛓️ Click to open Silver Mini Option Chain">
+                        <span class="pill-ltp" id="pillLtp_SILVERM">--</span>
+                    </div>
                 </div>
 
                 <!-- 10. Copper (Metallic Bronze) -->
                 <div class="commodity-pill" data-und="COPPER" id="pill_COPPER" onclick="selectGlobalUnderlying('COPPER')"
-                    style="display:inline-flex !important; flex-direction:row !important; align-items:center !important; flex-shrink:0 !important; border-radius:9999px !important; padding:5px 12px !important; gap:6px !important; --pill-color:#f97316; --pill-bg:rgba(249,115,22,0.15); --pill-border:rgba(249,115,22,0.6); --pill-glow:rgba(249,115,22,0.5); --pill-name-color:#ff8a4c; --pill-active-bg:rgba(46,18,8,0.95);">
-                    <span class="pill-dot"></span>
-                    <span class="pill-name" onclick="event.stopPropagation(); onPillNameClick('COPPER')" title="📈 Click to open Copper Candlestick Chart">Copper</span>
-                    <span class="pill-separator">:</span>
-                    <span class="pill-ltp" id="pillLtp_COPPER" onclick="event.stopPropagation(); onPillPriceClick('COPPER')" title="⛓️ Click to open Copper Option Chain">--</span>
+                    style="--pill-color:#f97316; --pill-bg:rgba(249,115,22,0.13); --pill-border:rgba(249,115,22,0.55); --pill-glow:rgba(249,115,22,0.45); --pill-name-color:#ff8a4c; --pill-active-bg:rgba(46,18,8,0.95);"
+                    title="Copper - Click top to open Candlestick Chart, bottom to open Option Chain">
+                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('COPPER')" title="📈 Click to open Copper Candlestick Chart (Kronos AI)">
+                        <span class="pill-dot"></span>
+                        <span class="pill-name">Copper</span>
+                    </div>
+                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('COPPER')" title="⛓️ Click to open Copper Option Chain">
+                        <span class="pill-ltp" id="pillLtp_COPPER">--</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2450,6 +2507,7 @@
                         <span>H: <b id="lblCandleHigh" style="color:#34d399;">--</b></span>
                         <span>L: <b id="lblCandleLow" style="color:#fb7185;">--</b></span>
                         <span>C: <b id="lblCandleClose" style="color:#38bdf8;">--</b></span>
+                        <span>Price: <b id="lblCursorPrice" style="color:#60a5fa; font-weight:800;">--</b></span>
                         <span>Time: <b id="lblCandleTime" style="color:#94a3b8;">--</b></span>
                     </div>
                     <canvas id="liveCandlestickCanvas" style="width:100%; height:500px; display:block; cursor:crosshair;"></canvas>

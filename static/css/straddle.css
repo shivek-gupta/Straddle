@@ -9247,33 +9247,20 @@ table .flag-cell {
     justify-content: flex-start !important;
     width: 100% !important;
     box-sizing: border-box !important;
-    overflow-x: auto !important;
+    overflow: hidden !important;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45) !important;
     backdrop-filter: blur(8px) !important;
 }
 
 .commodity-pills-strip {
-    display: flex !important;
-    flex-direction: row !important;
-    flex-wrap: nowrap !important;
-    align-items: center !important;
-    gap: 8px !important;
+    display: grid !important;
+    grid-template-columns: repeat(10, minmax(0, 1fr)) !important;
+    gap: 5px !important;
     width: 100% !important;
-    overflow-x: auto !important;
-    white-space: nowrap !important;
-    padding: 2px 0 !important;
-    -webkit-overflow-scrolling: touch !important;
-    scrollbar-width: thin !important;
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent !important;
-}
-
-.commodity-pills-strip::-webkit-scrollbar {
-    height: 4px !important;
-}
-
-.commodity-pills-strip::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2) !important;
-    border-radius: 9999px !important;
+    box-sizing: border-box !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
 }
 
 /* ==========================================================
@@ -9287,101 +9274,128 @@ button, input[type="button"], input[type="submit"] {
 
 .commodity-pill {
     background: var(--pill-bg, rgba(15, 23, 42, 0.8)) !important;
-    border: 1.5px solid var(--pill-border, rgba(255, 255, 255, 0.2)) !important;
-    border-radius: 9999px !important;
-    padding: 5px 12px !important;
+    border: 1.5px solid var(--pill-border, rgba(255, 255, 255, 0.18)) !important;
+    border-radius: 8px !important;
+    padding: 4px 3px !important;
     color: #e2e8f0 !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
     font-weight: 700 !important;
     cursor: pointer !important;
-    display: inline-flex !important;
-    flex-direction: row !important;
+    display: flex !important;
+    flex-direction: column !important;
     align-items: center !important;
-    flex-shrink: 0 !important;
-    gap: 6px !important;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
-    white-space: nowrap !important;
+    justify-content: center !important;
+    gap: 2px !important;
+    transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
     user-select: none !important;
     outline: none !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
 }
 
 .commodity-pill:hover {
     border-color: var(--pill-color, #38bdf8) !important;
     transform: translateY(-1.5px) !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 14px var(--pill-glow, rgba(56, 189, 248, 0.35)) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6), 0 0 12px var(--pill-glow, rgba(56, 189, 248, 0.35)) !important;
 }
 
 .commodity-pill.active {
     background: var(--pill-active-bg, rgba(12, 28, 56, 0.95)) !important;
     border-color: var(--pill-color, #38bdf8) !important;
-    box-shadow: 0 0 18px var(--pill-glow, rgba(56, 189, 248, 0.5)), inset 0 0 10px rgba(0, 0, 0, 0.5) !important;
+    box-shadow: 0 0 14px var(--pill-glow, rgba(56, 189, 248, 0.5)), inset 0 0 8px rgba(0, 0, 0, 0.4) !important;
+}
+
+.commodity-pill .pill-name-row {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    cursor: pointer !important;
+    line-height: 1.2 !important;
+    padding: 1px 2px !important;
+    border-radius: 4px !important;
+    transition: all 0.15s ease !important;
+}
+
+.commodity-pill .pill-name-row:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
 }
 
 .commodity-pill .pill-dot {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--pill-color, #38bdf8);
-    box-shadow: 0 0 8px var(--pill-color, #38bdf8);
+    box-shadow: 0 0 6px var(--pill-color, #38bdf8);
     flex-shrink: 0;
     transition: transform 0.2s ease;
 }
 
 .commodity-pill:hover .pill-dot,
 .commodity-pill.active .pill-dot {
-    transform: scale(1.3);
+    transform: scale(1.2);
 }
 
 .commodity-pill .pill-name {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.1px;
     color: var(--pill-name-color, #f8fafc);
     cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 6px;
-    transition: all 0.15s ease;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    user-select: none;
 }
 
 .commodity-pill .pill-name:hover {
     color: #ffffff;
     text-shadow: 0 0 8px var(--pill-color, #38bdf8);
-    background: rgba(255, 255, 255, 0.12);
 }
 
-.commodity-pill .pill-separator {
-    color: rgba(255, 255, 255, 0.35);
-    font-weight: 700;
-    margin: 0 1px;
-    user-select: none;
+.commodity-pill .pill-price-row {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
 }
 
 .commodity-pill .pill-ltp {
     font-family: var(--font-mono, "JetBrains Mono", monospace);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
     color: var(--pill-color, #38bdf8);
     cursor: pointer;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    background: rgba(0, 0, 0, 0.35);
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.45);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    letter-spacing: 0.2px;
+    letter-spacing: -0.2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    line-height: 1.25;
+    display: block;
     transition: all 0.15s ease;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
 }
 
 .commodity-pill .pill-ltp:hover {
     color: #ffffff;
     background: var(--pill-color, #38bdf8);
     border-color: var(--pill-color, #38bdf8);
-    box-shadow: 0 0 12px var(--pill-color, #38bdf8);
+    box-shadow: 0 0 10px var(--pill-color, #38bdf8);
 }
 
 /* Platform-wide Pill Shapes */
