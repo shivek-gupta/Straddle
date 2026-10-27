@@ -1143,17 +1143,34 @@ def api_system_restart():
 # ==========================================================
 
 def _auto_git_sync_worker():
-    """Periodically check remote GitHub repository and auto-pull if updates exist."""
+    """
+    Periodically check remote GitHub repository and auto-pull if updates exist on origin/main.
+    Runs primarily on Linux / Oracle Cloud production host to ensure seamless updates.
+    """
+    # Only run auto-updater daemon on Linux / Cloud or if explicitly enabled
+    is_linux = sys.platform.startswith("linux")
+    if not is_linux and os.environ.get("ENABLE_AUTO_GIT_SYNC", "0") != "1":
+        logger.info("[Auto-Updater] Local development environment detected. Automatic background pull disabled.")
+        return
+
     time.sleep(10)
     while True:
         try:
             rem_chk = subprocess.run(["git", "remote"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
             if rem_chk.stdout.strip():
                 subprocess.run(["git", "fetch", "origin", "main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True, timeout=30)
-                local_h = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True).stdout.strip()
-                remote_h = subprocess.run(["git", "rev-parse", "origin/main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True).stdout.strip()
-                if remote_h and local_h and remote_h != local_h:
-                    logger.info(f"[Auto-Updater] New version detected ({remote_h[:7]}). Pulling updates automatically...")
+                # Check how many commits remote origin/main is ahead of local HEAD
+                rev_res = subprocess.run(["git", "rev-list", "HEAD..origin/main", "--count"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True)
+                behind_count = 0
+                if rev_res.returncode == 0:
+                    try:
+                        behind_count = int(rev_res.stdout.strip() or "0")
+                    except ValueError:
+                        behind_count = 0
+
+                if behind_count > 0:
+                    remote_h = subprocess.run(["git", "rev-parse", "origin/main"], cwd=str(config.PROJECT_ROOT), capture_output=True, text=True).stdout.strip()
+                    logger.info(f"[Auto-Updater] {behind_count} new commit(s) detected on origin/main ({remote_h[:7]}). Pulling updates automatically...")
                     success, _ = _execute_safe_git_pull_operation()
                     if success:
                         logger.info("[Auto-Updater] Update applied cleanly. Reloading server process...")

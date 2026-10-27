@@ -1,0 +1,47 @@
+name: Deploy Straddle to Oracle Cloud
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy Straddle to Oracle Cloud VM
+        uses: appleboy/ssh-action@v1.0.3
+        continue-on-error: true
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            echo "Deploying Straddle to Oracle Cloud VM..."
+            cd /home/ubuntu/Straddle || git clone https://github.com/shivek-gupta/Straddle.git /home/ubuntu/Straddle
+            cd /home/ubuntu/Straddle
+
+            echo "Step 1: Backing up live runtime data..."
+            mkdir -p /home/ubuntu/straddle_data_persist
+            cp -p data/kotak_credentials.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
+            cp -p data/straddle_strategies.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
+            cp -p data/straddle_state.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
+            cp -p data/straddle_pnl_history.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
+
+            echo "Step 2: Pulling latest project code..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "Step 3: Restoring persisted data..."
+            cp -p /home/ubuntu/straddle_data_persist/* data/ 2>/dev/null || true
+
+            echo "Step 4: Installing requirements..."
+            python3 -m pip install -r requirements.txt --quiet || true
+
+            echo "Step 5: Ensuring systemd service is active..."
+            sudo cp -u straddle.service /etc/systemd/system/ 2>/dev/null || true
+            sudo systemctl daemon-reload 2>/dev/null || true
+            sudo systemctl enable straddle 2>/dev/null || true
+            sudo systemctl restart straddle
+            echo "Straddle deployment complete! Service status:"
+            sudo systemctl is-active straddle

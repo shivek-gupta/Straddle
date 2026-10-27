@@ -25,7 +25,7 @@ if "%PY_CMD%"=="" (
 )
 
 :: Verify dependencies
-%PY_CMD% -c "import flask, requests, pyotp, kotakneoapi" >nul 2>&1
+%PY_CMD% -c "import flask, requests, pyotp, neo_api_client" >nul 2>&1
 if errorlevel 1 (
     echo Installing required packages (kotakneoapi, pyotp, flask)...
     %PY_CMD% -m pip install -r requirements.txt
