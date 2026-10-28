@@ -167,11 +167,13 @@ def api_straddle_spots():
         spots = {}
         for und in tracked:
             spots[und] = mgr.get_cached_spot_price(und)
-        return jsonify({
+        resp = jsonify({
             "success": True,
             "spots": spots,
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -470,7 +472,9 @@ def api_straddle_option_chain():
         strike_range = int(range_raw) if range_raw and (range_raw.isdigit() or range_raw == "0") else 15
         mgr = get_straddle_manager()
         chain = mgr.get_option_chain_snapshot(underlying=und, expiry_ms=exp_ms, strike_range=strike_range)
-        return jsonify({"success": True, "data": chain, "chain": chain})
+        resp = jsonify({"success": True, "data": chain, "chain": chain})
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

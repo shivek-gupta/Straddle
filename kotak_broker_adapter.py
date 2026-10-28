@@ -870,21 +870,24 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         self._quotes_cache_ts[raw_tok] = now_ts
                         self._quotes_cache_ts[clean_sym] = now_ts
                 elif clean_sym in ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"):
-                    spot_p = straddle_engine._SPOT_CACHE.get(clean_sym, 0.0)
-                    if spot_p <= 0:
-                        try:
-                            spot_p = straddle_engine._get_commodity_live_price(clean_sym)
-                        except Exception:
-                            pass
-                    if spot_p > 0:
-                        entry = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
-                        quotes_data[clean_sym] = entry
-                        quotes_data[raw_tok] = entry
-                        quotes_data[raw_tok.replace("|", ":")] = entry
-                        self._quotes_cache[raw_tok] = entry
-                        self._quotes_cache[clean_sym] = entry
-                        self._quotes_cache_ts[raw_tok] = now_ts
-                        self._quotes_cache_ts[clean_sym] = now_ts
+                    comm_fut_map = {
+                        "GOLD": ("495213", "mcx_fo"),
+                        "GOLDM": ("571445", "mcx_fo"),
+                        "SILVER": ("495214", "mcx_fo"),
+                        "SILVERM": ("483080", "mcx_fo"),
+                        "CRUDEOIL": ("573422", "mcx_fo"),
+                        "CRUDEOILM": ("573423", "mcx_fo"),
+                        "NATURALGAS": ("574319", "mcx_fo"),
+                        "NATGASMINI": ("574320", "mcx_fo"),
+                        "COPPER": ("574829", "mcx_fo"),
+                    }
+                    tok_id, comm_seg = comm_fut_map.get(clean_sym, ("", "mcx_fo"))
+                    dyn_key = getattr(straddle_engine, "UNDERLYING_KEYS", {}).get(clean_sym)
+                    if dyn_key and "|" in dyn_key:
+                        tok_id = dyn_key.split("|")[-1]
+                    if tok_id:
+                        req_tokens.append({"instrument_token": tok_id, "exchange_segment": comm_seg})
+                        tokens_to_fetch.append(clean_sym)
                 else:
                     token_id = raw_tok.split("|")[-1].strip()
                     if not token_id.isdigit():
@@ -895,6 +898,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
             if req_tokens:
                 # Kotak Neo limits maximum 50 symbols per quotes call. We chunk into batches of 40.
+                reverse_comm = {
+                    "495213": "GOLD", "571445": "GOLDM",
+                    "495214": "SILVER", "483080": "SILVERM",
+                    "573422": "CRUDEOIL", "573423": "CRUDEOILM",
+                    "574319": "NATURALGAS", "574320": "NATGASMINI",
+                    "574829": "COPPER"
+                }
                 for i in range(0, len(req_tokens), 40):
                     batch = req_tokens[i:i + 40]
                     try:
@@ -927,6 +937,20 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                                     self._quotes_cache_ts[f"NSE_FO|{tok}"] = now_ts
                                     self._quotes_cache_ts[f"BSE_FO|{tok}"] = now_ts
                                     self._quotes_cache_ts[f"MCX_FO|{tok}"] = now_ts
+
+                                    if tok in reverse_comm:
+                                        c_sym = reverse_comm[tok]
+                                        quotes_data[c_sym] = entry
+                                        quotes_data[f"MCX|{c_sym}"] = entry
+                                        self._quotes_cache[c_sym] = entry
+                                        self._quotes_cache[f"MCX|{c_sym}"] = entry
+                                        self._quotes_cache_ts[c_sym] = now_ts
+                                        self._quotes_cache_ts[f"MCX|{c_sym}"] = now_ts
+                                        if entry["ltp"] > 0:
+                                            with straddle_engine._SPOT_FETCH_LOCK:
+                                                straddle_engine._SPOT_CACHE[c_sym] = entry["ltp"]
+                                                straddle_engine._LAST_SPOT_FETCH_TS[c_sym] = now_ts
+
                                 sym = q.get("display_symbol")
                                 if sym:
                                     quotes_data[sym] = entry

@@ -214,15 +214,15 @@ UNDERLYING_KEYS = {
     "FINNIFTY": "NSE_INDEX|Nifty Fin Service",
     "MIDCPNIFTY": "NSE_INDEX|NIFTY MID SELECT",
     "SENSEX": "BSE_INDEX|SENSEX",
-    "CRUDEOIL": "MCX|CRUDEOIL",
-    "CRUDEOILM": "MCX|CRUDEOILM",
-    "NATURALGAS": "MCX|NATURALGAS",
-    "NATGASMINI": "MCX|NATGASMINI",
-    "GOLD": "MCX|GOLD",
-    "GOLDM": "MCX|GOLDM",
-    "SILVER": "MCX|SILVER",
-    "SILVERM": "MCX|SILVERM",
-    "COPPER": "MCX|COPPER",
+    "CRUDEOIL": "MCX_FO|573422",
+    "CRUDEOILM": "MCX_FO|573423",
+    "NATURALGAS": "MCX_FO|574319",
+    "NATGASMINI": "MCX_FO|574320",
+    "GOLD": "MCX_FO|495213",
+    "GOLDM": "MCX_FO|571445",
+    "SILVER": "MCX_FO|495214",
+    "SILVERM": "MCX_FO|483080",
+    "COPPER": "MCX_FO|574829",
 }
 
 # Default lot sizes
@@ -249,15 +249,15 @@ COMMODITY_SYMBOLS = {
 }
 
 COMMODITY_FALLBACK_PRICES = {
-    "CRUDEOIL": 6120.0,
-    "CRUDEOILM": 6120.0,
-    "NATURALGAS": 245.50,
-    "NATGASMINI": 245.50,
-    "GOLD": 79500.0,
-    "GOLDM": 79500.0,
-    "SILVER": 94200.0,
-    "SILVERM": 94200.0,
-    "COPPER": 845.0,
+    "CRUDEOIL": 9670.0,
+    "CRUDEOILM": 9670.0,
+    "NATURALGAS": 294.0,
+    "NATGASMINI": 294.0,
+    "GOLD": 143850.0,
+    "GOLDM": 142200.0,
+    "SILVER": 194900.0,
+    "SILVERM": 196880.0,
+    "COPPER": 1398.0,
 }
 
 
@@ -528,7 +528,7 @@ def _fetch_live_index_spot_network(und: str) -> float:
 
 def _get_commodity_live_price(und: str) -> float:
     """Fetch real-time commodity futures / spot price in INR with connection pooling."""
-    clean_und = und.upper()
+    clean_und = und.upper().replace(" ", "")
     now_ts = time.time()
     with _SPOT_FETCH_LOCK:
         if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 0.25:
@@ -539,16 +539,23 @@ def _get_commodity_live_price(und: str) -> float:
         from kotak_broker_adapter import get_broker_adapter
         adapter = get_broker_adapter()
         fut_key = UNDERLYING_KEYS.get(clean_und)
+        query_keys = [clean_und]
         if fut_key:
-            q = adapter.get_live_quotes([fut_key])
-            if q and fut_key in q and float(q[fut_key].get("ltp", 0)) > 0:
-                p = float(q[fut_key]["ltp"])
-                with _SPOT_FETCH_LOCK:
-                    _SPOT_CACHE[clean_und] = p
-                    _LAST_SPOT_FETCH_TS[clean_und] = now_ts
-                return p
-    except Exception:
-        pass
+            query_keys.append(fut_key)
+        q = adapter.get_live_quotes(query_keys)
+        if q:
+            cand_keys = [clean_und, fut_key, fut_key.split("|")[-1] if fut_key and "|" in fut_key else None]
+            for ck in cand_keys:
+                if ck and ck in q:
+                    quote_item = q[ck]
+                    p = float(quote_item.get("ltp", 0.0) if isinstance(quote_item, dict) else quote_item)
+                    if p > 0:
+                        with _SPOT_FETCH_LOCK:
+                            _SPOT_CACHE[clean_und] = p
+                            _LAST_SPOT_FETCH_TS[clean_und] = now_ts
+                        return p
+    except Exception as e:
+        logger.debug(f"Broker quote note for {clean_und}: {e}")
 
     # 2. Try global financial feed & currency conversion to INR
     yahoo_map = {
@@ -624,6 +631,8 @@ class StraddleManager:
         self._pnl_history: List[Dict[str, Any]] = []
         self._orderbook: List[Dict[str, Any]] = []
         self._order_registry: Dict[str, Dict[str, Any]] = {}
+        self._last_state_save_ts: float = 0.0
+        self._last_pnl_save_ts: float = 0.0
 
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -718,7 +727,11 @@ class StraddleManager:
                 except Exception as e:
                     logger.error(f"Failed to load straddle state: {e}")
 
-    def _save_state(self):
+    def _save_state(self, force: bool = False):
+        now = time.time()
+        if not force and (now - getattr(self, "_last_state_save_ts", 0)) < 1.5:
+            return
+        self._last_state_save_ts = now
         with _ENGINE_LOCK:
             _safe_write_json(STRADDLE_STATE_FILE, self._state)
 
@@ -755,7 +768,11 @@ class StraddleManager:
                 except Exception:
                     self._pnl_history = []
 
-    def _save_pnl_history(self):
+    def _save_pnl_history(self, force: bool = False):
+        now = time.time()
+        if not force and (now - getattr(self, "_last_pnl_save_ts", 0)) < 2.0:
+            return
+        self._last_pnl_save_ts = now
         with _ENGINE_LOCK:
             _safe_write_json(STRADDLE_PNL_HISTORY_FILE, self._pnl_history[-1000:])
 
@@ -936,6 +953,39 @@ class StraddleManager:
                     self._options_by_und = indexed
                     self._expiries_cache.clear()
                     self._chain_snapshot_cache.clear()
+
+                    # Dynamic auto-discovery of active near-month MCX futures
+                    today_ms = int(time.time() * 1000)
+                    target_comm_prefixes = {
+                        "GOLD": "GOLD FUT ",
+                        "GOLDM": "GOLDM FUT ",
+                        "SILVER": "SILVER FUT ",
+                        "SILVERM": "SILVERM FUT ",
+                        "CRUDEOIL": "CRUDEOIL FUT ",
+                        "CRUDEOILM": "CRUDEOILM FUT ",
+                        "NATURALGAS": "NATURALGAS FUT ",
+                        "NATGASMINI": "NATGASMINI FUT ",
+                        "COPPER": "COPPER FUT "
+                    }
+                    discovered_futs: Dict[str, Dict[str, Any]] = {}
+                    for r in data:
+                        if r.get("segment") == "MCX_FO" and r.get("instrument_type") in ("FUT", "FUTCOM"):
+                            tsym = str(r.get("trading_symbol", "")).upper()
+                            exp = r.get("expiry") or 0
+                            if exp < today_ms:
+                                continue
+                            for comm, prefix in target_comm_prefixes.items():
+                                if tsym.startswith(prefix):
+                                    if comm not in discovered_futs or exp < discovered_futs[comm]["expiry"]:
+                                        discovered_futs[comm] = {
+                                            "symbol": tsym,
+                                            "expiry": exp,
+                                            "instrument_key": r.get("instrument_key"),
+                                            "token": str(r.get("exchange_token") or "")
+                                        }
+                    for comm, info in discovered_futs.items():
+                        if info.get("instrument_key"):
+                            UNDERLYING_KEYS[comm] = info["instrument_key"]
                     return data
             except Exception as e:
                 logger.error(f"Error reading instruments.json.gz: {e}")
