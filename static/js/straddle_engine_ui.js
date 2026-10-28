@@ -6041,6 +6041,24 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
         const data = await resp.json();
         if (data.success && data.data) {
             const chain = data.data;
+
+            // Spot outlier anomaly filter (ignore >15% sub-second bounce)
+            const spotKey = `${und}`;
+            if (chain.spot_price > 0) {
+                if (window._lastOptionChainSpotMap && window._lastOptionChainSpotMap[spotKey] > 0) {
+                    const prevSpot = window._lastOptionChainSpotMap[spotKey];
+                    if (Math.abs(chain.spot_price - prevSpot) / prevSpot > 0.15) {
+                        console.warn(`[OptionChain] Ignoring anomalous spot spike: ${chain.spot_price} vs prev ${prevSpot}`);
+                        chain.spot_price = prevSpot;
+                    } else {
+                        window._lastOptionChainSpotMap[spotKey] = chain.spot_price;
+                    }
+                } else {
+                    if (!window._lastOptionChainSpotMap) window._lastOptionChainSpotMap = {};
+                    window._lastOptionChainSpotMap[spotKey] = chain.spot_price;
+                }
+            }
+
             const currentExpDateStr = chain.expiry_date || (expSel?.selectedOptions && expSel.selectedOptions[0] ? expSel.selectedOptions[0].text : "Weekly");
 
             // Update Header Spot Ticker (remove ATM from title bar as requested)
@@ -6142,10 +6160,11 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         const prevLtp = parseFloat(ceLtpCell.getAttribute("data-ltp") || "0");
                         const ceLtpText = ceHasPrice ? `₹${ceLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
 
-                        if (Math.abs(ceLtpNum - prevLtp) > 0.001) {
+                        const diff = Math.abs(ceLtpNum - prevLtp);
+                        if (diff > 0.001) {
                             ceLtpCell.textContent = ceLtpText;
                             ceLtpCell.setAttribute("data-ltp", ceLtpNum);
-                            if (prevLtp > 0) {
+                            if (prevLtp > 0 && ceLtpNum > 0 && diff >= 0.05) {
                                 const isUp = ceLtpNum > prevLtp;
                                 ceLtpCell.classList.remove("opt-tick-flash-up", "opt-tick-flash-down");
                                 ceLtpCell.classList.add(isUp ? "opt-tick-flash-up" : "opt-tick-flash-down");
@@ -6168,10 +6187,11 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         const prevLtp = parseFloat(peLtpCell.getAttribute("data-ltp") || "0");
                         const peLtpText = peHasPrice ? `₹${peLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
 
-                        if (Math.abs(peLtpNum - prevLtp) > 0.001) {
+                        const diff = Math.abs(peLtpNum - prevLtp);
+                        if (diff > 0.001) {
                             peLtpCell.textContent = peLtpText;
                             peLtpCell.setAttribute("data-ltp", peLtpNum);
-                            if (prevLtp > 0) {
+                            if (prevLtp > 0 && peLtpNum > 0 && diff >= 0.05) {
                                 const isUp = peLtpNum > prevLtp;
                                 peLtpCell.classList.remove("opt-tick-flash-up", "opt-tick-flash-down");
                                 peLtpCell.classList.add(isUp ? "opt-tick-flash-up" : "opt-tick-flash-down");

@@ -527,14 +527,14 @@ def _fetch_live_index_spot_network(und: str) -> float:
 
 
 def _get_commodity_live_price(und: str) -> float:
-    """Fetch real-time commodity futures / spot price in INR with connection pooling."""
+    """Fetch real-time commodity futures / spot price in INR from broker quotes with fast in-memory caching."""
     clean_und = und.upper().replace(" ", "")
     now_ts = time.time()
     with _SPOT_FETCH_LOCK:
-        if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 0.25:
+        if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 1.5:
             return _SPOT_CACHE[clean_und]
 
-    # 1. Try Kotak Neo broker quote for active future
+    # 1. Try Kotak Neo broker quote for active future contract
     try:
         from kotak_broker_adapter import get_broker_adapter
         adapter = get_broker_adapter()
@@ -557,41 +557,12 @@ def _get_commodity_live_price(und: str) -> float:
     except Exception as e:
         logger.debug(f"Broker quote note for {clean_und}: {e}")
 
-    # 2. Try global financial feed & currency conversion to INR
-    yahoo_map = {
-        "CRUDEOIL": ("CL=F", 84.2),        # USD/bbl * USDINR
-        "CRUDEOILM": ("CL=F", 84.2),
-        "NATURALGAS": ("NG=F", 84.2),      # USD/mmBtu * USDINR
-        "NATGASMINI": ("NG=F", 84.2),
-        "GOLD": ("GC=F", (84.2 / 31.1035) * 10 * 1.06), # USD/oz to INR/10g with duty
-        "GOLDM": ("GC=F", (84.2 / 31.1035) * 10 * 1.06),
-        "SILVER": ("SI=F", (84.2 / 31.1035) * 1000 * 1.06), # USD/oz to INR/kg
-        "SILVERM": ("SI=F", (84.2 / 31.1035) * 1000 * 1.06),
-        "COPPER": ("HG=F", (84.2 / 0.453592)), # USD/lb to INR/kg
-    }
-    if clean_und in yahoo_map:
-        sym, mult = yahoo_map[clean_und]
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1m"
-        try:
-            session = _get_spot_session()
-            resp = session.get(url, timeout=1.8)
-            if resp.status_code == 200:
-                data = resp.json()
-                meta = data["chart"]["result"][0]["meta"]
-                raw_p = float(meta.get("regularMarketPrice") or 0.0)
-                if raw_p > 0:
-                    inr_p = round(raw_p * mult, 2)
-                    with _SPOT_FETCH_LOCK:
-                        _SPOT_CACHE[clean_und] = inr_p
-                        _LAST_SPOT_FETCH_TS[clean_und] = now_ts
-                    return inr_p
-        except Exception:
-            pass
-
-    # 3. Fallback to cached or realistic baseline
+    # 2. Return last confirmed cached spot if available (NEVER poison with foreign currency USD conversions)
     with _SPOT_FETCH_LOCK:
         if clean_und in _SPOT_CACHE and _SPOT_CACHE[clean_und] > 0:
             return _SPOT_CACHE[clean_und]
+
+    # 3. Fallback to realistic current MCX market levels
     return COMMODITY_FALLBACK_PRICES.get(clean_und, 6000.0)
 
 
@@ -628,6 +599,8 @@ class StraddleManager:
         self._options_by_und: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         self._expiries_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
         self._chain_snapshot_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+        self._option_last_ltp: Dict[str, float] = {}
+        self._option_last_quotes: Dict[str, Dict[str, Any]] = {}
         self._pnl_history: List[Dict[str, Any]] = []
         self._orderbook: List[Dict[str, Any]] = []
         self._order_registry: Dict[str, Dict[str, Any]] = {}
@@ -1546,7 +1519,7 @@ class StraddleManager:
         if spot_price <= 0:
             spot_price = self._get_underlying_spot_price(clean_und)
         if spot_price <= 0:
-            spot_price = 22453.0 if clean_und == "NIFTY" else 48150.0
+            spot_price = COMMODITY_FALLBACK_PRICES.get(clean_und, 22453.0 if clean_und == "NIFTY" else 48150.0)
 
         atm_strike = round(spot_price / step) * step
 
@@ -1628,25 +1601,29 @@ class StraddleManager:
 
             if item.get("ce"):
                 bs_ce = _calc_bs_greeks(spot_price, s, dte_days=dte_days, iv=iv_est, opt_type="CE")
-                item["ce"]["ltp"] = bs_ce["ltp"]
+                ce_key = item["ce"]["instrument_key"]
+                last_ce_p = self._option_last_ltp.get(ce_key)
+                item["ce"]["ltp"] = last_ce_p if (last_ce_p is not None and last_ce_p > 0) else bs_ce["ltp"]
                 item["ce"]["bid"] = bs_ce["bid"]
                 item["ce"]["ask"] = bs_ce["ask"]
                 item["ce"]["oi"] = oi_synthetic
                 item["ce"]["volume"] = vol_synthetic
                 item["ce"]["iv"] = bs_ce["iv"]
                 item["ce"]["delta"] = bs_ce["delta"]
-                active_keys.append(item["ce"]["instrument_key"])
+                active_keys.append(ce_key)
 
             if item.get("pe"):
                 bs_pe = _calc_bs_greeks(spot_price, s, dte_days=dte_days, iv=iv_est, opt_type="PE")
-                item["pe"]["ltp"] = bs_pe["ltp"]
+                pe_key = item["pe"]["instrument_key"]
+                last_pe_p = self._option_last_ltp.get(pe_key)
+                item["pe"]["ltp"] = last_pe_p if (last_pe_p is not None and last_pe_p > 0) else bs_pe["ltp"]
                 item["pe"]["bid"] = bs_pe["bid"]
                 item["pe"]["ask"] = bs_pe["ask"]
                 item["pe"]["oi"] = oi_synthetic
                 item["pe"]["volume"] = vol_synthetic
                 item["pe"]["iv"] = bs_pe["iv"]
                 item["pe"]["delta"] = bs_pe["delta"]
-                active_keys.append(item["pe"]["instrument_key"])
+                active_keys.append(pe_key)
 
         live_prices, live_quotes = self._fetch_live_quotes(active_keys)
 
@@ -1685,6 +1662,15 @@ class StraddleManager:
                             ltp_val = float(q_obj["last_price"])
                     if ltp_val is not None and q_obj is not None:
                         break
+
+                if ltp_val is not None and ltp_val > 0:
+                    self._option_last_ltp[ikey] = round(ltp_val, 2)
+                    if q_obj:
+                        self._option_last_quotes[ikey] = q_obj
+                elif ikey in self._option_last_ltp and self._option_last_ltp[ikey] > 0:
+                    ltp_val = self._option_last_ltp[ikey]
+                    if not q_obj and ikey in self._option_last_quotes:
+                        q_obj = self._option_last_quotes[ikey]
 
                 if ltp_val is not None and ltp_val > 0:
                     opt_item["ltp"] = round(ltp_val, 2)
@@ -1797,9 +1783,10 @@ class StraddleManager:
     def get_cached_spot_price(self, underlying: str = "NIFTY") -> float:
         """Returns the in-memory cached spot price instantly (<0.01ms) without blocking."""
         clean_und = (underlying or "NIFTY").upper()
+        now_ts = time.time()
         with _SPOT_FETCH_LOCK:
             p = _SPOT_CACHE.get(clean_und, 0.0)
-            if p > 0:
+            if p > 0 and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 2.0:
                 return p
         return self._get_underlying_spot_price(clean_und)
 
@@ -1811,9 +1798,9 @@ class StraddleManager:
 
         now_ts = time.time()
         
-        # Check high-speed memory cache (valid for 0.25 second for fast live ticks)
+        # Check high-speed memory cache (valid for 1.5 seconds for rock-solid stability)
         with _SPOT_FETCH_LOCK:
-            if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 0.25:
+            if clean_und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 1.5:
                 return _SPOT_CACHE[clean_und]
 
         # 1. Try Kotak Neo broker quotes if connected
@@ -7284,18 +7271,42 @@ class StraddleManager:
         ]
         while not self._stop_event.is_set():
             try:
-                # Update spot for tracked underlyings in background so web requests never block
-                for und in tracked_assets:
-                    if self._stop_event.is_set():
-                        break
-                    try:
-                        p = self._get_underlying_spot_price(und)
+                now_ts = time.time()
+                # 1. Single batch quote fetch from Kotak Neo for all tracked assets
+                try:
+                    adapter = get_broker_adapter()
+                    batch_keys = []
+                    for und in tracked_assets:
+                        batch_keys.append(und)
+                        fk = UNDERLYING_KEYS.get(und)
+                        if fk:
+                            batch_keys.append(fk)
+                    quotes = adapter.get_live_quotes(batch_keys)
+                    for und in tracked_assets:
+                        fk = UNDERLYING_KEYS.get(und)
+                        cands = [und, fk, fk.split("|")[-1] if fk and "|" in fk else None]
+                        for c in cands:
+                            if c and c in quotes:
+                                q_item = quotes[c]
+                                p = float(q_item.get("ltp", 0.0) if isinstance(q_item, dict) else q_item)
+                                if p > 0:
+                                    with _SPOT_FETCH_LOCK:
+                                        _SPOT_CACHE[und] = p
+                                        _LAST_SPOT_FETCH_TS[und] = now_ts
+                                    break
+                except Exception as ex_b:
+                    logger.debug(f"Batch spot loop broker note: {ex_b}")
+
+                # 2. For equity indices, if broker didn't return fresh quote, check network index feed
+                for und in ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"]:
+                    with _SPOT_FETCH_LOCK:
+                        has_fresh = (und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(und, 0)) < 2.0)
+                    if not has_fresh:
+                        p = _fetch_live_index_spot_network(und)
                         if p > 0:
                             with _SPOT_FETCH_LOCK:
                                 _SPOT_CACHE[und] = p
-                                _LAST_SPOT_FETCH_TS[und] = time.time()
-                    except Exception:
-                        pass
+                                _LAST_SPOT_FETCH_TS[und] = now_ts
 
                 # Sync active underlying spot into state
                 cur_und = self._state.get("underlying_symbol", "NIFTY")
