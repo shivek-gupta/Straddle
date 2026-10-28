@@ -214,15 +214,15 @@ UNDERLYING_KEYS = {
     "FINNIFTY": "NSE_INDEX|Nifty Fin Service",
     "MIDCPNIFTY": "NSE_INDEX|NIFTY MID SELECT",
     "SENSEX": "BSE_INDEX|SENSEX",
-    "CRUDEOIL": "MCX_FO|573422",
-    "CRUDEOILM": "MCX_FO|573423",
-    "NATURALGAS": "MCX_FO|570750",
-    "NATGASMINI": "MCX_FO|570751",
-    "GOLD": "MCX_FO|495213",
-    "GOLDM": "MCX_FO|571445",
-    "SILVER": "MCX_FO|495214",
-    "SILVERM": "MCX_FO|483080",
-    "COPPER": "MCX_FO|574829",
+    "CRUDEOIL": "MCX|CRUDEOIL",
+    "CRUDEOILM": "MCX|CRUDEOILM",
+    "NATURALGAS": "MCX|NATURALGAS",
+    "NATGASMINI": "MCX|NATGASMINI",
+    "GOLD": "MCX|GOLD",
+    "GOLDM": "MCX|GOLDM",
+    "SILVER": "MCX|SILVER",
+    "SILVERM": "MCX|SILVERM",
+    "COPPER": "MCX|COPPER",
 }
 
 # Default lot sizes
@@ -618,6 +618,9 @@ class StraddleManager:
         }
         self._instruments_cache: Optional[List[Dict[str, Any]]] = None
         self._instruments_mtime: float = 0.0
+        self._options_by_und: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        self._expiries_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+        self._chain_snapshot_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._pnl_history: List[Dict[str, Any]] = []
         self._orderbook: List[Dict[str, Any]] = []
         self._order_registry: Dict[str, Dict[str, Any]] = {}
@@ -904,38 +907,77 @@ class StraddleManager:
                     data = json.load(handle)
                     self._instruments_cache = data
                     self._instruments_mtime = mtime
+
+                    # Build ultra-fast O(1) indexed options lookup by (segment, clean_und)
+                    indexed: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+                    known_unds_set = {
+                        "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
+                        "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM",
+                        "SILVER", "SILVERM", "COPPER"
+                    }
+                    for r in data:
+                        itype = r.get("instrument_type")
+                        if itype not in ("CE", "PE"):
+                            continue
+                        seg = r.get("segment")
+                        r_name = str(r.get("name", "")).upper().replace(" ", "")
+                        r_tsym = str(r.get("trading_symbol", "")).upper()
+                        root_cand = r_tsym.split()[0] if r_tsym else r_name
+                        target_und = None
+                        if root_cand in known_unds_set:
+                            target_und = root_cand
+                        elif r_name in known_unds_set:
+                            target_und = r_name
+                        if target_und:
+                            k = (seg, target_und)
+                            if k not in indexed:
+                                indexed[k] = []
+                            indexed[k].append(r)
+                    self._options_by_und = indexed
+                    self._expiries_cache.clear()
+                    self._chain_snapshot_cache.clear()
                     return data
             except Exception as e:
                 logger.error(f"Error reading instruments.json.gz: {e}")
                 return []
 
     def get_expiries_for_underlying(self, underlying: str = "NIFTY") -> List[Dict[str, Any]]:
-        """Return unique sorted expiry dates for an underlying index or commodity."""
-        instruments = self._load_instruments_data()
+        """Return unique sorted expiry dates for an underlying index or commodity with memory caching."""
         clean_und = underlying.upper().replace(" ", "")
+        now_ts = time.time()
+
+        # Check 60-second TTL cache for instant return
+        if clean_und in self._expiries_cache:
+            cache_ts, cached_expiries = self._expiries_cache[clean_und]
+            if (now_ts - cache_ts) < 60.0:
+                return cached_expiries
+
+        instruments = self._load_instruments_data()
         today_date = now_ist().date()
         is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
         target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
 
+        candidate_options = self._options_by_und.get((target_seg, clean_und))
+        if candidate_options is None:
+            candidate_options = [
+                r for r in instruments
+                if r.get("segment") == target_seg and r.get("instrument_type") in ("CE", "PE") and
+                (str(r.get("name", "")).upper().replace(" ", "") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
+            ]
+
         expiries_set = set()
         all_found_expiries = set()
 
-        for r in instruments:
-            if r.get("segment") != target_seg:
-                continue
-            r_name = str(r.get("name", "")).upper().replace(" ", "")
-            r_tsym = str(r.get("trading_symbol", "")).upper()
-            matches = (r_name == clean_und or r_tsym.startswith(clean_und + " ") or r_name.startswith(clean_und))
-            if matches and r.get("instrument_type") in ("CE", "PE"):
-                exp = r.get("expiry")
-                if exp:
-                    all_found_expiries.add(exp)
-                    try:
-                        dt = datetime.fromtimestamp(exp / 1000, tz=timezone.utc)
-                        if dt.date() >= today_date:
-                            expiries_set.add(exp)
-                    except Exception:
-                        pass
+        for r in candidate_options:
+            exp = r.get("expiry")
+            if exp:
+                all_found_expiries.add(exp)
+                try:
+                    dt = datetime.fromtimestamp(exp / 1000, tz=timezone.utc)
+                    if dt.date() >= today_date:
+                        expiries_set.add(exp)
+                except Exception:
+                    pass
 
         effective_exp = sorted(list(expiries_set)) if expiries_set else sorted(list(all_found_expiries))
         result = []
@@ -950,6 +992,7 @@ class StraddleManager:
                 "tag": tag,
                 "is_current": i == 0,
             })
+        self._expiries_cache[clean_und] = (now_ts, result)
         return result
 
     def search_contracts(
@@ -1433,20 +1476,31 @@ class StraddleManager:
 
 
     def get_option_chain_snapshot(self, underlying: str = "NIFTY", expiry_ms: Optional[int] = None, strike_range: int = 15) -> Dict[str, Any]:
-        """Build real-time Option Chain for an underlying with spot, ATM strike, PCR, Max Pain, and Greeks."""
-        instruments = self._load_instruments_data()
-        clean_und = underlying.upper()
+        """Build real-time Option Chain for an underlying with spot, ATM strike, PCR, Max Pain, and Greeks at ultra-low latency."""
+        clean_und = underlying.upper().replace(" ", "")
         step = STRIKE_STEPS.get(clean_und, 50)
         und_key = UNDERLYING_KEYS.get(clean_und, f"NSE_INDEX|{clean_und}")
 
-        # Fetch Spot Quote
-        spot_price = self._get_underlying_spot_price(clean_und)
+        # Check sub-second snapshot cache (150ms TTL for 300ms ultra-rapid polling)
+        now_ts = time.time()
+        cache_key = f"{clean_und}_{expiry_ms}_{strike_range}"
+        if cache_key in self._chain_snapshot_cache:
+            c_ts, c_snap = self._chain_snapshot_cache[cache_key]
+            if (now_ts - c_ts) < 0.15:
+                return c_snap
+
+        instruments = self._load_instruments_data()
+
+        # Fetch Spot Quote (instant memory cache)
+        spot_price = self.get_cached_spot_price(clean_und)
+        if spot_price <= 0:
+            spot_price = self._get_underlying_spot_price(clean_und)
         if spot_price <= 0:
             spot_price = 22453.0 if clean_und == "NIFTY" else 48150.0
 
         atm_strike = round(spot_price / step) * step
 
-        # Resolve Expiry
+        # Resolve Expiry (instant memory cache)
         all_expiries = self.get_expiries_for_underlying(clean_und)
         selected_expiry_ms = expiry_ms or (all_expiries[0]["expiry_ms"] if all_expiries else None)
 
@@ -1456,22 +1510,21 @@ class StraddleManager:
             exp_sec = selected_expiry_ms / 1000
             dte_days = max(0.1, (exp_sec - time.time()) / 86400.0)
 
-        chain_by_strike: Dict[float, Dict[str, Any]] = {}
-        instrument_keys_to_fetch = [und_key]
-
         is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
         target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
-        r_clean_und = clean_und.replace(" ", "")
 
-        for r in instruments:
-            if r.get("segment") != target_seg:
-                continue
-            r_name = str(r.get("name", "")).upper().replace(" ", "")
-            r_tsym = str(r.get("trading_symbol", "")).upper()
-            if not (r_name == r_clean_und or r_tsym.startswith(r_clean_und + " ") or r_tsym.startswith(clean_und + " ") or r_name.startswith(r_clean_und)):
-                continue
-            if r.get("instrument_type") not in ("CE", "PE"):
-                continue
+        candidate_options = self._options_by_und.get((target_seg, clean_und))
+        if candidate_options is None:
+            r_clean_und = clean_und.replace(" ", "")
+            candidate_options = [
+                r for r in instruments
+                if r.get("segment") == target_seg and r.get("instrument_type") in ("CE", "PE") and
+                (str(r.get("name", "")).upper().replace(" ", "") == r_clean_und or str(r.get("trading_symbol", "")).upper().startswith(r_clean_und + " "))
+            ]
+
+        # Group contracts for selected expiry by strike
+        chain_by_strike: Dict[float, Dict[str, Any]] = {}
+        for r in candidate_options:
             if selected_expiry_ms is not None and r.get("expiry") != selected_expiry_ms:
                 continue
             strike = float(r.get("strike_price", 0.0))
@@ -1487,35 +1540,24 @@ class StraddleManager:
                     "ce": None,
                     "pe": None,
                 }
-
-            # Compute baseline Greeks with Black-Scholes
-            iv_est = 0.135 if clean_und == "NIFTY" else 0.155
-            bs = _calc_bs_greeks(spot_price, strike, dte_days=dte_days, iv=iv_est, opt_type=itype)
-
-            dist = abs(strike - atm_strike) / step
-            oi_synthetic = max(5000, int((30.0 / (1.0 + 0.15 * dist)) * 12500 + 15000))
-            vol_synthetic = max(2000, int(oi_synthetic * 0.45))
-
             opt_info = {
                 "instrument_key": ikey,
                 "trading_symbol": tsym,
                 "lot_size": lot,
-                "ltp": bs["ltp"],
-                "bid": bs["bid"],
-                "ask": bs["ask"],
-                "oi": oi_synthetic,
-                "volume": vol_synthetic,
-                "iv": bs["iv"],
-                "delta": bs["delta"],
+                "ltp": 0.0,
+                "bid": 0.0,
+                "ask": 0.0,
+                "oi": 0,
+                "volume": 0,
+                "iv": 0.0,
+                "delta": 0.0,
             }
             if itype == "CE":
                 chain_by_strike[strike]["ce"] = opt_info
             elif itype == "PE":
                 chain_by_strike[strike]["pe"] = opt_info
 
-            instrument_keys_to_fetch.append(ikey)
-
-        # Filter strikes around ATM based on strike_range
+        # Filter strikes around ATM based on strike_range BEFORE heavy BS calculations
         strikes_sorted = sorted(chain_by_strike.keys())
         filtered_strikes = strikes_sorted
         effective_range = strike_range if strike_range and strike_range > 0 else 15
@@ -1525,17 +1567,40 @@ class StraddleManager:
             end_idx = min(len(strikes_sorted), atm_idx + effective_range + 1)
             filtered_strikes = strikes_sorted[start_idx:end_idx]
 
+        # Calculate Black-Scholes baseline Greeks & synthetic OI ONLY for visible filtered strikes
+        iv_est = 0.135 if clean_und == "NIFTY" else 0.155
         active_keys = [und_key]
         for s in filtered_strikes:
             item = chain_by_strike[s]
+            dist = abs(s - atm_strike) / step
+            oi_synthetic = max(5000, int((30.0 / (1.0 + 0.15 * dist)) * 12500 + 15000))
+            vol_synthetic = max(2000, int(oi_synthetic * 0.45))
+
             if item.get("ce"):
+                bs_ce = _calc_bs_greeks(spot_price, s, dte_days=dte_days, iv=iv_est, opt_type="CE")
+                item["ce"]["ltp"] = bs_ce["ltp"]
+                item["ce"]["bid"] = bs_ce["bid"]
+                item["ce"]["ask"] = bs_ce["ask"]
+                item["ce"]["oi"] = oi_synthetic
+                item["ce"]["volume"] = vol_synthetic
+                item["ce"]["iv"] = bs_ce["iv"]
+                item["ce"]["delta"] = bs_ce["delta"]
                 active_keys.append(item["ce"]["instrument_key"])
+
             if item.get("pe"):
+                bs_pe = _calc_bs_greeks(spot_price, s, dte_days=dte_days, iv=iv_est, opt_type="PE")
+                item["pe"]["ltp"] = bs_pe["ltp"]
+                item["pe"]["bid"] = bs_pe["bid"]
+                item["pe"]["ask"] = bs_pe["ask"]
+                item["pe"]["oi"] = oi_synthetic
+                item["pe"]["volume"] = vol_synthetic
+                item["pe"]["iv"] = bs_pe["iv"]
+                item["pe"]["delta"] = bs_pe["delta"]
                 active_keys.append(item["pe"]["instrument_key"])
 
         live_prices, live_quotes = self._fetch_live_quotes(active_keys)
 
-        # Inject authoritative live prices & Greeks into chain
+        # Inject authoritative live prices & quotes into chain
         final_rows = []
         total_ce_oi = 0
         total_pe_oi = 0
@@ -1652,7 +1717,7 @@ class StraddleManager:
 
         max_single_oi = max(1, max(max_ce_oi, max_pe_oi))
 
-        return {
+        snapshot = {
             "underlying": clean_und,
             "spot_price": spot_price,
             "atm_strike": atm_strike,
@@ -1671,6 +1736,8 @@ class StraddleManager:
             "max_single_oi": max_single_oi,
             "rows": final_rows,
         }
+        self._chain_snapshot_cache[cache_key] = (now_ts, snapshot)
+        return snapshot
 
 
     # ==========================================================
@@ -7160,23 +7227,39 @@ class StraddleManager:
             self._spot_thread.start()
 
     def _spot_feed_loop(self):
-        logger.info("Straddle Engine background spot ticker loop started (sub-second daemon).")
+        logger.info("Straddle Engine background spot ticker loop started (continuous multi-asset daemon).")
+        tracked_assets = [
+            "NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY",
+            "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "CRUDEOILM", "NATGASMINI", "GOLDM", "SILVERM", "COPPER"
+        ]
         while not self._stop_event.is_set():
             try:
-                und = self._state.get("underlying_symbol", "NIFTY")
-                p = _fetch_live_index_spot_network(und)
-                if p > 0:
-                    with _SPOT_FETCH_LOCK:
-                        _SPOT_CACHE[und] = p
-                        _LAST_SPOT_FETCH_TS[und] = time.time()
+                # Update spot for tracked underlyings in background so web requests never block
+                for und in tracked_assets:
+                    if self._stop_event.is_set():
+                        break
+                    try:
+                        p = self._get_underlying_spot_price(und)
+                        if p > 0:
+                            with _SPOT_FETCH_LOCK:
+                                _SPOT_CACHE[und] = p
+                                _LAST_SPOT_FETCH_TS[und] = time.time()
+                    except Exception:
+                        pass
+
+                # Sync active underlying spot into state
+                cur_und = self._state.get("underlying_symbol", "NIFTY")
+                with _SPOT_FETCH_LOCK:
+                    cur_spot = _SPOT_CACHE.get(cur_und, 0.0)
+                if cur_spot > 0:
                     with _ENGINE_LOCK:
-                        self._state["underlying_spot"] = p
-                        step = STRIKE_STEPS.get(und.upper(), 50)
-                        self._state["underlying_atm_strike"] = round(p / step) * step
+                        self._state["underlying_spot"] = cur_spot
+                        step = STRIKE_STEPS.get(cur_und.upper(), 50)
+                        self._state["underlying_atm_strike"] = round(cur_spot / step) * step
                         self._state["last_tick_time"] = now_ist_str()
             except Exception as e:
                 logger.debug(f"Spot tick note: {e}")
-            time.sleep(0.8)
+            time.sleep(0.4)
 
     def _runner_loop(self):
         logger.info("Straddle Engine background evaluation loop started.")

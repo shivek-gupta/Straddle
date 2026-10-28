@@ -5464,23 +5464,30 @@ async function straddleToggleExecutionMode() {
 
 let _optChainTickerInterval = null;
 let _isLoadingOptionChain = false;
+window._optChainAbortController = null;
+window._lastRenderedOptionChainKey = null;
 
 function startOptionChainTicker() {
     stopOptionChainTicker();
     _optChainTickerInterval = setInterval(() => {
         const modal = document.getElementById("straddleOptionChainModal");
-        if (modal && modal.style.display === "flex") {
+        const isOpen = modal && !modal.classList.contains("hidden") && (modal.style.display !== "none") && (getComputedStyle(modal).display !== "none");
+        if (isOpen) {
             loadStraddleOptionChain(null, true);
         } else {
             stopOptionChainTicker();
         }
-    }, 500); // Continuous 500ms ultra-fast tick feed for Option Chain LTP & Bid/Ask
+    }, 300); // 300ms lightning-speed real-time ticks (~3.3 ticks/sec)
 }
 
 function stopOptionChainTicker() {
     if (_optChainTickerInterval) {
         clearInterval(_optChainTickerInterval);
         _optChainTickerInterval = null;
+    }
+    if (window._optChainAbortController) {
+        try { window._optChainAbortController.abort(); } catch(_) {}
+        window._optChainAbortController = null;
     }
 }
 
@@ -5913,7 +5920,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
     _isLoadingOptionChain = true;
 
     const undSel = document.getElementById("optChainUnderlyingSelect");
-    const und = undSel?.value || window._straddleState.optionChainUnderlying || "NIFTY";
+    const und = undSel?.value || window._straddleState?.optionChainUnderlying || "NIFTY";
     
     const expSel = document.getElementById("optChainExpirySelect");
     const exp = expiryMs || expSel?.value || "";
@@ -5935,7 +5942,14 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
     try {
         let url = `/api/straddle/option_chain?underlying=${und}&strike_range=${strikeRange}`;
         if (exp) url += `&expiry_ms=${exp}`;
-        const resp = await fetch(url);
+
+        // Abort previous in-flight tick request if any to avoid out-of-order responses
+        if (window._optChainAbortController) {
+            try { window._optChainAbortController.abort(); } catch(_) {}
+        }
+        window._optChainAbortController = new AbortController();
+
+        const resp = await fetch(url, { signal: window._optChainAbortController.signal });
         const data = await resp.json();
         if (data.success && data.data) {
             const chain = data.data;
@@ -6010,9 +6024,95 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 });
             }
 
+            const currentKey = `${und}_${exp}_${strikeRange}_${isBasketMode}_${!!window._optChainTradeableOnly}`;
+            const spotP = chain.spot_price || 0;
+
+            // IN-PLACE DOM PATCHING: If the structure hasn't changed, update text and flash ticks without destroying DOM
+            if (isBackgroundUpdate && window._lastRenderedOptionChainKey === currentKey && tbody.dataset.renderedKey === currentKey) {
+                const dividerRow = document.getElementById("optSpotDividerRow");
+                const dividerBadge = document.getElementById("optSpotDividerBadge");
+                if (dividerBadge && spotP > 0) {
+                    dividerBadge.textContent = spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                }
+
+                let firstRowAfterSpot = null;
+
+                renderRows.forEach(r => {
+                    const strike = r.strike_price;
+                    const rowEl = document.getElementById(`optRow_${strike}`);
+                    if (!rowEl) return;
+
+                    if (!firstRowAfterSpot && spotP > 0 && strike >= spotP) {
+                        firstRowAfterSpot = rowEl;
+                    }
+
+                    // Update CE LTP & Tick Flash
+                    const ceLtpCell = document.getElementById(`ceLtp_${strike}`);
+                    if (ceLtpCell) {
+                        const ceHasPrice = r.ce && Number(r.ce.ltp) > 0;
+                        const ceLtpNum = ceHasPrice ? Number(r.ce.ltp) : 0;
+                        const prevLtp = parseFloat(ceLtpCell.getAttribute("data-ltp") || "0");
+                        const ceLtpText = ceHasPrice ? `₹${ceLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
+
+                        if (Math.abs(ceLtpNum - prevLtp) > 0.001) {
+                            ceLtpCell.textContent = ceLtpText;
+                            ceLtpCell.setAttribute("data-ltp", ceLtpNum);
+                            if (prevLtp > 0) {
+                                const isUp = ceLtpNum > prevLtp;
+                                ceLtpCell.classList.remove("opt-tick-flash-up", "opt-tick-flash-down");
+                                ceLtpCell.classList.add(isUp ? "opt-tick-flash-up" : "opt-tick-flash-down");
+                                setTimeout(() => {
+                                    ceLtpCell.classList.remove("opt-tick-flash-up", "opt-tick-flash-down");
+                                }, 250);
+                            }
+                        }
+
+                        // Update ITM/OTM styling if spot crossed strike
+                        const isCeItm = strike < spotP;
+                        ceLtpCell.classList.toggle("opt-chain-itm-ce", isCeItm);
+                    }
+
+                    // Update PE LTP & Tick Flash
+                    const peLtpCell = document.getElementById(`peLtp_${strike}`);
+                    if (peLtpCell) {
+                        const peHasPrice = r.pe && Number(r.pe.ltp) > 0;
+                        const peLtpNum = peHasPrice ? Number(r.pe.ltp) : 0;
+                        const prevLtp = parseFloat(peLtpCell.getAttribute("data-ltp") || "0");
+                        const peLtpText = peHasPrice ? `₹${peLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
+
+                        if (Math.abs(peLtpNum - prevLtp) > 0.001) {
+                            peLtpCell.textContent = peLtpText;
+                            peLtpCell.setAttribute("data-ltp", peLtpNum);
+                            if (prevLtp > 0) {
+                                const isUp = peLtpNum > prevLtp;
+                                peLtpCell.classList.remove("opt-tick-flash-up", "opt-tick-flash-down");
+                                peLtpCell.classList.add(isUp ? "opt-tick-flash-up" : "opt-tick-flash-down");
+                                setTimeout(() => {
+                                    peLtpCell.classList.remove("opt-tick-flash-up", "opt-tick-flash-down");
+                                }, 250);
+                            }
+                        }
+
+                        // Update ITM/OTM styling if spot crossed strike
+                        const isPeItm = strike > spotP;
+                        peLtpCell.classList.toggle("opt-chain-itm-pe", isPeItm);
+                    }
+                });
+
+                // Move divider row smoothly if spot crossed strike boundary
+                if (dividerRow && firstRowAfterSpot && dividerRow.nextElementSibling !== firstRowAfterSpot) {
+                    tbody.insertBefore(dividerRow, firstRowAfterSpot);
+                } else if (dividerRow && !firstRowAfterSpot && tbody.lastElementChild !== dividerRow) {
+                    tbody.appendChild(dividerRow);
+                }
+
+                updateOptionChainBasketSummaryBar();
+                return;
+            }
+
+            // FULL RENDER (First load or when parameters/mode change)
             let rowsHtml = "";
             let spotDividerInserted = false;
-            const spotP = chain.spot_price || 0;
 
             renderRows.forEach(r => {
                 const isAtm = r.is_atm;
@@ -6023,10 +6123,10 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 // Center Spot Price Divider Line (Exact Match to User Screenshots 3 & 4)
                 if (!spotDividerInserted && spotP > 0 && strike >= spotP) {
                     rowsHtml += `
-                        <tr class="opt-spot-divider-row">
+                        <tr class="opt-spot-divider-row" id="optSpotDividerRow">
                             <td colspan="5">
                                 <div class="opt-spot-divider-line">
-                                    <span class="opt-spot-divider-badge">${spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    <span class="opt-spot-divider-badge" id="optSpotDividerBadge">${spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                 </div>
                             </td>
                         </tr>
@@ -6122,10 +6222,10 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 `;
 
                 rowsHtml += `
-                    <tr class="${rowClass}">
+                    <tr id="optRow_${strike}" class="${rowClass}">
                         ${ceActionCell}
                         <!-- CE LTP -->
-                        <td class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#2dd4bf; font-weight:800; font-size:12px; padding:5px 8px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})" title="Click to trade ${ceSym}">
+                        <td id="ceLtp_${strike}" data-ltp="${ceLtpNum}" class="${ceCellClass}" style="text-align:right; font-family:var(--font-mono); color:#2dd4bf; font-weight:800; font-size:12px; padding:5px 8px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})" title="Click to trade ${ceSym}">
                             ${ceLtpText}
                         </td>
 
@@ -6135,7 +6235,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         </td>
 
                         <!-- PE LTP -->
-                        <td class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#fb7185; font-weight:800; font-size:12px; padding:5px 8px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})" title="Click to trade ${peSym}">
+                        <td id="peLtp_${strike}" data-ltp="${peLtpNum}" class="${peCellClass}" style="text-align:left; font-family:var(--font-mono); color:#fb7185; font-weight:800; font-size:12px; padding:5px 8px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})" title="Click to trade ${peSym}">
                             ${peLtpText}
                         </td>
                         ${peActionCell}
@@ -6146,10 +6246,10 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
             // If divider hasn't been drawn (spot price higher than all strikes), append at bottom
             if (!spotDividerInserted && spotP > 0) {
                 rowsHtml += `
-                    <tr class="opt-spot-divider-row">
+                    <tr class="opt-spot-divider-row" id="optSpotDividerRow">
                         <td colspan="5">
                             <div class="opt-spot-divider-line">
-                                <span class="opt-spot-divider-badge">${spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                <span class="opt-spot-divider-badge" id="optSpotDividerBadge">${spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                             </div>
                         </td>
                     </tr>
@@ -6157,9 +6257,12 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
             }
 
             tbody.innerHTML = rowsHtml;
+            tbody.dataset.renderedKey = currentKey;
+            window._lastRenderedOptionChainKey = currentKey;
             updateOptionChainBasketSummaryBar();
         }
     } catch (e) {
+        if (e.name === 'AbortError') return;
         if (!isBackgroundUpdate) {
             tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#f43f5e; padding:30px;">Error loading Option Matrix: ${e.message}</td></tr>`;
         }

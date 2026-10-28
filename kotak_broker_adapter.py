@@ -266,6 +266,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
     def __init__(self):
         super().__init__(name="Kotak Neo")
         self._lock = threading.Lock()
+        self._quotes_cache: Dict[str, Dict[str, Any]] = {}
+        self._quotes_cache_ts: Dict[str, float] = {}
         _init_kotak_symbol_maps()
 
     def _get_client(self):
@@ -835,60 +837,108 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
         try:
             import straddle_engine
-            req_tokens = []
+            now_ts = time.time()
             quotes_data = {}
+            req_tokens = []
+            tokens_to_fetch = []
+
             for tok in instrument_tokens:
                 raw_tok = str(tok).strip()
                 if not raw_tok:
                     continue
+
+                # Check recent memory cache (180ms TTL for 300ms ultra-rapid ticking)
+                if raw_tok in self._quotes_cache and (now_ts - self._quotes_cache_ts.get(raw_tok, 0)) < 0.18:
+                    quotes_data[raw_tok] = self._quotes_cache[raw_tok]
+                    continue
+
                 clean_sym = raw_tok.split("|")[-1].strip().upper()
                 if clean_sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"):
-                    try:
-                        spot_p = straddle_engine._fetch_live_index_spot_network(clean_sym)
-                        if spot_p > 0:
-                            quotes_data[clean_sym] = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
-                    except Exception:
-                        pass
+                    spot_p = straddle_engine._SPOT_CACHE.get(clean_sym, 0.0)
+                    if spot_p <= 0:
+                        try:
+                            spot_p = straddle_engine._fetch_live_index_spot_network(clean_sym)
+                        except Exception:
+                            pass
+                    if spot_p > 0:
+                        entry = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
+                        quotes_data[clean_sym] = entry
+                        quotes_data[raw_tok] = entry
+                        quotes_data[raw_tok.replace("|", ":")] = entry
+                        self._quotes_cache[raw_tok] = entry
+                        self._quotes_cache[clean_sym] = entry
+                        self._quotes_cache_ts[raw_tok] = now_ts
+                        self._quotes_cache_ts[clean_sym] = now_ts
                 elif clean_sym in ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"):
-                    try:
-                        spot_p = straddle_engine._get_commodity_live_price(clean_sym)
-                        if spot_p > 0:
-                            quotes_data[clean_sym] = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
-                    except Exception:
-                        pass
+                    spot_p = straddle_engine._SPOT_CACHE.get(clean_sym, 0.0)
+                    if spot_p <= 0:
+                        try:
+                            spot_p = straddle_engine._get_commodity_live_price(clean_sym)
+                        except Exception:
+                            pass
+                    if spot_p > 0:
+                        entry = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
+                        quotes_data[clean_sym] = entry
+                        quotes_data[raw_tok] = entry
+                        quotes_data[raw_tok.replace("|", ":")] = entry
+                        self._quotes_cache[raw_tok] = entry
+                        self._quotes_cache[clean_sym] = entry
+                        self._quotes_cache_ts[raw_tok] = now_ts
+                        self._quotes_cache_ts[clean_sym] = now_ts
                 else:
                     token_id = raw_tok.split("|")[-1].strip()
+                    if not token_id.isdigit():
+                        continue
                     seg = get_exchange_segment_for_symbol(raw_tok, raw_tok)
                     req_tokens.append({"instrument_token": token_id, "exchange_segment": seg})
-            
+                    tokens_to_fetch.append(raw_tok)
+
             if req_tokens:
-                res = client.quotes(instrument_tokens=req_tokens, quote_type="all")
-                raw_list = res.get("data") if isinstance(res, dict) else res
-                if isinstance(raw_list, list):
-                    for q in raw_list:
-                        if not isinstance(q, dict):
-                            continue
-                        tok = str(q.get("exchange_token") or q.get("instrument_token") or q.get("tok", ""))
-                        best_bid = float(q.get("bid", 0.0) or (q.get("depth", {}).get("buy", [{}])[0].get("price", 0.0) if isinstance(q.get("depth"), dict) and q.get("depth", {}).get("buy") else 0.0))
-                        best_ask = float(q.get("ask", 0.0) or (q.get("depth", {}).get("sell", [{}])[0].get("price", 0.0) if isinstance(q.get("depth"), dict) and q.get("depth", {}).get("sell") else 0.0))
-                        entry = {
-                            "ltp": float(q.get("ltp", 0.0) or 0.0),
-                            "bid": best_bid,
-                            "ask": best_ask,
-                            "oi": int(q.get("open_int", q.get("oi", 0)) or 0),
-                            "volume": int(q.get("last_volume", q.get("vol", 0)) or 0)
-                        }
-                        if tok:
-                            quotes_data[tok] = entry
-                            quotes_data[f"NSE_FO|{tok}"] = entry
-                            quotes_data[f"BSE_FO|{tok}"] = entry
-                            quotes_data[f"MCX_FO|{tok}"] = entry
-                        sym = q.get("display_symbol")
-                        if sym:
-                            quotes_data[sym] = entry
-                        tsym = q.get("trdSym") or q.get("trading_symbol") or q.get("symbol")
-                        if tsym:
-                            quotes_data[tsym] = entry
+                # Kotak Neo limits maximum 50 symbols per quotes call. We chunk into batches of 40.
+                for i in range(0, len(req_tokens), 40):
+                    batch = req_tokens[i:i + 40]
+                    try:
+                        res = client.quotes(instrument_tokens=batch, quote_type="all")
+                        raw_list = res.get("data") if isinstance(res, dict) else res
+                        if isinstance(raw_list, list):
+                            for q in raw_list:
+                                if not isinstance(q, dict):
+                                    continue
+                                tok = str(q.get("exchange_token") or q.get("instrument_token") or q.get("tok", ""))
+                                best_bid = float(q.get("bid", 0.0) or (q.get("depth", {}).get("buy", [{}])[0].get("price", 0.0) if isinstance(q.get("depth"), dict) and q.get("depth", {}).get("buy") else 0.0))
+                                best_ask = float(q.get("ask", 0.0) or (q.get("depth", {}).get("sell", [{}])[0].get("price", 0.0) if isinstance(q.get("depth"), dict) and q.get("depth", {}).get("sell") else 0.0))
+                                entry = {
+                                    "ltp": float(q.get("ltp", 0.0) or 0.0),
+                                    "bid": best_bid,
+                                    "ask": best_ask,
+                                    "oi": int(q.get("open_int", q.get("oi", 0)) or 0),
+                                    "volume": int(q.get("last_volume", q.get("vol", 0)) or 0)
+                                }
+                                if tok:
+                                    quotes_data[tok] = entry
+                                    quotes_data[f"NSE_FO|{tok}"] = entry
+                                    quotes_data[f"BSE_FO|{tok}"] = entry
+                                    quotes_data[f"MCX_FO|{tok}"] = entry
+                                    self._quotes_cache[tok] = entry
+                                    self._quotes_cache[f"NSE_FO|{tok}"] = entry
+                                    self._quotes_cache[f"BSE_FO|{tok}"] = entry
+                                    self._quotes_cache[f"MCX_FO|{tok}"] = entry
+                                    self._quotes_cache_ts[tok] = now_ts
+                                    self._quotes_cache_ts[f"NSE_FO|{tok}"] = now_ts
+                                    self._quotes_cache_ts[f"BSE_FO|{tok}"] = now_ts
+                                    self._quotes_cache_ts[f"MCX_FO|{tok}"] = now_ts
+                                sym = q.get("display_symbol")
+                                if sym:
+                                    quotes_data[sym] = entry
+                                    self._quotes_cache[sym] = entry
+                                    self._quotes_cache_ts[sym] = now_ts
+                                tsym = q.get("trdSym") or q.get("trading_symbol") or q.get("symbol")
+                                if tsym:
+                                    quotes_data[tsym] = entry
+                                    self._quotes_cache[tsym] = entry
+                                    self._quotes_cache_ts[tsym] = now_ts
+                    except Exception as ex_b:
+                        logger.debug(f"[Kotak Neo] Batch quotes note: {ex_b}")
             return quotes_data
         except Exception as e:
             logger.warning(f"[Kotak Neo] Exception fetching quotes: {e}")
