@@ -9563,8 +9563,9 @@ async function loadAndRenderCandleChart(und, tf) {
             window._activeExpiryDate = data.expiry_date || "";
             window._activeSegment = data.segment || (und === "NIFTY" ? "NSE_FO" : "MCX_FO");
 
-            // Reset viewport view start to auto-align to the latest candles
+            // Reset viewport view start and manual price scale to auto-align to the latest candles
             window._chartViewStart = null;
+            window._chartPriceRange = null;
 
             if (countEl) countEl.textContent = `${data.candles.length} candles (${tf})`;
             
@@ -9870,12 +9871,18 @@ async function fetchAIStrategist(force = false) {
 }
 window.fetchAIStrategist = fetchAIStrategist;
 
-// Global Viewport and Pan/Zoom State
+// Safe numerical clamp helper
+function clamp(val, min, max) {
+    return Math.max(min, Math.min(max, val));
+}
+
+// Global Viewport, Pan/Zoom & Price Scale State (Copied & adapted from SwingScanner)
 window._chartZoomCount = 80; // default visible candles in viewport
 window._chartViewStart = null; // null = right-aligned to newest candles
+window._chartPriceRange = null; // null = automatic fit; object { min, max } when user drags/scales price
+window._chartDragState = null;
 window._chartIsDragging = false;
-window._chartDragStartX = 0;
-window._chartDragStartViewStart = 0;
+window._chartData = null;
 
 function chartZoomIn() {
     const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
@@ -9888,8 +9895,14 @@ function chartZoomIn() {
         const anchor = currentStart + (currentZoom * 0.85);
         window._chartZoomCount = newZoom;
         window._chartViewStart = Math.max(0, Math.min(totalBars - 5, anchor - (newZoom * 0.85)));
-        renderCandlestickCanvas();
     }
+    // Proportionally zoom manual price scale if active
+    if (window._chartPriceRange && Number.isFinite(window._chartPriceRange.min) && Number.isFinite(window._chartPriceRange.max)) {
+        const mid = (window._chartPriceRange.min + window._chartPriceRange.max) / 2;
+        const halfSpan = (window._chartPriceRange.max - window._chartPriceRange.min) * 0.425;
+        window._chartPriceRange = { min: mid - halfSpan, max: mid + halfSpan };
+    }
+    renderCandlestickCanvas();
 }
 window.chartZoomIn = chartZoomIn;
 
@@ -9905,19 +9918,33 @@ function chartZoomOut() {
         const anchor = currentStart + (currentZoom * 0.85);
         window._chartZoomCount = newZoom;
         window._chartViewStart = Math.max(0, Math.min(totalBars - 5, anchor - (newZoom * 0.85)));
-        renderCandlestickCanvas();
     }
+    // Proportionally zoom manual price scale if active
+    if (window._chartPriceRange && Number.isFinite(window._chartPriceRange.min) && Number.isFinite(window._chartPriceRange.max)) {
+        const mid = (window._chartPriceRange.min + window._chartPriceRange.max) / 2;
+        const halfSpan = (window._chartPriceRange.max - window._chartPriceRange.min) * 0.575;
+        window._chartPriceRange = { min: mid - halfSpan, max: mid + halfSpan };
+    }
+    renderCandlestickCanvas();
 }
 window.chartZoomOut = chartZoomOut;
 
 function chartResetZoom() {
     const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
                       ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
-    window._chartZoomCount = Math.min(80, Math.max(20, totalBars));
+    window._chartZoomCount = Math.min(80, Math.max(20, totalBars || 80));
     window._chartViewStart = null;
+    window._chartPriceRange = null; // Clears manual price scale zoom & pan
     renderCandlestickCanvas();
 }
 window.chartResetZoom = chartResetZoom;
+window.resetChartView = chartResetZoom; // SwingScanner alias
+
+function resetPriceScaleOnly() {
+    window._chartPriceRange = null;
+    renderCandlestickCanvas();
+}
+window.resetPriceScaleOnly = resetPriceScaleOnly;
 
 function renderCandlestickCanvas() {
     const canvas = document.getElementById("liveCandlestickCanvas");
@@ -10045,7 +10072,49 @@ function renderCandlestickCanvas() {
     const pricePadding = (maxPrice - minPrice) * 0.08;
     minPrice -= pricePadding;
     maxPrice += pricePadding;
-    const priceRange = maxPrice - minPrice;
+
+    // Apply manual price range if user dragged or zoomed price scale (SwingScanner pattern)
+    if (window._chartPriceRange && Number.isFinite(window._chartPriceRange.min) && Number.isFinite(window._chartPriceRange.max)) {
+        minPrice = window._chartPriceRange.min;
+        maxPrice = window._chartPriceRange.max;
+    }
+
+    if (minPrice >= maxPrice) {
+        const mid = (minPrice + maxPrice) / 2 || 100;
+        minPrice = mid * 0.95;
+        maxPrice = mid * 1.05;
+    }
+
+    const priceRange = Math.max(maxPrice - minPrice, 0.001);
+
+    // Save chart geometry & coordinate mapping for interactive events
+    window._chartData = {
+        priceMin: minPrice,
+        priceMax: maxPrice,
+        priceTop: margin.top,
+        priceBottom: margin.top + priceH,
+        padLeft: margin.left,
+        padRight: margin.right,
+        padBottom: margin.bottom,
+        chartWidth: chartW,
+        priceHeight: priceH,
+        visibleStart: viewStart,
+        visibleCount: zoomCount,
+        width: w,
+        height: h
+    };
+
+    // Update Auto button badge if present
+    const autoBtn = document.getElementById("chartAutoScaleBtn");
+    if (autoBtn) {
+        if (window._chartPriceRange) {
+            autoBtn.classList.add("active");
+            autoBtn.title = "Manual price scale active — Click to Reset (Auto)";
+        } else {
+            autoBtn.classList.remove("active");
+            autoBtn.title = "Price scale is in Auto mode";
+        }
+    }
 
     // Horizontal Price Grid lines
     ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
@@ -10496,83 +10565,191 @@ function setupChartCanvasEvents() {
     if (!canvas || canvas._eventsSetup) return;
     canvas._eventsSetup = true;
 
-    // 1. Mouse Wheel Zoom In / Out anchored at cursor
+    // 1. Mouse Wheel Zoom (Price Scale vs Chart Body)
     canvas.addEventListener("wheel", (e) => {
         e.preventDefault();
         const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
                           ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
         if (totalBars <= 0) return;
 
+        const cData = window._chartData;
+        if (!cData) return;
+
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
-        const margin = { left: 16, right: 88 };
-        const chartW = rect.width - margin.left - margin.right;
-        if (chartW <= 0) return;
+        const mouseY = e.clientY - rect.top;
+        const isPriceScale = mouseX >= rect.width - cData.padRight && mouseY >= cData.priceTop && mouseY <= cData.priceBottom;
+        const zoomIn = e.deltaY < 0;
 
-        // Normalized mouse position along chart width
-        const clampedMouseX = Math.max(margin.left, Math.min(rect.width - margin.right, mouseX));
-        const normX = (clampedMouseX - margin.left) / chartW;
+        if (isPriceScale) {
+            // Zoom vertical price scale ONLY
+            const currentMin = cData.priceMin;
+            const currentMax = cData.priceMax;
+            const priceSpan = Math.max(currentMax - currentMin, 0.001);
+            const clampedY = clamp(mouseY, cData.priceTop, cData.priceBottom);
+            const anchorPrice = currentMax - ((clampedY - cData.priceTop) / cData.priceHeight) * priceSpan;
+            const priceZoomFactor = zoomIn ? 0.85 : 1.15;
+            const nextSpan = Math.max(priceSpan * priceZoomFactor, 0.001);
+            window._chartPriceRange = {
+                min: anchorPrice - ((anchorPrice - currentMin) / priceSpan) * nextSpan,
+                max: anchorPrice + ((currentMax - anchorPrice) / priceSpan) * nextSpan
+            };
+            renderCandlestickCanvas();
+            return;
+        }
+
+        // Horizontal zoom on chart body
+        const chartW = cData.chartWidth;
+        if (chartW <= 0) return;
+        const clampedMouseX = Math.max(cData.padLeft, Math.min(rect.width - cData.padRight, mouseX));
+        const normX = (clampedMouseX - cData.padLeft) / chartW;
 
         const currentZoom = window._chartZoomCount || 80;
         const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
-        
-        // Wheel up = Zoom In (< 0), Wheel down = Zoom Out (> 0)
-        const factor = e.deltaY < 0 ? 0.82 : 1.22;
+
+        const factor = zoomIn ? 0.82 : 1.22;
         const maxZoom = Math.min(Math.max(30, totalBars + 8), 450);
         const newZoom = Math.max(15, Math.min(maxZoom, Math.round(currentZoom * factor)));
 
         if (newZoom !== currentZoom) {
             const barUnderCursor = currentStart + (normX * currentZoom);
             let newStart = barUnderCursor - (normX * newZoom);
-            newStart = Math.max(0, Math.min(totalBars - 5, newStart));
-            
+            const minView = -Math.max(140, Math.round(newZoom * 2.2));
+            const maxView = totalBars + Math.round(newZoom * 1.5);
             window._chartZoomCount = newZoom;
-            window._chartViewStart = newStart;
-            renderCandlestickCanvas();
+            window._chartViewStart = clamp(newStart, minView, maxView);
         }
+
+        // If manual price scale is active, also scale price range proportionally
+        if (window._chartPriceRange) {
+            const currentMin = window._chartPriceRange.min;
+            const currentMax = window._chartPriceRange.max;
+            const priceSpan = Math.max(currentMax - currentMin, 0.001);
+            const clampedY = clamp(mouseY, cData.priceTop, cData.priceBottom);
+            const anchorPrice = currentMax - ((clampedY - cData.priceTop) / cData.priceHeight) * priceSpan;
+            const priceZoomFactor = zoomIn ? 0.85 : 1.15;
+            const nextSpan = Math.max(priceSpan * priceZoomFactor, 0.001);
+            window._chartPriceRange = {
+                min: anchorPrice - ((anchorPrice - currentMin) / priceSpan) * nextSpan,
+                max: anchorPrice + ((currentMax - anchorPrice) / priceSpan) * nextSpan
+            };
+        }
+
+        renderCandlestickCanvas();
     }, { passive: false });
 
-    // 2. Drag to Pan across History
+    // 2. Pointer Down:
+    // - On price scale: start price scale vertical zoom drag (mode = "price")
+    // - On chart body: start 2D pan (horizontal history + vertical price range) (mode = "pan")
     canvas.addEventListener("pointerdown", (e) => {
         if (e.button !== 0) return; // Only main button
         const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
                           ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
         if (totalBars <= 0) return;
 
+        const cData = window._chartData;
+        if (!cData) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const pointerX = e.clientX - rect.left;
+        const pointerY = e.clientY - rect.top;
+
+        const isPriceScale = pointerX >= rect.width - cData.padRight && pointerY >= cData.priceTop && pointerY <= cData.priceBottom;
+
+        if (isPriceScale) {
+            const relativeY = clamp((pointerY - cData.priceTop) / cData.priceHeight, 0, 1);
+            const priceSpan = Math.max(cData.priceMax - cData.priceMin, 0.001);
+            window._chartDragState = {
+                mode: "price",
+                startY: e.clientY,
+                initialMin: cData.priceMin,
+                initialMax: cData.priceMax,
+                anchorPrice: cData.priceMax - relativeY * priceSpan
+            };
+            window._chartIsDragging = true;
+            try { canvas.setPointerCapture(e.pointerId); } catch(err){}
+            canvas.classList.add("is-price-scaling");
+            canvas.style.cursor = "ns-resize";
+            e.preventDefault();
+            return;
+        }
+
+        // Main chart pan (horizontal & vertical drag)
         const currentZoom = window._chartZoomCount || 80;
         const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
 
+        window._chartDragState = {
+            mode: "pan",
+            startX: e.clientX,
+            startY: e.clientY,
+            initialStart: currentStart,
+            initialPriceMin: cData.priceMin,
+            initialPriceMax: cData.priceMax,
+            priceHeight: cData.priceHeight,
+            visibleCount: currentZoom,
+            chartWidth: cData.chartWidth
+        };
         window._chartIsDragging = true;
-        window._chartDragStartX = e.clientX;
-        window._chartDragStartViewStart = currentStart;
         try { canvas.setPointerCapture(e.pointerId); } catch(err){}
         canvas.classList.add("is-dragging");
+        canvas.style.cursor = "grabbing";
+        e.preventDefault();
     });
 
+    // 3. Pointer Move:
     canvas.addEventListener("pointermove", (e) => {
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
+        const cData = window._chartData;
 
-        if (window._chartIsDragging) {
-            const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                              ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
-            const margin = { left: 16, right: 88 };
-            const chartW = rect.width - margin.left - margin.right;
-            const currentZoom = window._chartZoomCount || 80;
-            const slotW = chartW / currentZoom;
+        if (window._chartDragState) {
+            if (window._chartDragState.mode === "price") {
+                const zoomFactor = clamp(Math.exp((e.clientY - window._chartDragState.startY) / 180), 0.08, 12);
+                window._chartPriceRange = {
+                    min: window._chartDragState.anchorPrice - (window._chartDragState.anchorPrice - window._chartDragState.initialMin) * zoomFactor,
+                    max: window._chartDragState.anchorPrice + (window._chartDragState.initialMax - window._chartDragState.anchorPrice) * zoomFactor
+                };
+                window._chartCrosshairPos = null;
+                renderCandlestickCanvas();
+                return;
+            }
 
-            const deltaPx = e.clientX - window._chartDragStartX;
-            const deltaBars = deltaPx / slotW; // Drag right = see past (reduce start)
+            if (window._chartDragState.mode === "pan") {
+                const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                                  ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+                const minViewStart = -Math.max(140, Math.round(window._chartDragState.visibleCount * 2.2));
+                const maxViewStart = totalBars + Math.round(window._chartDragState.visibleCount * 1.5);
+                const deltaX = e.clientX - window._chartDragState.startX;
+                const candleShift = (deltaX / window._chartDragState.chartWidth) * window._chartDragState.visibleCount;
 
-            let newStart = window._chartDragStartViewStart - deltaBars;
-            const maxStart = Math.max(0, totalBars - Math.max(5, Math.floor(currentZoom * 0.15)));
-            newStart = Math.max(0, Math.min(maxStart, newStart));
+                window._chartViewStart = clamp(window._chartDragState.initialStart - candleShift, minViewStart, maxViewStart);
 
-            window._chartViewStart = newStart;
-            window._chartCrosshairPos = null;
-            renderCandlestickCanvas();
-            return;
+                // Vertical drag (pan price scale vertically)
+                const deltaY = e.clientY - window._chartDragState.startY;
+                const verticalShift = (deltaY / window._chartDragState.priceHeight) * (window._chartDragState.initialPriceMax - window._chartDragState.initialPriceMin);
+
+                if (Math.abs(deltaY) > 2) {
+                    window._chartPriceRange = {
+                        min: window._chartDragState.initialPriceMin + verticalShift,
+                        max: window._chartDragState.initialPriceMax + verticalShift
+                    };
+                }
+
+                window._chartCrosshairPos = null;
+                renderCandlestickCanvas();
+                return;
+            }
+        }
+
+        // Dynamic Cursor feedback on hover
+        if (cData) {
+            const isPriceScale = mouseX >= rect.width - cData.padRight && mouseY >= cData.priceTop && mouseY <= cData.priceBottom;
+            if (isPriceScale) {
+                canvas.style.cursor = "ns-resize";
+            } else {
+                canvas.style.cursor = "crosshair";
+            }
         }
 
         // Crosshair position
@@ -10581,22 +10758,43 @@ function setupChartCanvasEvents() {
     });
 
     const endDrag = (e) => {
-        if (window._chartIsDragging) {
+        if (window._chartDragState) {
+            const wasPrice = window._chartDragState.mode === "price";
+            window._chartDragState = null;
             window._chartIsDragging = false;
             canvas.classList.remove("is-dragging");
-            try { canvas.releasePointerCapture(e.pointerId); } catch(err){}
+            canvas.classList.remove("is-price-scaling");
+            try { if (e && e.pointerId !== undefined) canvas.releasePointerCapture(e.pointerId); } catch(err){}
+            canvas.style.cursor = wasPrice ? "ns-resize" : "crosshair";
             renderCandlestickCanvas();
         }
     };
     canvas.addEventListener("pointerup", endDrag);
     canvas.addEventListener("pointercancel", endDrag);
 
-    // 3. Double-Click to Reset Zoom
-    canvas.addEventListener("dblclick", () => {
+    // 4. Double-Click to Reset:
+    // - On price scale: reset price scale auto-fit
+    // - On chart canvas: reset entire chart view
+    canvas.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        const cData = window._chartData;
+        const rect = canvas.getBoundingClientRect();
+        const pointerX = e.clientX - rect.left;
+        const padRight = (cData && cData.padRight) ? cData.padRight : 88;
+        if (pointerX >= rect.width - padRight) {
+            resetPriceScaleOnly();
+        } else {
+            chartResetZoom();
+        }
+    });
+
+    // 5. Right-Click Context Menu to Reset Chart View
+    canvas.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
         chartResetZoom();
     });
 
-    // 4. Mouse Leave
+    // 6. Mouse Leave
     canvas.addEventListener("mouseleave", () => {
         window._chartCrosshairPos = null;
         const cursorPriceLegendEl = document.getElementById("lblCursorPrice");
@@ -10604,7 +10802,125 @@ function setupChartCanvasEvents() {
         renderCandlestickCanvas();
     });
 
-    // 5. Window Resize
+    // 7. Touch Events for Full Mobile / Tablet Support (from swingscanner)
+    let _touchStartPos = null;
+    let _touchPanState = null;
+    let _touchMoved = false;
+    let _initialPinchDist = 0;
+    let _initialPinchZoom = 80;
+    let _initialPinchStart = 0;
+    let _pinchCenterRatio = 0.5;
+
+    canvas.addEventListener("touchstart", (e) => {
+        const cData = window._chartData;
+        if (!cData) return;
+        const rect = canvas.getBoundingClientRect();
+
+        if (e.touches.length === 2) {
+            const t1 = e.touches[0];
+            const t2 = e.touches[1];
+            _initialPinchDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+            _initialPinchZoom = window._chartZoomCount || 80;
+            _initialPinchStart = window._chartViewStart !== null ? window._chartViewStart : 0;
+            const midX = ((t1.clientX + t2.clientX) / 2) - rect.left;
+            _pinchCenterRatio = clamp((midX - cData.padLeft) / cData.chartWidth, 0, 1);
+        } else if (e.touches.length === 1) {
+            const t = e.touches[0];
+            const pX = t.clientX - rect.left;
+            const pY = t.clientY - rect.top;
+            const isScale = pX >= rect.width - cData.padRight && pY >= cData.priceTop && pY <= cData.priceBottom;
+            _touchStartPos = { x: t.clientX, y: t.clientY, time: Date.now() };
+            _touchMoved = false;
+
+            const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                              ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+            const currentZoom = window._chartZoomCount || 80;
+            const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
+
+            _touchPanState = {
+                startX: t.clientX,
+                startY: t.clientY,
+                initialStart: currentStart,
+                initialMin: cData.priceMin,
+                initialMax: cData.priceMax,
+                anchorPrice: cData.priceMax - clamp((pY - cData.priceTop) / cData.priceHeight, 0, 1) * (cData.priceMax - cData.priceMin),
+                isPriceScale: isScale,
+                visibleCount: currentZoom,
+                chartWidth: cData.chartWidth,
+                priceHeight: cData.priceHeight
+            };
+        }
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", (e) => {
+        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                          ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+
+        if (e.touches.length === 2 && _initialPinchDist > 5) {
+            e.preventDefault();
+            const t1 = e.touches[0];
+            const t2 = e.touches[1];
+            const currentDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+
+            if (currentDist > 8) {
+                const scale = currentDist / _initialPinchDist;
+                const maxZoom = Math.min(Math.max(30, totalBars + 8), 450);
+                const nextZoom = clamp(Math.round(_initialPinchZoom / scale), 15, maxZoom);
+                const centerCandleIdx = _initialPinchStart + _pinchCenterRatio * _initialPinchZoom;
+                const nextStart = Math.round(centerCandleIdx - _pinchCenterRatio * nextZoom);
+                const minView = -Math.max(140, Math.round(nextZoom * 2.2));
+                const maxView = totalBars + Math.round(nextZoom * 1.5);
+
+                window._chartZoomCount = nextZoom;
+                window._chartViewStart = clamp(nextStart, minView, maxView);
+                renderCandlestickCanvas();
+            }
+        } else if (e.touches.length === 1 && _touchPanState) {
+            const t = e.touches[0];
+            const deltaX = t.clientX - _touchStartPos.x;
+            const deltaY = t.clientY - _touchStartPos.y;
+
+            if (Math.hypot(deltaX, deltaY) > 6) {
+                _touchMoved = true;
+                e.preventDefault();
+
+                if (_touchPanState.isPriceScale) {
+                    const zoomFactor = clamp(Math.exp(deltaY / 180), 0.08, 12);
+                    window._chartPriceRange = {
+                        min: _touchPanState.anchorPrice - (_touchPanState.anchorPrice - _touchPanState.initialMin) * zoomFactor,
+                        max: _touchPanState.anchorPrice + (_touchPanState.initialMax - _touchPanState.anchorPrice) * zoomFactor
+                    };
+                } else {
+                    const candleShift = (deltaX / _touchPanState.chartWidth) * _touchPanState.visibleCount;
+                    const minView = -Math.max(140, Math.round(_touchPanState.visibleCount * 2.2));
+                    const maxView = totalBars + Math.round(_touchPanState.visibleCount * 1.5);
+                    window._chartViewStart = clamp(_touchPanState.initialStart - candleShift, minView, maxView);
+
+                    if (Math.abs(deltaY) > 2) {
+                        const verticalShift = (deltaY / _touchPanState.priceHeight) * (_touchPanState.initialPriceMax - _touchPanState.initialPriceMin);
+                        window._chartPriceRange = {
+                            min: _touchPanState.initialMin + verticalShift,
+                            max: _touchPanState.initialMax + verticalShift
+                        };
+                    }
+                }
+                renderCandlestickCanvas();
+            }
+        }
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", (e) => {
+        if (e.touches.length === 0) {
+            _touchPanState = null;
+            _initialPinchDist = 0;
+        }
+    });
+    canvas.addEventListener("touchcancel", (e) => {
+        _touchPanState = null;
+        _initialPinchDist = 0;
+    });
+
+    // 8. Window Resize
     window.addEventListener("resize", () => {
         const modal = document.getElementById("modalLiveChart");
         if (modal && modal.style.display === "flex") {

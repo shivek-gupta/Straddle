@@ -2633,6 +2633,16 @@
                         <span>Time: <b id="lblCandleTime" style="color:#94a3b8;">--</b></span>
                     </div>
                     <canvas id="liveCandlestickCanvas" style="width:100%; height:500px; display:block; cursor:crosshair;"></canvas>
+
+                    <!-- Floating Zoom & Reset Chart Controls (copied from swingscanner) -->
+                    <div class="chart-zoom-floating-controls" id="chartZoomFloatingControls">
+                        <button type="button" class="chart-zoom-btn" onclick="chartZoomIn()" title="Zoom In (+)">+</button>
+                        <button type="button" class="chart-zoom-btn" onclick="chartZoomOut()" title="Zoom Out (−)">−</button>
+                        <button type="button" class="chart-zoom-btn" onclick="chartResetZoom()" title="Reset Chart View (Double-click or Right-click canvas)">↺</button>
+                    </div>
+
+                    <!-- Auto Price Scale Indicator & Reset Button (TradingView Style) -->
+                    <button type="button" id="chartAutoScaleBtn" class="chart-auto-scale-btn" onclick="resetPriceScaleOnly()" title="Reset Price Scale to Auto (Double-click price scale)">Auto</button>
                 </div>
             </div>
 
@@ -2645,9 +2655,10 @@
                     <span>•</span>
                     <span id="chartExchangeSegInfo">MCX_FO</span>
                     <span>•</span>
-                    <span style="color:#94a3b8; display:inline-flex; align-items:center; gap:5px;"><span style="font-size:13px;">✋</span> <b>Drag</b> to pan history • <b>Scroll wheel</b> or <b>🔍+ / 🔍−</b> to zoom • <b>Double-click</b> to reset</span>
+                    <span style="color:#94a3b8; display:inline-flex; align-items:center; gap:5px;"><span style="font-size:13px;">✋</span> <b>Drag chart</b> horizontally &amp; vertically • <b>Drag price scale</b> up/down to zoom vertically • <b>Double-click / Right-click</b> or <b>↺ Reset</b> to restore</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:10px;">
+                    <button type="button" class="straddle-btn btn-outline" onclick="chartResetZoom()" style="padding:4px 12px; font-size:11.5px; color:#38bdf8; border-color:#38bdf8;" title="Reset Chart View to Default">↺ Reset Chart</button>
                     <button type="button" class="straddle-btn btn-outline" onclick="openStraddleOptionChainModal(window._activeGlobalUnderlying)" style="padding:4px 12px; font-size:11.5px; color:#38bdf8; border-color:#38bdf8;">⛓️ Open Option Chain</button>
                     <button type="button" class="straddle-btn btn-primary" onclick="closeLiveChartModal(); switchStraddleSubView('algos');" style="padding:4px 14px; font-size:11.5px; font-weight:800;">📊 Build Straddle / Algo</button>
                 </div>
