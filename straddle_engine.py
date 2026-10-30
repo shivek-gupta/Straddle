@@ -7009,6 +7009,8 @@ class StraddleManager:
             if current_price < last["low"]:
                 last["low"] = round(current_price, 2)
 
+        derivatives_intel = self._extract_derivatives_intelligence(clean_und)
+
         return {
             "status": "success",
             "underlying": clean_und,
@@ -7020,7 +7022,120 @@ class StraddleManager:
             "current_price": current_price,
             "candle_count": len(candles),
             "candles": candles,
+            "derivatives_intelligence": derivatives_intel,
         }
+
+    def _extract_derivatives_intelligence(self, underlying: str, model_projected_range: float = 0.0) -> Dict[str, Any]:
+        """
+        Extracts institutional derivatives intelligence for live chart overlays:
+        - Max Pain Strike
+        - Call OI Wall (Major Resistance)
+        - Put OI Wall (Major Support)
+        - PCR & Market Sentiment
+        - ATM Straddle Premium & Implied Volatility Move
+        - Expected Move vs Straddle Implied Move Mispricing Ratio
+        """
+        clean_und = str(underlying or "NIFTY").upper().replace(" ", "")
+        try:
+            snap = self.get_option_chain_snapshot(underlying=clean_und, strike_range=12)
+            spot_price = float(snap.get("spot_price") or 0.0)
+            if spot_price <= 0:
+                spot_price = self._get_underlying_spot_price(clean_und)
+            atm_strike = float(snap.get("atm_strike") or 0.0)
+            if atm_strike <= 0 and spot_price > 0:
+                step = STRIKE_STEPS.get(clean_und, 50)
+                atm_strike = round(spot_price / step) * step
+
+            max_pain = float(snap.get("max_pain_strike") or atm_strike)
+            call_oi_wall = float(snap.get("max_ce_oi_strike") or atm_strike)
+            put_oi_wall = float(snap.get("max_pe_oi_strike") or atm_strike)
+            pcr = float(snap.get("pcr") or 1.0)
+            sentiment = str(snap.get("sentiment") or "Neutral / Balanced")
+            sentiment_color = str(snap.get("sentiment_color") or "#38bdf8")
+
+            # Extract ATM Straddle LTP from rows
+            atm_ce_ltp = 0.0
+            atm_pe_ltp = 0.0
+            rows = snap.get("rows", [])
+            for r in rows:
+                if r.get("is_atm") or abs(float(r.get("strike_price", 0.0)) - atm_strike) < 0.1:
+                    if r.get("ce"):
+                        atm_ce_ltp = float(r["ce"].get("ltp") or 0.0)
+                    if r.get("pe"):
+                        atm_pe_ltp = float(r["pe"].get("ltp") or 0.0)
+                    break
+
+            atm_straddle_premium = round(atm_ce_ltp + atm_pe_ltp, 2)
+            if atm_straddle_premium <= 0:
+                atm_straddle_premium = round(spot_price * 0.0085, 2)
+
+            atm_implied_move_pct = round((atm_straddle_premium / max(1.0, spot_price)) * 100.0, 2)
+
+            # Straddle Mispricing Ratio: Implied Straddle Premium vs Model Projected Volatility Range
+            eff_proj_range = float(model_projected_range or 0.0)
+            if eff_proj_range <= 0:
+                eff_proj_range = round(spot_price * 0.0075, 2)
+
+            mispricing_ratio = round(atm_straddle_premium / max(1.0, eff_proj_range), 2)
+            if mispricing_ratio >= 1.15:
+                mispricing_status = "OVERPRICED"
+                mispricing_badge = "OVERPRICED (Theta Selling Edge)"
+                mispricing_color = "#10b981"
+                action_text = "Straddle premium is rich compared to projected volatility. High statistical edge for theta decay / Short Straddle / Iron Condor."
+            elif mispricing_ratio <= 0.85:
+                mispricing_status = "UNDERPRICED"
+                mispricing_badge = "UNDERPRICED (Gamma Risk)"
+                mispricing_color = "#ef4444"
+                action_text = "Straddle is underpriced relative to projected move. Elevated risk of breakout gamma expansion. Favorable for Long Straddle / Breakout Spreads."
+            else:
+                mispricing_status = "FAIR_VALUE"
+                mispricing_badge = "FAIR VALUE (Balanced)"
+                mispricing_color = "#38bdf8"
+                action_text = "Straddle market pricing is balanced with forecast range. Standard delta-neutral theta strategies applicable."
+
+            return {
+                "success": True,
+                "underlying": clean_und,
+                "spot_price": spot_price,
+                "atm_strike": atm_strike,
+                "max_pain": max_pain,
+                "call_oi_wall": call_oi_wall,
+                "put_oi_wall": put_oi_wall,
+                "call_wall_dist": round(call_oi_wall - spot_price, 2),
+                "put_wall_dist": round(spot_price - put_oi_wall, 2),
+                "pcr": pcr,
+                "sentiment": sentiment,
+                "sentiment_color": sentiment_color,
+                "atm_straddle_premium": atm_straddle_premium,
+                "atm_implied_move_pct": atm_implied_move_pct,
+                "model_projected_range": round(eff_proj_range, 2),
+                "mispricing_ratio": mispricing_ratio,
+                "mispricing_status": mispricing_status,
+                "mispricing_badge": mispricing_badge,
+                "mispricing_color": mispricing_color,
+                "action_text": action_text
+            }
+        except Exception as e:
+            logger.error(f"Error in _extract_derivatives_intelligence for {underlying}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "underlying": clean_und,
+                "error": str(e),
+                "max_pain": 0.0,
+                "call_oi_wall": 0.0,
+                "put_oi_wall": 0.0,
+                "pcr": 1.0,
+                "sentiment": "Neutral",
+                "sentiment_color": "#38bdf8",
+                "atm_straddle_premium": 0.0,
+                "atm_implied_move_pct": 0.0,
+                "model_projected_range": 0.0,
+                "mispricing_ratio": 1.0,
+                "mispricing_status": "FAIR_VALUE",
+                "mispricing_badge": "FAIR VALUE (Balanced)",
+                "mispricing_color": "#38bdf8",
+                "action_text": "Balanced volatility environment."
+            }
 
     def get_kronos_forecast(self, underlying: str = "NIFTY", timeframe: str = "5m", horizon: int = 24) -> Dict[str, Any]:
         """
@@ -7031,12 +7146,18 @@ class StraddleManager:
             chart_res = self.get_chart_candles(underlying=underlying, timeframe=timeframe, range_str="1d")
             candles = chart_res.get("candles", []) if isinstance(chart_res, dict) else []
             svc = KronosService.get_instance()
-            return svc.forecast(
+            forecast_res = svc.forecast(
                 underlying=underlying,
                 historical_candles=candles,
                 timeframe=timeframe,
                 horizon=horizon
             )
+            if isinstance(forecast_res, dict) and forecast_res.get("success"):
+                summary = forecast_res.get("summary", {})
+                model_range = float(summary.get("projected_range_pts") or 0.0)
+                intel = self._extract_derivatives_intelligence(underlying, model_projected_range=model_range)
+                forecast_res["derivatives_intelligence"] = intel
+            return forecast_res
         except Exception as e:
             logger.error(f"Error in StraddleProManager.get_kronos_forecast: {e}", exc_info=True)
             return {
@@ -7044,6 +7165,254 @@ class StraddleManager:
                 "error": str(e),
                 "underlying": underlying
             }
+
+    def get_ai_market_strategist(self, underlying: str = "NIFTY") -> Dict[str, Any]:
+        """
+        Synthesizes real-time quantitative, derivatives, and algorithmic signals
+        into an institutional Market Strategist trade playbook.
+        Leverages Gemini API (when configured) with an algorithmic quant reasoning engine fallback.
+        """
+        clean_und = str(underlying or "NIFTY").upper().replace(" ", "")
+        try:
+            # 1. Fetch real-time chart candles and spot price
+            chart_res = self.get_chart_candles(underlying=clean_und, timeframe="5m", range_str="1d")
+            candles = chart_res.get("candles", []) if isinstance(chart_res, dict) else []
+            spot_price = float(chart_res.get("current_price") or (candles[-1]["close"] if candles else 0.0))
+            
+            # 2. Fetch Kronos forecast and derivatives intelligence
+            forecast_res = self.get_kronos_forecast(underlying=clean_und, timeframe="5m", horizon=24)
+            intel = forecast_res.get("derivatives_intelligence") or self._extract_derivatives_intelligence(clean_und)
+            
+            summary = forecast_res.get("summary", {})
+            mtf = forecast_res.get("mtf_confluence", {})
+            cond_vol = forecast_res.get("cond_vol", {})
+            
+            direction = summary.get("direction", "NEUTRAL")
+            chg_pts = summary.get("change_points", 0.0)
+            chg_pct = summary.get("change_percent", 0.0)
+            proj_range = summary.get("projected_range_pts", 0.0)
+            garch_ann = cond_vol.get("annualized_vol_pct", 15.0)
+            garch_regime = cond_vol.get("regime", "NORMAL_VOLATILITY")
+            mtf_bias = mtf.get("bias", "NEUTRAL")
+            mtf_score = mtf.get("score", 0.0)
+            
+            max_pain = intel.get("max_pain", spot_price)
+            ce_wall = intel.get("call_oi_wall", spot_price + 200)
+            pe_wall = intel.get("put_oi_wall", spot_price - 200)
+            pcr = intel.get("pcr", 1.0)
+            straddle_prem = intel.get("atm_straddle_premium", 0.0)
+            mispricing_status = intel.get("mispricing_status", "FAIR_VALUE")
+            mispricing_ratio = intel.get("mispricing_ratio", 1.0)
+            
+            # Attempt Gemini API call if key exists
+            gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            ai_output = None
+            if gemini_key:
+                ai_output = self._call_gemini_market_strategist(
+                    gemini_key=gemini_key,
+                    underlying=clean_und,
+                    spot_price=spot_price,
+                    direction=direction,
+                    chg_pts=chg_pts,
+                    chg_pct=chg_pct,
+                    proj_range=proj_range,
+                    garch_ann=garch_ann,
+                    garch_regime=garch_regime,
+                    mtf_bias=mtf_bias,
+                    mtf_score=mtf_score,
+                    max_pain=max_pain,
+                    ce_wall=ce_wall,
+                    pe_wall=pe_wall,
+                    pcr=pcr,
+                    straddle_prem=straddle_prem,
+                    mispricing_status=mispricing_status,
+                    mispricing_ratio=mispricing_ratio
+                )
+
+            if not ai_output:
+                ai_output = self._synthesize_quant_market_strategist(
+                    underlying=clean_und,
+                    spot_price=spot_price,
+                    direction=direction,
+                    chg_pts=chg_pts,
+                    chg_pct=chg_pct,
+                    proj_range=proj_range,
+                    garch_ann=garch_ann,
+                    garch_regime=garch_regime,
+                    mtf_bias=mtf_bias,
+                    mtf_score=mtf_score,
+                    max_pain=max_pain,
+                    ce_wall=ce_wall,
+                    pe_wall=pe_wall,
+                    pcr=pcr,
+                    straddle_prem=straddle_prem,
+                    mispricing_status=mispricing_status,
+                    mispricing_ratio=mispricing_ratio
+                )
+
+            return {
+                "success": True,
+                "underlying": clean_und,
+                "spot_price": spot_price,
+                "timestamp": int(time.time()),
+                "derivatives": intel,
+                "forecast_summary": summary,
+                "cond_vol": cond_vol,
+                "mtf_confluence": mtf,
+                "report": ai_output
+            }
+        except Exception as e:
+            logger.error(f"Error in get_ai_market_strategist: {e}", exc_info=True)
+            return {
+                "success": False,
+                "underlying": clean_und,
+                "error": str(e)
+            }
+
+    def _synthesize_quant_market_strategist(
+        self,
+        underlying: str,
+        spot_price: float,
+        direction: str,
+        chg_pts: float,
+        chg_pct: float,
+        proj_range: float,
+        garch_ann: float,
+        garch_regime: str,
+        mtf_bias: str,
+        mtf_score: float,
+        max_pain: float,
+        ce_wall: float,
+        pe_wall: float,
+        pcr: float,
+        straddle_prem: float,
+        mispricing_status: str,
+        mispricing_ratio: float
+    ) -> Dict[str, Any]:
+        """Algorithmic quantitative market strategist logic (0ms latency, 100% resilient)."""
+        # Determine Market Regime
+        if garch_regime == "ELEVATED_VOLATILITY" and mispricing_status == "OVERPRICED":
+            regime = "High-IV Mean-Reverting Theta Drain"
+            bias = "DELTA-NEUTRAL / SHORT VEGA"
+            strategy = "Iron Condor / Short Straddle (Sell ATM, Buy Wings at OI Walls)"
+            bullet_1 = f"STRUCTURE: Sell ATM {round(spot_price, 0)} Straddle / Strangle; buy protection wings at CE Wall (₹{ce_wall:,.0f}) and PE Wall (₹{pe_wall:,.0f}). Straddle is OVERPRICED by {int((mispricing_ratio - 1.0) * 100)}% relative to projected move."
+            bullet_2 = f"DEFENSE TRIGGER: Stop-loss at 25% premium expansion on either tested leg or spot breach outside [₹{pe_wall:,.0f} - ₹{ce_wall:,.0f}]."
+            bullet_3 = f"THETA HARVEST: Target 45-55% max profit harvest. Annualized GARCH vol is elevated at {garch_ann:.1f}%, accelerating rapid theta decay as price mean-reverts to Max Pain (₹{max_pain:,.0f})."
+        elif mispricing_status == "UNDERPRICED" and abs(mtf_score) >= 0.5:
+            regime = f"Volatility Squeeze / {direction} Breakout"
+            bias = f"DIRECTIONAL {direction} (Score: {mtf_score:+.2f})"
+            spread_type = "Bull Call Spread" if direction == "BULLISH" else "Bear Put Spread"
+            strategy = f"{spread_type} (Targeting {'CE' if direction == 'BULLISH' else 'PE'} OI Wall)"
+            bullet_1 = f"STRUCTURE: Straddle is UNDERPRICED (ratio {mispricing_ratio:.2f}) with MTF momentum aligned {direction}. Deploy {spread_type} targeting {ce_wall if direction == 'BULLISH' else pe_wall:,.0f} to capture asymmetric gamma."
+            bullet_2 = f"DEFENSE TRIGGER: Exit trade if 5m close violates spot anchor ₹{spot_price:,.0f} by more than 0.35% against the trend."
+            bullet_3 = f"PROFIT TARGET: Take 1:2.5 risk-to-reward near the {'Call' if direction == 'BULLISH' else 'Put'} Wall boundary."
+        elif abs(mtf_score) >= 0.6:
+            regime = f"{direction} Trend Expansion"
+            bias = f"{direction} MOMENTUM"
+            strategy = f"Directional Ratio Spread / Trend Follower (Bias: {mtf_bias})"
+            bullet_1 = f"STRUCTURE: Multi-timeframe trend confluence (EMA 8/21/55) shows strong {direction} alignment (+{abs(mtf_score):.2f}). Deploy directional credit/debit structure."
+            bullet_2 = f"DEFENSE TRIGGER: Trailing stop below/above recent 5m swing pivots with strict Max Pain (₹{max_pain:,.0f}) reference."
+            bullet_3 = f"PROFIT TARGET: Run runners toward major open interest wall at ₹{ce_wall if direction == 'BULLISH' else pe_wall:,.0f}."
+        else:
+            regime = "Range-Bound Delta-Neutral Consolidation"
+            bias = "DELTA-NEUTRAL PIN"
+            strategy = "Short Strangle / Iron Butterfly with Max Pain Pin"
+            bullet_1 = f"STRUCTURE: Sell ₹{max_pain:,.0f} Straddle / Iron Butterfly. Put-Call Ratio (PCR: {pcr:.2f}) indicates balanced institutional positioning."
+            bullet_2 = f"DEFENSE TRIGGER: Dynamic delta-hedging if spot diverges >{round(proj_range * 0.5, 0)} points from ATM strike."
+            bullet_3 = f"THETA HARVEST: Capture intraday premium erosion between Support (₹{pe_wall:,.0f}) and Resistance (₹{ce_wall:,.0f})."
+
+        return {
+            "source": "Institutional Quant Synthesis Engine",
+            "market_regime": regime,
+            "bias": bias,
+            "strategy_recommendation": strategy,
+            "key_levels": {
+                "support_pe_wall": pe_wall,
+                "anchor_max_pain": max_pain,
+                "resistance_ce_wall": ce_wall,
+                "spot": spot_price
+            },
+            "execution_plan": [
+                {"title": "1. Execution & Strike Selection", "detail": bullet_1},
+                {"title": "2. Risk Management & Stop Triggers", "detail": bullet_2},
+                {"title": "3. Profit Target & Theta Horizon", "detail": bullet_3}
+            ]
+        }
+
+    def _call_gemini_market_strategist(
+        self,
+        gemini_key: str,
+        underlying: str,
+        spot_price: float,
+        direction: str,
+        chg_pts: float,
+        chg_pct: float,
+        proj_range: float,
+        garch_ann: float,
+        garch_regime: str,
+        mtf_bias: str,
+        mtf_score: float,
+        max_pain: float,
+        ce_wall: float,
+        pe_wall: float,
+        pcr: float,
+        straddle_prem: float,
+        mispricing_status: str,
+        mispricing_ratio: float
+    ) -> Optional[Dict[str, Any]]:
+        """Invokes Gemini LLM via fast HTTP REST API with strict timeout."""
+        try:
+            import urllib.request
+            import json
+
+            prompt = (
+                f"You are the Head Derivatives Quant Strategist at an institutional proprietary trading firm. "
+                f"Analyze the live quantitative and options metrics for {underlying} and provide an actionable, structured trade playbook.\n"
+                f"Live Metrics:\n"
+                f"- Spot Price: {spot_price}\n"
+                f"- Kronos Predicted Move: {chg_pts:+.2f} pts ({chg_pct:+.2f}%), Projected Range: {proj_range:.2f} pts\n"
+                f"- GARCH(1,1) Volatility: {garch_ann:.1f}% ({garch_regime})\n"
+                f"- Multi-Timeframe Trend Confluence: {mtf_bias} (Confluence Score: {mtf_score:+.2f})\n"
+                f"- Derivatives Levels: Max Pain: {max_pain}, Call OI Wall (Resistance): {ce_wall}, Put OI Wall (Support): {pe_wall}, PCR: {pcr:.2f}\n"
+                f"- ATM Straddle: ₹{straddle_prem:.2f}, Mispricing Status: {mispricing_status} (Ratio: {mispricing_ratio:.2f})\n\n"
+                f"Respond STRICTLY in valid JSON matching this schema:\n"
+                f'{{\n'
+                f'  "market_regime": "<Short string, e.g. High-IV Mean-Reverting Theta Drain>",\n'
+                f'  "bias": "<Short string, e.g. DELTA-NEUTRAL / SHORT VEGA>",\n'
+                f'  "strategy_recommendation": "<Specific trade strategy, e.g. Iron Condor / Short Straddle>",\n'
+                f'  "execution_plan": [\n'
+                f'    {{"title": "1. Execution & Strike Selection", "detail": "<Detailed sentence>"}},\n'
+                f'    {{"title": "2. Risk Management & Stop Triggers", "detail": "<Detailed sentence>"}},\n'
+                f'    {{"title": "3. Profit Target & Theta Horizon", "detail": "<Detailed sentence>"}}\n'
+                f'  ]\n'
+                f'}}'
+            )
+
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=3.5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                text_content = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(text_content)
+                parsed["source"] = "Gemini AI Market Strategist (LLM Quant Engine)"
+                parsed["key_levels"] = {
+                    "support_pe_wall": pe_wall,
+                    "anchor_max_pain": max_pain,
+                    "resistance_ce_wall": ce_wall,
+                    "spot": spot_price
+                }
+                return parsed
+        except Exception as e:
+            logger.warning(f"Notice: Gemini API call unavailable ({e}). Using institutional quant synthesis fallback.")
+            return None
 
     def get_market_depth(self, symbol: str = "", instrument_key: str = "", underlying: str = "", strike: float = 0.0, opt_type: str = "", ltp: float = 0.0) -> Dict[str, Any]:
         """

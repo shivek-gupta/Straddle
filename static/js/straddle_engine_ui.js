@@ -9592,6 +9592,11 @@ async function loadAndRenderCandleChart(und, tf) {
             if (highEl && maxH > 0) highEl.textContent = "₹" + maxH.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             if (lowEl && minL < Infinity) lowEl.textContent = "₹" + minL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+            if (data.derivatives_intelligence) {
+                window._activeDerivativesIntelligence = data.derivatives_intelligence;
+                updateDerivativesUI(data.derivatives_intelligence);
+            }
+
             renderCandlestickCanvas();
             if (window._kronosForecastActive) {
                 triggerKronosForecast(false);
@@ -9603,11 +9608,14 @@ async function loadAndRenderCandleChart(und, tf) {
     }
 }
 
-// Global Kronos AI Forecast State
+// Global Kronos AI Forecast & Derivatives State
 window._kronosForecastActive = false;
 window._kronosForecastHorizon = 24;
 window._kronosForecastData = null;
 window._kronosForecastLoading = false;
+window._activeDerivativesIntelligence = null;
+window._aiStrategistActive = false;
+window._aiStrategistData = null;
 
 function toggleKronosForecast() {
     window._kronosForecastActive = !window._kronosForecastActive;
@@ -9667,6 +9675,10 @@ async function triggerKronosForecast(force = false) {
         const data = await resp.json();
         if (data && data.success && Array.isArray(data.candles)) {
             window._kronosForecastData = data;
+            if (data.derivatives_intelligence) {
+                window._activeDerivativesIntelligence = data.derivatives_intelligence;
+                updateDerivativesUI(data.derivatives_intelligence);
+            }
             updateKronosForecastUI(data);
             renderCandlestickCanvas();
         } else {
@@ -9686,6 +9698,7 @@ function updateKronosForecastUI(data) {
     const summary = data.summary || {};
     const corridor = data.volatility_corridor || {};
     const edge = data.straddle_edge || {};
+    const mtf = data.mtf_confluence || {};
 
     const statusText = document.getElementById("kronosStatusText");
     if (statusText) {
@@ -9733,8 +9746,129 @@ function updateKronosForecastUI(data) {
             edgePill.style.color = "#38bdf8";
         }
     }
+
+    // Update MTF Confluence badge if available
+    const mtfBadge = document.getElementById("lblMtfTrendBadge");
+    if (mtfBadge && mtf.bias) {
+        const scoreStr = (mtf.score >= 0 ? "+" : "") + (mtf.score || 0).toFixed(2);
+        mtfBadge.textContent = `${mtf.bias} (${scoreStr})`;
+        mtfBadge.style.color = mtf.color || "#38bdf8";
+        mtfBadge.style.borderColor = mtf.color || "rgba(56,189,248,0.4)";
+    }
 }
 window.updateKronosForecastUI = updateKronosForecastUI;
+
+function updateDerivativesUI(intel) {
+    if (!intel) return;
+    const painEl = document.getElementById("lblMaxPainStrike");
+    const callEl = document.getElementById("lblCallWallStrike");
+    const putEl = document.getElementById("lblPutWallStrike");
+    const pcrEl = document.getElementById("lblPcrRatio");
+    const premEl = document.getElementById("lblAtmStraddlePremium");
+    const mispriceBadge = document.getElementById("lblStraddleMispricingBadge");
+
+    if (painEl && intel.max_pain) {
+        painEl.textContent = "₹" + Math.round(intel.max_pain).toLocaleString('en-IN');
+    }
+    if (callEl && intel.call_oi_wall) {
+        const dist = intel.call_wall_dist !== undefined ? ` (+${intel.call_wall_dist})` : "";
+        callEl.textContent = "₹" + Math.round(intel.call_oi_wall).toLocaleString('en-IN') + dist;
+    }
+    if (putEl && intel.put_oi_wall) {
+        const dist = intel.put_wall_dist !== undefined ? ` (-${intel.put_wall_dist})` : "";
+        putEl.textContent = "₹" + Math.round(intel.put_oi_wall).toLocaleString('en-IN') + dist;
+    }
+    if (pcrEl && intel.pcr !== undefined) {
+        pcrEl.textContent = `${intel.pcr.toFixed(2)} (${intel.sentiment || 'Balanced'})`;
+        if (intel.sentiment_color) pcrEl.style.color = intel.sentiment_color;
+    }
+    if (premEl && intel.atm_straddle_premium) {
+        premEl.textContent = `₹${intel.atm_straddle_premium.toFixed(2)} (±${intel.atm_implied_move_pct.toFixed(2)}%)`;
+    }
+    if (mispriceBadge && intel.mispricing_badge) {
+        mispriceBadge.textContent = `${intel.mispricing_badge} [${(intel.mispricing_ratio || 1).toFixed(2)}x]`;
+        mispriceBadge.title = intel.action_text || "";
+        mispriceBadge.className = "";
+        if (intel.mispricing_status === "OVERPRICED") {
+            mispriceBadge.classList.add("mispricing-badge-overpriced");
+        } else if (intel.mispricing_status === "UNDERPRICED") {
+            mispriceBadge.classList.add("mispricing-badge-underpriced");
+        } else {
+            mispriceBadge.classList.add("mispricing-badge-neutral");
+        }
+    }
+}
+window.updateDerivativesUI = updateDerivativesUI;
+
+function toggleAIStrategist() {
+    window._aiStrategistActive = !window._aiStrategistActive;
+    const btn = document.getElementById("btnToggleAIStrategist");
+    const badge = document.getElementById("aiStrategistBadgeState");
+    const panel = document.getElementById("aiStrategistPanel");
+
+    if (window._aiStrategistActive) {
+        if (btn) btn.classList.add("btn-ai-strategist-active");
+        if (badge) {
+            badge.textContent = "ACTIVE";
+            badge.style.background = "#10b981";
+            badge.style.boxShadow = "0 0 8px rgba(16, 185, 129, 0.8)";
+        }
+        if (panel) panel.style.display = "flex";
+        fetchAIStrategist(true);
+    } else {
+        if (btn) btn.classList.remove("btn-ai-strategist-active");
+        if (badge) {
+            badge.textContent = "READY";
+            badge.style.background = "#475569";
+            badge.style.boxShadow = "none";
+        }
+        if (panel) panel.style.display = "none";
+    }
+}
+window.toggleAIStrategist = toggleAIStrategist;
+
+async function fetchAIStrategist(force = false) {
+    const und = window._activeChartUnderlying || "NIFTY";
+    const regimeEl = document.getElementById("aiStrategistRegime");
+    const biasEl = document.getElementById("aiStrategistBias");
+    const recEl = document.getElementById("aiStrategistRecommendation");
+    const b1 = document.getElementById("aiStrategistBullet1");
+    const b2 = document.getElementById("aiStrategistBullet2");
+    const b3 = document.getElementById("aiStrategistBullet3");
+    const srcBadge = document.getElementById("aiStrategistSourceBadge");
+
+    if (recEl) recEl.textContent = "Synthesizing real-time quant analysis...";
+
+    try {
+        const resp = await fetch(`/api/straddle/ai_strategist?underlying=${encodeURIComponent(und)}`);
+        const data = await resp.json();
+        if (data && data.success && data.report) {
+            window._aiStrategistData = data;
+            const r = data.report;
+            if (srcBadge) srcBadge.textContent = r.source || "Institutional Quant Synthesis Engine";
+            if (regimeEl) regimeEl.textContent = r.market_regime || "Normal Market Conditions";
+            if (biasEl) biasEl.textContent = r.bias || "DELTA-NEUTRAL";
+            if (recEl) recEl.textContent = r.strategy_recommendation || "Delta-Neutral Straddle / Strangle";
+
+            const plans = r.execution_plan || [];
+            if (b1) b1.innerHTML = plans[0] ? `• <b>${plans[0].title}:</b> ${plans[0].detail}` : "";
+            if (b2) b2.innerHTML = plans[1] ? `• <b>${plans[1].title}:</b> ${plans[1].detail}` : "";
+            if (b3) b3.innerHTML = plans[2] ? `• <b>${plans[2].title}:</b> ${plans[2].detail}` : "";
+
+            if (data.derivatives) {
+                window._activeDerivativesIntelligence = data.derivatives;
+                updateDerivativesUI(data.derivatives);
+                renderCandlestickCanvas();
+            }
+        } else {
+            if (recEl) recEl.textContent = "Notice: Unable to generate strategist report";
+        }
+    } catch (e) {
+        console.error("Error fetching AI Strategist report:", e);
+        if (recEl) recEl.textContent = "Strategist connection error";
+    }
+}
+window.fetchAIStrategist = fetchAIStrategist;
 
 // Global Viewport and Pan/Zoom State
 window._chartZoomCount = 80; // default visible candles in viewport
@@ -9870,18 +10004,32 @@ function renderCandlestickCanvas() {
         if (c.volume > maxVolume) maxVolume = c.volume;
     });
 
-    // Also include Kronos volatility corridor in price scaling if visible
+    // Also include Kronos volatility corridors (80% and 95%) in price scaling if visible
     if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.volatility_corridor) {
         const vc = window._kronosForecastData.volatility_corridor;
-        const upper = vc.upper || [];
-        const lower = vc.lower || [];
+        const u95 = vc.upper_95 || vc.upper || [];
+        const l95 = vc.lower_95 || vc.lower || [];
         forecastCandles.forEach((c, fIdx) => {
             const globalIdx = baseCandles.length + fIdx;
             if (globalIdx >= visStartIdx && globalIdx <= visEndIdx) {
-                if (upper[fIdx] && upper[fIdx].value > maxPrice) maxPrice = upper[fIdx].value;
-                if (lower[fIdx] && lower[fIdx].value < minPrice) minPrice = lower[fIdx].value;
+                if (u95[fIdx] && u95[fIdx].value > maxPrice) maxPrice = u95[fIdx].value;
+                if (l95[fIdx] && l95[fIdx].value < minPrice) minPrice = l95[fIdx].value;
             }
         });
+    }
+
+    // Include Derivatives Intelligence levels (Max Pain, OI walls) if within reasonable range of spot (±4.5%)
+    if (window._activeDerivativesIntelligence) {
+        const intel = window._activeDerivativesIntelligence;
+        const spot = (baseCandles.length ? baseCandles[baseCandles.length - 1].close : 0);
+        if (spot > 0) {
+            [intel.max_pain, intel.call_oi_wall, intel.put_oi_wall].forEach(lvl => {
+                if (lvl && lvl > 0 && Math.abs(lvl - spot) / spot <= 0.045) {
+                    if (lvl > maxPrice) maxPrice = lvl;
+                    if (lvl < minPrice) minPrice = lvl;
+                }
+            });
+        }
     }
 
     if (minPrice === Infinity || maxPrice === -Infinity || minPrice <= 0) {
@@ -9960,30 +10108,62 @@ function renderCandlestickCanvas() {
     ctx.rect(margin.left, margin.top - 12, chartW, chartH + 12);
     ctx.clip();
 
-    // 1. Draw Volatility Corridor Ribbon if Kronos forecast is active
+    // 1. Draw Monte Carlo Volatility Corridors (95% outer and 80% primary inner) if Kronos forecast is active
     if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.volatility_corridor) {
         const vc = window._kronosForecastData.volatility_corridor;
-        const upper = vc.upper || [];
-        const lower = vc.lower || [];
-        if (upper.length === forecastCandles.length && lower.length === forecastCandles.length) {
+        
+        // 1a. Outer 95% Volatility Corridor (subtle tail boundary)
+        const u95 = vc.upper_95 || [];
+        const l95 = vc.lower_95 || [];
+        if (u95.length === forecastCandles.length && l95.length === forecastCandles.length) {
             ctx.save();
-            ctx.fillStyle = "rgba(168, 85, 247, 0.10)";
-            ctx.strokeStyle = "rgba(168, 85, 247, 0.35)";
-            ctx.lineWidth = 1.2;
-            ctx.setLineDash([3, 3]);
+            ctx.fillStyle = "rgba(168, 85, 247, 0.05)";
+            ctx.strokeStyle = "rgba(168, 85, 247, 0.22)";
+            ctx.lineWidth = 1.0;
+            ctx.setLineDash([2, 4]);
 
             ctx.beginPath();
             for (let f = 0; f < forecastCandles.length; f++) {
                 const idx = baseCandles.length + f;
                 const fx = margin.left + ((idx - viewStart) * slotW) + (slotW / 2);
-                const fy = margin.top + priceH - ((upper[f].value - minPrice) / priceRange * priceH);
+                const fy = margin.top + priceH - ((u95[f].value - minPrice) / priceRange * priceH);
                 if (f === 0) ctx.moveTo(fx, fy);
                 else ctx.lineTo(fx, fy);
             }
             for (let f = forecastCandles.length - 1; f >= 0; f--) {
                 const idx = baseCandles.length + f;
                 const fx = margin.left + ((idx - viewStart) * slotW) + (slotW / 2);
-                const fy = margin.top + priceH - ((lower[f].value - minPrice) / priceRange * priceH);
+                const fy = margin.top + priceH - ((l95[f].value - minPrice) / priceRange * priceH);
+                ctx.lineTo(fx, fy);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // 1b. Inner 80% Volatility Corridor (primary confidence envelope)
+        const u80 = vc.upper_80 || vc.upper || [];
+        const l80 = vc.lower_80 || vc.lower || [];
+        if (u80.length === forecastCandles.length && l80.length === forecastCandles.length) {
+            ctx.save();
+            ctx.fillStyle = "rgba(168, 85, 247, 0.12)";
+            ctx.strokeStyle = "rgba(168, 85, 247, 0.45)";
+            ctx.lineWidth = 1.3;
+            ctx.setLineDash([3, 3]);
+
+            ctx.beginPath();
+            for (let f = 0; f < forecastCandles.length; f++) {
+                const idx = baseCandles.length + f;
+                const fx = margin.left + ((idx - viewStart) * slotW) + (slotW / 2);
+                const fy = margin.top + priceH - ((u80[f].value - minPrice) / priceRange * priceH);
+                if (f === 0) ctx.moveTo(fx, fy);
+                else ctx.lineTo(fx, fy);
+            }
+            for (let f = forecastCandles.length - 1; f >= 0; f--) {
+                const idx = baseCandles.length + f;
+                const fx = margin.left + ((idx - viewStart) * slotW) + (slotW / 2);
+                const fy = margin.top + priceH - ((l80[f].value - minPrice) / priceRange * priceH);
                 ctx.lineTo(fx, fy);
             }
             ctx.closePath();
@@ -10145,6 +10325,42 @@ function renderCandlestickCanvas() {
             ctx.fillText("🎯 ₹" + targetP.toFixed(2), w - margin.right + 4, Math.floor(targetY) + 4);
             ctx.restore();
         }
+    }
+
+    // 5b. Derivatives Intelligence Live Levels (Max Pain, Call OI Wall, Put OI Wall)
+    if (window._activeDerivativesIntelligence) {
+        const intel = window._activeDerivativesIntelligence;
+        const levelsToDraw = [
+            { level: intel.max_pain, label: "PAIN", color: "#eab308", strokeColor: "rgba(234, 179, 8, 0.75)", textColor: "#000000" },
+            { level: intel.call_oi_wall, label: "CE WALL", color: "#ef4444", strokeColor: "rgba(239, 68, 68, 0.75)", textColor: "#ffffff" },
+            { level: intel.put_oi_wall, label: "PE WALL", color: "#10b981", strokeColor: "rgba(16, 185, 129, 0.75)", textColor: "#ffffff" }
+        ];
+
+        levelsToDraw.forEach(item => {
+            if (!item.level || item.level <= 0) return;
+            const y = margin.top + priceH - ((item.level - minPrice) / priceRange * priceH);
+            if (y >= margin.top && y <= margin.top + priceH + 5) {
+                ctx.save();
+                ctx.setLineDash([5, 4]);
+                ctx.strokeStyle = item.strokeColor;
+                ctx.lineWidth = 1.3;
+                ctx.beginPath();
+                ctx.moveTo(margin.left, Math.floor(y) + 0.5);
+                ctx.lineTo(w - margin.right, Math.floor(y) + 0.5);
+                ctx.stroke();
+
+                // Right axis level badge
+                ctx.fillStyle = item.color;
+                ctx.beginPath();
+                ctx.roundRect(w - margin.right + 2, Math.floor(y) - 9, margin.right - 4, 18, 3);
+                ctx.fill();
+                ctx.fillStyle = item.textColor;
+                ctx.font = "bold 9px JetBrains Mono, monospace";
+                ctx.textAlign = "left";
+                ctx.fillText(`${item.label}: ₹${Math.round(item.level).toLocaleString('en-IN')}`, w - margin.right + 4, Math.floor(y) + 4);
+                ctx.restore();
+            }
+        });
     }
 
     // 6. Crosshair and Hover Information

@@ -970,6 +970,22 @@ def api_straddle_kronos_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/ai_strategist", methods=["GET"])
+def api_straddle_ai_strategist():
+    """
+    Returns Institutional AI Market Strategist report synthesising
+    GARCH volatility, Monte Carlo fan, Max Pain, OI Walls, and Straddle mispricing.
+    """
+    try:
+        und = request.args.get("underlying") or request.args.get("symbol") or "NIFTY"
+        mgr = get_straddle_manager()
+        report = mgr.get_ai_market_strategist(underlying=und)
+        return jsonify(report)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_ai_strategist: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/market_depth", methods=["GET"])
 def api_straddle_market_depth():
     try:
