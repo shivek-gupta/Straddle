@@ -9559,21 +9559,38 @@ async function loadAndRenderCandleChart(und, tf) {
         const data = await resp.json();
         if (data && data.status === "success" && Array.isArray(data.candles)) {
             window._activeCandles = data.candles;
+            window._activeContractSymbol = data.contract_symbol || und;
+            window._activeExpiryDate = data.expiry_date || "";
+            window._activeSegment = data.segment || (und === "NIFTY" ? "NSE_FO" : "MCX_FO");
+
+            // Reset viewport view start to auto-align to the latest candles
+            window._chartViewStart = null;
+
             if (countEl) countEl.textContent = `${data.candles.length} candles (${tf})`;
             
+            const badgeEl = document.getElementById("chartActiveContractBadge");
+            if (badgeEl) {
+                badgeEl.textContent = data.contract_symbol ? data.contract_symbol : `${und} NEAR MONTH`;
+            }
+
+            const segEl = document.getElementById("chartExchangeSegInfo");
+            if (segEl) {
+                segEl.textContent = window._activeSegment;
+            }
+
             const ltpEl = document.getElementById("chartLtpDisplay");
             const curP = data.current_price || (data.candles.length ? data.candles[data.candles.length - 1].close : 0);
-            if (ltpEl && curP > 0) ltpEl.textContent = "₹" + curP.toFixed(2);
+            if (ltpEl && curP > 0) ltpEl.textContent = "₹" + curP.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
             let maxH = 0, minL = Infinity;
             data.candles.forEach(c => {
                 if (c.high > maxH) maxH = c.high;
-                if (c.low < minL) minL = c.low;
+                if (c.low < minL && c.low > 0) minL = c.low;
             });
             const highEl = document.getElementById("chartHighDisplay");
             const lowEl = document.getElementById("chartLowDisplay");
-            if (highEl && maxH > 0) highEl.textContent = "₹" + maxH.toFixed(2);
-            if (lowEl && minL < Infinity) lowEl.textContent = "₹" + minL.toFixed(2);
+            if (highEl && maxH > 0) highEl.textContent = "₹" + maxH.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            if (lowEl && minL < Infinity) lowEl.textContent = "₹" + minL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
             renderCandlestickCanvas();
             if (window._kronosForecastActive) {
@@ -9719,6 +9736,55 @@ function updateKronosForecastUI(data) {
 }
 window.updateKronosForecastUI = updateKronosForecastUI;
 
+// Global Viewport and Pan/Zoom State
+window._chartZoomCount = 80; // default visible candles in viewport
+window._chartViewStart = null; // null = right-aligned to newest candles
+window._chartIsDragging = false;
+window._chartDragStartX = 0;
+window._chartDragStartViewStart = 0;
+
+function chartZoomIn() {
+    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                      ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+    if (totalBars <= 0) return;
+    const currentZoom = window._chartZoomCount || 80;
+    const newZoom = Math.max(15, Math.round(currentZoom * 0.75));
+    if (newZoom !== currentZoom) {
+        const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
+        const anchor = currentStart + (currentZoom * 0.85);
+        window._chartZoomCount = newZoom;
+        window._chartViewStart = Math.max(0, Math.min(totalBars - 5, anchor - (newZoom * 0.85)));
+        renderCandlestickCanvas();
+    }
+}
+window.chartZoomIn = chartZoomIn;
+
+function chartZoomOut() {
+    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                      ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+    if (totalBars <= 0) return;
+    const currentZoom = window._chartZoomCount || 80;
+    const maxZoomAllowed = Math.min(Math.max(30, totalBars + 6), 450);
+    const newZoom = Math.min(maxZoomAllowed, Math.round(currentZoom * 1.33));
+    if (newZoom !== currentZoom) {
+        const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
+        const anchor = currentStart + (currentZoom * 0.85);
+        window._chartZoomCount = newZoom;
+        window._chartViewStart = Math.max(0, Math.min(totalBars - 5, anchor - (newZoom * 0.85)));
+        renderCandlestickCanvas();
+    }
+}
+window.chartZoomOut = chartZoomOut;
+
+function chartResetZoom() {
+    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                      ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+    window._chartZoomCount = Math.min(80, Math.max(20, totalBars));
+    window._chartViewStart = null;
+    renderCandlestickCanvas();
+}
+window.chartResetZoom = chartResetZoom;
+
 function renderCandlestickCanvas() {
     const canvas = document.getElementById("liveCandlestickCanvas");
     if (!canvas) return;
@@ -9746,9 +9812,18 @@ function renderCandlestickCanvas() {
 
     const baseCandles = window._activeCandles || [];
     const forecastCandles = (window._kronosForecastActive && window._kronosForecastData && Array.isArray(window._kronosForecastData.candles)) ? window._kronosForecastData.candles : [];
-    const candles = [...baseCandles, ...forecastCandles];
+    
+    // Combine base and forecast candles with explicit indexing
+    const allCandles = [];
+    baseCandles.forEach((c, idx) => {
+        allCandles.push({ ...c, is_forecast: false, globalIdx: idx });
+    });
+    forecastCandles.forEach((c, idx) => {
+        allCandles.push({ ...c, is_forecast: true, globalIdx: baseCandles.length + idx });
+    });
 
-    if (!candles || candles.length === 0) {
+    const totalBars = allCandles.length;
+    if (totalBars === 0) {
         ctx.fillStyle = "#64748b";
         ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.textAlign = "center";
@@ -9757,50 +9832,84 @@ function renderCandlestickCanvas() {
     }
 
     // Chart margins
-    const margin = { top: 25, right: 85, bottom: 30, left: 15 };
+    const margin = { top: 25, right: 88, bottom: 28, left: 16 };
     const chartW = w - margin.left - margin.right;
     const chartH = h - margin.top - margin.bottom;
     const volumeH = chartH * 0.16;
     const priceH = chartH - volumeH - 12;
 
-    // Filter valid positive candles and compute price range
+    // Viewport windowing:
+    const zoomCount = Math.max(15, Math.min(Math.min(totalBars + 5, 450), window._chartZoomCount || 80));
+    window._chartZoomCount = zoomCount;
+
+    // Default right gap of 4 bars so latest candle has comfortable breathing room
+    const rightGap = 4;
+    if (window._chartViewStart === null || window._chartViewStart === undefined) {
+        window._chartViewStart = Math.max(0, totalBars - zoomCount + rightGap);
+    }
+    const maxStart = Math.max(0, totalBars - Math.max(5, Math.floor(zoomCount * 0.15)));
+    const viewStart = Math.max(0, Math.min(maxStart, window._chartViewStart));
+    window._chartViewStart = viewStart;
+    const viewEnd = viewStart + zoomCount;
+
+    const slotW = chartW / zoomCount;
+    const candleW = Math.max(2, Math.min(26, Math.floor(slotW * 0.72)));
+
+    // Visible slice for dynamic Y-axis auto-scaling
+    const visStartIdx = Math.max(0, Math.floor(viewStart));
+    const visEndIdx = Math.min(totalBars, Math.ceil(viewEnd) + 1);
+    const visibleCandles = allCandles.slice(visStartIdx, visEndIdx);
+
     let minPrice = Infinity;
     let maxPrice = -Infinity;
     let maxVolume = 0;
 
-    candles.forEach(c => {
+    visibleCandles.forEach(c => {
         if (c.low && c.low < minPrice && c.low > 0) minPrice = c.low;
         if (c.high && c.high > maxPrice) maxPrice = c.high;
         if (c.volume > maxVolume) maxVolume = c.volume;
     });
 
+    // Also include Kronos volatility corridor in price scaling if visible
+    if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.volatility_corridor) {
+        const vc = window._kronosForecastData.volatility_corridor;
+        const upper = vc.upper || [];
+        const lower = vc.lower || [];
+        forecastCandles.forEach((c, fIdx) => {
+            const globalIdx = baseCandles.length + fIdx;
+            if (globalIdx >= visStartIdx && globalIdx <= visEndIdx) {
+                if (upper[fIdx] && upper[fIdx].value > maxPrice) maxPrice = upper[fIdx].value;
+                if (lower[fIdx] && lower[fIdx].value < minPrice) minPrice = lower[fIdx].value;
+            }
+        });
+    }
+
     if (minPrice === Infinity || maxPrice === -Infinity || minPrice <= 0) {
         minPrice = 100;
         maxPrice = 110;
     }
-
     if (minPrice === maxPrice) {
         minPrice *= 0.99;
         maxPrice *= 1.01;
     }
 
-    // 12% vertical margins prevent wicks from touching canvas edges
-    const pricePadding = (maxPrice - minPrice) * 0.12;
+    // 8% vertical padding on price scale
+    const pricePadding = (maxPrice - minPrice) * 0.08;
     minPrice -= pricePadding;
     maxPrice += pricePadding;
     const priceRange = maxPrice - minPrice;
 
-    // Subtle Grid lines
+    // Horizontal Price Grid lines
     ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
     ctx.lineWidth = 1;
     ctx.fillStyle = "#64748b";
     ctx.font = "11px JetBrains Mono, monospace";
     ctx.textAlign = "left";
 
-    const steps = 6;
-    for (let i = 0; i <= steps; i++) {
-        const p = minPrice + (priceRange * (i / steps));
-        const y = Math.floor(margin.top + priceH - (priceH * (i / steps))) + 0.5;
+    const priceSteps = 6;
+    for (let i = 0; i <= priceSteps; i++) {
+        const p = minPrice + (priceRange * (i / priceSteps));
+        const y = Math.floor(margin.top + priceH - (priceH * (i / priceSteps))) + 0.5;
         ctx.beginPath();
         ctx.moveTo(margin.left, y);
         ctx.lineTo(w - margin.right, y);
@@ -9809,13 +9918,47 @@ function renderCandlestickCanvas() {
         ctx.fillText("₹" + p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w - margin.right + 6, y + 4);
     }
 
-    // Candle widths and spacing
-    const numCandles = candles.length;
-    const slotW = chartW / numCandles;
-    const candleW = Math.max(2, Math.min(18, slotW * 0.72));
+    // Vertical Time Grid Lines and X-axis Labels
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.035)";
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "#64748b";
+    ctx.font = "10.5px JetBrains Mono, monospace";
+    ctx.textAlign = "center";
 
+    const labelStep = Math.max(5, Math.floor(zoomCount / 7));
+    for (let i = visStartIdx; i < visEndIdx; i++) {
+        if (i % labelStep === 0 || i === baseCandles.length - 1) {
+            const c = allCandles[i];
+            if (!c) continue;
+            const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+            if (x >= margin.left && x <= w - margin.right) {
+                // Vertical grid line
+                ctx.beginPath();
+                ctx.setLineDash([2, 4]);
+                ctx.moveTo(Math.floor(x) + 0.5, margin.top);
+                ctx.lineTo(Math.floor(x) + 0.5, h - margin.bottom);
+                ctx.stroke();
+
+                // Timestamp label at bottom
+                const d = new Date(c.time * 1000);
+                const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                ctx.fillStyle = c.is_forecast ? "#c084fc" : "#64748b";
+                ctx.fillText(timeStr, x, h - 8);
+            }
+        }
+    }
+    ctx.restore();
+
+    // COLOR DEFINITIONS
     const COLOR_BULLISH = "#089981";
     const COLOR_BEARISH = "#f23645";
+
+    // Clip rendering strictly to chart canvas region (prevents overflow during drag/pan)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(margin.left, margin.top - 12, chartW, chartH + 12);
+    ctx.clip();
 
     // 1. Draw Volatility Corridor Ribbon if Kronos forecast is active
     if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.volatility_corridor) {
@@ -9832,14 +9975,14 @@ function renderCandlestickCanvas() {
             ctx.beginPath();
             for (let f = 0; f < forecastCandles.length; f++) {
                 const idx = baseCandles.length + f;
-                const fx = margin.left + (idx * slotW) + (slotW / 2);
+                const fx = margin.left + ((idx - viewStart) * slotW) + (slotW / 2);
                 const fy = margin.top + priceH - ((upper[f].value - minPrice) / priceRange * priceH);
                 if (f === 0) ctx.moveTo(fx, fy);
                 else ctx.lineTo(fx, fy);
             }
             for (let f = forecastCandles.length - 1; f >= 0; f--) {
                 const idx = baseCandles.length + f;
-                const fx = margin.left + (idx * slotW) + (slotW / 2);
+                const fx = margin.left + ((idx - viewStart) * slotW) + (slotW / 2);
                 const fy = margin.top + priceH - ((lower[f].value - minPrice) / priceRange * priceH);
                 ctx.lineTo(fx, fy);
             }
@@ -9852,31 +9995,36 @@ function renderCandlestickCanvas() {
 
     // 2. Draw Vertical Divider between Historical and Forecast Horizon
     if (forecastCandles.length > 0 && baseCandles.length > 0) {
-        const divX = Math.floor(margin.left + (baseCandles.length * slotW)) + 0.5;
-        ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = "#a855f7";
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(divX, margin.top);
-        ctx.lineTo(divX, h - margin.bottom);
-        ctx.stroke();
+        const divX = Math.floor(margin.left + ((baseCandles.length - viewStart) * slotW)) + 0.5;
+        if (divX >= margin.left - 50 && divX <= w - margin.right + 50) {
+            ctx.save();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = "#a855f7";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(divX, margin.top);
+            ctx.lineTo(divX, h - margin.bottom);
+            ctx.stroke();
 
-        // Glowing Forecast Horizon Badge
-        ctx.fillStyle = "#a855f7";
-        ctx.beginPath();
-        ctx.roundRect(divX - 42, margin.top - 20, 84, 18, 4);
-        ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 9.5px JetBrains Mono, monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("🔮 KRONOS AI", divX, margin.top - 7);
-        ctx.restore();
+            // Glowing Forecast Horizon Badge
+            ctx.fillStyle = "#a855f7";
+            ctx.beginPath();
+            ctx.roundRect(divX - 42, margin.top - 20, 84, 18, 4);
+            ctx.fill();
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 9.5px JetBrains Mono, monospace";
+            ctx.textAlign = "center";
+            ctx.fillText("🔮 KRONOS AI", divX, margin.top - 7);
+            ctx.restore();
+        }
     }
 
     // 3. Draw Candles & Volumes
-    candles.forEach((c, i) => {
-        const x = margin.left + (i * slotW) + (slotW / 2);
+    allCandles.forEach((c, i) => {
+        const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+        // Only draw if within or slightly outside the visible slot
+        if (x < margin.left - slotW * 2 || x > w - margin.right + slotW * 2) return;
+
         const isUp = c.close >= c.open;
         const isForecast = !!c.is_forecast;
 
@@ -9935,20 +10083,11 @@ function renderCandlestickCanvas() {
             }
             ctx.fillRect(bodyLeft, yVol, Math.floor(candleW), vBarH);
         }
-
-        // Time axis labels every N candles
-        const labelInterval = Math.max(1, Math.floor(numCandles / 7));
-        if (i % labelInterval === 0 || i === numCandles - 1 || i === baseCandles.length - 1) {
-            const date = new Date(c.time * 1000);
-            const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-            ctx.fillStyle = isForecast ? "#c084fc" : "#64748b";
-            ctx.font = isForecast ? "bold 10.5px JetBrains Mono, monospace" : "11px JetBrains Mono, monospace";
-            ctx.textAlign = "center";
-            ctx.fillText(timeStr, x, h - 8);
-        }
     });
 
-    // Current Price Line on last historical candle
+    ctx.restore(); // Restore clip region
+
+    // 4. Current Price Line on last historical candle
     if (baseCandles.length > 0) {
         const lastCandle = baseCandles[baseCandles.length - 1];
         const curP = lastCandle.close;
@@ -9956,74 +10095,79 @@ function renderCandlestickCanvas() {
         const lastIsUp = lastCandle.close >= lastCandle.open;
         const lastColor = lastIsUp ? COLOR_BULLISH : COLOR_BEARISH;
 
-        ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = lastColor;
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.moveTo(margin.left, curY);
-        ctx.lineTo(w - margin.right, curY);
-        ctx.stroke();
-        ctx.restore();
+        if (curY >= margin.top && curY <= margin.top + priceH + 15) {
+            ctx.save();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = lastColor;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(margin.left, Math.floor(curY) + 0.5);
+            ctx.lineTo(w - margin.right, Math.floor(curY) + 0.5);
+            ctx.stroke();
+            ctx.restore();
 
-        // Price tag badge on right axis
-        ctx.fillStyle = lastColor;
-        ctx.beginPath();
-        ctx.roundRect(w - margin.right + 2, curY - 10, margin.right - 4, 20, 4);
-        ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 11px JetBrains Mono, monospace";
-        ctx.textAlign = "left";
-        ctx.fillText("₹" + curP.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w - margin.right + 6, curY + 4);
+            // Price tag badge on right axis
+            ctx.fillStyle = lastColor;
+            ctx.beginPath();
+            ctx.roundRect(w - margin.right + 2, Math.floor(curY) - 10, margin.right - 4, 20, 4);
+            ctx.fill();
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 11px JetBrains Mono, monospace";
+            ctx.textAlign = "left";
+            ctx.fillText("₹" + curP.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w - margin.right + 6, Math.floor(curY) + 4);
+        }
     }
 
-    // Kronos Target Line if Forecast Active
+    // 5. Kronos Target Line if Forecast Active
     if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.summary) {
         const targetP = window._kronosForecastData.summary.final_projected_price;
         const targetY = margin.top + priceH - ((targetP - minPrice) / priceRange * priceH);
 
-        ctx.save();
-        ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = "#a855f7";
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.moveTo(margin.left + (baseCandles.length * slotW), targetY);
-        ctx.lineTo(w - margin.right, targetY);
-        ctx.stroke();
+        if (targetY >= margin.top && targetY <= margin.top + priceH + 15) {
+            const divX = Math.max(margin.left, Math.min(w - margin.right, margin.left + ((baseCandles.length - viewStart) * slotW)));
+            ctx.save();
+            ctx.setLineDash([3, 3]);
+            ctx.strokeStyle = "#a855f7";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(divX, Math.floor(targetY) + 0.5);
+            ctx.lineTo(w - margin.right, Math.floor(targetY) + 0.5);
+            ctx.stroke();
 
-        // Right axis target badge
-        ctx.fillStyle = "#a855f7";
-        ctx.beginPath();
-        ctx.roundRect(w - margin.right + 2, targetY - 10, margin.right - 4, 20, 4);
-        ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 10px JetBrains Mono, monospace";
-        ctx.textAlign = "left";
-        ctx.fillText("🎯 ₹" + targetP.toFixed(2), w - margin.right + 4, targetY + 4);
-        ctx.restore();
+            // Right axis target badge
+            ctx.fillStyle = "#a855f7";
+            ctx.beginPath();
+            ctx.roundRect(w - margin.right + 2, Math.floor(targetY) - 10, margin.right - 4, 20, 4);
+            ctx.fill();
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 10px JetBrains Mono, monospace";
+            ctx.textAlign = "left";
+            ctx.fillText("🎯 ₹" + targetP.toFixed(2), w - margin.right + 4, Math.floor(targetY) + 4);
+            ctx.restore();
+        }
     }
 
-    // Crosshair if hovering
-    if (window._chartCrosshairPos) {
+    // 6. Crosshair and Hover Information
+    if (window._chartCrosshairPos && !window._chartIsDragging) {
         const mx = window._chartCrosshairPos.x;
         const my = window._chartCrosshairPos.y;
 
         if (mx >= margin.left && mx <= w - margin.right && my >= margin.top && my <= h - margin.bottom) {
             ctx.save();
             ctx.setLineDash([2, 2]);
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
             ctx.lineWidth = 1;
             
             // Vertical line
             ctx.beginPath();
-            ctx.moveTo(mx, margin.top);
-            ctx.lineTo(mx, h - margin.bottom);
+            ctx.moveTo(Math.floor(mx) + 0.5, margin.top);
+            ctx.lineTo(Math.floor(mx) + 0.5, h - margin.bottom);
             ctx.stroke();
 
             // Horizontal line
             ctx.beginPath();
-            ctx.moveTo(margin.left, my);
-            ctx.lineTo(w - margin.right, my);
+            ctx.moveTo(margin.left, Math.floor(my) + 0.5);
+            ctx.lineTo(w - margin.right, Math.floor(my) + 0.5);
             ctx.stroke();
             ctx.restore();
 
@@ -10040,7 +10184,6 @@ function renderCandlestickCanvas() {
                 const badgeH = 20;
 
                 ctx.save();
-                // High-visibility royal blue badge with bright border on right price scale
                 ctx.fillStyle = "#2563eb";
                 ctx.strokeStyle = "#93c5fd";
                 ctx.lineWidth = 1.2;
@@ -10049,7 +10192,6 @@ function renderCandlestickCanvas() {
                 ctx.fill();
                 ctx.stroke();
 
-                // Format cursor price with Indian numbering format
                 const fmtCursorPrice = (cursorPrice >= 1000) ? 
                     cursorPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 
                     cursorPrice.toFixed(2);
@@ -10060,17 +10202,17 @@ function renderCandlestickCanvas() {
                 ctx.fillText("₹" + fmtCursorPrice, badgeX + 5, badgeY + 4);
                 ctx.restore();
 
-                // Also update legend badge price display
                 const cursorPriceLegendEl = document.getElementById("lblCursorPrice");
                 if (cursorPriceLegendEl) {
                     cursorPriceLegendEl.textContent = "₹" + fmtCursorPrice;
                 }
             }
 
-            // Index of hovered candle
-            const hoveredIdx = Math.floor((mx - margin.left) / slotW);
-            if (hoveredIdx >= 0 && hoveredIdx < candles.length) {
-                const c = candles[hoveredIdx];
+            // Hovered candle index in allCandles
+            const hoveredRelSlot = (mx - margin.left) / slotW;
+            const hoveredIdx = Math.floor(viewStart + hoveredRelSlot);
+            if (hoveredIdx >= 0 && hoveredIdx < allCandles.length) {
+                const c = allCandles[hoveredIdx];
                 const d = new Date(c.time * 1000);
                 const openEl = document.getElementById("lblCandleOpen");
                 const highEl = document.getElementById("lblCandleHigh");
@@ -10083,11 +10225,12 @@ function renderCandlestickCanvas() {
                 if (closeEl) closeEl.textContent = "₹" + c.close.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 if (timeEl) {
                     const tStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                    timeEl.textContent = c.is_forecast ? `🔮 FORECAST (${tStr})` : tStr;
+                    const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                    timeEl.textContent = c.is_forecast ? `🔮 FORECAST (${tStr})` : `${dateStr} ${tStr}`;
                     timeEl.style.color = c.is_forecast ? "#c084fc" : "#94a3b8";
                 }
 
-                // Draw sleek time pill on bottom X-axis at cursor X
+                // Sleek time pill on bottom X-axis at cursor X
                 const tStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
                 ctx.save();
                 ctx.fillStyle = c.is_forecast ? "#7e22ce" : "#1e293b";
@@ -10106,6 +10249,7 @@ function renderCandlestickCanvas() {
         }
     }
 }
+window.renderCandlestickCanvas = renderCandlestickCanvas;
 
 function updateLiveCandleTick(newPrice) {
     if (!newPrice || Number(newPrice) <= 0) return;
@@ -10136,15 +10280,107 @@ function setupChartCanvasEvents() {
     if (!canvas || canvas._eventsSetup) return;
     canvas._eventsSetup = true;
 
-    canvas.addEventListener("mousemove", (e) => {
+    // 1. Mouse Wheel Zoom In / Out anchored at cursor
+    canvas.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                          ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+        if (totalBars <= 0) return;
+
         const rect = canvas.getBoundingClientRect();
-        window._chartCrosshairPos = {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        };
+        const mouseX = e.clientX - rect.left;
+        const margin = { left: 16, right: 88 };
+        const chartW = rect.width - margin.left - margin.right;
+        if (chartW <= 0) return;
+
+        // Normalized mouse position along chart width
+        const clampedMouseX = Math.max(margin.left, Math.min(rect.width - margin.right, mouseX));
+        const normX = (clampedMouseX - margin.left) / chartW;
+
+        const currentZoom = window._chartZoomCount || 80;
+        const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
+        
+        // Wheel up = Zoom In (< 0), Wheel down = Zoom Out (> 0)
+        const factor = e.deltaY < 0 ? 0.82 : 1.22;
+        const maxZoom = Math.min(Math.max(30, totalBars + 8), 450);
+        const newZoom = Math.max(15, Math.min(maxZoom, Math.round(currentZoom * factor)));
+
+        if (newZoom !== currentZoom) {
+            const barUnderCursor = currentStart + (normX * currentZoom);
+            let newStart = barUnderCursor - (normX * newZoom);
+            newStart = Math.max(0, Math.min(totalBars - 5, newStart));
+            
+            window._chartZoomCount = newZoom;
+            window._chartViewStart = newStart;
+            renderCandlestickCanvas();
+        }
+    }, { passive: false });
+
+    // 2. Drag to Pan across History
+    canvas.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return; // Only main button
+        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                          ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+        if (totalBars <= 0) return;
+
+        const currentZoom = window._chartZoomCount || 80;
+        const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
+
+        window._chartIsDragging = true;
+        window._chartDragStartX = e.clientX;
+        window._chartDragStartViewStart = currentStart;
+        try { canvas.setPointerCapture(e.pointerId); } catch(err){}
+        canvas.classList.add("is-dragging");
+    });
+
+    canvas.addEventListener("pointermove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        if (window._chartIsDragging) {
+            const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
+                              ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+            const margin = { left: 16, right: 88 };
+            const chartW = rect.width - margin.left - margin.right;
+            const currentZoom = window._chartZoomCount || 80;
+            const slotW = chartW / currentZoom;
+
+            const deltaPx = e.clientX - window._chartDragStartX;
+            const deltaBars = deltaPx / slotW; // Drag right = see past (reduce start)
+
+            let newStart = window._chartDragStartViewStart - deltaBars;
+            const maxStart = Math.max(0, totalBars - Math.max(5, Math.floor(currentZoom * 0.15)));
+            newStart = Math.max(0, Math.min(maxStart, newStart));
+
+            window._chartViewStart = newStart;
+            window._chartCrosshairPos = null;
+            renderCandlestickCanvas();
+            return;
+        }
+
+        // Crosshair position
+        window._chartCrosshairPos = { x: mouseX, y: mouseY };
         renderCandlestickCanvas();
     });
 
+    const endDrag = (e) => {
+        if (window._chartIsDragging) {
+            window._chartIsDragging = false;
+            canvas.classList.remove("is-dragging");
+            try { canvas.releasePointerCapture(e.pointerId); } catch(err){}
+            renderCandlestickCanvas();
+        }
+    };
+    canvas.addEventListener("pointerup", endDrag);
+    canvas.addEventListener("pointercancel", endDrag);
+
+    // 3. Double-Click to Reset Zoom
+    canvas.addEventListener("dblclick", () => {
+        chartResetZoom();
+    });
+
+    // 4. Mouse Leave
     canvas.addEventListener("mouseleave", () => {
         window._chartCrosshairPos = null;
         const cursorPriceLegendEl = document.getElementById("lblCursorPrice");
@@ -10152,6 +10388,7 @@ function setupChartCanvasEvents() {
         renderCandlestickCanvas();
     });
 
+    // 5. Window Resize
     window.addEventListener("resize", () => {
         const modal = document.getElementById("modalLiveChart");
         if (modal && modal.style.display === "flex") {
@@ -10159,4 +10396,5 @@ function setupChartCanvasEvents() {
         }
     });
 }
+
 

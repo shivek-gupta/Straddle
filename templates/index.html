@@ -2393,6 +2393,7 @@
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chartAssetDot" style="width:10px; height:10px; border-radius:50%; background:#38bdf8; box-shadow:0 0 10px #38bdf8;"></span>
                         <span id="chartAssetTitle" style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">LIVE CANDLESTICK CHART</span>
+                        <span id="chartActiveContractBadge" style="font-size:11px; font-weight:700; background:#1e293b; color:#38bdf8; border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:2px 8px; font-family:var(--font-mono); letter-spacing:0.5px;">--</span>
                     </div>
                     <!-- Real-time Price Stream Strip -->
                     <div style="display:flex; align-items:center; gap:12px; background:#0e1422; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 12px; font-family:var(--font-mono); font-size:12px;">
@@ -2427,6 +2428,13 @@
                         <button type="button" class="chart-timeframe-btn" data-tf="15m" onclick="switchChartTimeframe('15m')">15m</button>
                         <button type="button" class="chart-timeframe-btn" data-tf="1h" onclick="switchChartTimeframe('1h')">1h</button>
                         <button type="button" class="chart-timeframe-btn" data-tf="1d" onclick="switchChartTimeframe('1d')">1D</button>
+                    </div>
+
+                    <!-- Zoom & Pan Quick Action Buttons -->
+                    <div style="display:flex; gap:4px; background:#0e1422; padding:3px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
+                        <button type="button" class="chart-action-btn" id="btnChartZoomIn" onclick="chartZoomIn()" title="Zoom In (or Scroll Up)">🔍+</button>
+                        <button type="button" class="chart-action-btn" id="btnChartZoomOut" onclick="chartZoomOut()" title="Zoom Out (or Scroll Down)">🔍−</button>
+                        <button type="button" class="chart-action-btn" id="btnChartResetZoom" onclick="chartResetZoom()" title="Reset View (Double-click chart)">↺ Reset</button>
                     </div>
 
                     <!-- Kronos Foundation Model AI Forecast Toggle Button -->
@@ -2528,12 +2536,14 @@
 
             <!-- Bottom Information Footer -->
             <div style="padding:10px 20px; background:#060911; border-top:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:#64748b; flex-wrap:wrap; gap:10px;">
-                <div style="display:flex; align-items:center; gap:12px;">
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                     <span>⚡ MCX &amp; NSE Continuous Tick Engine</span>
                     <span>•</span>
                     <span id="chartCandleCountInfo">0 candles</span>
                     <span>•</span>
                     <span id="chartExchangeSegInfo">MCX_FO</span>
+                    <span>•</span>
+                    <span style="color:#94a3b8; display:inline-flex; align-items:center; gap:5px;"><span style="font-size:13px;">✋</span> <b>Drag</b> to pan history • <b>Scroll wheel</b> or <b>🔍+ / 🔍−</b> to zoom • <b>Double-click</b> to reset</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:10px;">
                     <button type="button" class="straddle-btn btn-outline" onclick="openStraddleOptionChainModal(window._activeGlobalUnderlying)" style="padding:4px 12px; font-size:11.5px; color:#38bdf8; border-color:#38bdf8;">⛓️ Open Option Chain</button>
