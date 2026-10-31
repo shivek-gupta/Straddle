@@ -582,10 +582,12 @@ def api_straddle_strategy_create_preset():
         und = data.get("underlying", "NIFTY")
         name = data.get("name")
         days = data.get("days")
+        logger.info(f"Creating preset strategy: name='{name}', preset='{ptype}', underlying='{und}'")
         mgr = get_straddle_manager()
         res = mgr.create_preset_strategy(name=name, preset_type=ptype, underlying=und, days=days)
         return jsonify(res)
     except Exception as e:
+        logger.error(f"Error in api_straddle_strategy_create_preset: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

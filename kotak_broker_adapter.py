@@ -897,6 +897,16 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     tokens_to_fetch.append(raw_tok)
 
             if req_tokens:
+                # De-duplicate tokens by (instrument_token, exchange_segment) to avoid Kotak 400 Bad Request
+                deduped_tokens = []
+                seen_tok_keys = set()
+                for rt in req_tokens:
+                    t_key = (str(rt.get("instrument_token")), str(rt.get("exchange_segment")).lower())
+                    if t_key not in seen_tok_keys:
+                        seen_tok_keys.add(t_key)
+                        deduped_tokens.append(rt)
+                req_tokens = deduped_tokens
+
                 # Kotak Neo limits maximum 50 symbols per quotes call. We chunk into batches of 40.
                 reverse_comm = {
                     "495213": "GOLD", "571445": "GOLDM",

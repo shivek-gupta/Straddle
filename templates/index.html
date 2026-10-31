@@ -1783,38 +1783,42 @@
                 <div class="straddle-modal-body" style="padding:0; overflow-x:hidden; max-height:calc(88vh - 160px); overflow-y:auto;">
                     <table class="straddle-table opt-chain-table" id="straddleOptionChainTable" style="margin:0; width:100%; font-size:12px; table-layout:fixed; border-collapse:collapse;">
                         <colgroup>
-                            <col style="width: 145px;">
-                            <col style="width: auto;">
-                            <col style="width: 90px;">
-                            <col style="width: auto;">
-                            <col style="width: 145px;">
+                            <col style="width: 88px;">
+                            <col style="width: 62px;">
+                            <col style="width: 78px;">
+                            <col style="width: 72px;">
+                            <col style="width: 78px;">
+                            <col style="width: 62px;">
+                            <col style="width: 88px;">
                         </colgroup>
                         <thead>
                             <tr id="optChainSuperHeaderRow">
                                 <!-- CALLS HEADER -->
-                                <th id="thCeSuperHeader" colspan="2" class="opt-table-header-ce" style="text-align:center; font-size:12px; letter-spacing:0.5px; padding:5px 8px;">
+                                <th id="thCeSuperHeader" colspan="3" class="opt-table-header-ce" style="text-align:center; font-size:11px; letter-spacing:0.5px; padding:3px 6px;">
                                     CALL
                                 </th>
                                 <!-- STRIKE HEADER -->
-                                <th class="opt-table-header-strike" style="text-align:center; width:90px; font-size:12px; padding:5px 4px;">
+                                <th class="opt-table-header-strike" style="text-align:center; width:72px; font-size:11px; padding:3px 2px;">
                                     STRIKE
                                 </th>
                                 <!-- PUTS HEADER -->
-                                <th id="thPeSuperHeader" colspan="2" class="opt-table-header-pe" style="text-align:center; font-size:12px; letter-spacing:0.5px; padding:5px 8px;">
+                                <th id="thPeSuperHeader" colspan="3" class="opt-table-header-pe" style="text-align:center; font-size:11px; letter-spacing:0.5px; padding:3px 6px;">
                                     PUT
                                 </th>
                             </tr>
                             <tr id="optChainSubHeaderRow" style="background:#0c101a; border-bottom:1px solid rgba(255,255,255,0.1);">
-                                <!-- Calls Columns: Action/Select, LTP -->
-                                <th id="thCeActionHeader" class="opt-action-col" style="text-align:center; width:145px; color:#38bdf8; padding:5px 3px; font-weight:800; font-size:11px;">ACTION</th>
-                                <th id="thCeLtp" style="text-align:right; color:#34d399; font-weight:800; padding:5px 8px; font-size:11px;">LTP</th>
+                                <!-- Calls Columns: Action/Select, CHG%, LTP -->
+                                <th id="thCeActionHeader" class="opt-action-col" style="text-align:center; width:88px; color:#38bdf8; padding:3px 2px; font-weight:800; font-size:10px;">ACTION</th>
+                                <th id="thCeChg" style="text-align:right; width:62px; color:#94a3b8; font-weight:800; padding:3px 4px; font-size:10px;">CHG %</th>
+                                <th id="thCeLtp" style="text-align:right; width:78px; color:#34d399; font-weight:800; padding:3px 6px; font-size:10px;">LTP</th>
 
                                 <!-- Center Strike -->
-                                <th style="text-align:center; width:90px; background:#111c3a; color:#60a5fa; font-weight:900; padding:5px 3px; font-size:11px;">STRIKE</th>
+                                <th style="text-align:center; width:72px; background:#111c3a; color:#60a5fa; font-weight:900; padding:3px 2px; font-size:10.5px;">STRIKE</th>
 
-                                <!-- Puts Columns: LTP, Action/Select -->
-                                <th id="thPeLtp" style="text-align:left; color:#fb7185; font-weight:800; padding:5px 8px; font-size:11px;">LTP</th>
-                                <th id="thPeActionHeader" class="opt-action-col" style="text-align:center; width:145px; color:#38bdf8; padding:5px 3px; font-weight:800; font-size:11px;">ACTION</th>
+                                <!-- Puts Columns: LTP, CHG%, Action/Select -->
+                                <th id="thPeLtp" style="text-align:left; width:78px; color:#fb7185; font-weight:800; padding:3px 6px; font-size:10px;">LTP</th>
+                                <th id="thPeChg" style="text-align:left; width:62px; color:#94a3b8; font-weight:800; padding:3px 4px; font-size:10px;">CHG %</th>
+                                <th id="thPeActionHeader" class="opt-action-col" style="text-align:center; width:88px; color:#38bdf8; padding:3px 2px; font-weight:800; font-size:10px;">ACTION</th>
                             </tr>
                         </thead>
                         <tbody id="straddleOptionChainBody">

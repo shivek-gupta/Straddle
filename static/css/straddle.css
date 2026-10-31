@@ -8930,6 +8930,54 @@ table .flag-cell {
     white-space: nowrap !important;
 }
 
+/* Angel One Style Purple OI Bars */
+.opt-oi-purple-bar-ce {
+    position: absolute;
+    bottom: 0px;
+    right: 0px;
+    height: 3px;
+    background: #a855f7;
+    border-radius: 2px 0 0 2px;
+    box-shadow: 0 0 6px rgba(168, 85, 247, 0.85);
+    pointer-events: none;
+    transition: width 0.3s ease;
+}
+.opt-oi-purple-bar-pe {
+    position: absolute;
+    bottom: 0px;
+    left: 0px;
+    height: 3px;
+    background: #a855f7;
+    border-radius: 0 2px 2px 0;
+    box-shadow: 0 0 6px rgba(168, 85, 247, 0.85);
+    pointer-events: none;
+    transition: width 0.3s ease;
+}
+
+/* Compact Option Chain Table & Buttons */
+.opt-chain-table tr {
+    height: 27px !important;
+}
+.opt-chain-table td {
+    padding: 2px 5px !important;
+    height: 27px !important;
+    font-size: 11px !important;
+}
+.opt-chain-table .chain-quick-trade-btn {
+    width: 19px !important;
+    height: 18px !important;
+    font-size: 9.5px !important;
+    padding: 0 !important;
+    line-height: 18px !important;
+    border-radius: 3px !important;
+}
+.opt-chain-table .chain-tick-btn {
+    padding: 1px 3px !important;
+    font-size: 9.5px !important;
+    height: 18px !important;
+    border-radius: 3px !important;
+}
+
 /* ==========================================================
    Basket Presets Dropdown Styles
    ========================================================== */

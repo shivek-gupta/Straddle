@@ -1782,13 +1782,23 @@ class StraddleManager:
 
     def get_cached_spot_price(self, underlying: str = "NIFTY") -> float:
         """Returns the in-memory cached spot price instantly (<0.01ms) without blocking."""
-        clean_und = (underlying or "NIFTY").upper()
-        now_ts = time.time()
+        clean_und = (underlying or "NIFTY").upper().replace(" ", "")
         with _SPOT_FETCH_LOCK:
             p = _SPOT_CACHE.get(clean_und, 0.0)
-            if p > 0 and (now_ts - _LAST_SPOT_FETCH_TS.get(clean_und, 0)) < 2.0:
+            if p > 0:
                 return p
-        return self._get_underlying_spot_price(clean_und)
+        # Instant non-blocking fallback to avoid stalling web server threads
+        if clean_und in COMMODITY_FALLBACK_PRICES:
+            return COMMODITY_FALLBACK_PRICES[clean_und]
+        fallbacks = {
+            "NIFTY": 23053.10,
+            "BANKNIFTY": 55300.0,
+            "FINNIFTY": 24200.0,
+            "MIDCPNIFTY": 13000.0,
+            "SENSEX": 72900.0,
+            "BANKEX": 60500.0,
+        }
+        return fallbacks.get(clean_und, 23000.0)
 
     def _get_underlying_spot_price(self, underlying: str = "NIFTY") -> float:
         """Resolves live continuous spot index price with sub-second caching."""
@@ -3233,6 +3243,14 @@ class StraddleManager:
             strat["name"] = final_name
             strat["underlying"] = clean_und
             strat["schedule_days"] = raw_days if raw_days else ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+            strat["status"] = "READY"
+            strat["enabled"] = False
+            strat["positions"] = []
+            strat["mtm"] = 0.0
+            strat["group_mtm"] = 0.0
+            strat["_manual_reset"] = False
+            strat["entry_error"] = "-"
+            strat["repair_needed"] = False
 
             if "STRANGLE" in p_type:
                 strat["legs"] = [
