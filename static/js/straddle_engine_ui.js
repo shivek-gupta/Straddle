@@ -386,6 +386,15 @@ async function fetchStraddleState() {
             const activePositions = active ? (active.positions || []) : (s.positions || []);
             window._straddleState.positions = activePositions;
 
+            // Sync live broker margin from state
+            if (s.margin) {
+                window._straddleState.margin = s.margin;
+                window._straddleMargin = s.margin;
+                if (typeof updateFormAutoMultiplierPreview === "function") {
+                    updateFormAutoMultiplierPreview();
+                }
+            }
+
             renderStraddleHeader(s);
             updateStraddleStrategyDropdown(s.all_strategies || [], active);
 
@@ -4700,6 +4709,9 @@ function populateStraddleSettingsForm(s) {
     if (document.getElementById("cfgStrategyName")) {
         document.getElementById("cfgStrategyName").value = s.name || "";
     }
+    if (document.getElementById("cfgStrategyUnderlying")) {
+        document.getElementById("cfgStrategyUnderlying").value = (s.underlying || "NIFTY").toUpperCase();
+    }
     const titleEl = document.getElementById("straddleTerminalStrategyTitle");
     if (titleEl) {
         titleEl.textContent = s.name || s.strategy_id || "Custom Strategy";
@@ -4871,12 +4883,35 @@ function addStraddleLegRow(leg = null) {
     });
 
     // Underlying assets
-    const underlyings = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"];
-    const curUnd = (l.underlying || "NIFTY").toUpperCase();
+    const stratUnd = document.getElementById("cfgStrategyUnderlying")?.value || window._straddleState?.activeStrategy?.underlying || "NIFTY";
+    const curUnd = (l.underlying || stratUnd).toUpperCase();
+    const isCommodity = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(curUnd);
+
+    const underlyings = [
+        "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
+        "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"
+    ];
     let undOptionsHtml = "";
     underlyings.forEach(u => {
         undOptionsHtml += `<option value="${u}" ${curUnd === u ? "selected" : ""}>${u}</option>`;
     });
+
+    let expOptionsHtml = "";
+    if (isCommodity) {
+        const curExp = l.expiry || "Current Month";
+        expOptionsHtml = `
+            <option value="Current Month" ${curExp === "Current Month" || curExp === "Monthly" ? "selected" : ""}>Current Month</option>
+            <option value="Next Month" ${curExp === "Next Month" || curExp === "Next Monthly" ? "selected" : ""}>Next Month</option>
+            <option value="Far Month" ${curExp === "Far Month" ? "selected" : ""}>Far Month</option>
+        `;
+    } else {
+        const curExp = l.expiry || "Weekly";
+        expOptionsHtml = `
+            <option value="Weekly" ${curExp === "Weekly" ? "selected" : ""}>Weekly</option>
+            <option value="Next Weekly" ${curExp === "Next Weekly" ? "selected" : ""}>Next Weekly</option>
+            <option value="Monthly" ${curExp === "Monthly" ? "selected" : ""}>Monthly</option>
+        `;
+    }
 
     const hasMult = (l.multiple_strike_selection === "500/100 multiple" || l.multiple_strike_selection === "500_100_multiple");
 
@@ -4967,9 +5002,7 @@ function addStraddleLegRow(leg = null) {
         </td>
         <td>
             <select class="straddle-select leg-expiry">
-                <option value="Weekly" ${l.expiry === "Weekly" ? "selected" : ""}>Weekly</option>
-                <option value="Next Weekly" ${l.expiry === "Next Weekly" ? "selected" : ""}>Next Weekly</option>
-                <option value="Monthly" ${l.expiry === "Monthly" ? "selected" : ""}>Monthly</option>
+                ${expOptionsHtml}
             </select>
         </td>
         <td style="text-align:center;">
@@ -4983,6 +5016,44 @@ function removeStraddleLegRow(rowId) {
     const tr = document.getElementById(rowId);
     if (tr) tr.remove();
 }
+
+function onStrategyUnderlyingChange(newUnd) {
+    if (!newUnd) return;
+    newUnd = newUnd.toUpperCase();
+    if (window._straddleState?.activeStrategy) {
+        window._straddleState.activeStrategy.underlying = newUnd;
+    }
+    const isCommodity = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(newUnd);
+
+    // Update all existing leg rows
+    const trs = document.querySelectorAll("#straddleLegsBuilderBody tr");
+    trs.forEach(tr => {
+        const undSel = tr.querySelector(".leg-underlying");
+        if (undSel) undSel.value = newUnd;
+
+        const expSel = tr.querySelector(".leg-expiry");
+        if (expSel) {
+            const curExp = expSel.value;
+            if (isCommodity) {
+                expSel.innerHTML = `
+                    <option value="Current Month" ${curExp === "Current Month" || curExp === "Monthly" ? "selected" : ""}>Current Month</option>
+                    <option value="Next Month" ${curExp === "Next Month" || curExp === "Next Monthly" ? "selected" : ""}>Next Month</option>
+                    <option value="Far Month" ${curExp === "Far Month" ? "selected" : ""}>Far Month</option>
+                `;
+            } else {
+                expSel.innerHTML = `
+                    <option value="Weekly" ${curExp === "Weekly" ? "selected" : ""}>Weekly</option>
+                    <option value="Next Weekly" ${curExp === "Next Weekly" ? "selected" : ""}>Next Weekly</option>
+                    <option value="Monthly" ${curExp === "Monthly" ? "selected" : ""}>Monthly</option>
+                `;
+            }
+        }
+    });
+
+    // Refresh live margin preview and auto multiplier preview for this underlying
+    updateFormAutoMultiplierPreview();
+}
+window.onStrategyUnderlyingChange = onStrategyUnderlyingChange;
 
 function setUnderlyingPriceSource(source) {
     ["Spot", "Futures", "Synthetic Futures"].forEach(s => {
@@ -5224,9 +5295,11 @@ function serializeCurrentStrategySettings() {
         undSource = "Synthetic Futures";
     }
 
+    const stratUnd = (document.getElementById("cfgStrategyUnderlying")?.value || active.underlying || "NIFTY").toUpperCase();
     const strategy = {
         strategy_id: inputSid || active.strategy_id || ("strat_" + Date.now()),
         name: (inputName && inputName.trim()) ? inputName.trim() : (active.name || "Custom Straddle Strategy"),
+        underlying: stratUnd,
         enabled: active.enabled !== false,
         multiplier_type: (document.getElementById("grpAutoMultiplier")?.style.display !== "none") ? "AUTO" : "MANUAL",
         multiplier: parseInt(document.getElementById("cfgMultiplier")?.value) || 1,
@@ -5303,7 +5376,7 @@ function serializeCurrentStrategySettings() {
             sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
             sl_re_execute_count: parseInt(tr.querySelector(".leg-sl-re-cnt")?.value) || 1,
             action: tr.querySelector(".leg-action")?.value,
-            underlying: tr.querySelector(".leg-underlying")?.value,
+            underlying: stratUnd,
             expiry: tr.querySelector(".leg-expiry")?.value
         });
     });
@@ -8696,14 +8769,50 @@ function updateFormAutoMultiplierPreview() {
     if (!badge) return;
 
     const strat = window._straddleState?.activeStrategy;
-    const brokerMargin = (strat && strat.broker_margin_per_lot) ? strat.broker_margin_per_lot : 125174.14;
+    const und = (document.getElementById("cfgStrategyUnderlying")?.value || strat?.underlying || "NIFTY").toUpperCase();
+    const defaultMarginTable = {
+        "NIFTY": 125174.14,
+        "BANKNIFTY": 140000.0,
+        "FINNIFTY": 120000.0,
+        "MIDCPNIFTY": 110000.0,
+        "SENSEX": 135000.0,
+        "BANKEX": 135000.0,
+        "CRUDEOIL": 240000.0,
+        "CRUDEOILM": 24000.0,
+        "NATURALGAS": 175000.0,
+        "NATGASMINI": 45000.0,
+        "GOLD": 450000.0,
+        "GOLDM": 45000.0,
+        "SILVER": 320000.0,
+        "SILVERM": 65000.0,
+        "COPPER": 220000.0
+    };
+    const defaultMargin = defaultMarginTable[und] || 125174.14;
+    const brokerMargin = (strat && strat.broker_margin_per_lot && (strat.underlying || "NIFTY").toUpperCase() === und) ? strat.broker_margin_per_lot : defaultMargin;
     const totalPerLot = brokerMargin + cushionVal;
 
-    const avail = parseFloat(window._straddleState?.margin?.available_margin || window._straddleMargin?.available_margin || 1400000.0);
-    const lots = Math.max(1, Math.floor(avail / Math.max(1, totalPerLot)));
+    let avail = 0.0;
+    if (window._straddleState?.margin?.available_margin !== undefined && window._straddleState?.margin?.available_margin !== null) {
+        avail = parseFloat(window._straddleState.margin.available_margin);
+    } else if (window._straddleMargin?.available_margin !== undefined && window._straddleMargin?.available_margin !== null) {
+        avail = parseFloat(window._straddleMargin.available_margin);
+    } else if (window._straddleState?.margin?.available_cash !== undefined && window._straddleState?.margin?.available_cash !== null) {
+        avail = parseFloat(window._straddleState.margin.available_cash);
+    }
 
-    badge.innerHTML = `⚡ Auto: <b>${lots} Lots</b> (₹${(totalPerLot / 100000).toFixed(2)}L/lot)`;
-    badge.title = `Broker Required: ₹${brokerMargin.toLocaleString('en-IN', {maximumFractionDigits: 0})} + Cushion: ₹${cushionVal.toLocaleString('en-IN', {maximumFractionDigits: 0})} = ₹${totalPerLot.toLocaleString('en-IN', {maximumFractionDigits: 0})} / lot\nAvailable Capital: ₹${avail.toLocaleString('en-IN', {maximumFractionDigits: 0})} ➔ ${lots} Lots`;
+    const lots = totalPerLot > 0 ? Math.floor(avail / totalPerLot) : 0;
+
+    if (lots > 0) {
+        badge.innerHTML = `⚡ Auto: <b>${lots} Lots</b> (₹${(totalPerLot / 100000).toFixed(2)}L/lot)`;
+        badge.style.color = "#38bdf8";
+        badge.style.background = "rgba(56, 189, 248, 0.1)";
+        badge.title = `Broker Required: ₹${brokerMargin.toLocaleString('en-IN', {maximumFractionDigits: 0})} + Cushion: ₹${cushionVal.toLocaleString('en-IN', {maximumFractionDigits: 0})} = ₹${totalPerLot.toLocaleString('en-IN', {maximumFractionDigits: 0})} / lot\nLive Available Capital: ₹${avail.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ➔ ${lots} Lots`;
+    } else {
+        badge.innerHTML = `⚡ Auto: <b>0 Lots</b> (₹${(totalPerLot / 100000).toFixed(2)}L/lot)`;
+        badge.style.color = "#f87171";
+        badge.style.background = "rgba(248, 113, 113, 0.1)";
+        badge.title = `Live Available Capital (₹${avail.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}) is less than Required Margin per lot (₹${totalPerLot.toLocaleString('en-IN', {maximumFractionDigits: 0})}). Minimum ₹${totalPerLot.toLocaleString('en-IN', {maximumFractionDigits: 0})} needed for 1 lot.`;
+    }
 }
 window.updateFormAutoMultiplierPreview = updateFormAutoMultiplierPreview;
 

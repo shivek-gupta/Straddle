@@ -169,12 +169,26 @@ def get_tick_size_for_symbol(symbol: str = "", instrument_key: str = "") -> floa
     return 0.05
 
 
-def get_freeze_limit_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
+def get_lot_size_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
     s = f"{symbol} {instrument_key}".upper()
-    for comm, fl in getattr(config, "FREEZE_LIMITS", {}).items():
-        if comm in s:
-            return fl
-    return 1800
+    for und, ls in getattr(config, "DEFAULT_LOT_SIZES", {}).items():
+        if und in s:
+            return ls
+    return 65 if "NIFTY" in s else 15
+
+
+def get_freeze_limit_lots_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
+    s = f"{symbol} {instrument_key}".upper()
+    for und, fl_lots in getattr(config, "FREEZE_LIMIT_LOTS", {}).items():
+        if und in s:
+            return fl_lots
+    return 54 if "NIFTY" in s else 30
+
+
+def get_freeze_limit_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
+    fl_lots = get_freeze_limit_lots_for_symbol(symbol, instrument_key)
+    lot_size = get_lot_size_for_symbol(symbol, instrument_key)
+    return fl_lots * lot_size
 
 
 def get_exchange_segment_for_symbol(symbol: str = "", instrument_key: str = "") -> str:
@@ -268,6 +282,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         self._lock = threading.Lock()
         self._quotes_cache: Dict[str, Dict[str, Any]] = {}
         self._quotes_cache_ts: Dict[str, float] = {}
+        self._funds_cache: Dict[str, Any] = {}
+        self._funds_cache_ts: float = 0.0
         _init_kotak_symbol_maps()
 
     def _get_client(self):
@@ -397,22 +413,32 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         canonical_symbol = _resolve_kotak_trading_symbol(symbol, instrument_key)
         segment = get_exchange_segment_for_symbol(canonical_symbol, instrument_key)
         tick_size = get_tick_size_for_symbol(canonical_symbol, instrument_key)
-        freeze_limit = get_freeze_limit_for_symbol(canonical_symbol, instrument_key)
+        freeze_limit_qty = get_freeze_limit_for_symbol(canonical_symbol, instrument_key)
+        lot_size = get_lot_size_for_symbol(canonical_symbol, instrument_key)
+        freeze_limit_lots = get_freeze_limit_lots_for_symbol(canonical_symbol, instrument_key)
 
-        logger.info(f"[Kotak Neo] Order request: sym='{symbol}' -> canon='{canonical_symbol}', seg='{segment}', qty={quantity}, freeze={freeze_limit}")
+        logger.info(f"[Kotak Neo] Order request: sym='{symbol}' -> canon='{canonical_symbol}', seg='{segment}', qty={quantity}, freeze_qty={freeze_limit_qty} ({freeze_limit_lots} lots @ {lot_size}/lot)")
 
         total_qty = int(quantity)
         if total_qty <= 0:
             return {"success": False, "error": "Invalid quantity <= 0"}
 
-        # Calculate slices according to exchange freeze limit
+        # Calculate slices strictly in multiples of lot size and exchange freeze limit lots (e.g. 54 lots for NIFTY)
         slices = []
-        rem = total_qty
-        while rem > freeze_limit:
-            slices.append(freeze_limit)
-            rem -= freeze_limit
-        if rem > 0:
-            slices.append(rem)
+        if total_qty <= freeze_limit_qty:
+            slices = [total_qty]
+        else:
+            total_lots = max(1, total_qty // lot_size)
+            rem_lots = total_lots
+            while rem_lots > freeze_limit_lots:
+                slices.append(freeze_limit_lots * lot_size)
+                rem_lots -= freeze_limit_lots
+            if rem_lots > 0:
+                slices.append(rem_lots * lot_size)
+            # Ensure no residual remainder lost
+            residual = total_qty - sum(slices)
+            if residual > 0:
+                slices[-1] += residual
 
         if len(slices) > 1:
             logger.info(f"[Kotak Neo] Order Slicing triggered: {total_qty} qty sliced into {len(slices)} orders: {slices}")
@@ -792,6 +818,10 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             return []
 
     def get_funds(self) -> Dict[str, Any]:
+        now_ts = time.time()
+        if self._funds_cache and (now_ts - self._funds_cache_ts) < 2.5:
+            return self._funds_cache
+
         client = self._get_client()
         if client is None:
             return {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
@@ -812,7 +842,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 unavailable = float(data.get("DeliveryMarginPresent") or data.get("CncSellcrdPresent") or 0.0)
                 total = round(avail + used, 2)
 
-                return {
+                res_dict = {
                     "available_margin": avail,
                     "available_cash": avail,
                     "used_margin": used,
@@ -825,10 +855,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     "total_margin": total,
                     "raw": data
                 }
+                self._funds_cache = res_dict
+                self._funds_cache_ts = now_ts
+                return res_dict
             return {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
         except Exception as e:
             logger.error(f"[Kotak Neo] Exception fetching funds: {e}")
-            return {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
+            return self._funds_cache or {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
 
     def get_live_quotes(self, instrument_tokens: List[str]) -> Dict[str, Any]:
         client = self._get_client()
@@ -1034,17 +1067,26 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         with self._lock:
             canonical_symbol = _resolve_kotak_trading_symbol(symbol, instrument_key)
             tick_size = get_tick_size_for_symbol(canonical_symbol, instrument_key)
-            freeze_limit = get_freeze_limit_for_symbol(canonical_symbol, instrument_key)
+            freeze_limit_qty = get_freeze_limit_for_symbol(canonical_symbol, instrument_key)
+            lot_size = get_lot_size_for_symbol(canonical_symbol, instrument_key)
+            freeze_limit_lots = get_freeze_limit_lots_for_symbol(canonical_symbol, instrument_key)
             total_qty = int(quantity)
 
-            # Order slicing in simulation according to exchange freeze limits
+            # Order slicing in simulation strictly in multiples of lot size and freeze limit lots
             slices = []
-            rem = total_qty
-            while rem > freeze_limit:
-                slices.append(freeze_limit)
-                rem -= freeze_limit
-            if rem > 0:
-                slices.append(rem)
+            if total_qty <= freeze_limit_qty:
+                slices = [total_qty]
+            else:
+                total_lots = max(1, total_qty // lot_size)
+                rem_lots = total_lots
+                while rem_lots > freeze_limit_lots:
+                    slices.append(freeze_limit_lots * lot_size)
+                    rem_lots -= freeze_limit_lots
+                if rem_lots > 0:
+                    slices.append(rem_lots * lot_size)
+                residual = total_qty - sum(slices)
+                if residual > 0:
+                    slices[-1] += residual
 
             exec_price = price if price and price > 0 else 100.0
             exec_price = round_to_tick(exec_price, tick_size=tick_size)

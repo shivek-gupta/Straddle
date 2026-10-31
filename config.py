@@ -72,22 +72,42 @@ DEFAULT_LOT_SIZES = {
     "COPPER": 2500,
 }
 
-# Quantity Freeze Limits for Order Slicing
+# Exchange Freeze Limits in Lots
+FREEZE_LIMIT_LOTS = {
+    "NIFTY": 54,        # NSE NIFTY Freeze: 54 lots (3,510 qty @ 65 lot size)
+    "BANKNIFTY": 30,    # NSE BANKNIFTY Freeze: 30 lots (450 qty @ 15 lot size)
+    "FINNIFTY": 40,     # NSE FINNIFTY Freeze: 40 lots (2,600 qty @ 65 lot size)
+    "MIDCPNIFTY": 50,   # NSE MIDCPNIFTY Freeze: 50 lots (6,000 qty @ 120 lot size)
+    "SENSEX": 50,       # BSE SENSEX Freeze: 50 lots (500 qty @ 10 lot size)
+    "BANKEX": 50,       # BSE BANKEX Freeze: 50 lots (750 qty @ 15 lot size)
+    "CRUDEOIL": 100,    # MCX CRUDEOIL: 100 lots (10,000 qty @ 100)
+    "CRUDEOILM": 1000,  # MCX CRUDEOILM: 1000 lots (10,000 qty @ 10)
+    "NATURALGAS": 40,   # MCX NATURALGAS: 40 lots (50,000 qty @ 1250)
+    "NATGASMINI": 200,  # MCX NATGASMINI: 200 lots (50,000 qty @ 250)
+    "GOLD": 100,        # MCX GOLD: 100 lots (100 qty @ 1)
+    "GOLDM": 100,       # MCX GOLDM: 100 lots (10,000 qty @ 100)
+    "SILVER": 20,       # MCX SILVER: 20 lots (600 qty @ 30)
+    "SILVERM": 120,     # MCX SILVERM: 120 lots (600 qty @ 5)
+    "COPPER": 20,       # MCX COPPER: 20 lots (50,000 qty @ 2500)
+}
+
+# Quantity Freeze Limits for Order Slicing (Quantity = Freeze Lots * Lot Size)
 FREEZE_LIMITS = {
-    "NIFTY": 1800,
-    "BANKNIFTY": 900,
-    "FINNIFTY": 1800,
-    "MIDCPNIFTY": 4200,
-    "SENSEX": 1000,
-    "CRUDEOIL": 10000,      # 100 lots
-    "CRUDEOILM": 10000,     # 1000 lots
-    "NATURALGAS": 50000,    # 40 lots
-    "NATGASMINI": 50000,    # 200 lots
-    "GOLD": 100,            # 100 lots
-    "GOLDM": 10000,         # 100 lots
-    "SILVER": 600,          # 20 lots
-    "SILVERM": 600,         # 120 lots
-    "COPPER": 50000,        # 20 lots
+    "NIFTY": 3510,       # 54 lots * 65
+    "BANKNIFTY": 450,    # 30 lots * 15
+    "FINNIFTY": 2600,    # 40 lots * 65
+    "MIDCPNIFTY": 6000,  # 50 lots * 120
+    "SENSEX": 500,       # 50 lots * 10
+    "BANKEX": 750,       # 50 lots * 15
+    "CRUDEOIL": 10000,   # 100 lots * 100
+    "CRUDEOILM": 10000,  # 1000 lots * 10
+    "NATURALGAS": 50000, # 40 lots * 1250
+    "NATGASMINI": 50000, # 200 lots * 250
+    "GOLD": 100,         # 100 lots * 1
+    "GOLDM": 10000,      # 100 lots * 100
+    "SILVER": 600,       # 20 lots * 30
+    "SILVERM": 600,      # 120 lots * 5
+    "COPPER": 50000,     # 20 lots * 2500
 }
 
 # Minimum Price Tick Size per Underlying

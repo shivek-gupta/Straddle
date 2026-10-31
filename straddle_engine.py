@@ -83,12 +83,21 @@ def normalize_time_str(t_str: Any, default: str = "15:29:50") -> str:
 # ==========================================================
 
 FREEZE_LIMIT_LOTS = {
-    "NIFTY": 54,       # NSE NIFTY Freeze: 54 lots (3,510 qty)
-    "BANKNIFTY": 30,   # NSE BANKNIFTY Freeze: 30 lots (450 qty or 900 qty)
-    "FINNIFTY": 40,    # NSE FINNIFTY Freeze: 40 lots (1,000 qty)
-    "MIDCPNIFTY": 50,  # NSE MIDCPNIFTY Freeze: 50 lots
-    "SENSEX": 50,      # BSE SENSEX Freeze: 50 lots
-    "BANKEX": 50,      # BSE BANKEX Freeze: 50 lots
+    "NIFTY": 54,        # NSE NIFTY Freeze: 54 lots (3,510 qty @ 65 lot size)
+    "BANKNIFTY": 30,    # NSE BANKNIFTY Freeze: 30 lots (450 qty @ 15 lot size)
+    "FINNIFTY": 40,     # NSE FINNIFTY Freeze: 40 lots (2,600 qty @ 65 lot size)
+    "MIDCPNIFTY": 50,   # NSE MIDCPNIFTY Freeze: 50 lots (6,000 qty @ 120 lot size)
+    "SENSEX": 50,       # BSE SENSEX Freeze: 50 lots (500 qty @ 10 lot size)
+    "BANKEX": 50,       # BSE BANKEX Freeze: 50 lots (750 qty @ 15 lot size)
+    "CRUDEOIL": 100,    # MCX CRUDEOIL Freeze: 100 lots
+    "CRUDEOILM": 1000,  # MCX CRUDEOILM Freeze: 1000 lots
+    "NATURALGAS": 40,   # MCX NATURALGAS Freeze: 40 lots
+    "NATGASMINI": 200,  # MCX NATGASMINI Freeze: 200 lots
+    "GOLD": 100,        # MCX GOLD Freeze: 100 lots
+    "GOLDM": 100,       # MCX GOLDM Freeze: 100 lots
+    "SILVER": 20,       # MCX SILVER Freeze: 20 lots
+    "SILVERM": 120,     # MCX SILVERM Freeze: 120 lots
+    "COPPER": 20,       # MCX COPPER Freeze: 20 lots
 }
 
 
@@ -606,6 +615,8 @@ class StraddleManager:
         self._order_registry: Dict[str, Dict[str, Any]] = {}
         self._last_state_save_ts: float = 0.0
         self._last_pnl_save_ts: float = 0.0
+        self._cached_margin: Dict[str, Any] = {}
+        self._cached_margin_ts: float = 0.0
 
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -2161,6 +2172,14 @@ class StraddleManager:
                 sid = f"strat_{int(time.time())}"
                 strat_dict["strategy_id"] = sid
 
+            # Normalize underlying asset
+            und = str(strat_dict.get("underlying") or "NIFTY").upper()
+            strat_dict["underlying"] = und
+            if "legs" in strat_dict and isinstance(strat_dict["legs"], list):
+                for leg in strat_dict["legs"]:
+                    if isinstance(leg, dict):
+                        leg["underlying"] = und
+
             idx = next((i for i, s in enumerate(self._strategies) if s.get("strategy_id") == sid), -1)
             if idx >= 0:
                 # Merge existing runtime properties (e.g. positions, status, mtm)
@@ -2192,7 +2211,7 @@ class StraddleManager:
                 self._strategies.append(strat_dict)
 
             self._save_strategies()
-            self._log_event(f"Strategy '{strat_dict.get('name', sid)}' saved successfully.")
+            self._log_event(f"Strategy '{strat_dict.get('name', sid)}' ({und}) saved successfully.")
             return {"success": True, "strategy_id": sid, "strategy": strat_dict}
 
     def calculate_strategy_margin_per_lot(self, strat: Dict[str, Any]) -> float:
@@ -2288,10 +2307,10 @@ class StraddleManager:
                 available_capital = 0.0
 
         if available_capital <= 0:
-            available_capital = 1400000.0
+            return 1 if mult_type != "AUTO" else 0
 
-        auto_lots = int(math.floor((available_capital / total_margin_per_lot) + 0.02))
-        return max(1, auto_lots)
+        auto_lots = int(math.floor(available_capital / total_margin_per_lot))
+        return max(0, auto_lots)
 
 
     def update_strategy_multiplier(
@@ -3949,36 +3968,11 @@ class StraddleManager:
         }
 
         # Quantiply-parity: timeout conversion to market
-        # If N = 0: after trying with limit order, converted to market order immediately.
-        # If N > 0: converted to market order if unfilled after N seconds.
+        # If N = 0: Timeout conversion disabled (Order stays as Limit order in exchange orderbook)
+        # If N > 0: Converted to market/marketable limit order if unfilled after N seconds.
         entry_timeout = int(adv.get("entry_market_timeout_sec") or adv.get("entry_open_for_secs") or 0)
         if order_id and "Limit" in order_type_cfg and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
-            if entry_timeout == 0:
-                # 0 seconds: after trying limit order, immediately convert to market if not filled
-                try:
-                    fill_chk = broker.wait_for_order_fill(str(order_id), timeout_sec=0.05, poll_interval_sec=0.005)
-                    if not fill_chk.get("filled"):
-                        logger.info(f"[Limit 0s Timeout] Entry order {order_id} not filled immediately. Converting to MARKET order...")
-                        mod_res = broker.modify_order(order_id=str(order_id), order_type="MARKET", price=0.0, quantity=total_qty)
-                        if not mod_res.get("success"):
-                            logger.warning(f"[Limit 0s Timeout] Modify failed: {mod_res.get('error')}. Cancelling and punching fresh MARKET order...")
-                            broker.cancel_order(str(order_id))
-                            fresh_res = broker.place_order(
-                                symbol=contract.get("trading_symbol", ""),
-                                instrument_key=contract.get("instrument_key", ""),
-                                transaction_type=side,
-                                quantity=total_qty,
-                                product=prod,
-                                order_type="MARKET",
-                                price=0.0,
-                                tag="to_mkt"
-                            )
-                            if fresh_res.get("order_id"):
-                                order_id = str(fresh_res.get("order_id"))
-                                pos_record["order_id"] = order_id
-                except Exception as ex:
-                    logger.error(f"[Limit 0s Timeout] Error checking immediate fill: {ex}")
-            else:
+            if entry_timeout > 0:
                 threading.Thread(
                     target=self._watch_limit_order_timeout,
                     args=(broker, order_id, entry_timeout, contract.get("trading_symbol", ""), total_qty, side, prod, contract.get("instrument_key", "")),
@@ -4481,30 +4475,36 @@ class StraddleManager:
         product: str = "NRML",
         instrument_key: str = ""
     ):
-        """Quantiply-parity: if order remains OPEN for N seconds (or immediately if N=0), convert to MARKET order."""
-        if not order_id:
+        """Quantiply-parity: if order remains OPEN after N seconds (N > 0), convert to MARKET / Marketable Limit order."""
+        if not order_id or timeout_sec <= 0:
             return
-        if timeout_sec > 0:
-            time.sleep(timeout_sec)
-        else:
-            time.sleep(0.05)
+        time.sleep(timeout_sec)
         try:
-            status_res = broker.wait_for_order_fill(str(order_id), timeout_sec=0.05, poll_interval_sec=0.005)
+            status_res = broker.wait_for_order_fill(str(order_id), timeout_sec=0.5, poll_interval_sec=0.05)
             if not status_res.get("filled"):
-                logger.info(f"[Limit Timeout Watcher] Order {order_id} open after {timeout_sec}s. Converting to MARKET order immediately...")
+                logger.info(f"[Limit Timeout Watcher] Order {order_id} still OPEN after {timeout_sec}s. Converting to Marketable execution...")
                 mod_res = broker.modify_order(order_id=str(order_id), order_type="MARKET", price=0.0, quantity=qty if qty > 0 else None)
                 if not mod_res.get("success"):
-                    logger.warning(f"[Limit Timeout Watcher] Modify order {order_id} failed: {mod_res.get('error')}. Cancelling and punching fresh MARKET order...")
+                    logger.warning(f"[Limit Timeout Watcher] Modify order {order_id} failed: {mod_res.get('error')}. Cancelling and punching Marketable Limit order...")
                     broker.cancel_order(str(order_id))
                     if symbol and qty > 0:
+                        mkt_price = 0.0
+                        try:
+                            quotes = broker.get_live_quotes([instrument_key or symbol])
+                            q_item = quotes.get(instrument_key or symbol, {})
+                            ltp = float(q_item.get("ltp") or q_item.get("last_price") or 0.0)
+                            if ltp > 0:
+                                mkt_price = round_to_tick(ltp * 1.05 if side == "BUY" else max(0.05, ltp * 0.95))
+                        except Exception:
+                            pass
                         broker.place_order(
                             symbol=symbol,
                             instrument_key=instrument_key,
                             transaction_type=side,
                             quantity=qty,
                             product=product,
-                            order_type="MARKET",
-                            price=0.0,
+                            order_type="LIMIT" if mkt_price > 0 else "MARKET",
+                            price=mkt_price,
                             tag="to_mkt"
                         )
         except Exception as e:
@@ -5121,36 +5121,11 @@ class StraddleManager:
             pos.pop("error_message", None)
 
             # Quantiply-parity: timeout conversion to market on exit if order remains open
-            # If N = 0: after trying with limit order, converted to market order immediately.
-            # If N > 0: converted to market order if unfilled after N seconds.
+            # If N = 0: Timeout conversion disabled (Limit order remains active)
+            # If N > 0: Converted to market/marketable limit order if unfilled after N seconds.
             exit_timeout = int(adv.get("exit_market_timeout_sec", 0))
             if order_id and order_type_str == "LIMIT" and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
-                if exit_timeout == 0:
-                    # 0 seconds: after trying limit order, immediately convert to market if not filled
-                    try:
-                        fill_chk = broker.wait_for_order_fill(order_id, timeout_sec=0.05, poll_interval_sec=0.005)
-                        if not fill_chk.get("filled"):
-                            logger.info(f"[Exit Limit 0s Timeout] Order {order_id} not filled immediately. Converting to MARKET order...")
-                            mod_res = broker.modify_order(order_id=order_id, order_type="MARKET", price=0.0, quantity=qty)
-                            if not mod_res.get("success"):
-                                logger.warning(f"[Exit Limit 0s Timeout] Modify failed: {mod_res.get('error')}. Cancelling and punching fresh MARKET order...")
-                                broker.cancel_order(order_id)
-                                fresh_res = broker.place_order(
-                                    symbol=pos.get("symbol", ""),
-                                    instrument_key=pos.get("instrument_key", ""),
-                                    transaction_type=exit_side,
-                                    quantity=qty,
-                                    product=pos.get("product", "NRML"),
-                                    order_type="MARKET",
-                                    price=0.0,
-                                    tag="exit_to_mkt"
-                                )
-                                if fresh_res.get("order_id"):
-                                    order_id = str(fresh_res.get("order_id"))
-                                    pos["exit_order_id"] = order_id
-                    except Exception as ex:
-                        logger.error(f"[Exit Limit 0s Timeout] Error checking immediate fill: {ex}")
-                else:
+                if exit_timeout > 0:
                     threading.Thread(
                         target=self._watch_limit_order_timeout,
                         args=(broker, order_id, exit_timeout, pos.get("symbol", ""), qty, exit_side, pos.get("product", "NRML"), pos.get("instrument_key", "")),
@@ -5749,7 +5724,13 @@ class StraddleManager:
             return filtered
 
     def get_margin_overview(self, client_id: Optional[str] = None) -> Dict[str, Any]:
-        """Return funds and margin utilization from Kotak Neo or Paper adapter."""
+        """Return funds and margin utilization from Kotak Neo or Paper adapter with 2.5s cache."""
+        now_ts = time.time()
+        cached = getattr(self, "_cached_margin", None)
+        cached_ts = getattr(self, "_cached_margin_ts", 0)
+        if cached and (now_ts - cached_ts) < 2.5:
+            return dict(cached)
+
         mode = self._state.get("execution_mode", "LIVE_BROKER")
         
         # Query broker adapter for live funds
@@ -5780,7 +5761,7 @@ class StraddleManager:
         total = round(avail_margin + used, 2)
         pct = round((used / total * 100.0), 2) if total > 0 else 0.0
 
-        return {
+        res = {
             "available_cash": avail_cash,
             "available_margin": avail_margin,
             "collateral_margin": collateral,
@@ -5794,6 +5775,9 @@ class StraddleManager:
             "client_id": client_id or "Kotak Neo Live",
             "mode": mode,
         }
+        self._cached_margin = res
+        self._cached_margin_ts = now_ts
+        return res
 
     def get_adoptable_broker_positions(self, strategy_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -8341,6 +8325,7 @@ class StraddleManager:
                 "underlying_atm_strike": self._state.get("underlying_atm_strike", 22450.0),
                 "last_tick_time": self._state.get("last_tick_time", now_ist_str()),
                 "logs": self._state.get("logs", [])[:50],
+                "margin": self.get_margin_overview(),
             }
 
 

@@ -765,9 +765,33 @@
                 <input type="hidden" id="cfgStrategyId" value="">
                 <!-- Strategy Name Header Bar -->
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:10px 14px; margin-bottom:14px; flex-wrap:wrap;">
-                    <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:280px;">
+                    <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:280px; flex-wrap:wrap;">
                         <span style="font-size:12px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Algo Name:</span>
-                        <input type="text" id="cfgStrategyName" class="straddle-input" style="flex:1; max-width:400px; font-size:13px; font-weight:700; color:#60a5fa;" placeholder="e.g. NIFTY 9:20 Short Straddle">
+                        <input type="text" id="cfgStrategyName" class="straddle-input" style="flex:1; min-width:180px; max-width:320px; font-size:13px; font-weight:700; color:#60a5fa;" placeholder="e.g. NIFTY 9:20 Short Straddle">
+                        <div style="display:flex; align-items:center; gap:6px; margin-left:6px;">
+                            <span style="font-size:12px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Underlying:</span>
+                            <select id="cfgStrategyUnderlying" class="straddle-select" style="min-width:145px; font-weight:700; color:#38bdf8; background:#1e293b; border:1px solid #3b82f6;" onchange="onStrategyUnderlyingChange(this.value)" title="Choose Underlying Index or Commodity">
+                                <optgroup label="NSE / BSE Equity Indices">
+                                    <option value="NIFTY" selected>NIFTY 50</option>
+                                    <option value="BANKNIFTY">BANKNIFTY</option>
+                                    <option value="FINNIFTY">FINNIFTY</option>
+                                    <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+                                    <option value="SENSEX">SENSEX</option>
+                                    <option value="BANKEX">BANKEX</option>
+                                </optgroup>
+                                <optgroup label="MCX Commodities">
+                                    <option value="CRUDEOIL">CRUDE OIL</option>
+                                    <option value="CRUDEOILM">CRUDE OIL MINI</option>
+                                    <option value="NATURALGAS">NATURAL GAS</option>
+                                    <option value="NATGASMINI">NATGAS MINI</option>
+                                    <option value="GOLD">GOLD</option>
+                                    <option value="GOLDM">GOLD MINI</option>
+                                    <option value="SILVER">SILVER</option>
+                                    <option value="SILVERM">SILVER MINI</option>
+                                    <option value="COPPER">COPPER</option>
+                                </optgroup>
+                            </select>
+                        </div>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save strategy settings without placing orders">💾 Save Changes</button>
@@ -1151,7 +1175,7 @@
                                 </div>
                             </div>
                             <div class="straddle-form-group">
-                                <label>Entry with Market order if order Open for (N) secs (0 = immediate):</label>
+                                <label>Convert to Market/Marketable order if unfilled for (N) secs (0 = Keep Limit / Disabled):</label>
                                 <div style="display:flex; align-items:center; gap:8px;">
                                     <input type="number" id="cfgEntryMarketTimeoutSec" class="straddle-input" value="0" min="0" max="300" style="flex:1;">
                                     <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
@@ -1193,7 +1217,7 @@
                                 </div>
                             </div>
                             <div class="straddle-form-group">
-                                <label>Exit with Market order if order Open for (N) secs (0 = immediate):</label>
+                                <label>Convert to Market/Marketable order if unfilled for (N) secs (0 = Keep Limit / Disabled):</label>
                                 <div style="display:flex; align-items:center; gap:8px;">
                                     <input type="number" id="cfgExitMarketTimeoutSec" class="straddle-input" value="0" min="0" max="300" style="flex:1;">
                                     <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
@@ -1425,20 +1449,25 @@
                     <div class="straddle-form-group">
                         <label>Underlying Asset:</label>
                         <select id="newAlgoUnderlying" class="straddle-select">
-                            <option value="NIFTY" selected>NIFTY 50</option>
-                            <option value="BANKNIFTY">BANKNIFTY</option>
-                            <option value="FINNIFTY">FINNIFTY</option>
-                            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
-                            <option value="SENSEX">SENSEX</option>
-                            <option value="CRUDEOIL">Crude Oil (MCX)</option>
-                            <option value="NATURALGAS">Natural Gas (MCX)</option>
-                            <option value="GOLD">Gold (MCX)</option>
-                            <option value="SILVER">Silver (MCX)</option>
-                            <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
-                            <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
-                            <option value="GOLDM">Gold Mini (MCX)</option>
-                            <option value="SILVERM">Silver Mini (MCX)</option>
-                            <option value="COPPER">Copper (MCX)</option>
+                            <optgroup label="NSE / BSE Equity Indices">
+                                <option value="NIFTY" selected>NIFTY 50</option>
+                                <option value="BANKNIFTY">BANKNIFTY</option>
+                                <option value="FINNIFTY">FINNIFTY</option>
+                                <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+                                <option value="SENSEX">SENSEX</option>
+                                <option value="BANKEX">BANKEX</option>
+                            </optgroup>
+                            <optgroup label="MCX Commodities">
+                                <option value="CRUDEOIL">Crude Oil (MCX)</option>
+                                <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
+                                <option value="NATURALGAS">Natural Gas (MCX)</option>
+                                <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
+                                <option value="GOLD">Gold (MCX)</option>
+                                <option value="GOLDM">Gold Mini (MCX)</option>
+                                <option value="SILVER">Silver (MCX)</option>
+                                <option value="SILVERM">Silver Mini (MCX)</option>
+                                <option value="COPPER">Copper (MCX)</option>
+                            </optgroup>
                         </select>
                     </div>
                     <div class="straddle-form-group">
