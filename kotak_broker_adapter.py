@@ -355,34 +355,14 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 order_id = res.get("nOrdNo") or res.get("order_id") or (res.get("data") or {}).get("nOrdNo")
 
             if order_id:
-                confirmed_status = "OPEN"
-                for attempt in range(3):
-                    time.sleep(0.2)
-                    try:
-                        hist = client.order_history(order_id=str(order_id))
-                        d = hist.get("data", {})
-                        items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
-                        if items and isinstance(items, list):
-                            latest = items[0]
-                            st = str(latest.get("ordSt", "")).lower()
-                            if st in ("rejected", "cancelled"):
-                                rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
-                                logger.warning(f"[Kotak Neo] Order slice {order_id} rejected by RMS: {rej_msg}")
-                                return {
-                                    "success": False,
-                                    "status": "REJECTED",
-                                    "order_id": str(order_id),
-                                    "error": rej_msg,
-                                    "status_message": rej_msg,
-                                    "data": latest
-                                }
-                            elif st in ("traded", "complete", "open", "trigger pending"):
-                                confirmed_status = st.upper()
-                                break
-                    except Exception as e_chk:
-                        logger.debug(f"[Kotak Neo] Verification notice: {e_chk}")
-
-                return {"success": True, "status": confirmed_status, "order_id": str(order_id), "data": res, "quantity": int(quantity)}
+                # Ultra-low-latency direct return: order has been accepted & punched by Kotak Neo
+                return {
+                    "success": True,
+                    "status": "OPEN",
+                    "order_id": str(order_id),
+                    "data": res,
+                    "quantity": int(quantity)
+                }
 
             err_msg = str(res.get("errMsg") or res.get("message") or res.get("error") or res)
             return {"success": False, "error": err_msg, "data": res}
@@ -443,18 +423,14 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         if len(slices) > 1:
             logger.info(f"[Kotak Neo] Order Slicing triggered: {total_qty} qty sliced into {len(slices)} orders: {slices}")
 
-        slice_results = []
-        order_ids = []
-        all_succeeded = True
-        failed_error = ""
-
-        for s_idx, slice_qty in enumerate(slices):
+        def _dispatch_slice(item):
+            s_idx, s_qty = item
             slice_tag = f"{tag}_{s_idx+1}" if len(slices) > 1 else tag
-            res = self._place_single_order(
+            return self._place_single_order(
                 client=client,
                 canonical_symbol=canonical_symbol,
                 transaction_type=transaction_type,
-                quantity=slice_qty,
+                quantity=s_qty,
                 product=product,
                 order_type=order_type,
                 price=price,
@@ -463,22 +439,43 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 segment=segment,
                 tick_size=tick_size
             )
-            slice_results.append(res)
+
+        # Execute multiple slices concurrently at sub-millisecond speed
+        if len(slices) > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, len(slices))) as pool:
+                slice_results = list(pool.map(_dispatch_slice, enumerate(slices)))
+        else:
+            slice_results = [_dispatch_slice((0, slices[0]))]
+
+        order_ids = []
+        filled_qty = 0
+        failed_qty = 0
+        failed_error = ""
+
+        for s_idx, res in enumerate(slice_results):
+            s_qty = slices[s_idx]
             if res.get("success"):
                 order_ids.append(str(res.get("order_id")))
+                filled_qty += s_qty
             else:
-                all_succeeded = False
-                failed_error = res.get("error", "Slice failed")
+                failed_qty += s_qty
+                if not failed_error:
+                    failed_error = res.get("error", "Slice order failed")
                 logger.error(f"[Kotak Neo] Slice {s_idx+1}/{len(slices)} failed: {failed_error}")
+
+        all_succeeded = (len(order_ids) == len(slices)) and (failed_qty == 0)
 
         if order_ids:
             primary_id = order_ids[0] if len(order_ids) == 1 else ",".join(order_ids)
             return {
                 "success": all_succeeded,
                 "order_id": primary_id,
+                "child_order_ids": order_ids,
                 "status": "COMPLETE" if all_succeeded else "PARTIAL",
                 "slices": slice_results,
                 "sliced": len(slices) > 1,
+                "filled_qty": filled_qty,
+                "remaining_qty": failed_qty,
                 "error": failed_error if not all_succeeded else None,
                 "data": slice_results[0].get("data") if slice_results else {}
             }

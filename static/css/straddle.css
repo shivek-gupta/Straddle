@@ -1247,19 +1247,46 @@ select:disabled.straddle-select {
 .section-muted-locked {
     opacity: 0.38 !important;
     filter: grayscale(85%) !important;
+    transition: opacity 0.25s ease, filter 0.25s ease !important;
+}
+
+.section-muted-locked input:not(.quantiply-switch input),
+.section-muted-locked select,
+.section-muted-locked textarea,
+.section-muted-locked button:not(.quantiply-switch):not(.quantiply-switch *) {
     pointer-events: none !important;
     user-select: none !important;
-    transition: opacity 0.25s ease, filter 0.25s ease !important;
 }
 
 /* Card Muted & Locked */
 .card-muted-locked {
     opacity: 0.42 !important;
     filter: grayscale(80%) !important;
-    pointer-events: none !important;
-    user-select: none !important;
     border-color: rgba(255, 255, 255, 0.04) !important;
     transition: opacity 0.25s ease, filter 0.25s ease !important;
+}
+
+.card-muted-locked .straddle-form-group,
+.card-muted-locked select,
+.card-muted-locked input:not([type="checkbox"]),
+.card-muted-locked textarea,
+.card-muted-locked button:not(.quantiply-switch):not(.quantiply-switch *) {
+    pointer-events: none !important;
+    user-select: none !important;
+}
+
+/* Ensure ALL quantiply switches and sliders remain fully clickable and vibrant even inside muted cards */
+.card-muted-locked .quantiply-switch,
+.card-muted-locked .quantiply-switch *,
+.section-muted-locked .quantiply-switch,
+.section-muted-locked .quantiply-switch * {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    user-select: auto !important;
+}
+
+#modalMarketDepth {
+    z-index: 200000 !important;
 }
 
 /* Status Badges in Section Headers */

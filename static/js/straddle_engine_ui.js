@@ -5152,6 +5152,15 @@ function onToggleMtmSection(enabled) {
         const ch = document.getElementById("chevron_sec_builder_mtm");
         if (ch) ch.textContent = "▼";
     }
+    // If user re-enables the MTM section and both sub-toggles were OFF, turn them both ON so boxes are active
+    if (enabled) {
+        const tgtToggle = document.getElementById("cfgToggleMtmTarget");
+        const slToggle = document.getElementById("cfgToggleMtmSl");
+        if (tgtToggle && slToggle && !tgtToggle.checked && !slToggle.checked) {
+            tgtToggle.checked = true;
+            slToggle.checked = true;
+        }
+    }
     syncMtmFieldStates();
 }
 window.onToggleMtmSection = onToggleMtmSection;
@@ -6963,6 +6972,7 @@ function openMarketDepthModal(sym, key, ltp, underlying, strike, optType) {
     // Show modal cleanly
     modal.classList.remove("hidden");
     modal.style.setProperty("display", "flex", "important");
+    modal.style.setProperty("z-index", "200000", "important");
 
     // Clear existing timer if any
     if (window._marketDepthTimer) {

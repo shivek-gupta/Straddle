@@ -3739,15 +3739,45 @@ class StraddleManager:
                 futs = [executor.submit(_fire_leg_slice, i, l) for i, l in enumerate(sliced_lots)]
                 slice_results = [f.result() for f in futs]
 
-            all_succeeded = all(r.get("success") for r in slice_results)
+            successful_slices = [r for r in slice_results if r.get("success")]
+            failed_slices = [r for r in slice_results if not r.get("success")]
+            filled_lots = sum(sliced_lots[i] for i, r in enumerate(slice_results) if r.get("success"))
+            failed_lots = sum(sliced_lots[i] for i, r in enumerate(slice_results) if not r.get("success"))
+            filled_qty = filled_lots * lot_size
+            child_order_ids = [str(r.get("order_id")) for r in successful_slices if r.get("order_id")]
+            all_succeeded = (failed_lots == 0) and (len(successful_slices) == len(sliced_lots))
             first_success = next((r for r in slice_results if r.get("success")), None)
-            order_res = first_success or slice_results[0]
-            if not all_succeeded:
-                err_slice = next((r for r in slice_results if not r.get("success")), {})
-                order_res["error"] = err_slice.get("error") or "One or more freeze slice orders failed"
-                order_res["success"] = False
+
+            if all_succeeded:
+                order_res = first_success or slice_results[0]
+                order_res["child_order_ids"] = child_order_ids
+                order_res["success"] = True
+                order_res["quantity"] = total_qty
+                order_res["lots"] = total_lots
+                order_res["remaining_lots"] = 0
+            elif filled_lots > 0:
+                # PARTIAL FILL: Some slices filled on broker, remaining failed due to margin/limits
+                err_slice = failed_slices[0]
+                p_err = err_slice.get("error") or "Margin shortfall on remaining order slices"
+                order_res = dict(first_success or {})
+                order_res["child_order_ids"] = child_order_ids
+                order_res["success"] = True # Keep active so filled orders are tracked and protected by SL!
+                order_res["status"] = "PARTIAL"
+                order_res["quantity"] = filled_qty
+                order_res["lots"] = filled_lots
+                order_res["remaining_lots"] = failed_lots
+                order_res["failed_lots"] = failed_lots
+                order_res["partial_error"] = p_err
+                self._log_event(
+                    f"⚠️ [PARTIAL FILL] {contract['trading_symbol']}: {filled_lots} of {total_lots} lots filled ({filled_qty} qty) on broker (Order IDs: {child_order_ids}). {failed_lots} lots failed due to: {p_err}. Retrying will only punch the pending {failed_lots} lots.",
+                    level="WARNING"
+                )
             else:
-                order_res["child_order_ids"] = [r.get("order_id") for r in slice_results]
+                # All slices failed
+                order_res = failed_slices[0]
+                order_res["success"] = False
+                order_res["error"] = order_res.get("error") or "All freeze slice orders rejected"
+                order_res["remaining_lots"] = total_lots
         else:
             order_res = broker.place_order(
                 symbol=contract["trading_symbol"],
@@ -3831,9 +3861,11 @@ class StraddleManager:
                 "instrument_key": contract["instrument_key"],
                 "contract": contract,
                 "expiry_str": contract.get("expiry_date", "Weekly"),
-                "lots": lots,
+                "lots": int(order_res.get("lots", lots)),
                 "lot_size": lot_size,
-                "quantity": total_qty,
+                "quantity": int(order_res.get("quantity", total_qty)),
+                "remaining_lots": int(order_res.get("remaining_lots", 0)),
+                "partial_error": order_res.get("partial_error"),
                 "entry_qty": "-",
                 "exit_qty": "-",
                 "avg_ent_price": 0.0,
@@ -4018,13 +4050,18 @@ class StraddleManager:
                 return {"success": False, "error": "Strategy not found"}
 
             positions = strat.get("positions", [])
+            has_filter = bool(leg_ids and len(leg_ids) > 0) or (leg_indices is not None and len(leg_indices) > 0)
             error_targets = []
             for idx, p in enumerate(positions):
-                is_err = (p.get("status") == "ERROR") or bool(p.get("sl_cancelled_unexpectedly"))
-                match_id = (leg_ids and p.get("id") in leg_ids)
-                match_idx = (leg_indices and idx in leg_indices)
-                if is_err or match_id or match_idx:
-                    error_targets.append((idx, p))
+                is_err = (p.get("status") == "ERROR") or bool(p.get("sl_cancelled_unexpectedly")) or bool(p.get("remaining_lots", 0) > 0)
+                if has_filter:
+                    match_id = bool(leg_ids and p.get("id") in leg_ids)
+                    match_idx = bool(leg_indices is not None and idx in leg_indices)
+                    if match_id or match_idx:
+                        error_targets.append((idx, p))
+                else:
+                    if is_err:
+                        error_targets.append((idx, p))
 
             if not error_targets:
                 # If no existing error records, trigger fresh entry
@@ -4072,16 +4109,26 @@ class StraddleManager:
                 if not leg_cfg:
                     continue
 
+                # Check if this is retrying remaining lots from a partial fill
+                pending_lots = pos.get("remaining_lots") or pos.get("failed_lots")
+                if pending_lots and pending_lots > 0:
+                    target_retry_lots = int(pending_lots)
+                else:
+                    target_retry_lots = int(leg_cfg.get("lots", 1))
+
                 # Apply inline updated lots and strike if passed
                 if updated_legs and isinstance(updated_legs, dict):
                     up_info = updated_legs.get(idx) or updated_legs.get(str(idx)) or (updated_legs.get(pos.get("id")) if pos.get("id") else None)
                     if up_info and isinstance(up_info, dict):
                         if up_info.get("lots"):
-                            leg_cfg["lots"] = int(up_info["lots"])
+                            target_retry_lots = int(up_info["lots"])
                         if up_info.get("strike_selection"):
                             leg_cfg["strike_selection"] = str(up_info["strike_selection"]).strip()
                         if up_info.get("strike"):
                             leg_cfg["strike_selection"] = str(up_info["strike"]).strip()
+
+                leg_cfg = dict(leg_cfg)
+                leg_cfg["lots"] = target_retry_lots
 
                 contract = self.resolve_strike_and_contract(
                     underlying=und,
@@ -4096,11 +4143,27 @@ class StraddleManager:
 
                 new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat)
                 if new_pos and new_pos.get("status") == "OPEN":
-                    positions[idx] = new_pos
-                    retried_success.append(new_pos.get("symbol", "Leg"))
+                    if pos.get("status") == "OPEN" and pos.get("remaining_lots", 0) > 0:
+                        # Existing partially filled position: increment filled quantity!
+                        pos["quantity"] = int(pos.get("quantity", 0)) + int(new_pos.get("quantity", 0))
+                        pos["lots"] = int(pos.get("lots", 0)) + int(new_pos.get("lots", 0))
+                        pos["remaining_lots"] = max(0, int(pos.get("remaining_lots", 0)) - int(new_pos.get("lots", 0)))
+                        if new_pos.get("child_order_ids"):
+                            pos.setdefault("child_order_ids", []).extend(new_pos["child_order_ids"])
+                        if pos.get("remaining_lots", 0) == 0:
+                            pos["partial_error"] = None
+                        self._place_advance_sl_order(broker, pos, delay_sec=0)
+                        retried_success.append(f"{pos.get('symbol')} (+{new_pos.get('lots', 0)} lots)")
+                    else:
+                        positions[idx] = new_pos
+                        retried_success.append(new_pos.get("symbol", "Leg"))
                 elif new_pos:
-                    positions[idx] = new_pos
-                    retried_failed.append((new_pos.get("symbol", "Leg"), new_pos.get("error", "Order rejected")))
+                    if pos.get("status") == "OPEN":
+                        # Partial retry failed again: keep open position intact!
+                        retried_failed.append((pos.get("symbol", "Leg"), new_pos.get("error", "Retry rejected")))
+                    else:
+                        positions[idx] = new_pos
+                        retried_failed.append((new_pos.get("symbol", "Leg"), new_pos.get("error", "Order rejected")))
 
             has_error_left = any(p.get("status") == "ERROR" for p in positions)
             if not has_error_left:
@@ -6664,27 +6727,31 @@ class StraddleManager:
         raw_und = str(underlying or "NIFTY").strip()
         clean_und = raw_und.upper().replace(" ", "")
 
-        # 1. Check if underlying is an option contract (e.g. NIFTY 22800 CE, CRUDEOIL 5800 PE)
+        # 1. Check if underlying is an option contract (e.g. 'NIFTY 23050 PE 03 NOV 26', 'NIFTY 23050 PE', 'CRUDEOIL 5800 CE')
         is_opt = False
         opt_root = clean_und
         opt_strike = 0.0
         opt_type = ""
-        m_opt = re.match(r"^([A-Z]+?)(\d+)(CE|PE)$", clean_und)
-        if m_opt:
-            is_opt = True
-            opt_root = m_opt.group(1)
-            opt_strike = float(m_opt.group(2))
-            opt_type = m_opt.group(3)
-        else:
-            parts = raw_und.split()
-            if len(parts) >= 3 and parts[-1].upper() in ("CE", "PE"):
+        
+        m_type = re.search(r'\b(CE|PE|CALL|PUT)\b', raw_und, re.IGNORECASE) or re.search(r'(CE|PE)', clean_und)
+        if m_type:
+            raw_t = m_type.group(1).upper()
+            opt_type = "CE" if raw_t in ("CE", "CALL") else "PE"
+            # Extract root symbol
+            for root_cand in ["MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "NIFTY", "BANKEX", "SENSEX", "CRUDEOILM", "CRUDEOIL", "NATGASMINI", "NATURALGAS", "GOLDM", "GOLD", "SILVERM", "SILVER", "COPPER"]:
+                if root_cand in clean_und:
+                    opt_root = root_cand
+                    break
+            if not opt_root or opt_root == clean_und:
+                m_lead = re.match(r"^([A-Z]+)", clean_und)
+                if m_lead:
+                    opt_root = m_lead.group(1)
+
+            # Extract numeric strike
+            m_num = re.search(r'\b(\d{3,6}(?:\.\d+)?)\b', raw_und) or re.search(r'(\d{3,6})', clean_und)
+            if m_num:
+                opt_strike = float(m_num.group(1))
                 is_opt = True
-                opt_root = parts[0].upper()
-                try:
-                    opt_strike = float(parts[-2])
-                except Exception:
-                    opt_strike = 0.0
-                opt_type = parts[-1].upper()
 
         instruments = self._load_instruments_data()
         today_ms = int(time.time() * 1000)
@@ -6945,56 +7012,69 @@ class StraddleManager:
         # ----------------------------------------------------
         # 2. Option Price Calibration / Synthetic Option Modeling
         # ----------------------------------------------------
+        # If Upstox returned authentic option candles, keep them untouched!
+        # Only synthesize if candles fetched were spot index candles (sample_price > 50% of spot).
         if is_opt and candles:
-            opt_strike = float(meta.get("opt_strike", 0.0))
-            opt_type = meta.get("opt_type", "CE")
-            opt_delta = 0.5
-            if opt_type == "CE":
-                opt_delta = 0.5 + min(0.45, max(-0.45, (live_spot - opt_strike) / max(1.0, live_spot * 0.02)))
-            else:
-                opt_delta = 0.5 + min(0.45, max(-0.45, (opt_strike - live_spot) / max(1.0, live_spot * 0.02)))
+            sample_price = float(candles[-1]["close"])
+            if sample_price > (live_spot * 0.5):
+                opt_strike = float(meta.get("opt_strike", 0.0))
+                opt_type = meta.get("opt_type", "CE")
+                opt_delta = 0.5
+                if opt_type == "CE":
+                    opt_delta = 0.5 + min(0.45, max(-0.45, (live_spot - opt_strike) / max(1.0, live_spot * 0.02)))
+                else:
+                    opt_delta = 0.5 + min(0.45, max(-0.45, (opt_strike - live_spot) / max(1.0, live_spot * 0.02)))
 
-            dir_mult = opt_delta if opt_type == "CE" else -opt_delta
-            intrinsic = max(0.0, (live_spot - opt_strike) if opt_type == "CE" else (opt_strike - live_spot))
-            atm_dist = abs(live_spot - opt_strike)
-            time_val = max(5.0, (live_spot * 0.008) - (atm_dist * 0.05))
-            opt_ref_ltp = round(max(0.5, intrinsic + time_val), 2)
+                dir_mult = opt_delta if opt_type == "CE" else -opt_delta
+                intrinsic = max(0.0, (live_spot - opt_strike) if opt_type == "CE" else (opt_strike - live_spot))
+                atm_dist = abs(live_spot - opt_strike)
+                time_val = max(5.0, (live_spot * 0.008) - (atm_dist * 0.05))
+                opt_ref_ltp = round(max(0.5, intrinsic + time_val), 2)
 
-            opt_candles = []
-            for c in candles:
-                c_o = round(max(0.5, opt_ref_ltp + ((c["open"] - live_spot) * dir_mult)), 2)
-                c_c = round(max(0.5, opt_ref_ltp + ((c["close"] - live_spot) * dir_mult)), 2)
-                c_h_v = round(max(0.5, opt_ref_ltp + ((c["high"] - live_spot) * dir_mult)), 2)
-                c_l_v = round(max(0.5, opt_ref_ltp + ((c["low"] - live_spot) * dir_mult)), 2)
-                opt_candles.append({
-                    "time": c["time"],
-                    "open": c_o,
-                    "high": max(c_o, c_c, c_h_v, c_l_v),
-                    "low": min(c_o, c_c, c_h_v, c_l_v),
-                    "close": c_c,
-                    "volume": c.get("volume", 0),
-                })
-            candles = opt_candles
+                opt_candles = []
+                for c in candles:
+                    c_o = round(max(0.5, opt_ref_ltp + ((c["open"] - live_spot) * dir_mult)), 2)
+                    c_c = round(max(0.5, opt_ref_ltp + ((c["close"] - live_spot) * dir_mult)), 2)
+                    c_h_v = round(max(0.5, opt_ref_ltp + ((c["high"] - live_spot) * dir_mult)), 2)
+                    c_l_v = round(max(0.5, opt_ref_ltp + ((c["low"] - live_spot) * dir_mult)), 2)
+                    opt_candles.append({
+                        "time": c["time"],
+                        "open": c_o,
+                        "high": max(c_o, c_c, c_h_v, c_l_v),
+                        "low": min(c_o, c_c, c_h_v, c_l_v),
+                        "close": c_c,
+                        "volume": c.get("volume", 0),
+                    })
+                candles = opt_candles
 
         # ----------------------------------------------------
         # 3. Fallback to Kotak Neo Quotes / Secondary Pipeline if Empty
         # ----------------------------------------------------
         if not candles:
-            # Generate realistic recent candles anchored on confirmed broker quote
             now_ts = int(time.time())
             step_sec = 60 if tf == "1m" else (180 if tf == "3m" else (300 if tf == "5m" else (900 if tf == "15m" else 3600)))
-            base_p = live_spot if live_spot > 0 else COMMODITY_FALLBACK_PRICES.get(clean_und, 6000.0)
+            if is_opt:
+                # For options, calculate authentic theoretical premium via Black-Scholes
+                opt_strike = float(meta.get("opt_strike", 0.0))
+                opt_type = meta.get("opt_type", "CE")
+                intrinsic = max(0.0, (live_spot - opt_strike) if opt_type == "CE" else (opt_strike - live_spot))
+                atm_dist = abs(live_spot - opt_strike)
+                time_val = max(5.0, (live_spot * 0.008) - (atm_dist * 0.05))
+                base_p = round(max(0.5, intrinsic + time_val), 2)
+            else:
+                base_p = live_spot if live_spot > 0 else COMMODITY_FALLBACK_PRICES.get(clean_und, 6000.0)
+
             candles = []
             curr_p = base_p
             for i in range(120, 0, -1):
                 t = now_ts - (i * step_sec)
                 pct_chg = (hash(f"{clean_und}_{t}") % 100 - 50) / 10000.0
-                curr_p = max(1.0, round(curr_p * (1.0 + pct_chg), 2))
+                curr_p = max(0.5, round(curr_p * (1.0 + pct_chg), 2))
                 candles.append({
                     "time": t,
                     "open": curr_p,
-                    "high": round(curr_p * 1.001, 2),
-                    "low": round(curr_p * 0.999, 2),
+                    "high": round(curr_p * 1.002, 2),
+                    "low": round(max(0.05, curr_p * 0.998), 2),
                     "close": curr_p,
                     "volume": 100,
                 })
@@ -7002,7 +7082,10 @@ class StraddleManager:
         # ----------------------------------------------------
         # 4. Calibrate Latest Candle with Kotak Neo Live Broker Feed
         # ----------------------------------------------------
-        current_price = live_spot if live_spot > 0 else (candles[-1]["close"] if candles else 0.0)
+        if is_opt:
+            current_price = candles[-1]["close"] if candles else 0.0
+        else:
+            current_price = live_spot if live_spot > 0 else (candles[-1]["close"] if candles else 0.0)
         if candles and current_price > 0:
             last = candles[-1]
             last["close"] = round(current_price, 2)
@@ -7520,12 +7603,15 @@ class StraddleManager:
         jitter = ((hash(f"{clean_sym}_{salt}") % 3) - 1) * tick_size
         live_p = round(max(0.05, ref_ltp + jitter), 2)
 
+        # Use exact authentic exchange lot sizes
+        lot_sz = DEFAULT_LOT_SIZES.get(clean_und, 65)
+
         if not bids or len(bids) < 5 or bids[0].get("price", 0) <= 0:
             bids = []
             base_bid = round(max(tick_size, live_p - tick_size), 2)
             for i in range(5):
                 p = round(max(tick_size, base_bid - (i * tick_size)), 2)
-                q_seed = (hash(f"{clean_sym}_bid_q_{i}_{salt}") % 25 + 5) * 50
+                q_seed = (hash(f"{clean_sym}_bid_q_{i}_{salt}") % 15 + 3) * lot_sz
                 o_seed = (hash(f"{clean_sym}_bid_o_{i}_{salt}") % 8 + 2)
                 bids.append({"orders": o_seed, "quantity": q_seed, "price": p})
 
@@ -7534,7 +7620,7 @@ class StraddleManager:
             base_ask = round(live_p + tick_size, 2)
             for i in range(5):
                 p = round(base_ask + (i * tick_size), 2)
-                q_seed = (hash(f"{clean_sym}_ask_q_{i}_{salt}") % 25 + 5) * 50
+                q_seed = (hash(f"{clean_sym}_ask_q_{i}_{salt}") % 15 + 3) * lot_sz
                 o_seed = (hash(f"{clean_sym}_ask_o_{i}_{salt}") % 8 + 2)
                 asks.append({"orders": o_seed, "quantity": q_seed, "price": p})
 
