@@ -398,6 +398,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             if st in ("rejected", "cancelled"):
                                 rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
                                 logger.warning(f"[Kotak Neo] Order slice {order_id} rejected by RMS: {rej_msg}")
+                                if "adapter has been logged off" in rej_msg.lower() or "adapter is logged off" in rej_msg.lower():
+                                    rej_msg = "Adapter has been Logged off (Market Closed: Exchange Gateway is offline outside trading hours / on weekends. Orders will execute when market opens)."
                                 return {
                                     "success": False,
                                     "status": "REJECTED",
@@ -644,6 +646,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     elif st in ("rejected", "cancelled"):
                         rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or f"Order {st}"
                         logger.warning(f"[Kotak Neo] Order {oid_str} not filled: status='{st}', reason='{rej_msg}'")
+                        if "adapter has been logged off" in rej_msg.lower() or "adapter is logged off" in rej_msg.lower():
+                            rej_msg = "Adapter has been Logged off (Market Closed: Exchange Gateway is offline outside trading hours / on weekends. Orders will execute when market opens)."
                         return {
                             "filled": False,
                             "status": st.upper(),

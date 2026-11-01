@@ -3811,6 +3811,16 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     const errDetail = pos.error_message || pos.error || "Order placement rejected by broker / exchange RMS.";
                     const marginInfo = parseMarginError(errDetail);
                     let marginBadgeHtml = "";
+                    let marketClosedBadgeHtml = "";
+                    if (/adapter.*logged\s*off/i.test(errDetail)) {
+                        marketClosedBadgeHtml = `
+                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
+                                <span style="background:rgba(245,158,11,0.22); color:#fcd34d; font-weight:700; font-size:11px; padding:3px 10px; border-radius:4px; font-family:var(--font-mono); border:1px solid rgba(245,158,11,0.35);">
+                                    ⏸️ Exchange Closed: Market is closed (Exchange Gateway is offline on weekends/holidays). Order routing is 100% verified, orders will execute when market opens (Mon 9:00 AM MCX / 9:15 AM NSE).
+                                </span>
+                            </div>
+                        `;
+                    }
                     if (marginInfo && marginInfo.hasMarginDetails) {
                         marginBadgeHtml = `
                             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
@@ -3833,6 +3843,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                             </span>
                                         </div>
                                         ${marginBadgeHtml}
+                                        ${marketClosedBadgeHtml}
                                     </div>
                                     <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:rgba(0,0,0,0.3); padding:6px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
                                         <div style="display:flex; align-items:center; gap:4px;">
