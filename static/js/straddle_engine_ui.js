@@ -4728,8 +4728,16 @@ function populateStraddleSettingsForm(s) {
         cushionInput.value = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? s.cushion_margin : 15000;
     }
     updateFormAutoMultiplierPreview();
-    setStraddleTimeInputValue("cfgStartTime", s.start_time || "09:15:56");
-    setStraddleTimeInputValue("cfgEndTime", s.end_time || "15:29:50");
+    const curUnd = (s.underlying || "NIFTY").toUpperCase();
+    const isComm = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(curUnd);
+    const defaultSt = isComm ? "09:00:00" : "09:15:56";
+    const defaultEt = isComm ? "23:30:00" : "15:29:50";
+    let initSt = s.start_time || defaultSt;
+    let initEt = s.end_time || defaultEt;
+    if (isComm && (initEt === "15:29:50" || initEt === "15:30:00")) initEt = "23:30:00";
+    if (isComm && initSt === "09:15:56") initSt = "09:00:00";
+    setStraddleTimeInputValue("cfgStartTime", initSt);
+    setStraddleTimeInputValue("cfgEndTime", initEt);
     initStraddleTimeSteppers();
 
     document.getElementById("cfgToggleMoveSlToCost").checked = !!s.move_sl_to_cost;
@@ -9269,6 +9277,47 @@ window.resetBasketAutoName = resetBasketAutoName;
 // =========================================================================
 // STRATEGY BUILDER MULTIPLIER MODE & CUSHION MARGIN HANDLERS
 // =========================================================================
+
+function onStrategyUnderlyingChange(newUnd) {
+    if (!newUnd) return;
+    const und = newUnd.toUpperCase();
+    const isComm = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(und);
+    
+    // Auto-adjust start/end times if they were at defaults
+    const startEl = document.getElementById("cfgStartTime");
+    const endEl = document.getElementById("cfgEndTime");
+    if (isComm) {
+        if (startEl && (startEl.value === "09:15:56" || startEl.value === "09:15:00")) {
+            setStraddleTimeInputValue("cfgStartTime", "09:00:00");
+        }
+        if (endEl && (endEl.value === "15:29:50" || endEl.value === "15:30:00")) {
+            setStraddleTimeInputValue("cfgEndTime", "23:30:00");
+        }
+    } else {
+        if (startEl && startEl.value === "09:00:00") {
+            setStraddleTimeInputValue("cfgStartTime", "09:15:56");
+        }
+        if (endEl && (endEl.value === "23:30:00" || endEl.value === "23:55:00")) {
+            setStraddleTimeInputValue("cfgEndTime", "15:29:50");
+        }
+    }
+
+    // Update underlying in active strategy in memory
+    if (window._straddleState && window._straddleState.activeStrategy) {
+        window._straddleState.activeStrategy.underlying = und;
+    }
+
+    // Update all leg rows underlying selects if present
+    document.querySelectorAll(".leg-underlying-select").forEach(sel => {
+        sel.value = und;
+    });
+
+    // Re-calculate margin estimate
+    if (typeof renderStrategyMarginEstimate === "function") {
+        renderStrategyMarginEstimate();
+    }
+}
+window.onStrategyUnderlyingChange = onStrategyUnderlyingChange;
 
 function setFormMultiplierMode(mode, syncToServer = true) {
     const isManual = (mode === "MANUAL");

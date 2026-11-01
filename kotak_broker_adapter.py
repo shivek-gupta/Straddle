@@ -163,7 +163,7 @@ def _resolve_kotak_trading_symbol(symbol: str, instrument_key: str = "") -> str:
 
 def get_tick_size_for_symbol(symbol: str = "", instrument_key: str = "") -> float:
     s = f"{symbol} {instrument_key}".upper()
-    for comm, ts in getattr(config, "TICK_SIZES", {}).items():
+    for comm, ts in sorted(getattr(config, "TICK_SIZES", {}).items(), key=lambda x: len(x[0]), reverse=True):
         if comm in s:
             return ts
     return 0.05
@@ -171,7 +171,7 @@ def get_tick_size_for_symbol(symbol: str = "", instrument_key: str = "") -> floa
 
 def get_lot_size_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
     s = f"{symbol} {instrument_key}".upper()
-    for und, ls in getattr(config, "DEFAULT_LOT_SIZES", {}).items():
+    for und, ls in sorted(getattr(config, "DEFAULT_LOT_SIZES", {}).items(), key=lambda x: len(x[0]), reverse=True):
         if und in s:
             return ls
     return 65 if "NIFTY" in s else 15
@@ -179,7 +179,7 @@ def get_lot_size_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
 
 def get_freeze_limit_lots_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
     s = f"{symbol} {instrument_key}".upper()
-    for und, fl_lots in getattr(config, "FREEZE_LIMIT_LOTS", {}).items():
+    for und, fl_lots in sorted(getattr(config, "FREEZE_LIMIT_LOTS", {}).items(), key=lambda x: len(x[0]), reverse=True):
         if und in s:
             return fl_lots
     return 54 if "NIFTY" in s else 30

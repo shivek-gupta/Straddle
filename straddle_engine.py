@@ -28,7 +28,18 @@ from typing import Dict, Any, List, Optional, Tuple
 import concurrent.futures
 
 import config
-from kotak_broker_adapter import get_broker_adapter, BaseBrokerAdapter, round_to_tick, KotakNeoBrokerAdapter, PaperBrokerAdapter, _resolve_kotak_trading_symbol
+from kotak_broker_adapter import (
+    get_broker_adapter,
+    BaseBrokerAdapter,
+    round_to_tick,
+    KotakNeoBrokerAdapter,
+    PaperBrokerAdapter,
+    _resolve_kotak_trading_symbol,
+    get_lot_size_for_symbol,
+    get_freeze_limit_lots_for_symbol,
+    get_tick_size_for_symbol,
+    get_exchange_segment_for_symbol,
+)
 import kotak_auth
 
 logger = logging.getLogger("straddle_engine")
@@ -134,7 +145,7 @@ def slice_quantity_by_freeze(total_qty: int, lot_size: int, underlying: str = "N
     Slices total quantity into quantities compliant with exchange freeze limit.
     """
     if lot_size <= 0:
-        lot_size = 65 if "NIFTY" in str(underlying).upper() else 15
+        lot_size = get_lot_size_for_symbol(str(underlying).upper())
     total_lots = max(1, total_qty // lot_size)
     lot_slices = slice_lots_by_freeze(total_lots, underlying)
     return [l * lot_size for l in lot_slices]
@@ -1258,19 +1269,32 @@ class StraddleManager:
             target_exp_ms = expiries[0]["expiry_ms"]
 
         # Find matching instrument
+        is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+        target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
+
         matched = None
         for r in instruments:
-            if (
-                r.get("segment") in ("NSE_FO", "BSE_FO")
-                and r.get("name") == clean_und
-                and str(r.get("instrument_type", "")).upper() == clean_opt
-                and abs(float(r.get("strike_price", 0.0)) - clean_strike) < 0.5
-            ):
-                if target_exp_ms and r.get("expiry") == target_exp_ms:
-                    matched = r
-                    break
-                elif not matched:
-                    matched = r
+            if r.get("segment") != target_seg:
+                continue
+            if str(r.get("instrument_type", "")).upper() != clean_opt:
+                continue
+            if abs(float(r.get("strike_price", 0.0)) - clean_strike) >= 0.5:
+                continue
+            
+            ts = str(r.get("trading_symbol", "")).upper()
+            nm = str(r.get("name", "")).upper().replace(" ", "")
+            if target_seg == "MCX_FO":
+                if not ts.startswith(clean_und + " "):
+                    continue
+            else:
+                if nm != clean_und and not ts.startswith(clean_und + " "):
+                    continue
+
+            if target_exp_ms and r.get("expiry") == target_exp_ms:
+                matched = r
+                break
+            elif not matched:
+                matched = r
 
         # Fallback metadata if not in instruments
         lot_size = DEFAULT_LOT_SIZES.get(clean_und, 65)
@@ -1389,19 +1413,32 @@ class StraddleManager:
             if not target_exp_ms and expiries:
                 target_exp_ms = expiries[0]["expiry_ms"]
 
+            is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+            target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
+
             matched = None
             for r in instruments:
-                if (
-                    r.get("segment") in ("NSE_FO", "BSE_FO")
-                    and r.get("name") == clean_und
-                    and str(r.get("instrument_type", "")).upper() == clean_opt
-                    and abs(float(r.get("strike_price", 0.0)) - clean_strike) < 0.5
-                ):
-                    if target_exp_ms and r.get("expiry") == target_exp_ms:
-                        matched = r
-                        break
-                    elif not matched:
-                        matched = r
+                if r.get("segment") != target_seg:
+                    continue
+                if str(r.get("instrument_type", "")).upper() != clean_opt:
+                    continue
+                if abs(float(r.get("strike_price", 0.0)) - clean_strike) >= 0.5:
+                    continue
+                
+                ts = str(r.get("trading_symbol", "")).upper()
+                nm = str(r.get("name", "")).upper().replace(" ", "")
+                if target_seg == "MCX_FO":
+                    if not ts.startswith(clean_und + " "):
+                        continue
+                else:
+                    if nm != clean_und and not ts.startswith(clean_und + " "):
+                        continue
+
+                if target_exp_ms and r.get("expiry") == target_exp_ms:
+                    matched = r
+                    break
+                elif not matched:
+                    matched = r
 
             lot_size = DEFAULT_LOT_SIZES.get(clean_und, 65)
             exp_info = expiry_map.get(target_exp_ms, {})
@@ -2042,7 +2079,12 @@ class StraddleManager:
         multiple_strike_selection: str = "none",
     ) -> Optional[Dict[str, Any]]:
         """Resolves the exact option contract matching strike, 500/100 multiple, and expiry."""
-        clean_und = underlying.upper()
+        clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
+        if clean_und == "CRUDE":
+            clean_und = "CRUDEOIL"
+        elif clean_und == "NATGAS":
+            clean_und = "NATURALGAS"
+
         step = STRIKE_STEPS.get(clean_und, 50)
         spot_price = self._get_underlying_spot_price(clean_und)
         atm_strike = round(spot_price / step) * step
@@ -2100,33 +2142,82 @@ class StraddleManager:
 
         target_expiry_ms = custom_expiry_ms
         if target_expiry_ms is None:
-            if expiry_type.lower() == "next weekly" and len(all_expiries) > 1:
-                target_expiry_ms = all_expiries[1]["expiry_ms"]
-            elif expiry_type.lower() == "monthly" and len(all_expiries) >= 4:
-                target_expiry_ms = all_expiries[3]["expiry_ms"]
+            if expiry_type.lower() in ("next weekly", "next"):
+                target_expiry_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
+            elif expiry_type.lower() == "monthly":
+                monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly"), None)
+                if monthly_exp:
+                    target_expiry_ms = monthly_exp
+                elif len(all_expiries) >= 4:
+                    target_expiry_ms = all_expiries[3]["expiry_ms"]
+                else:
+                    target_expiry_ms = all_expiries[0]["expiry_ms"]
             else:
                 target_expiry_ms = all_expiries[0]["expiry_ms"]
 
-        candidates = [
-            r for r in instruments
-            if r.get("segment") == "NSE_FO"
-            and r.get("name") == clean_und
-            and r.get("instrument_type") == option_type.upper()
-            and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
-        ]
+        is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+        target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
+
+        if target_seg == "MCX_FO":
+            candidates = [
+                r for r in instruments
+                if r.get("segment") == "MCX_FO"
+                and r.get("instrument_type") == option_type.upper()
+                and str(r.get("trading_symbol", "")).upper().startswith(clean_und + " ")
+                and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
+            ]
+            if not candidates and target_expiry_ms is not None:
+                candidates = [
+                    r for r in instruments
+                    if r.get("segment") == "MCX_FO"
+                    and r.get("instrument_type") == option_type.upper()
+                    and str(r.get("trading_symbol", "")).upper().startswith(clean_und + " ")
+                ]
+        elif target_seg == "BSE_FO":
+            candidates = [
+                r for r in instruments
+                if r.get("segment") == "BSE_FO"
+                and r.get("instrument_type") == option_type.upper()
+                and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
+                and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
+            ]
+            if not candidates and target_expiry_ms is not None:
+                candidates = [
+                    r for r in instruments
+                    if r.get("segment") == "BSE_FO"
+                    and r.get("instrument_type") == option_type.upper()
+                    and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
+                ]
+        else:
+            candidates = [
+                r for r in instruments
+                if r.get("segment") == "NSE_FO"
+                and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
+                and r.get("instrument_type") == option_type.upper()
+                and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
+            ]
+            if not candidates and target_expiry_ms is not None:
+                candidates = [
+                    r for r in instruments
+                    if r.get("segment") == "NSE_FO"
+                    and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
+                    and r.get("instrument_type") == option_type.upper()
+                ]
 
         if not candidates:
             return None
 
         best_match = min(candidates, key=lambda c: abs(float(c.get("strike_price", 0.0)) - target_strike))
+        resolved_lot_size = int(best_match.get("lot_size") or get_lot_size_for_symbol(best_match.get("trading_symbol", clean_und), best_match.get("instrument_key", "")))
         return {
             "instrument_key": best_match["instrument_key"],
             "trading_symbol": best_match["trading_symbol"],
             "strike_price": float(best_match["strike_price"]),
-            "lot_size": int(best_match.get("lot_size", DEFAULT_LOT_SIZES.get(clean_und, 65))),
+            "lot_size": resolved_lot_size,
             "expiry_ms": best_match.get("expiry"),
             "option_type": option_type.upper(),
             "underlying": clean_und,
+            "segment": target_seg.lower(),
         }
 
     # ==========================================================
@@ -3494,8 +3585,22 @@ class StraddleManager:
 
     def _is_within_trading_hours(self, strat: Dict[str, Any]) -> bool:
         now_sec = parse_time_to_seconds(now_ist_str())
-        st_sec = parse_time_to_seconds(strat.get("start_time", "09:15:00"), 9 * 3600 + 15 * 60)
-        et_sec = parse_time_to_seconds(strat.get("end_time", "15:29:50"), 15 * 3600 + 29 * 60 + 50)
+        und = str(strat.get("underlying", "NIFTY")).upper()
+        is_comm = und in COMMODITY_SYMBOLS or any(c in und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+        
+        default_start = "09:00:00" if is_comm else "09:15:00"
+        default_end = "23:30:00" if is_comm else "15:29:50"
+        
+        raw_start = strat.get("start_time")
+        raw_end = strat.get("end_time")
+        
+        if is_comm and (not raw_end or "15:30" in str(raw_end) or "15:29" in str(raw_end)):
+            raw_end = "23:30:00"
+        if is_comm and (not raw_start or "09:15" in str(raw_start)):
+            raw_start = "09:00:00"
+
+        st_sec = parse_time_to_seconds(raw_start or default_start, (9 * 3600) if is_comm else (9 * 3600 + 15 * 60))
+        et_sec = parse_time_to_seconds(raw_end or default_end, (23 * 3600 + 30 * 60) if is_comm else (15 * 3600 + 29 * 60 + 50))
         return st_sec <= now_sec <= et_sec
 
     def _execute_strategy_entry(self, strat: Dict[str, Any]):
@@ -3777,8 +3882,8 @@ class StraddleManager:
             else:
                 raw_limit = max(0.05, ltp * (1.0 - buffer_val / 100.0))
         
-        # Strictly enforce 0.05 tick size
-        limit_price = round_to_tick(raw_limit, 0.05)
+        # Enforce exchange-mandated tick size (1.0 for Gold/Silver/Crude, 0.10 for NatGas, 0.05 for NSE)
+        limit_price = round_to_tick(raw_limit, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
 
         tag_prefix = "re" if is_re_entry else "ent"
         und_name = contract.get("underlying") or leg_cfg.get("underlying") or "NIFTY"
@@ -4032,6 +4137,8 @@ class StraddleManager:
             "product": prod,
             "symbol": contract["trading_symbol"],
             "instrument_key": contract["instrument_key"],
+            "underlying": und_name,
+            "exchange_segment": contract.get("segment") or get_exchange_segment_for_symbol(contract.get("trading_symbol", ""), contract.get("instrument_key", "")),
             "contract": contract,
             "expiry_str": contract.get("expiry_date", "Weekly"),
             "lots": lots,
@@ -5183,23 +5290,26 @@ class StraddleManager:
                     raw_exit = ltp * (1.0 + exit_buffer_val / 100.0)
                 else:
                     raw_exit = max(0.05, ltp * (1.0 - exit_buffer_val / 100.0))
-            exit_price_req = round_to_tick(raw_exit, 0.05)
+            exit_price_req = round_to_tick(raw_exit, symbol=pos.get("symbol", ""), instrument_key=pos.get("instrument_key", ""))
             order_type_str = "LIMIT"
         else:
             exit_price_req = 0.0
             order_type_str = "MARKET"
 
         # Determine underlying asset for freeze calculation
-        und = "NIFTY"
-        sym_u = str(pos.get("symbol", "")).upper()
-        for u in ("BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX", "NIFTY"):
-            if u in sym_u:
-                und = u
-                break
+        und = pos.get("underlying")
+        if not und:
+            sym_u = str(pos.get("symbol", "")).upper()
+            for u in sorted(list(DEFAULT_LOT_SIZES.keys()), key=lambda x: len(x), reverse=True):
+                if u in sym_u:
+                    und = u
+                    break
+            if not und:
+                und = "NIFTY"
 
         lot_size = int(pos.get("lot_size") or 0)
         if lot_size <= 0:
-            lot_size = 65 if "NIFTY" in und else 15
+            lot_size = get_lot_size_for_symbol(pos.get("symbol", ""), pos.get("instrument_key", ""))
 
         qty_slices = slice_quantity_by_freeze(qty, lot_size, und)
 
@@ -8100,10 +8210,23 @@ class StraddleManager:
                 sched_days = strat.get("schedule_days", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
                 is_day_scheduled = (today_name in sched_days)
 
-                st = normalize_time_str(strat.get("start_time"), "09:15:56")
-                et = normalize_time_str(strat.get("end_time"), "15:29:50")
-                st_sec = parse_time_to_seconds(st, 9 * 3600 + 15 * 60 + 56)
-                et_sec = parse_time_to_seconds(et, 15 * 3600 + 29 * 60 + 50)
+                und_eval = str(strat.get("underlying", "NIFTY")).upper()
+                is_comm_strat = und_eval in COMMODITY_SYMBOLS or any(c in und_eval for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+                
+                default_strat_st = "09:00:00" if is_comm_strat else "09:15:56"
+                default_strat_et = "23:30:00" if is_comm_strat else "15:29:50"
+                
+                raw_st = strat.get("start_time")
+                raw_et = strat.get("end_time")
+                if is_comm_strat and (not raw_et or "15:30" in str(raw_et) or "15:29" in str(raw_et)):
+                    raw_et = "23:30:00"
+                if is_comm_strat and (not raw_st or "09:15" in str(raw_st)):
+                    raw_st = "09:00:00"
+
+                st = normalize_time_str(raw_st or default_strat_st, default_strat_st)
+                et = normalize_time_str(raw_et or default_strat_et, default_strat_et)
+                st_sec = parse_time_to_seconds(st, (9 * 3600) if is_comm_strat else (9 * 3600 + 15 * 60 + 56))
+                et_sec = parse_time_to_seconds(et, (23 * 3600 + 30 * 60) if is_comm_strat else (15 * 3600 + 29 * 60 + 50))
                 strat_status = strat.get("status", "READY")
                 strat_positions = strat.get("positions", [])
 
