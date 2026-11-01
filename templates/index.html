@@ -2516,6 +2516,10 @@
                         <span id="aiStrategistBadgeState" style="background:#475569; color:#f8fafc; font-size:9.5px; padding:1px 6px; border-radius:4px; font-weight:800; letter-spacing:0.5px;">READY</span>
                     </button>
 
+                    <button type="button" id="btnToggleChartHeader" class="straddle-btn" onclick="toggleChartHeaderCollapse()" style="padding:4px 10px; font-size:11.5px; background:#1e293b; border:1px solid rgba(255,255,255,0.18); color:#cbd5e1; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Collapse/Expand topbar to maximize chart space">
+                        <span id="iconChartHeaderCollapse">▲</span>
+                        <span id="lblChartHeaderCollapse">Compact</span>
+                    </button>
                     <button type="button" class="straddle-btn btn-outline" onclick="reloadActiveCandlestickChart()" style="padding:4px 10px; font-size:11.5px;" title="Reload historical candles">🔄 Refresh</button>
                     <button type="button" class="straddle-modal-close" onclick="closeLiveChartModal()" style="font-size:20px; font-weight:800; color:#f8fafc; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.25); border-radius:6px; cursor:pointer; padding:3px 12px; line-height:1; transition:all 0.15s ease;" title="Close Chart (Esc)">✕</button>
                 </div>
@@ -2635,7 +2639,7 @@
             </div>
 
             <!-- Real-Time Derivatives & Straddle Mispricing Intelligence Strip -->
-            <div style="padding:6px 20px; background:#080d1a; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; font-size:11.5px;">
+            <div id="chartDerivativesStrip" style="padding:6px 20px; background:#080d1a; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; font-size:11.5px;">
                 <!-- Left: Max Pain & OI Walls -->
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                     <div class="derivatives-pill pill-max-pain" title="Options Max Pain Strike (Pin Level)">
@@ -2729,10 +2733,12 @@
                 </div>
             </div>
         </div>
+    </div>
+
     <!-- ====================================================================
          REAL-TIME MARKET DEPTH MODAL (Level 2 Quotes - 5 Bids & 5 Asks)
          ==================================================================== -->
-    <div id="modalMarketDepth" class="straddle-modal-backdrop hidden" style="display:none !important; z-index:200000 !important;" onclick="if(event.target === this) closeMarketDepthModal()">
+    <div id="modalMarketDepth" class="straddle-modal-backdrop" style="display:none; z-index:200000;" onclick="if(event.target === this) closeMarketDepthModal()">
         <div class="straddle-modal-card" style="max-width:540px; width:94%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.95), 0 0 30px rgba(245,158,11,0.15); overflow:hidden; display:flex; flex-direction:column;">
             <!-- Header -->
             <div style="padding:10px 16px; background:#060911; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">

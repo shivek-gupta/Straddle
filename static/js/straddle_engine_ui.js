@@ -336,7 +336,9 @@ async function fetchLiveSpotTick() {
         const data = await resp.json();
         if (data && data.success && data.spot > 0) {
             updateSpotPriceDisplay(data.spot, data.atm, data.underlying || und);
-            if (typeof updateLiveCandleTick === "function" && window._activeChartUnderlying === und) {
+            const activeChart = String(window._activeChartUnderlying || "");
+            const isOptionChart = activeChart.includes("CE") || activeChart.includes("PE");
+            if (!isOptionChart && typeof updateLiveCandleTick === "function" && activeChart === und) {
                 updateLiveCandleTick(data.spot);
             }
         }
@@ -6808,7 +6810,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                                 <span class="tick-box">${isCeSellChecked ? '☑' : '☐'}</span><span class="tick-lbl">S</span>
                             </label>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#38bdf8 !important; border:1px solid rgba(56,189,248,0.4) !important; font-size:9px; width:18px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Candlestick Chart: ${ceSym}" onclick="event.stopPropagation(); openActiveAssetChartModal('${ceSym}')">📈</button>
-                            <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important; font-size:9px; width:18px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Market Depth: ${ceSym}" onclick="event.stopPropagation(); openMarketDepthModal('${ceSym}', '${ceKey}', ${ceLtpNum}, '${und}', ${strike}, 'CE')">📑</button>
+                            <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important; font-size:9px; width:18px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Market Depth: ${ceSym}" onclick="event.stopPropagation(); window.openMarketDepthModal('${ceSym}', '${ceKey}', ${ceLtpNum}, '${und}', ${strike}, 'CE')">📑</button>
                         </div>
                     </td>
                 ` : `
@@ -6817,7 +6819,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                             <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:9.5px; width:19px; height:19px; border-radius:3px; box-shadow:0 0 4px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">B</button>
                             <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:9.5px; width:19px; height:19px; border-radius:3px; box-shadow:0 0 4px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">S</button>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#38bdf8 !important; border:1px solid rgba(56,189,248,0.4) !important; font-size:9px; width:19px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Candlestick Chart: ${ceSym}" onclick="event.stopPropagation(); openActiveAssetChartModal('${ceSym}')">📈</button>
-                            <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important; font-size:9px; width:19px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Market Depth: ${ceSym}" onclick="event.stopPropagation(); openMarketDepthModal('${ceSym}', '${ceKey}', ${ceLtpNum}, '${und}', ${strike}, 'CE')">📑</button>
+                            <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important; font-size:9px; width:19px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Market Depth: ${ceSym}" onclick="event.stopPropagation(); window.openMarketDepthModal('${ceSym}', '${ceKey}', ${ceLtpNum}, '${und}', ${strike}, 'CE')">📑</button>
                         </div>
                     </td>
                 `;
@@ -6834,7 +6836,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                                 <span class="tick-box">${isPeSellChecked ? '☑' : '☐'}</span><span class="tick-lbl">S</span>
                             </label>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#38bdf8 !important; border:1px solid rgba(56,189,248,0.4) !important; font-size:9px; width:18px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Candlestick Chart: ${peSym}" onclick="event.stopPropagation(); openActiveAssetChartModal('${peSym}')">📈</button>
-                            <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important; font-size:9px; width:18px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Market Depth: ${peSym}" onclick="event.stopPropagation(); openMarketDepthModal('${peSym}', '${peKey}', ${peLtpNum}, '${und}', ${strike}, 'PE')">📑</button>
+                            <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important; font-size:9px; width:18px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Market Depth: ${peSym}" onclick="event.stopPropagation(); window.openMarketDepthModal('${peSym}', '${peKey}', ${peLtpNum}, '${und}', ${strike}, 'PE')">📑</button>
                         </div>
                     </td>
                 ` : `
@@ -6843,7 +6845,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                             <button type="button" class="chain-quick-trade-btn chain-btn-buy" style="background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; font-weight:900 !important; font-size:9.5px; width:19px; height:19px; border-radius:3px; box-shadow:0 0 4px rgba(16,185,129,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: BUY ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">B</button>
                             <button type="button" class="chain-quick-trade-btn chain-btn-sell" style="background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; font-weight:900 !important; font-size:9.5px; width:19px; height:19px; border-radius:3px; box-shadow:0 0 4px rgba(239,68,68,0.5); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Direct Trade: SELL ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">S</button>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#38bdf8 !important; border:1px solid rgba(56,189,248,0.4) !important; font-size:9px; width:19px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Candlestick Chart: ${peSym}" onclick="event.stopPropagation(); openActiveAssetChartModal('${peSym}')">📈</button>
-                            <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important; font-size:9px; width:19px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Market Depth: ${peSym}" onclick="event.stopPropagation(); openMarketDepthModal('${peSym}', '${peKey}', ${peLtpNum}, '${und}', ${strike}, 'PE')">📑</button>
+                            <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important; font-size:9px; width:19px; height:19px; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;" title="Market Depth: ${peSym}" onclick="event.stopPropagation(); window.openMarketDepthModal('${peSym}', '${peKey}', ${peLtpNum}, '${und}', ${strike}, 'PE')">📑</button>
                         </div>
                     </td>
                 `;
@@ -6928,6 +6930,15 @@ window._lastDepthLtp = 0;
 let _isPollingDepth = false;
 
 function openMarketDepthModal(sym, key, ltp, underlying, strike, optType) {
+    const modal = document.getElementById("modalMarketDepth");
+    if (modal) {
+        modal.classList.remove("hidden");
+        modal.style.display = "flex";
+        modal.style.zIndex = "200000";
+        modal.style.setProperty("display", "flex", "important");
+        modal.style.setProperty("z-index", "200000", "important");
+    }
+
     const und = underlying || (window._straddleState && window._straddleState.optionChainUnderlying) || "NIFTY";
     const resolvedSym = sym && sym.length > 3 ? sym : `${und} ${strike} ${optType}`;
     const resolvedLtp = Number(ltp) || 0;
@@ -6944,7 +6955,6 @@ function openMarketDepthModal(sym, key, ltp, underlying, strike, optType) {
     window._marketDepthActiveSymbol = resolvedSym;
     window._lastDepthLtp = resolvedLtp;
 
-    const modal = document.getElementById("modalMarketDepth");
     if (!modal) return;
 
     // Set initial display headers
@@ -7019,6 +7029,23 @@ async function pollMarketDepthContinuous() {
 
         const liveLtp = Number(data.ltp) || p.ltp || 0;
         window._lastDepthLtp = liveLtp;
+
+        // Reflect authentic broker market status
+        const modalEl = document.getElementById("modalMarketDepth");
+        if (modalEl) {
+            const statusBadge = modalEl.querySelector(".live-tick-pulse")?.parentElement;
+            if (statusBadge) {
+                if (data.market_status === "CLOSED") {
+                    statusBadge.innerHTML = `<span style="width:6px; height:6px; background:#f59e0b; border-radius:50%; display:inline-block;"></span><span style="color:#fbbf24; font-size:10px; font-weight:800; letter-spacing:0.4px;">MARKET CLOSED (PREV CLOSE)</span>`;
+                    statusBadge.style.background = "rgba(245,158,11,0.12)";
+                    statusBadge.style.borderColor = "rgba(245,158,11,0.35)";
+                } else {
+                    statusBadge.innerHTML = `<span class="live-tick-pulse" style="width:6px; height:6px; background:#10b981; border-radius:50%; display:inline-block;"></span><span style="color:#10b981; font-size:10px; font-weight:800; letter-spacing:0.4px;">LIVE DEPTH</span>`;
+                    statusBadge.style.background = "rgba(16,185,129,0.1)";
+                    statusBadge.style.borderColor = "rgba(16,185,129,0.3)";
+                }
+            }
+        }
 
         // Update Header LTP & Change
         const ltpEl = document.getElementById("depthLtpDisplay");
@@ -10093,6 +10120,9 @@ function openActiveAssetChartModal(undParam) {
     }
 
     setupChartCanvasEvents();
+    if (typeof applyChartHeaderCollapseState === "function") {
+        applyChartHeaderCollapseState();
+    }
     loadAndRenderCandleChart(und, window._activeChartTimeframe || "5m");
     startChartTickStream();
 }
@@ -10545,7 +10575,7 @@ function renderCandlestickCanvas() {
     // Fixed container bounds & device pixel ratio handling
     const dpr = window.devicePixelRatio || 1;
     const w = Math.floor(container.clientWidth || 1050);
-    const h = 500; // Fixed height in sync with container CSS
+    const h = window._chartCanvasHeight || (window._chartHeaderCollapsed ? 640 : 500);
 
     if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
         canvas.width = Math.floor(w * dpr);
@@ -11474,3 +11504,68 @@ function setupChartCanvasEvents() {
 }
 
 
+
+
+// =========================================================================
+// LIVE CHART MODAL HEADER COLLAPSE / EXPAND TOGGLE & CANVAS SCALING
+// =========================================================================
+
+window._chartHeaderCollapsed = false;
+window._chartCanvasHeight = 500;
+
+function toggleChartHeaderCollapse() {
+    window._chartHeaderCollapsed = !window._chartHeaderCollapsed;
+    try {
+        localStorage.setItem("straddle_chart_header_collapsed", window._chartHeaderCollapsed ? "true" : "false");
+    } catch (e) {}
+    applyChartHeaderCollapseState();
+}
+window.toggleChartHeaderCollapse = toggleChartHeaderCollapse;
+
+function applyChartHeaderCollapseState() {
+    try {
+        const saved = localStorage.getItem("straddle_chart_header_collapsed");
+        if (saved !== null) {
+            window._chartHeaderCollapsed = (saved === "true");
+        }
+    } catch (e) {}
+
+    const isCollapsed = !!window._chartHeaderCollapsed;
+    const strip = document.getElementById("chartDerivativesStrip");
+    const icon = document.getElementById("iconChartHeaderCollapse");
+    const lbl = document.getElementById("lblChartHeaderCollapse");
+    const btn = document.getElementById("btnToggleChartHeader");
+    const btnKronos = document.getElementById("btnToggleKronosForecast");
+    const btnAI = document.getElementById("btnToggleAIStrategist");
+    const subStrip = document.getElementById("chartModalPriceStreamStrip");
+
+    if (strip) {
+        strip.style.display = isCollapsed ? "none" : "flex";
+    }
+    if (btnKronos) {
+        btnKronos.classList.toggle("chart-header-compact-hide", isCollapsed);
+    }
+    if (btnAI) {
+        btnAI.classList.toggle("chart-header-compact-hide", isCollapsed);
+    }
+    if (icon) {
+        icon.textContent = isCollapsed ? "▼" : "▲";
+    }
+    if (lbl) {
+        lbl.textContent = isCollapsed ? "Expand" : "Compact";
+    }
+    if (btn) {
+        btn.title = isCollapsed ? "Expand topbar to show derivatives intelligence & AI models" : "Collapse topbar to maximize chart space";
+    }
+
+    // Dynamic responsive height for candlestick canvas
+    window._chartCanvasHeight = isCollapsed ? 640 : 500;
+    const canvas = document.getElementById("liveCandlestickCanvas");
+    if (canvas) {
+        canvas.style.height = window._chartCanvasHeight + "px";
+        if (typeof renderCandlestickCanvas === "function") {
+            renderCandlestickCanvas();
+        }
+    }
+}
+window.applyChartHeaderCollapseState = applyChartHeaderCollapseState;

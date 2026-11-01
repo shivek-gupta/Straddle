@@ -10002,3 +10002,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 
 
 
+
+.chart-header-compact-hide {
+    display: none !important;
+}

@@ -4064,8 +4064,23 @@ class StraddleManager:
                         error_targets.append((idx, p))
 
             if not error_targets:
-                # If no existing error records, trigger fresh entry
-                return self.start_algo(sid, force_fresh=False)
+                if has_filter:
+                    # User requested retry on a specific leg, but no matching position found in strat["positions"].
+                    # Look up directly in strat["legs"] by index or id so ONLY that leg is executed!
+                    legs_cfg = strat.get("legs", [])
+                    for req_idx in (leg_indices or []):
+                        if 0 <= req_idx < len(legs_cfg):
+                            error_targets.append((req_idx, {"id": legs_cfg[req_idx].get("id"), "status": "ERROR"}))
+                    if not error_targets and leg_ids:
+                        for req_id in leg_ids:
+                            for l_idx, l_cfg in enumerate(legs_cfg):
+                                if l_cfg.get("id") == req_id:
+                                    error_targets.append((l_idx, {"id": req_id, "status": "ERROR"}))
+                    if not error_targets:
+                        return {"success": False, "error": "Target leg not found for single-leg retry"}
+                else:
+                    # If no existing error records and no specific leg filter, trigger fresh entry
+                    return self.start_algo(sid, force_fresh=False)
 
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
@@ -4155,14 +4170,20 @@ class StraddleManager:
                         self._place_advance_sl_order(broker, pos, delay_sec=0)
                         retried_success.append(f"{pos.get('symbol')} (+{new_pos.get('lots', 0)} lots)")
                     else:
-                        positions[idx] = new_pos
+                        if 0 <= idx < len(positions):
+                            positions[idx] = new_pos
+                        else:
+                            positions.append(new_pos)
                         retried_success.append(new_pos.get("symbol", "Leg"))
                 elif new_pos:
                     if pos.get("status") == "OPEN":
                         # Partial retry failed again: keep open position intact!
                         retried_failed.append((pos.get("symbol", "Leg"), new_pos.get("error", "Retry rejected")))
                     else:
-                        positions[idx] = new_pos
+                        if 0 <= idx < len(positions):
+                            positions[idx] = new_pos
+                        else:
+                            positions.append(new_pos)
                         retried_failed.append((new_pos.get("symbol", "Leg"), new_pos.get("error", "Order rejected")))
 
             has_error_left = any(p.get("status") == "ERROR" for p in positions)
@@ -7593,17 +7614,31 @@ class StraddleManager:
         except Exception as e:
             logger.debug(f"[Market Depth] Kotak quotes live fetch pass: {e}")
 
-        # 3. If depth is empty (market closed, weekend, or synthetic), generate continuous realistic ticking depth
+        # 3. Determine authentic market open/closed status (IST)
+        now_dt = now_ist()
+        weekday = now_dt.weekday() # 0 = Monday, 6 = Sunday
+        is_weekend = weekday in (5, 6)
+        is_mcx = ("MCX" in clean_und) or any(c in clean_und for c in ("CRUDE", "NATURAL", "GOLD", "SILVER", "COPPER"))
+        cur_min = now_dt.hour * 60 + now_dt.minute
+        if is_weekend:
+            market_open = False
+        elif is_mcx:
+            market_open = (9 * 60 <= cur_min < 23 * 60 + 30)
+        else:
+            market_open = (9 * 60 + 15 <= cur_min < 15 * 60 + 30)
+
         tick_size = 0.05
         now_ts = time.time()
-        # Seeded pseudo-randomness based on timestamp and symbol for smooth continuous micro-fluctuations
-        salt = int(now_ts * 2)  # changes every 500ms
 
-        # Micro price jitter of +/- 0.05 around ref_ltp for live feel
-        jitter = ((hash(f"{clean_sym}_{salt}") % 3) - 1) * tick_size
-        live_p = round(max(0.05, ref_ltp + jitter), 2)
+        if market_open:
+            salt = int(now_ts * 2)
+            jitter = ((hash(f"{clean_sym}_{salt}") % 3) - 1) * tick_size
+            live_p = round(max(0.05, ref_ltp + jitter), 2)
+        else:
+            # When market is closed/weekend: price is static authentic closing/ref price, NO jitter!
+            salt = abs(hash(clean_sym)) % 1000
+            live_p = round(max(0.05, ref_ltp), 2)
 
-        # Use exact authentic exchange lot sizes
         lot_sz = DEFAULT_LOT_SIZES.get(clean_und, 65)
 
         if not bids or len(bids) < 5 or bids[0].get("price", 0) <= 0:
@@ -7611,8 +7646,8 @@ class StraddleManager:
             base_bid = round(max(tick_size, live_p - tick_size), 2)
             for i in range(5):
                 p = round(max(tick_size, base_bid - (i * tick_size)), 2)
-                q_seed = (hash(f"{clean_sym}_bid_q_{i}_{salt}") % 15 + 3) * lot_sz
-                o_seed = (hash(f"{clean_sym}_bid_o_{i}_{salt}") % 8 + 2)
+                q_seed = (abs(hash(f"{clean_sym}_bid_q_{i}_{salt}")) % 15 + 3) * lot_sz
+                o_seed = (abs(hash(f"{clean_sym}_bid_o_{i}_{salt}")) % 8 + 2)
                 bids.append({"orders": o_seed, "quantity": q_seed, "price": p})
 
         if not asks or len(asks) < 5 or asks[0].get("price", 0) <= 0:
@@ -7620,8 +7655,8 @@ class StraddleManager:
             base_ask = round(live_p + tick_size, 2)
             for i in range(5):
                 p = round(base_ask + (i * tick_size), 2)
-                q_seed = (hash(f"{clean_sym}_ask_q_{i}_{salt}") % 15 + 3) * lot_sz
-                o_seed = (hash(f"{clean_sym}_ask_o_{i}_{salt}") % 8 + 2)
+                q_seed = (abs(hash(f"{clean_sym}_ask_q_{i}_{salt}")) % 15 + 3) * lot_sz
+                o_seed = (abs(hash(f"{clean_sym}_ask_o_{i}_{salt}")) % 8 + 2)
                 asks.append({"orders": o_seed, "quantity": q_seed, "price": p})
 
         total_buy = sum(b["quantity"] for b in bids)
@@ -7651,6 +7686,7 @@ class StraddleManager:
             "total_sell_qty": total_sell,
             "buy_pct": buy_pct,
             "sell_pct": sell_pct,
+            "market_status": "OPEN" if market_open else "CLOSED",
             "timestamp": int(now_ts * 1000)
         }
 

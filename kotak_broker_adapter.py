@@ -355,10 +355,40 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 order_id = res.get("nOrdNo") or res.get("order_id") or (res.get("data") or {}).get("nOrdNo")
 
             if order_id:
-                # Ultra-low-latency direct return: order has been accepted & punched by Kotak Neo
+                # Fast parallel RMS status verification (40ms initial micro-wait, 1 retry if pending)
+                confirmed_status = "OPEN"
+                for attempt in range(2):
+                    if attempt > 0:
+                        time.sleep(0.10)
+                    else:
+                        time.sleep(0.04)
+                    try:
+                        hist = client.order_history(order_id=str(order_id))
+                        d = hist.get("data", {})
+                        items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
+                        if items and isinstance(items, list):
+                            latest = items[0]
+                            st = str(latest.get("ordSt", "")).lower()
+                            if st in ("rejected", "cancelled"):
+                                rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
+                                logger.warning(f"[Kotak Neo] Order slice {order_id} rejected by RMS: {rej_msg}")
+                                return {
+                                    "success": False,
+                                    "status": "REJECTED",
+                                    "order_id": str(order_id),
+                                    "error": rej_msg,
+                                    "status_message": rej_msg,
+                                    "data": latest
+                                }
+                            elif st in ("traded", "complete", "open", "trigger pending"):
+                                confirmed_status = st.upper()
+                                break
+                    except Exception as e_chk:
+                        logger.debug(f"[Kotak Neo] RMS check notice: {e_chk}")
+
                 return {
                     "success": True,
-                    "status": "OPEN",
+                    "status": confirmed_status,
                     "order_id": str(order_id),
                     "data": res,
                     "quantity": int(quantity)
