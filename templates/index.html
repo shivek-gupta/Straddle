@@ -1983,18 +1983,19 @@
                         </div>
                     </div>
 
-                    <!-- Quantity & Stepper + Lot Info -->
+                    <!-- Quantity & Stepper + Lot Info (Lots based) -->
                     <div style="display:grid; grid-template-columns:1.2fr 1fr; gap:12px; align-items:flex-end;">
                         <div>
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <label style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Quantity</label>
-                                <span id="directOrderLotBadge" style="font-size:11px; color:#38bdf8; font-weight:700; font-family:var(--font-mono);">1 lot = 65</span>
+                                <label style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Lots</label>
+                                <span id="directOrderLotBadge" style="font-size:11px; color:#38bdf8; font-weight:700; font-family:var(--font-mono);">1 lot = 65 (65 Qty)</span>
                             </div>
                             <div style="display:flex; align-items:center; background:#0f172a; border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden;">
-                                <button type="button" style="background:#1e293b; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderQuantity(-1)">−</button>
-                                <input type="number" id="directOrderQuantityInput" value="65" min="1" step="1" style="flex:1; width:100%; background:transparent; border:none; text-align:center; color:#fff; font-size:15px; font-weight:800; font-family:var(--font-mono); outline:none;" oninput="onDirectOrderQuantityChange()" />
-                                <button type="button" style="background:#1e293b; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderQuantity(1)">+</button>
+                                <button type="button" style="background:#1e293b; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderLots(-1)">−</button>
+                                <input type="number" id="directOrderLotsInput" value="1" min="1" step="1" style="flex:1; width:100%; background:transparent; border:none; text-align:center; color:#fff; font-size:15px; font-weight:800; font-family:var(--font-mono); outline:none;" oninput="onDirectOrderLotsChange()" />
+                                <button type="button" style="background:#1e293b; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderLots(1)">+</button>
                             </div>
+                            <input type="hidden" id="directOrderQuantityInput" value="65" />
                         </div>
                         <div>
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -2452,76 +2453,82 @@
          ==================================================================== -->
     <div id="modalLiveChart" class="straddle-modal-backdrop hidden" style="display:none !important; z-index:10070;" onclick="if(event.target === this) closeLiveChartModal()">
         <div class="straddle-modal-card" style="max-width:1150px; width:96%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.9); overflow:hidden; display:flex; flex-direction:column;">
-            <!-- Header -->
-            <div style="padding:12px 20px; background:#060911; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span id="chartAssetDot" style="width:10px; height:10px; border-radius:50%; background:#38bdf8; box-shadow:0 0 10px #38bdf8;"></span>
-                        <span id="chartAssetTitle" style="font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">LIVE CANDLESTICK CHART</span>
-                        <span id="chartActiveContractBadge" style="font-size:11px; font-weight:700; background:#1e293b; color:#38bdf8; border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:2px 8px; font-family:var(--font-mono); letter-spacing:0.5px;">--</span>
-                    </div>
-                    <!-- Real-time Price Stream Strip -->
-                    <div style="display:flex; align-items:center; gap:12px; background:#0e1422; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 12px; font-family:var(--font-mono); font-size:12px;">
+            <!-- Row 1: Merged Header & Live Price Stream (Always visible in compact mode) -->
+            <div id="chartTopRow1" style="padding:8px 16px; background:#060911; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                <!-- Left: Dot + Blue Heading Badge + Real-time Price Stream -->
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span id="chartAssetDot" style="width:8px; height:8px; border-radius:50%; background:#38bdf8; box-shadow:0 0 8px #38bdf8; flex-shrink:0;"></span>
+                    <span id="chartAssetTitle" style="display:none;"></span>
+                    <span id="chartActiveContractBadge" style="font-size:12px; font-weight:800; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); border-radius:5px; padding:3px 10px; font-family:var(--font-mono); letter-spacing:0.5px;">--</span>
+                    
+                    <!-- Merged Real-time Price Stream Strip -->
+                    <div id="chartModalPriceStreamStrip" style="display:inline-flex; align-items:center; gap:10px; background:#0e1422; border:1px solid rgba(255,255,255,0.08); border-radius:5px; padding:3px 10px; font-family:var(--font-mono); font-size:11.5px;">
                         <div>
-                            <span style="color:#94a3b8; font-size:11px;">LTP:</span>
-                            <span id="chartLtpDisplay" style="color:#38bdf8; font-weight:800; font-size:14px;">₹ --</span>
+                            <span style="color:#94a3b8; font-size:10.5px;">LTP:</span>
+                            <span id="chartLtpDisplay" style="color:#38bdf8; font-weight:800; font-size:13px;">₹ --</span>
                         </div>
                         <span style="color:rgba(255,255,255,0.2);">|</span>
                         <div>
-                            <span style="color:#94a3b8; font-size:11px;">HIGH:</span>
+                            <span style="color:#94a3b8; font-size:10.5px;">HIGH:</span>
                             <span id="chartHighDisplay" style="color:#34d399; font-weight:700;">₹ --</span>
                         </div>
                         <span style="color:rgba(255,255,255,0.2);">|</span>
                         <div>
-                            <span style="color:#94a3b8; font-size:11px;">LOW:</span>
+                            <span style="color:#94a3b8; font-size:10.5px;">LOW:</span>
                             <span id="chartLowDisplay" style="color:#fb7185; font-weight:700;">₹ --</span>
                         </div>
                         <span style="color:rgba(255,255,255,0.2);">|</span>
-                        <div style="display:flex; align-items:center; gap:4px;">
+                        <div style="display:inline-flex; align-items:center; gap:4px;">
                             <span class="live-tick-pulse" style="width:6px; height:6px;"></span>
-                            <span style="color:#10b981; font-size:10.5px; font-weight:700;">LIVE FEED</span>
+                            <span style="color:#10b981; font-size:10px; font-weight:700;">LIVE FEED</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Timeframe Selection & Controls -->
-                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                    <div style="display:flex; gap:4px; background:#0e1422; padding:3px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
-                        <button type="button" class="chart-timeframe-btn" data-tf="1m" onclick="switchChartTimeframe('1m')">1m</button>
-                        <button type="button" class="chart-timeframe-btn" data-tf="3m" onclick="switchChartTimeframe('3m')">3m</button>
-                        <button type="button" class="chart-timeframe-btn active" data-tf="5m" onclick="switchChartTimeframe('5m')">5m</button>
-                        <button type="button" class="chart-timeframe-btn" data-tf="15m" onclick="switchChartTimeframe('15m')">15m</button>
-                        <button type="button" class="chart-timeframe-btn" data-tf="1h" onclick="switchChartTimeframe('1h')">1h</button>
-                        <button type="button" class="chart-timeframe-btn" data-tf="1d" onclick="switchChartTimeframe('1d')">1D</button>
-                    </div>
-
-                    <!-- Zoom & Pan Quick Action Buttons -->
-                    <div style="display:flex; gap:4px; background:#0e1422; padding:3px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
-                        <button type="button" class="chart-action-btn" id="btnChartZoomIn" onclick="chartZoomIn()" title="Zoom In (or Scroll Up)">🔍+</button>
-                        <button type="button" class="chart-action-btn" id="btnChartZoomOut" onclick="chartZoomOut()" title="Zoom Out (or Scroll Down)">🔍−</button>
-                        <button type="button" class="chart-action-btn" id="btnChartResetZoom" onclick="chartResetZoom()" title="Reset View (Double-click chart)">↺ Reset</button>
-                    </div>
-
-                    <!-- Kronos Foundation Model AI Forecast Toggle Button -->
-                    <button type="button" id="btnToggleKronosForecast" onclick="toggleKronosForecast()" class="straddle-btn" style="padding:4px 12px; font-size:11.5px; font-weight:800; background:linear-gradient(135deg, rgba(139,92,246,0.25), rgba(56,189,248,0.25)); border:1.5px solid #a855f7; color:#f3e8ff; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 0 12px rgba(168,85,247,0.3); transition:all 0.2s ease;" title="Forecast future price trajectory and volatility envelope with Kronos Foundation Model">
-                        <span style="font-size:13px;">🔮</span>
-                        <span>AI FORECAST (KRONOS)</span>
-                        <span id="kronosBadgeState" style="background:#475569; color:#f8fafc; font-size:9.5px; padding:1px 6px; border-radius:4px; font-weight:800; letter-spacing:0.5px;">OFF</span>
-                    </button>
-
-                    <!-- Institutional AI Market Strategist Toggle Button -->
-                    <button type="button" id="btnToggleAIStrategist" onclick="toggleAIStrategist()" class="straddle-btn" style="padding:4px 12px; font-size:11.5px; font-weight:800; background:linear-gradient(135deg, rgba(16,185,129,0.25), rgba(6,182,212,0.25)); border:1.5px solid #10b981; color:#d1fae5; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 0 12px rgba(16,185,129,0.3); transition:all 0.2s ease;" title="Open AI Market Strategist institutional quant playbook">
-                        <span style="font-size:13px;">🧠</span>
-                        <span>AI STRATEGIST</span>
-                        <span id="aiStrategistBadgeState" style="background:#475569; color:#f8fafc; font-size:9.5px; padding:1px 6px; border-radius:4px; font-weight:800; letter-spacing:0.5px;">READY</span>
-                    </button>
-
-                    <button type="button" id="btnToggleChartHeader" class="straddle-btn" onclick="toggleChartHeaderCollapse()" style="padding:4px 10px; font-size:11.5px; background:#1e293b; border:1px solid rgba(255,255,255,0.18); color:#cbd5e1; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Collapse/Expand topbar to maximize chart space">
+                <!-- Right: Action Buttons (Compact, Refresh, Close) -->
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <button type="button" id="btnToggleChartHeader" class="straddle-btn" onclick="toggleChartHeaderCollapse()" style="padding:3px 10px; font-size:11px; font-weight:700; background:#1e293b; border:1px solid rgba(255,255,255,0.18); color:#cbd5e1; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;" title="Collapse/Expand topbar to maximize chart space">
                         <span id="iconChartHeaderCollapse">▲</span>
                         <span id="lblChartHeaderCollapse">Compact</span>
                     </button>
-                    <button type="button" class="straddle-btn btn-outline" onclick="reloadActiveCandlestickChart()" style="padding:4px 10px; font-size:11.5px;" title="Reload historical candles">🔄 Refresh</button>
-                    <button type="button" class="straddle-modal-close" onclick="closeLiveChartModal()" style="font-size:20px; font-weight:800; color:#f8fafc; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.25); border-radius:6px; cursor:pointer; padding:3px 12px; line-height:1; transition:all 0.15s ease;" title="Close Chart (Esc)">✕</button>
+                    <button type="button" class="straddle-btn btn-outline" onclick="reloadActiveCandlestickChart()" style="padding:3px 10px; font-size:11px; border-radius:5px;" title="Reload historical candles">🔄 Refresh</button>
+                    <button type="button" class="straddle-modal-close" onclick="closeLiveChartModal()" style="font-size:16px; font-weight:800; color:#f8fafc; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); border-radius:5px; cursor:pointer; padding:2px 10px; line-height:1;" title="Close Chart (Esc)">✕</button>
+                </div>
+            </div>
+
+            <!-- Row 2: Merged Controls Row (Timeframe, Zoom, Kronos, AI Strategist) -->
+            <div id="chartControlsRow" style="padding:5px 16px; background:#080d19; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; font-size:11px;">
+                <!-- Left: Timeframe Selection & Zoom Controls -->
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:3px; background:#0e1422; padding:2px 4px; border-radius:5px; border:1px solid rgba(255,255,255,0.08);">
+                        <button type="button" class="chart-timeframe-btn" data-tf="1m" onclick="switchChartTimeframe('1m')" style="padding:2px 7px; font-size:11px;">1m</button>
+                        <button type="button" class="chart-timeframe-btn" data-tf="3m" onclick="switchChartTimeframe('3m')" style="padding:2px 7px; font-size:11px;">3m</button>
+                        <button type="button" class="chart-timeframe-btn active" data-tf="5m" onclick="switchChartTimeframe('5m')" style="padding:2px 7px; font-size:11px;">5m</button>
+                        <button type="button" class="chart-timeframe-btn" data-tf="15m" onclick="switchChartTimeframe('15m')" style="padding:2px 7px; font-size:11px;">15m</button>
+                        <button type="button" class="chart-timeframe-btn" data-tf="1h" onclick="switchChartTimeframe('1h')" style="padding:2px 7px; font-size:11px;">1h</button>
+                        <button type="button" class="chart-timeframe-btn" data-tf="1d" onclick="switchChartTimeframe('1d')" style="padding:2px 7px; font-size:11px;">1D</button>
+                    </div>
+
+                    <div style="display:flex; gap:3px; background:#0e1422; padding:2px 4px; border-radius:5px; border:1px solid rgba(255,255,255,0.08);">
+                        <button type="button" class="chart-action-btn" id="btnChartZoomIn" onclick="chartZoomIn()" style="padding:2px 7px; font-size:11px;" title="Zoom In">🔍+</button>
+                        <button type="button" class="chart-action-btn" id="btnChartZoomOut" onclick="chartZoomOut()" style="padding:2px 7px; font-size:11px;" title="Zoom Out">🔍−</button>
+                        <button type="button" class="chart-action-btn" id="btnChartResetZoom" onclick="chartResetZoom()" style="padding:2px 7px; font-size:11px;" title="Reset View">↺ Reset</button>
+                    </div>
+                </div>
+
+                <!-- Right: AI Models in Compact Form -->
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <button type="button" id="btnToggleKronosForecast" onclick="toggleKronosForecast()" class="straddle-btn" style="padding:3px 9px; font-size:11px; font-weight:800; background:linear-gradient(135deg, rgba(139,92,246,0.2), rgba(56,189,248,0.2)); border:1px solid #a855f7; color:#f3e8ff; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Forecast future price trajectory and volatility envelope with Kronos Foundation Model">
+                        <span style="font-size:11.5px;">🔮</span>
+                        <span>AI FORECAST (KRONOS)</span>
+                        <span id="kronosBadgeState" style="background:#475569; color:#f8fafc; font-size:9px; padding:1px 5px; border-radius:3px; font-weight:800;">OFF</span>
+                    </button>
+
+                    <button type="button" id="btnToggleAIStrategist" onclick="toggleAIStrategist()" class="straddle-btn" style="padding:3px 9px; font-size:11px; font-weight:800; background:linear-gradient(135deg, rgba(16,185,129,0.2), rgba(6,182,212,0.2)); border:1px solid #10b981; color:#d1fae5; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Open AI Market Strategist institutional quant playbook">
+                        <span style="font-size:11.5px;">🧠</span>
+                        <span>AI STRATEGIST</span>
+                        <span id="aiStrategistBadgeState" style="background:#475569; color:#f8fafc; font-size:9px; padding:1px 5px; border-radius:3px; font-weight:800;">READY</span>
+                    </button>
                 </div>
             </div>
 

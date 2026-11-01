@@ -1927,31 +1927,30 @@ class StraddleManager:
                 }
             }
 
-        # 2. Option Selling (Short CE / Short PE) -> Upstox SPAN + Exposure Margin
+        # 2. Option Selling (Short CE / Short PE) -> Exchange SPAN + Exposure Margin (Kotak Neo / Broker Specification)
         und = underlying or "NIFTY"
-        for candidate in ["BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "NIFTY"]:
-            if candidate in symbol.upper():
+        all_candidates = [
+            "NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL", 
+            "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER",
+            "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "BANKEX", "SENSEX", "NIFTY"
+        ]
+        sym_check = (symbol or "").upper()
+        for candidate in all_candidates:
+            if candidate in sym_check:
                 und = candidate
                 break
 
-        spot = float(spot_price) if spot_price and float(spot_price) > 0 else self._get_underlying_spot_price(und)
-        contract_val = spot * clean_qty
+        lot_size = int(DEFAULT_LOT_SIZES.get(und, 1 if ("GOLD" in und or "SILVER" in und) else 65))
+        lots = max(1, clean_qty // lot_size) if clean_qty >= lot_size else 1
 
-        # Standard Exchange Margin Percentages (SPAN + Exposure)
-        margin_pct_map = {
-            "NIFTY": 0.111,       # ~ 11.1% of contract value (~1.63L per 65 lot at spot 22603)
-            "BANKNIFTY": 0.128,   # ~ 12.8%
-            "FINNIFTY": 0.118,    # ~ 11.8%
-            "MIDCPNIFTY": 0.138,  # ~ 13.8%
-            "SENSEX": 0.108,      # ~ 10.8%
-        }
-        base_pct = margin_pct_map.get(und, 0.111)
+        base_span = float(getattr(config, "BASE_SPAN_PER_LOT", {}).get(und, 104000.0))
+        base_exp = float(getattr(config, "BASE_EXP_PER_LOT", {}).get(und, 41492.16))
 
-        # Product discount (MIS Intraday has ~25% leverage discount on Upstox)
+        # Product discount (MIS Intraday has ~25% leverage discount)
         prod_multiplier = 0.75 if clean_prod == "I" else 1.0
 
-        base_margin = contract_val * base_pct * prod_multiplier
-        required = round(base_margin, 2)
+        margin_per_lot = (base_span + base_exp * 0.5) * prod_multiplier
+        required = round(lots * margin_per_lot, 2)
         formatted = f"₹ {required/100000:.2f} L" if required >= 100000 else f"₹{required:,.2f}"
 
         return {
@@ -1961,9 +1960,12 @@ class StraddleManager:
             "breakdown": {
                 "type": "SPAN_EXPOSURE",
                 "margin_type": "SPAN + Exposure Margin",
-                "contract_value": round(contract_val, 2),
-                "span_margin": round(base_margin * 0.82, 2),
-                "exposure_margin": round(base_margin * 0.18, 2)
+                "underlying": und,
+                "lots": lots,
+                "lot_size": lot_size,
+                "margin_per_lot": round(margin_per_lot, 2),
+                "span_margin": round(lots * base_span * prod_multiplier, 2),
+                "exposure_margin": round(lots * base_exp * 0.5 * prod_multiplier, 2)
             }
         }
 

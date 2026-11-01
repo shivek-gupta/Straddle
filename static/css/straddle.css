@@ -1544,13 +1544,18 @@ select:disabled.straddle-select {
     overflow: hidden !important;
 }
 .opt-insights-bar {
-    display: flex !important;
+    display: flex;
     flex-wrap: wrap !important;
     align-items: center !important;
     gap: 6px !important;
     padding: 6px 12px !important;
     background: linear-gradient(180deg, #0d1322 0%, #080c14 100%) !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+.opt-insights-bar.hidden,
+.opt-insights-bar[style*="display: none"],
+.opt-insights-bar[style*="display:none"] {
+    display: none !important;
 }
 .opt-insight-card {
     background: rgba(15, 23, 42, 0.7) !important;

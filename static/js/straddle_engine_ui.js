@@ -6102,33 +6102,32 @@ window.getStrikeStepForUnderlying = getStrikeStepForUnderlying;
 function toggleOptionChainInsights(forceState = null) {
     const bar = document.getElementById("optChainInsightsBar");
     const arrow = document.getElementById("optChainInsightsArrow");
-    const badge = document.getElementById("optChainInsightsStateBadge");
+    const badge = document.getElementById("optChainInsightsBadge") || document.getElementById("optChainInsightsStateBadge");
     if (!bar) return;
 
     let isCollapsed;
     if (forceState !== null) {
-        isCollapsed = forceState;
+        isCollapsed = !!forceState;
     } else {
-        isCollapsed = (bar.style.display !== "none");
+        const currentlyVisible = (bar.style.display !== "none" && !bar.classList.contains("hidden") && window.getComputedStyle(bar).display !== "none");
+        isCollapsed = currentlyVisible;
     }
 
     if (isCollapsed) {
-        bar.style.display = "none";
+        bar.style.setProperty("display", "none", "important");
+        bar.classList.add("hidden");
         if (arrow) arrow.textContent = "▶";
         if (badge) {
-            badge.textContent = "COLLAPSED";
-            badge.style.color = "#94a3b8";
-            badge.style.background = "rgba(148, 163, 184, 0.1)";
-            badge.style.borderColor = "rgba(148, 163, 184, 0.3)";
+            badge.textContent = "Show Details ▼";
+            badge.style.color = "#38bdf8";
         }
     } else {
-        bar.style.display = "grid";
+        bar.style.setProperty("display", "flex", "important");
+        bar.classList.remove("hidden");
         if (arrow) arrow.textContent = "▼";
         if (badge) {
-            badge.textContent = "EXPANDED";
-            badge.style.color = "#38bdf8";
-            badge.style.background = "rgba(56, 189, 248, 0.15)";
-            badge.style.borderColor = "rgba(56, 189, 248, 0.4)";
+            badge.textContent = "Hide Details ▲";
+            badge.style.color = "#94a3b8";
         }
     }
 
@@ -7160,8 +7159,29 @@ function openStraddleDirectOrderModal(symbol, instrumentKey, strike, optType, si
     const modal = document.getElementById("straddleDirectOrderModal");
     if (!modal) return;
 
-    const und = window._straddleState.optionChainUnderlying || "NIFTY";
-    const resolvedLot = lotSize > 0 ? lotSize : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : 65));
+    const undFromState = window._straddleState.optionChainUnderlying || "NIFTY";
+    const allCommodityCandidates = [
+        "NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL", 
+        "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER",
+        "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "BANKEX", "SENSEX", "NIFTY"
+    ];
+    let und = undFromState;
+    const symUpper = (symbol || "").toUpperCase();
+    for (const c of allCommodityCandidates) {
+        if (symUpper.includes(c)) {
+            und = c;
+            break;
+        }
+    }
+
+    const COMMODITY_LOT_DEFAULTS = {
+        "GOLD": 1, "GOLDM": 100, "SILVER": 30, "SILVERM": 5,
+        "CRUDEOIL": 100, "CRUDEOILM": 10, "NATURALGAS": 1250, "NATGASMINI": 250,
+        "COPPER": 2500, "NIFTY": 65, "BANKNIFTY": 15, "FINNIFTY": 65,
+        "MIDCPNIFTY": 120, "SENSEX": 10, "BANKEX": 15
+    };
+
+    const resolvedLot = lotSize > 0 ? lotSize : (COMMODITY_LOT_DEFAULTS[und] || 65);
     const resolvedLtp = Number(ltp) || 0;
     const resolvedSymbol = symbol && symbol.length > 3 ? symbol : `${und} ${strike} ${optType}`;
 
@@ -7176,10 +7196,12 @@ function openStraddleDirectOrderModal(symbol, instrumentKey, strike, optType, si
         price: resolvedLtp > 0 ? resolvedLtp : 0.05,
         trigger_price: 0,
         lot_size: resolvedLot,
+        lots: 1,
         quantity: resolvedLot,
         ltp: resolvedLtp,
         net_change: Number(netChange) || 0,
-        net_change_pct: Number(netChangePct) || 0
+        net_change_pct: Number(netChangePct) || 0,
+        underlying: und
     };
 
     // Update Symbol & Subtitle Header
@@ -7187,7 +7209,7 @@ function openStraddleDirectOrderModal(symbol, instrumentKey, strike, optType, si
     if (titleEl) titleEl.textContent = resolvedSymbol;
 
     const subEl = document.getElementById("directOrderSubtitle");
-    if (subEl) subEl.textContent = `NFO • ${und} Strike ${strike} ${optType}`;
+    if (subEl) subEl.textContent = `${und === "NIFTY" ? "NFO" : "MCX"} • ${und} Strike ${strike} ${optType}`;
 
     // Update LTP & Change
     const ltpEl = document.getElementById("directOrderLtp");
@@ -7200,12 +7222,16 @@ function openStraddleDirectOrderModal(symbol, instrumentKey, strike, optType, si
         chgEl.style.color = window._directOrderState.net_change >= 0 ? "#10b981" : "#f43f5e";
     }
 
-    // Set Quantity Input
+    // Set Lots & Quantity Input
+    const lotsInput = document.getElementById("directOrderLotsInput");
+    if (lotsInput) {
+        lotsInput.value = 1;
+        lotsInput.min = 1;
+        lotsInput.step = 1;
+    }
     const qtyInput = document.getElementById("directOrderQuantityInput");
     if (qtyInput) {
         qtyInput.value = resolvedLot;
-        qtyInput.step = resolvedLot;
-        qtyInput.min = resolvedLot;
     }
 
     // Set Price Input
@@ -7359,38 +7385,63 @@ function setOrderModalType(type) {
     updateOrderMarginSummary();
 }
 
-function adjustOrderQuantity(stepLots) {
-    const lot = window._directOrderState.lot_size || 65;
-    let currentQty = Number(document.getElementById("directOrderQuantityInput")?.value) || lot;
-    let newQty = currentQty + (stepLots * lot);
-    if (newQty < lot) newQty = lot;
+function adjustOrderLots(step) {
+    let currentLots = Number(document.getElementById("directOrderLotsInput")?.value) || window._directOrderState.lots || 1;
+    let newLots = currentLots + step;
+    if (newLots < 1) newLots = 1;
 
-    const input = document.getElementById("directOrderQuantityInput");
-    if (input) input.value = newQty;
+    const lot = window._directOrderState.lot_size || 1;
+    const newQty = newLots * lot;
+
+    const lotsInput = document.getElementById("directOrderLotsInput");
+    if (lotsInput) lotsInput.value = newLots;
+
+    const qtyInput = document.getElementById("directOrderQuantityInput");
+    if (qtyInput) qtyInput.value = newQty;
+
+    window._directOrderState.lots = newLots;
     window._directOrderState.quantity = newQty;
 
     updateOrderLotBadge();
     updateOrderMarginSummary();
 }
+window.adjustOrderLots = adjustOrderLots;
 
-function onDirectOrderQuantityChange() {
-    const lot = window._directOrderState.lot_size || 65;
-    const input = document.getElementById("directOrderQuantityInput");
-    let val = Number(input?.value) || lot;
-    if (val < 1) val = lot;
-    window._directOrderState.quantity = val;
+function onDirectOrderLotsChange() {
+    let val = Number(document.getElementById("directOrderLotsInput")?.value) || 1;
+    if (val < 1) val = 1;
+
+    const lot = window._directOrderState.lot_size || 1;
+    const newQty = val * lot;
+
+    const qtyInput = document.getElementById("directOrderQuantityInput");
+    if (qtyInput) qtyInput.value = newQty;
+
+    window._directOrderState.lots = val;
+    window._directOrderState.quantity = newQty;
 
     updateOrderLotBadge();
     updateOrderMarginSummary();
+}
+window.onDirectOrderLotsChange = onDirectOrderLotsChange;
+
+function adjustOrderQuantity(stepLots) {
+    adjustOrderLots(stepLots);
+}
+
+function onDirectOrderQuantityChange() {
+    onDirectOrderLotsChange();
 }
 
 function updateOrderLotBadge() {
     const badge = document.getElementById("directOrderLotBadge");
     if (!badge) return;
-    const lot = window._directOrderState.lot_size || 65;
-    const qty = window._directOrderState.quantity || lot;
-    const lotsCount = (qty / lot).toFixed(1).replace(/\.0$/, "");
-    badge.textContent = `${lotsCount} Lot${lotsCount === "1" ? "" : "s"} (${qty} Qty)`;
+    const lot = window._directOrderState.lot_size || 1;
+    const lots = window._directOrderState.lots || Math.max(1, Math.round((window._directOrderState.quantity || lot) / lot));
+    const qty = window._directOrderState.quantity || (lots * lot);
+    const und = window._directOrderState.underlying || window._straddleState.optionChainUnderlying || "NIFTY";
+    const unit = (und === "GOLD") ? "KGS" : ((und === "SILVER") ? "KG" : "Qty");
+    badge.textContent = `1 lot = ${lot} ${unit} (${qty} Total Qty)`;
 }
 
 function syncDirectOrderFunds() {
@@ -7408,24 +7459,45 @@ function updateOrderMarginSummary() {
     const reqEl = document.getElementById("directOrderReqMargin");
     if (!reqEl) return;
 
-    const qty = Number(window._directOrderState.quantity) || window._directOrderState.lot_size || 65;
+    const qty = Number(window._directOrderState.quantity) || window._directOrderState.lot_size || 1;
+    const lots = window._directOrderState.lots || Math.max(1, Math.round(qty / (window._directOrderState.lot_size || 1)));
     const isBuy = window._directOrderState.side === "BUY";
     const priceVal = Number(document.getElementById("directOrderPriceInput")?.value) || window._directOrderState.ltp || 100.0;
-    const und = window._straddleState.optionChainUnderlying || "NIFTY";
+    const und = window._directOrderState.underlying || window._straddleState.optionChainUnderlying || "NIFTY";
     const prod = window._directOrderState.product || "D";
 
-    // Instant realistic Kotak Neo SPAN + Exposure calculation
+    // Standard Kotak Neo calibrated SPAN + Exposure Margin per Lot
+    const LOT_MARGIN_MAP = {
+        "GOLD": 1815574.25,
+        "GOLDM": 181557.42,
+        "SILVER": 625000.0,
+        "SILVERM": 104500.0,
+        "CRUDEOIL": 210000.0,
+        "CRUDEOILM": 21000.0,
+        "NATURALGAS": 140000.0,
+        "NATGASMINI": 28000.0,
+        "COPPER": 285000.0,
+        "NIFTY": 124746.08,
+        "BANKNIFTY": 117500.0,
+        "FINNIFTY": 108000.0,
+        "MIDCPNIFTY": 102000.0,
+        "SENSEX": 122000.0,
+        "BANKEX": 114000.0
+    };
+
+    const prodMult = prod === "I" ? 0.75 : 1.0;
+
     if (isBuy) {
         const req = qty * Math.max(0.05, priceVal);
         reqEl.textContent = req >= 100000 
             ? `₹ ${(req/100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})})`
             : `₹ ${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     } else {
-        const spot = 22603.05;
-        const basePct = und === "NIFTY" ? 0.111 : (und === "BANKNIFTY" ? 0.128 : 0.118);
-        const prodMult = prod === "I" ? 0.75 : 1.0;
-        const req = (spot * qty * basePct * prodMult);
-        reqEl.textContent = `₹ ${(req/100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})})`;
+        const baseMarginPerLot = LOT_MARGIN_MAP[und] || 124746.08;
+        const req = baseMarginPerLot * lots * prodMult;
+        reqEl.textContent = req >= 100000
+            ? `₹ ${(req/100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})})`
+            : `₹ ${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     }
 
     // Call server endpoint for exact live calculated broker margin
@@ -7456,7 +7528,9 @@ function updateOrderMarginSummary() {
 
 async function submitStraddleDirectOrder() {
     const submitBtn = document.getElementById("directOrderSubmitBtn");
-    const qty = Number(document.getElementById("directOrderQuantityInput")?.value) || window._directOrderState.lot_size || 65;
+    const lots = Number(document.getElementById("directOrderLotsInput")?.value) || window._directOrderState.lots || 1;
+    const lotSize = window._directOrderState.lot_size || 1;
+    const qty = lots * lotSize;
     let price = Number(document.getElementById("directOrderPriceInput")?.value) || 0.0;
     let trigPrice = Number(document.getElementById("directOrderTriggerPriceInput")?.value) || 0.0;
     const ordType = window._directOrderState.order_type;
@@ -10108,6 +10182,10 @@ function openActiveAssetChartModal(undParam) {
     if (titleEl) {
         titleEl.textContent = `${dispName.toUpperCase()} LIVE CANDLESTICK CHART`;
     }
+    const badgeEl = document.getElementById("chartActiveContractBadge");
+    if (badgeEl) {
+        badgeEl.textContent = `${dispName.toUpperCase()} NEAR MONTH`;
+    }
     const dotEl = document.getElementById("chartAssetDot");
     if (dotEl) {
         dotEl.style.background = color;
@@ -11531,23 +11609,27 @@ function applyChartHeaderCollapseState() {
     } catch (e) {}
 
     const isCollapsed = !!window._chartHeaderCollapsed;
+    const controlsRow = document.getElementById("chartControlsRow");
     const strip = document.getElementById("chartDerivativesStrip");
+    const kronosPanel = document.getElementById("kronosForecastPanel");
+    const aiPanel = document.getElementById("aiStrategistPanel");
     const icon = document.getElementById("iconChartHeaderCollapse");
     const lbl = document.getElementById("lblChartHeaderCollapse");
     const btn = document.getElementById("btnToggleChartHeader");
-    const btnKronos = document.getElementById("btnToggleKronosForecast");
-    const btnAI = document.getElementById("btnToggleAIStrategist");
-    const subStrip = document.getElementById("chartModalPriceStreamStrip");
 
+    if (controlsRow) {
+        controlsRow.style.display = isCollapsed ? "none" : "flex";
+    }
     if (strip) {
         strip.style.display = isCollapsed ? "none" : "flex";
     }
-    if (btnKronos) {
-        btnKronos.classList.toggle("chart-header-compact-hide", isCollapsed);
+    if (kronosPanel && isCollapsed) {
+        kronosPanel.style.display = "none";
     }
-    if (btnAI) {
-        btnAI.classList.toggle("chart-header-compact-hide", isCollapsed);
+    if (aiPanel && isCollapsed) {
+        aiPanel.style.display = "none";
     }
+
     if (icon) {
         icon.textContent = isCollapsed ? "▼" : "▲";
     }
@@ -11555,11 +11637,11 @@ function applyChartHeaderCollapseState() {
         lbl.textContent = isCollapsed ? "Expand" : "Compact";
     }
     if (btn) {
-        btn.title = isCollapsed ? "Expand topbar to show derivatives intelligence & AI models" : "Collapse topbar to maximize chart space";
+        btn.title = isCollapsed ? "Expand topbar to show controls, derivatives intelligence & AI models" : "Collapse topbar to 1st row only and maximize chart space";
     }
 
-    // Dynamic responsive height for candlestick canvas
-    window._chartCanvasHeight = isCollapsed ? 640 : 500;
+    // Dynamic responsive height for candlestick canvas (maximize when compact)
+    window._chartCanvasHeight = isCollapsed ? 680 : 500;
     const canvas = document.getElementById("liveCandlestickCanvas");
     if (canvas) {
         canvas.style.height = window._chartCanvasHeight + "px";
