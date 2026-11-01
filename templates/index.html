@@ -752,9 +752,8 @@
                 <button type="button" class="straddle-btn btn-success" id="btnStraddleRetryErrors" onclick="retrySelectedStraddleLegs()" style="background:#15803d; border-color:#16a34a; font-weight:800; display:none;">🔄 Retry (1)</button>
                 <button type="button" class="straddle-btn" id="btnStraddleResetAlgo" onclick="resetCurrentStraddleAlgo()" title="Clear failed order errors and reset strategy to clean Ready state" style="background:#7c3aed; border-color:#8b5cf6; color:#ffffff; font-weight:800;">🔄 Reset Algo</button>
                 <button type="button" class="straddle-btn btn-primary" onclick="toggleStraddleSettingsPanel()" title="Open strategy parameters, execution rules & leg builder" style="background:#2563eb; border-color:#3b82f6; font-weight:800;">⚙️ Configure Settings</button>
-                <button type="button" class="straddle-btn btn-outline" id="btnStraddleAdoptPosition" onclick="openAdoptBrokerPositionModal()" title="View and adopt manual or external broker positions into this algo" style="border-color:#38bdf8; color:#38bdf8; font-weight:800;">📥 Add Existing Position to Algo</button>
                 <button type="button" class="straddle-btn btn-success" id="btnStraddleStartAlgo" onclick="straddleStartAlgo()" title="Start algorithm and execute strategy orders" style="font-weight:800;">▶ Start / Enable Algo</button>
-                <button type="button" class="straddle-btn btn-warning" onclick="straddleTerminateAlgo()" title="Halt strategy algorithm execution without squaring off broker positions" style="background:#b45309; border-color:#d97706; font-weight:800;">⏹ Terminate Algo</button>
+                <button type="button" class="straddle-btn btn-warning" onclick="straddleTerminateAlgo()" title="Halt strategy algorithm execution without squaring off broker positions" style="background:#b45309; border-color:#d97706; font-weight:800;">⏹ Stop Algo</button>
                 <button type="button" class="straddle-btn btn-danger" onclick="straddleSquareOffAllAndTerminate()" title="Emergency: Square off all open broker positions immediately and stop algorithm" style="background:#ea580c; border-color:#f97316; font-weight:800;">🚨 Square Off All & Terminate</button>
                 <button type="button" class="straddle-btn btn-outline" onclick="openStraddleOptionChainModal()" title="View live option chain matrix">📊 Option Chain</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleSquareOffSelected" style="margin-left:auto;" onclick="straddleSquareOffSelectedLegs()" title="Square off only the selected open leg positions">Square off selected legs</button>
@@ -763,6 +762,8 @@
             <!-- 5. Strategy Settings & Builder Panel (Screenshots 2, 3, 4) -->
             <div id="straddleSettingsPanel" class="straddle-settings-panel" style="display:none;">
                 <input type="hidden" id="cfgStrategyId" value="">
+                <!-- Strategy Settings Error Banner -->
+                <div id="stratSettingsErrorBanner" style="display:none; background:rgba(239, 68, 68, 0.15); border:1px solid #ef4444; border-radius:8px; padding:10px 14px; margin-bottom:12px; color:#fca5a5; font-size:12.5px; font-weight:700;"></div>
                 <!-- Strategy Name Header Bar -->
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:10px 14px; margin-bottom:14px; flex-wrap:wrap;">
                     <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:280px; flex-wrap:wrap;">
@@ -793,9 +794,10 @@
                             </select>
                         </div>
                     </div>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <button type="button" class="straddle-btn btn-outline" id="btnStraddleAdoptPosition" onclick="openAdoptBrokerPositionModal()" title="View and adopt manual or external broker positions into this algo" style="border-color:#38bdf8; color:#38bdf8; font-size:11.5px; font-weight:700;">📥 Adopt Positions</button>
                         <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save strategy settings without placing orders">💾 Save Changes</button>
-                        <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings Drawer">✕ Close Settings</button>
+                        <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings Drawer">✕ Close</button>
                     </div>
                 </div>
                                       <!-- SECTION 1: POSITIONS & LEGS BUILDER (Collapsible) -->
@@ -1322,11 +1324,10 @@
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save all strategy settings without placing orders">💾 Save Changes</button>
                         <button type="button" class="straddle-btn btn-outline" onclick="saveAsNewStraddlePreset()" title="Create and save as a new strategy preset clone">📑 Save as New Preset</button>
-                        <button type="button" class="straddle-btn btn-success" onclick="saveAndStartStraddleTrade()" title="Save configuration and punch live entry orders with broker">▶ Apply & Start Trade</button>
+                        <button type="button" class="straddle-btn btn-success" id="btnApplyAndStartTrade" onclick="saveAndStartStraddleTrade()" title="Save configuration and punch live entry orders with broker" style="background:#16a34a; border-color:#22c55e; font-weight:800;">▶ Apply & Start Trade</button>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings Drawer">✕ Close Settings</button>
-                        <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" title="Return to Algos Master Table">← Back to Algos List</button>
                     </div>
                 </div>
             </div>

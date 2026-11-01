@@ -571,7 +571,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         self,
         order_id: str,
         timeout_sec: float = 15.0,
-        poll_interval_sec: float = 0.005,
+        poll_interval_sec: float = 0.05,
     ) -> Dict[str, Any]:
         """
         Polls Kotak Neo OMS/RMS order history until the order status is confirmed

@@ -5814,44 +5814,73 @@ async function saveAndStartStraddleTrade() {
     const strat = serializeCurrentStrategySettings();
     strat.status = "TRADE_ACTIVE";
     strat.enabled = true;
-    showStraddleToast(`⚡ Launching '${strat.name}' & punching orders...`, "info", 2500);
+    showStraddleToast(`💾 Saving settings and punching orders for '${strat.name}'...`, "info", 4000);
 
-    // Instant optimistic state update
-    if (window._straddleState && window._straddleState.allStrategies) {
-        const idx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === strat.strategy_id);
-        if (idx >= 0) window._straddleState.allStrategies[idx] = strat;
-        window._straddleState.activeStrategy = strat;
-        window._straddleState.activeStrategyId = strat.strategy_id;
-        window._straddleState.status = "TRADE_ACTIVE";
-        renderStraddleAlgosTable(true);
+    const btn = document.getElementById("btnApplyAndStartTrade");
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `⏳ Executing Trade...`;
+    }
+
+    const errBanner = document.getElementById("stratSettingsErrorBanner");
+    if (errBanner) {
+        errBanner.style.display = "none";
+        errBanner.textContent = "";
     }
 
     try {
-        const savePromise = fetch("/api/straddle/strategy/save", {
+        // Step 1: Save settings FIRST and ensure it succeeds
+        const saveResp = await fetch("/api/straddle/strategy/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ strategy: strat })
         });
-        const startPromise = fetch("/api/straddle/start", {
+        const saveRes = await saveResp.json();
+        if (!saveRes.success) {
+            showStraddleToast(`❌ Failed to save settings: ${saveRes.error || "Unknown error"}`, "error", 5000);
+            if (errBanner) {
+                errBanner.textContent = "Failed to save settings: " + (saveRes.error || "Unknown error");
+                errBanner.style.display = "block";
+            }
+            if (btn) { btn.disabled = false; btn.innerHTML = `▶ Apply & Start Trade`; }
+            return;
+        }
+
+        // Step 2: Now start the algo with fresh settings and wait for order execution outcome
+        const startResp = await fetch("/api/straddle/start", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ strategy_id: strat.strategy_id, force_fresh: true })
         });
-
-        const [saveResp, startResp] = await Promise.all([savePromise, startPromise]);
         const startRes = await startResp.json();
-        if (startRes.success) {
-            showStraddleToast(`🚀 Trade started! Orders punched to Kotak Neo.`, "success", 3000);
-        } else {
-            showStraddleToast(`Notice: ${startRes.error || "Orders dispatched"}`, "warning", 3500);
-        }
+
         await fetchStraddleState();
         await loadStraddleOpenPositions();
         renderStraddleAlgosTable(true);
+
+        if (startRes.success) {
+            showStraddleToast(`🚀 Trade Started! ${startRes.filled_count ? startRes.filled_count + ' leg(s) filled on Kotak Neo.' : 'Orders punched.'}`, "success", 4000);
+            toggleStraddleSettingsPanel(false);
+        } else {
+            const errMsg = startRes.error || "Broker rejected orders";
+            showStraddleToast(`❌ Order Placement Failed: ${errMsg}`, "error", 7000);
+            if (errBanner) {
+                errBanner.textContent = `❌ Order Placement Failed: ${errMsg}`;
+                errBanner.style.display = "block";
+            }
+        }
     } catch (e) {
-        showStraddleToast("Error: " + e.message, "error", 3500);
+        showStraddleToast("Error: " + e.message, "error", 5000);
+        if (errBanner) {
+            errBanner.textContent = "Error: " + e.message;
+            errBanner.style.display = "block";
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `▶ Apply & Start Trade`;
+        }
     }
-    toggleStraddleSettingsPanel();
 }
 
 async function onStraddleStrategySelect(stratId) {
@@ -5868,8 +5897,25 @@ async function onStraddleStrategySelect(stratId) {
 }
 
 async function straddleStartAlgo() {
-    const stratId = window._straddleState.activeStrategyId;
-    showStraddleToast("🚀 Dispatching strategy orders...", "info", 2000);
+    const panel = document.getElementById("straddleSettingsPanel");
+    const isOpen = panel && !panel.classList.contains("hidden") && panel.style.display !== "none";
+    if (isOpen) {
+        return saveAndStartStraddleTrade();
+    }
+
+    const stratId = window._straddleState?.activeStrategyId;
+    if (!stratId) {
+        showStraddleToast("⚠️ No active algorithm selected to start", "warning", 3000);
+        return;
+    }
+
+    const btn = document.getElementById("btnStraddleStartAlgo");
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "⏳ Starting...";
+    }
+
+    showStraddleToast("🚀 Dispatching strategy orders to broker...", "info", 3500);
     try {
         const resp = await fetch("/api/straddle/start", {
             method: "POST",
@@ -5877,16 +5923,22 @@ async function straddleStartAlgo() {
             body: JSON.stringify({ strategy_id: stratId, force_fresh: true })
         });
         const res = await resp.json();
+        await fetchStraddleState();
+        await loadStraddleOpenPositions();
+        renderStraddleAlgosTable(true);
+
         if (res.success) {
-            showStraddleToast("✅ Algorithm started & orders punched!", "success", 2500);
-            await fetchStraddleState();
-            await loadStraddleOpenPositions();
-            renderStraddleAlgosTable(true);
+            showStraddleToast(`✅ Algorithm started! ${res.filled_count ? res.filled_count + ' leg(s) filled.' : 'Orders punched.'}`, "success", 4000);
         } else {
-            showStraddleToast("Notice: " + (res.error || "Execution triggered"), "warning", 3500);
+            showStraddleToast(`❌ Order Placement Failed: ${res.error || "Broker rejected orders"}`, "error", 7000);
         }
     } catch (e) {
-        showStraddleToast("Network error: " + e.message, "error", 3500);
+        showStraddleToast("Network error: " + e.message, "error", 4000);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = "▶ Start / Enable Algo";
+        }
     }
 }
 
@@ -5916,6 +5968,7 @@ async function clearStraddleClosedAndExpiredPositions() {
 }
 
 async function straddleTerminateAlgo() {
+    if (!confirm("Pause/Terminate algorithm execution? (Note: Existing open broker positions will remain open without algorithmic SL/TP. Use 'Square Off All & Terminate' to exit positions).")) return;
     showStraddleToast("⏹ Terminating algorithm execution...", "info", 1500);
 
     // Instant optimistic state change

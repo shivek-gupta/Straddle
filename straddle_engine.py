@@ -3357,10 +3357,31 @@ class StraddleManager:
             self._save_state()
             self._log_event(f"Algorithm '{strat.get('name')}' started manually. Punching entry orders...")
 
-            # Unconditionally launch strategy entry thread to punch orders immediately to broker
-            threading.Thread(target=self._execute_strategy_entry, args=(strat,), daemon=True).start()
+            # Launch strategy entry thread to punch orders immediately to broker
+            th = threading.Thread(target=self._execute_strategy_entry, args=(strat,), daemon=True)
+            th.start()
 
-            return {"success": True, "status": "TRADE_ACTIVE", "strategy": strat}
+            # Wait briefly (up to 3.5s) for entry execution so response includes authoritative order outcome
+            th.join(timeout=3.5)
+
+            # Refresh strategy reference
+            strat = self.get_strategy(sid)
+            has_error = (strat.get("status") == "ENTRY_FAILED" or bool(strat.get("entry_error") and strat.get("entry_error") != "-"))
+            if has_error:
+                return {
+                    "success": False,
+                    "status": strat.get("status", "ENTRY_FAILED"),
+                    "error": strat.get("entry_error", "Order placement failed on broker"),
+                    "strategy": strat
+                }
+
+            open_positions = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
+            return {
+                "success": True,
+                "status": strat.get("status", "TRADE_ACTIVE"),
+                "filled_count": len(open_positions),
+                "strategy": strat
+            }
 
     def reset_strategy_session(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
         """Clear completed/expired/failed positions from a strategy and reset its runtime state to READY."""
@@ -3562,7 +3583,20 @@ class StraddleManager:
                     if pos:
                         new_positions.append(pos)
 
-                # Ultra-fast parallel fill confirmation for Buy (Hedge) legs (5ms micro-poll, 200ms timeout)
+                # Check if any buy order failed to place
+                failed_buys = [p for p in buy_results if not p or p.get("status") == "ERROR"]
+                if failed_buys:
+                    err_msg = failed_buys[0].get("error_message") or failed_buys[0].get("error") or "Buy hedge placement failed"
+                    strat["entry_error"] = f"Hedge Buy Order Failed: {err_msg}"
+                    strat["status"] = "ENTRY_FAILED"
+                    strat["enabled"] = False
+                    strat["positions"] = new_positions
+                    self._log_event(f"[{strat.get('name')}] Cancelled Sell entry: Buy hedge order failed ({err_msg})", level="ERROR")
+                    self._save_strategies()
+                    self._save_state()
+                    return
+
+                # Wait for all Buy orders to be confirmed FILLED before punching Sell orders
                 buy_oids = []
                 for pos in buy_results:
                     if pos and pos.get("order_id") and not str(pos.get("order_id")).startswith("ORD_") and not str(pos.get("order_id")).startswith("PAPER_"):
@@ -3573,11 +3607,34 @@ class StraddleManager:
                                     buy_oids.append(str(ch_oid))
 
                 if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
-                    with ThreadPoolExecutor(max_workers=min(12, len(buy_oids) + 1)) as v_exec:
-                        v_futs = [v_exec.submit(broker.wait_for_order_fill, oid, 0.20, 0.005) for oid in buy_oids]
-                        _ = [f.result() for f in concurrent.futures.as_completed(v_futs)]
+                    all_buys_filled = True
+                    unfilled_reasons = []
+                    with ThreadPoolExecutor(max_workers=min(8, len(buy_oids) + 1)) as v_exec:
+                        v_futs = {v_exec.submit(broker.wait_for_order_fill, oid, 8.0, 0.05): oid for oid in buy_oids}
+                        for fut in concurrent.futures.as_completed(v_futs):
+                            res = fut.result()
+                            if not res.get("filled"):
+                                all_buys_filled = False
+                                unfilled_reasons.append(f"Order {v_futs[fut]}: {res.get('error') or res.get('status')}")
 
-                # Delay before executing Sell legs (0 seconds means immediately upon Buy fills)
+                    if not all_buys_filled:
+                        err_str = "; ".join(unfilled_reasons)
+                        strat["entry_error"] = f"Hedge Buy Not Filled: {err_str}"
+                        strat["status"] = "ENTRY_FAILED"
+                        strat["enabled"] = False
+                        for pos in buy_results:
+                            if pos and str(pos.get("order_id")) in err_str:
+                                pos["status"] = "ERROR"
+                                pos["error_message"] = err_str
+                        strat["positions"] = new_positions
+                        self._log_event(f"[{strat.get('name')}] ABORTING Sell Entry! Buy hedge orders were not filled: {err_str}", level="ERROR")
+                        self._save_strategies()
+                        self._save_state()
+                        return
+
+                self._log_event(f"[{strat.get('name')}] All Buy (Hedge) positions confirmed FILLED. Margin benefit active.")
+
+                # Delay before executing Sell legs (0 seconds means immediately upon confirmed Buy fills)
                 if sell_legs and entry_delay_sec > 0:
                     self._log_event(f"Waiting {entry_delay_sec}s before executing Short Sell positions (Hedge Margin Optimization)...")
                     time.sleep(entry_delay_sec)
@@ -5228,10 +5285,18 @@ class StraddleManager:
                         daemon=True
                     ).start()
 
-            # Wait briefly (up to 3s) for the broker to confirm fill and get exact traded price
+            # Wait briefly (up to 4s) for the broker to confirm fill and get exact traded price
             fill_res = {}
             if order_id and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
-                fill_res = broker.wait_for_order_fill(order_id, timeout_sec=3.0, poll_interval_sec=0.1)
+                fill_res = broker.wait_for_order_fill(order_id, timeout_sec=4.0, poll_interval_sec=0.05)
+
+            if fill_res and fill_res.get("status") in ("REJECTED", "CANCELLED", "FAILED"):
+                pos["status"] = "ERROR"
+                pos["error"] = fill_res.get("error") or "Exit order rejected by broker"
+                pos["error_message"] = f"[EXIT REJECTED] {pos['error']}"
+                pos["repair_needed"] = True
+                self._log_event(f"Exit order {order_id} for {pos.get('symbol')} was REJECTED: {pos['error']}", level="ERROR")
+                return {"success": False, "error": pos["error"], "order_id": order_id}
 
             exit_price = float(fill_res.get("price") or order_res.get("price") or ltp)
             pos["status"] = "COMPLETE"
@@ -8274,8 +8339,11 @@ class StraddleManager:
                             pos["status"] = "EXIT_PENDING"
                             self._log_event(f"Target Hit for {pos['symbol']} @ ₹{ltp:.2f} (Target was ₹{tgt_price:.2f})")
                             res_sq = self._square_off_single_position(pos, broker, reason=f"TARGET HIT (₹{tgt_price:.2f})")
-                            exit_oid = (res_sq or {}).get("order_id") or pos.get("exit_order_id")
-                            self._handle_leg_re_entry(strat, pos, trigger="TARGET", exit_order_id=exit_oid)
+                            if res_sq and res_sq.get("success"):
+                                exit_oid = res_sq.get("order_id") or pos.get("exit_order_id")
+                                self._handle_leg_re_entry(strat, pos, trigger="TARGET", exit_order_id=exit_oid)
+                            else:
+                                self._log_event(f"Target exit order failed for {pos.get('symbol')}. Re-entry aborted.", level="ERROR")
                             continue
 
                     # Check Stoploss Hit
@@ -8289,8 +8357,11 @@ class StraddleManager:
                                 reason_desc = f"STOPLOSS HIT [Auto-Handled SL Cancellation] (₹{sl_price:.2f})"
                             self._log_event(f"Stoploss Hit for {pos['symbol']} @ ₹{ltp:.2f} ({reason_desc})")
                             res_sq = self._square_off_single_position(pos, broker, reason=reason_desc)
-                            exit_oid = (res_sq or {}).get("order_id") or pos.get("exit_order_id")
-                            self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS", exit_order_id=exit_oid)
+                            if res_sq and res_sq.get("success"):
+                                exit_oid = (res_sq or {}).get("order_id") or pos.get("exit_order_id")
+                                self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS", exit_order_id=exit_oid)
+                            else:
+                                self._log_event(f"Stoploss exit order failed for {pos.get('symbol')}. Re-entry aborted.", level="ERROR")
                             continue
 
                 # Move SL to Cost Check (Quantiply standard: when ANY leg hits target or SL and completes)
@@ -8409,13 +8480,23 @@ class StraddleManager:
         # If exit_delay_sec == 0s (or "None"), buffer time is 0: exit Buy hedge legs immediately upon Sell exits!
         if sells:
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(sells))) as executor:
-                _ = list(executor.map(lambda p: self._square_off_single_position(p, broker, reason=reason), sells))
+                sell_res = list(executor.map(lambda p: self._square_off_single_position(p, broker, reason=reason), sells))
+
+            # Confirm all sell exits are FILLED on broker before exiting hedge buys
+            sell_exit_oids = [str(p.get("exit_order_id")) for p in sells if p.get("exit_order_id") and not str(p.get("exit_order_id")).startswith("ORD_") and not str(p.get("exit_order_id")).startswith("PAPER_")]
+            if sell_exit_oids:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(sell_exit_oids) + 1)) as v_exec:
+                    v_futs = [v_exec.submit(broker.wait_for_order_fill, oid, 8.0, 0.05) for oid in sell_exit_oids]
+                    for fut in concurrent.futures.as_completed(v_futs):
+                        pass
+
+            self._log_event(f"[{strat.get('name')}] All Short Sell positions confirmed squared off. Closing Buy hedges...")
 
             if buys and exit_delay_sec > 0:
                 self._log_event(f"Waiting {exit_delay_sec}s before squaring off Long Buy (Hedge) positions...")
                 time.sleep(exit_delay_sec)
 
-        # Phase 2: Square off Long Buy (Hedge) positions (immediately if exit_delay_sec == 0)
+        # Phase 2: Square off Long Buy (Hedge) positions ONLY after Short Sell positions are completely exited!
         if buys:
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(buys))) as executor:
                 _ = list(executor.map(lambda p: self._square_off_single_position(p, broker, reason=reason), buys))
