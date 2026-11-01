@@ -55,42 +55,57 @@
     <header class="straddle-topbar">
         <div class="straddle-brand">
             <span>⚡ STRADDLE PRO</span>
-            <span class="straddle-brand-badge">KOTAK NEO</span>
         </div>
 
         <div class="straddle-header-controls">
-            <!-- Kotak Auth Status Pill -->
-            <div id="kotakAuthStatusPill" class="straddle-auth-pill {% if not (auth_status and auth_status.is_authenticated) %}disconnected{% endif %}" onclick="openKotakSettingsModal()" title="Click to view/edit Kotak Neo credentials">
-                <span id="kotakAuthDot">{% if auth_status and auth_status.is_authenticated %}🟢{% elif auth_status and auth_status.configured %}🟡{% else %}🔴{% endif %}</span>
-                <span id="kotakAuthLabel">{% if auth_status and auth_status.is_authenticated %}Kotak Neo: Active ({{ auth_status.ucc or 'Live' }}){% elif auth_status and auth_status.configured %}Kotak Neo: Ready to Login{% else %}Kotak Neo: Not Configured{% endif %}</span>
-            </div>
-
             <!-- Net MTM Pill -->
             <div id="topbarMtmPill" style="display:inline-flex; align-items:center; gap:6px; background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.12); padding:5px 14px; border-radius:6px; font-family:var(--font-mono); font-size:12.5px; font-weight:800;">
                 <span style="color:#94a3b8; font-size:11px;">NET MTM:</span>
                 <span id="topbarMtmVal" style="color:#38bdf8;">₹0.00</span>
             </div>
 
-            <!-- Execution Mode Toggle -->
-            <button type="button" class="straddle-sys-btn" id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode()">
-                <span id="topbarModeIcon">⚡</span>
-                <span id="topbarModeLabel">Mode: Live Broker</span>
-            </button>
-
             <!-- Emergency Square-Off Kill Switch -->
-            <button type="button" class="straddle-btn btn-danger" onclick="emergencySquareOffAllStraddles()" style="padding:6px 14px; font-size:11.5px; letter-spacing:0.02em;">
+            <button type="button" class="straddle-btn btn-danger" onclick="emergencySquareOffAllStraddles()" style="padding:6px 14px; font-size:11.5px; letter-spacing:0.02em; font-weight:800;">
                 <span>🛑</span> SQUARE OFF ALL
             </button>
 
-            <!-- Kotak Neo Credentials Modal Trigger -->
-            <button type="button" class="straddle-sys-btn" onclick="openKotakSettingsModal()" title="Configure Kotak Neo API Keys">
-                <span>⚙️</span> Kotak API
-            </button>
-
-            <!-- Git Status & Cloud Sync Trigger -->
-            <button type="button" class="straddle-sys-btn" id="gitStatusBtn" onclick="openSystemUpdateModal()" title="View Git Commits, Auto Push to GitHub & Pull Updates">
-                <span>🔄</span> <span id="gitBranchBadge">main</span>
-            </button>
+            <!-- Merged Settings & System Dropdown (Kotak API + Git main + Trading Mode) -->
+            <div style="position:relative; display:inline-block;" id="topbarSettingsMenuWrap">
+                <button type="button" class="straddle-sys-btn" id="btnTopbarSettingsToggle" onclick="toggleTopbarSettingsDropdown(event)" style="display:inline-flex; align-items:center; gap:7px; background:#0f172a; border:1px solid #334155; padding:6px 12px; border-radius:6px; cursor:pointer; color:#f8fafc; font-size:12px; font-weight:700;" title="System Settings & Integrations">
+                    <span>⚙️</span>
+                    <span>Settings</span>
+                    <span style="font-size:10px; color:#94a3b8; margin-left:2px;">▼</span>
+                </button>
+                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:36px; right:0; width:260px; background:#0b0f19; border:1px solid #334155; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.85); z-index:11500; overflow:hidden;">
+                    <!-- Kotak API Credentials -->
+                    <div id="kotakAuthStatusPill" class="{% if not (auth_status and auth_status.is_authenticated) %}disconnected{% endif %}" onclick="openKotakSettingsModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Configure Kotak Neo API Keys">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span>⚙️</span>
+                            <span style="font-weight:700; color:#f8fafc; font-size:12px;">Kotak Neo API</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:4px; font-size:11px; color:#94a3b8;">
+                            <span id="kotakAuthDot">{% if auth_status and auth_status.is_authenticated %}🟢{% elif auth_status and auth_status.configured %}🟡{% else %}🔴{% endif %}</span>
+                            <span id="kotakAuthLabel" style="font-size:10.5px;">{% if auth_status and auth_status.is_authenticated %}Active{% elif auth_status and auth_status.configured %}Ready{% else %}Inactive{% endif %}</span>
+                        </div>
+                    </div>
+                    <!-- Git Cloud Sync -->
+                    <div id="gitStatusBtn" onclick="openSystemUpdateModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Git Cloud Sync & Updates">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span>🔄</span>
+                            <span style="font-weight:700; color:#f8fafc; font-size:12px;">Git Cloud Sync</span>
+                        </div>
+                        <span id="gitBranchBadge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800; font-family:var(--font-mono);">main</span>
+                    </div>
+                    <!-- Broker Execution Mode -->
+                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span id="topbarModeIcon">⚡</span>
+                            <span style="font-weight:700; color:#f8fafc; font-size:12px;">Trading Mode</span>
+                        </div>
+                        <span id="topbarModeLabel" style="font-size:10.5px; color:#10b981; font-weight:700;">Live Broker</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </header>
 
@@ -411,18 +426,12 @@
             </div>
 
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <!-- Underlying Live Spot Ticker (Clickable to open Option Chain) -->
-                <div class="straddle-ticker-box" onclick="openStraddleOptionChainModal()" style="cursor:pointer; transition:all 0.15s ease; border-radius:9999px;" title="Click to open Option Chain">
-                    <span class="live-tick-pulse" id="straddleLiveTickIndicator" title="Live Continuous Tick Stream Active"></span>
-                    <span class="tick-label" id="straddleUnderlyingLabel" style="color:#60a5fa; text-decoration:underline;">NIFTY:</span>
-                    <span class="tick-val" id="straddleSpotPrice">₹--</span>
-                    <span style="font-size:11px; color:#38bdf8; margin-left:3px;">⛓️</span>
-                </div>
-
-                <!-- Total Day MTM Widget -->
-                <div class="straddle-ticker-box" style="background:#0c101a; border-color:rgba(255,255,255,0.12);">
-                    <span class="tick-label">Total MTM:</span>
-                    <span class="tick-val" id="straddleNavTotalMtm" style="color:#f43f5e; font-weight:800;">₹ 0.00</span>
+                <!-- Hidden spot & nav MTM elements preserved for JS safety -->
+                <div style="display:none;">
+                    <span id="straddleLiveTickIndicator"></span>
+                    <span id="straddleUnderlyingLabel"></span>
+                    <span id="straddleSpotPrice">₹--</span>
+                    <span id="straddleNavTotalMtm">₹ 0.00</span>
                 </div>
 
                 <!-- Quick Action Buttons -->
@@ -2330,7 +2339,7 @@
                     <div style="font-size:32px; margin-bottom:10px;">🧺</div>
                     <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">Your Basket is Empty</div>
                     <div style="font-size:12px; margin-bottom:14px;">Add legs from the Option Chain or use the search bar above to build multi-leg strategies.</div>
-                    <button type="button" class="straddle-btn btn-primary" onclick="closeBasketOrderModal(); openStraddleOptionChainModal();" style="font-size:12px; padding:6px 14px;">⚡ Open Option Chain</button>
+                    <button type="button" class="straddle-btn btn-primary" onclick="openOptionChainForActiveBasket();" style="font-size:12px; padding:6px 14px;">⚡ Open Option Chain</button>
                 </div>
 
                 <!-- Protected Market Orders Notice Banner (Screenshot 4) -->

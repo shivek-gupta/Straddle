@@ -6190,11 +6190,14 @@ function toggleOptionChainInsights(forceState = null) {
 }
 window.toggleOptionChainInsights = toggleOptionChainInsights;
 
-async function openStraddleOptionChainModal(undParam) {
+async function openStraddleOptionChainModal(undParam, forceBasketMode = false) {
     const modal = document.getElementById("straddleOptionChainModal");
     if (!modal) return;
     modal.classList.remove("hidden");
     modal.style.setProperty("display", "flex", "important");
+
+    // Force Basket Mode ON or OFF depending on entrypoint
+    setOptionChainBasketMode(Boolean(forceBasketMode));
 
     // Collapsed by default unless user explicitly expanded
     const savedCollapsed = localStorage.getItem("straddle_opt_chain_insights_collapsed");
@@ -6202,7 +6205,7 @@ async function openStraddleOptionChainModal(undParam) {
     toggleOptionChainInsights(shouldCollapse);
 
     const undSel = document.getElementById("optChainUnderlyingSelect");
-    const targetUnd = undParam || undSel?.value || window._straddleState.activeStrategy?.underlying || "NIFTY";
+    const targetUnd = undParam || (forceBasketMode ? null : window._activeGlobalUnderlying) || undSel?.value || window._straddleState.activeStrategy?.underlying || "NIFTY";
     if (undSel) undSel.value = targetUnd;
 
     await onChangeOptChainUnderlying(targetUnd);
@@ -6229,7 +6232,7 @@ async function onChangeOptChainUnderlying(und) {
     }
 
     try {
-        const resp = await fetch(`/api/straddle/expiries?underlying=${und}`);
+        const resp = await fetch(`/api/straddle/expiries?underlying=${encodeURIComponent(und)}`);
         const data = await resp.json();
         let targetExpMs = null;
         if (data.success && data.expiries && data.expiries.length > 0) {
@@ -6263,56 +6266,8 @@ window._optionChainBasketMode = false;
 window._chainSelectedLegs = {};
 window._basketOpeningForOptionChain = null;
 
-function openOptionChainForActiveBasket() {
-    window._basketOpeningForOptionChain = window._activeBasketId || "basket_default";
-    const basketModal = document.getElementById("modalBasketOrders");
-    if (basketModal) basketModal.style.display = "none";
-    stopBasketQuoteTicker();
-
-    // Determine target underlying from active basket
-    const list = getSavedBasketsList();
-    const current = list.find(b => b.id === window._activeBasketId);
-    const basketUnderlying = current?.underlying || document.getElementById("basketUnderlyingSelect")?.value || "NIFTY";
-
-    // Set Basket Mode ON by default when invoked from Basket
-    window._optionChainBasketMode = true;
-
-    // Open option chain modal
-    openStraddleOptionChainModal(basketUnderlying);
-
-    // Sync basket mode button visual state
-    const btn = document.getElementById("btnToggleBasketMode");
-    const lbl = document.getElementById("basketModeStateLabel");
-    if (lbl) {
-        lbl.textContent = "ON";
-        lbl.style.color = "#10b981";
-    }
-    if (btn) {
-        btn.style.background = "#1d4ed8";
-        btn.style.borderColor = "#60a5fa";
-        btn.style.color = "#ffffff";
-        btn.style.boxShadow = "0 0 12px rgba(37,99,235,0.6)";
-    }
-    const thCe = document.getElementById("thCeActionHeader");
-    const thPe = document.getElementById("thPeActionHeader");
-    if (thCe) {
-        thCe.textContent = "SELECT";
-        thCe.style.width = "145px";
-    }
-    if (thPe) {
-        thPe.textContent = "SELECT";
-        thPe.style.width = "145px";
-    }
-    const botBar = document.getElementById("optionChainBasketBottomBar");
-    if (botBar) botBar.style.display = "flex";
-
-    showStraddleToast(`Select option legs for "${current?.name || 'Current Basket'}"`, "info", 2000);
-}
-window.openOptionChainForActiveBasket = openOptionChainForActiveBasket;
-
-function toggleOptionChainBasketMode() {
-    window._optionChainBasketMode = !window._optionChainBasketMode;
-    const isMode = window._optionChainBasketMode;
+function setOptionChainBasketMode(isMode) {
+    window._optionChainBasketMode = Boolean(isMode);
     const btn = document.getElementById("btnToggleBasketMode");
     const lbl = document.getElementById("basketModeStateLabel");
     const thCe = document.getElementById("thCeActionHeader") || document.getElementById("thCeBasketTick");
@@ -6341,13 +6296,13 @@ function toggleOptionChainBasketMode() {
     if (thCe) {
         thCe.textContent = isMode ? "SELECT" : "ACTION";
         thCe.style.display = "";
-        thCe.style.width = "145px";
+        thCe.style.width = isMode ? "145px" : "88px";
         thCe.className = "opt-action-col";
     }
     if (thPe) {
         thPe.textContent = isMode ? "SELECT" : "ACTION";
         thPe.style.display = "";
-        thPe.style.width = "145px";
+        thPe.style.width = isMode ? "145px" : "88px";
         thPe.className = "opt-action-col";
     }
     if (thCeSuper) thCeSuper.setAttribute("colspan", "3");
@@ -6355,8 +6310,62 @@ function toggleOptionChainBasketMode() {
     if (botBar) botBar.style.display = isMode ? "flex" : "none";
 
     updateOptionChainBasketSummaryBar();
+}
+window.setOptionChainBasketMode = setOptionChainBasketMode;
+
+function openOptionChainForActiveBasket() {
+    window._basketOpeningForOptionChain = window._activeBasketId || "basket_default";
+    const basketModal = document.getElementById("modalBasketOrders");
+    if (basketModal) basketModal.style.display = "none";
+    stopBasketQuoteTicker();
+
+    // Priority 1: Check what is actively selected in the dropdown
+    const undSelectEl = document.getElementById("basketUnderlyingSelect");
+    const selectedUnd = undSelectEl ? undSelectEl.value : null;
+
+    // Priority 2: Check current active basket in storage
+    const list = getSavedBasketsList();
+    const current = list.find(b => b.id === window._activeBasketId);
+    
+    // Authoritative underlying for this basket
+    const basketUnderlying = selectedUnd || current?.underlying || window._activeGlobalUnderlying || "NIFTY";
+
+    // Synchronize to active basket object and persistent storage
+    if (current && current.underlying !== basketUnderlying) {
+        current.underlying = basketUnderlying;
+        saveBasketsList(list);
+    }
+
+    // Open option chain modal with forceBasketMode = true
+    openStraddleOptionChainModal(basketUnderlying, true);
+
+    showStraddleToast(`Select option legs for "${current?.name || 'Current Basket'}" (${COMMODITY_DISPLAY_NAMES[basketUnderlying] || basketUnderlying})`, "info", 2500);
+}
+window.openOptionChainForActiveBasket = openOptionChainForActiveBasket;
+
+function toggleOptionChainBasketMode() {
+    const newMode = !window._optionChainBasketMode;
+    setOptionChainBasketMode(newMode);
     loadStraddleOptionChain();
 }
+window.toggleOptionChainBasketMode = toggleOptionChainBasketMode;
+
+function toggleTopbarSettingsDropdown(event) {
+    if (event) event.stopPropagation();
+    const dd = document.getElementById("topbarSettingsDropdown");
+    if (!dd) return;
+    const isShown = dd.style.display === "block";
+    dd.style.display = isShown ? "none" : "block";
+}
+window.toggleTopbarSettingsDropdown = toggleTopbarSettingsDropdown;
+
+document.addEventListener("click", function(e) {
+    const wrap = document.getElementById("topbarSettingsMenuWrap");
+    const dd = document.getElementById("topbarSettingsDropdown");
+    if (dd && wrap && !wrap.contains(e.target)) {
+        dd.style.display = "none";
+    }
+});
 window.toggleOptionChainBasketMode = toggleOptionChainBasketMode;
 
 function onToggleChainBasketLeg(strike, optType, side, symbol, token, ltp, lotSize, expDate, isChecked) {
