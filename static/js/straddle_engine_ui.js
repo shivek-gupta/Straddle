@@ -3551,11 +3551,16 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     symAccentClass = "sym-ce";
                 }
 
-                // Expiry subtext
-                let expiryText = pos.contract ? (pos.contract.expiry_date || 'NFO') : (pos.expiry_str || pos.expiry || 'NFO');
-                if (expiryText && !String(expiryText).toUpperCase().startsWith("NFO")) {
-                    expiryText = "NFO " + expiryText;
-                }
+                // Expiry subtext & exchange segment prefix
+                const exSeg = (pos.exchange_segment || (pos.contract && (pos.contract.segment || pos.contract.exchange_segment)) || '').toLowerCase();
+                const posUnd = (pos.underlying || (pos.contract && pos.contract.underlying) || sym).toUpperCase();
+                const isCommPos = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].some(c => posUnd.includes(c)) || exSeg.includes("mcx");
+                const isBsePos = ["SENSEX", "BANKEX"].some(b => posUnd.includes(b)) || exSeg.includes("bse");
+                const segPrefix = isCommPos ? "MCX" : (isBsePos ? "BFO" : "NFO");
+
+                let rawExp = pos.contract ? (pos.contract.expiry_date || pos.contract.expiry_str || '') : (pos.expiry_str || pos.expiry || '');
+                rawExp = String(rawExp).replace(/^(NFO|MCX|BFO|BSE|NSE)\s*/i, '').trim();
+                let expiryText = rawExp ? `${segPrefix} ${rawExp}` : segPrefix;
 
                 // Quantity column
                 const lots = pending ? pending.lots : (pos.lots || 1);

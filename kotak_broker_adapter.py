@@ -67,7 +67,6 @@ def _init_kotak_symbol_maps():
                         if seg in ("NSE_FO", "BSE_FO", "MCX_FO") and r.get("exchange_token"):
                             tok = str(r["exchange_token"]).strip()
                             tsym = str(r.get("trading_symbol", "")).strip()
-                            is_w = bool(r.get("weekly", True))
                             parts = tsym.split()
                             if len(parts) >= 6:
                                 und = parts[0].upper()
@@ -76,10 +75,14 @@ def _init_kotak_symbol_maps():
                                 day = parts[3].zfill(2)
                                 month = parts[4].upper()
                                 year = parts[5][-2:]
-                                if is_w:
-                                    canon = f"{und}{year}{MONTH_CODE_MAP.get(month, month[:1])}{day}{strike}{opt_type}"
+                                if seg == "MCX_FO" or any(c in und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER")):
+                                    canon = f"{und}{day}{month}{year}{strike}{opt_type}"
                                 else:
-                                    canon = f"{und}{year}{month}{strike}{opt_type}"
+                                    is_w = bool(r.get("weekly", True))
+                                    if is_w:
+                                        canon = f"{und}{year}{MONTH_CODE_MAP.get(month, month[:1])}{day}{strike}{opt_type}"
+                                    else:
+                                        canon = f"{und}{year}{month}{strike}{opt_type}"
                                 _KOTAK_TOKEN_MAP[tok] = canon
                                 _KOTAK_DISPLAY_MAP[tsym.upper()] = canon
                                 _KOTAK_DISPLAY_MAP[tsym.upper().replace(" ", "")] = canon
@@ -89,7 +92,10 @@ def _init_kotak_symbol_maps():
                                 day = parts[2].zfill(2) if len(parts) >= 5 else ""
                                 month = parts[3].upper() if len(parts) >= 5 else parts[2].upper()
                                 year = parts[4][-2:] if len(parts) >= 5 else parts[3][-2:]
-                                canon = f"{und}{year}{month}FUT"
+                                if seg == "MCX_FO" or any(c in und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER")):
+                                    canon = f"{und}{day}{month}{year}FUT"
+                                else:
+                                    canon = f"{und}{year}{month}FUT"
                                 _KOTAK_TOKEN_MAP[tok] = canon
                                 _KOTAK_DISPLAY_MAP[tsym.upper()] = canon
                                 _KOTAK_DISPLAY_MAP[tsym.upper().replace(" ", "")] = canon
@@ -147,16 +153,35 @@ def _resolve_kotak_trading_symbol(symbol: str, instrument_key: str = "") -> str:
 
     # Priority 4: Algorithmic transformation of space-separated display string
     # e.g. "NIFTY 22600 CE 19 OCT 26" -> "NIFTY26O1922600CE"
+    # e.g. "GOLD 138500 CE 27 NOV 26" -> "GOLD27NOV26138500CE"
     parts = clean_sym.split()
     if len(parts) >= 6:
         und = parts[0].upper()
-        strike = parts[1]
-        opt_type = parts[2].upper()
-        day = parts[3].zfill(2)
-        month = parts[4].upper()
-        year = parts[5][-2:]
-        m_code = MONTH_CODE_MAP.get(month, month[:1])
-        return f"{und}{year}{m_code}{day}{strike}{opt_type}"
+        if parts[1].replace(".", "", 1).isdigit() and parts[2].upper() in ("CE", "PE"):
+            strike = parts[1]
+            opt_type = parts[2].upper()
+            day = parts[3].zfill(2)
+            month = parts[4].upper()
+            year = parts[5][-2:]
+        elif parts[-1].upper() in ("CE", "PE"):
+            day = parts[1].zfill(2)
+            month = parts[2].upper()
+            year = parts[3][-2:]
+            strike = parts[4]
+            opt_type = parts[5].upper()
+        else:
+            strike = parts[1]
+            opt_type = parts[2].upper()
+            day = parts[3].zfill(2)
+            month = parts[4].upper()
+            year = parts[5][-2:]
+
+        is_comm = any(c in und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+        if is_comm or "MCX" in str(instrument_key).upper():
+            return f"{und}{day}{month}{year}{strike}{opt_type}"
+        else:
+            m_code = MONTH_CODE_MAP.get(month, month[:1])
+            return f"{und}{year}{m_code}{day}{strike}{opt_type}"
 
     return no_space
 
