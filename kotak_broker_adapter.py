@@ -284,6 +284,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         self._quotes_cache_ts: Dict[str, float] = {}
         self._funds_cache: Dict[str, Any] = {}
         self._funds_cache_ts: float = 0.0
+        self._last_429_ts: float = 0.0
         _init_kotak_symbol_maps()
 
     def _get_client(self):
@@ -898,6 +899,15 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         try:
             import straddle_engine
             now_ts = time.time()
+
+            # If Kotak recently returned 429 Too Many Requests, serve from cache to prevent API flooding
+            if (now_ts - getattr(self, "_last_429_ts", 0.0)) < 3.0:
+                cached_res = {}
+                for tok in instrument_tokens:
+                    raw_tok = str(tok).strip()
+                    if raw_tok in self._quotes_cache:
+                        cached_res[raw_tok] = self._quotes_cache[raw_tok]
+                return cached_res
             quotes_data = {}
             req_tokens = []
             tokens_to_fetch = []
@@ -907,8 +917,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 if not raw_tok:
                     continue
 
-                # Check recent memory cache (180ms TTL for 300ms ultra-rapid ticking)
-                if raw_tok in self._quotes_cache and (now_ts - self._quotes_cache_ts.get(raw_tok, 0)) < 0.18:
+                # Check recent memory cache (2.0s TTL for smooth real-time ticking)
+                if raw_tok in self._quotes_cache and (now_ts - self._quotes_cache_ts.get(raw_tok, 0)) < 2.0:
                     quotes_data[raw_tok] = self._quotes_cache[raw_tok]
                     continue
 
@@ -975,10 +985,36 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     "574319": "NATURALGAS", "574320": "NATGASMINI",
                     "574829": "COPPER"
                 }
-                for i in range(0, len(req_tokens), 40):
-                    batch = req_tokens[i:i + 40]
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                def _fetch_single_batch(b_tokens):
                     try:
-                        res = client.quotes(instrument_tokens=batch, quote_type="all")
+                        return client.quotes(instrument_tokens=b_tokens, quote_type="all")
+                    except Exception as eb:
+                        eb_str = str(eb)
+                        if "429" in eb_str or "too many request" in eb_str.lower():
+                            self._last_429_ts = time.time()
+                        logger.debug(f"[Kotak Neo] Batch quotes error: {eb}")
+                        return None
+
+                batches = [req_tokens[i:i + 40] for i in range(0, len(req_tokens), 40)]
+                batch_results = []
+                if len(batches) == 1:
+                    batch_results.append(_fetch_single_batch(batches[0]))
+                else:
+                    with ThreadPoolExecutor(max_workers=min(2, len(batches))) as pool:
+                        fut_to_b = {pool.submit(_fetch_single_batch, b): b for b in batches}
+                        for fut in as_completed(fut_to_b):
+                            res = fut.result()
+                            if res:
+                                batch_results.append(res)
+
+                for res in batch_results:
+                    if not res:
+                        continue
+                    if isinstance(res, dict) and res.get("status_code") == 429:
+                        self._last_429_ts = time.time()
+                    try:
                         raw_list = res.get("data") if isinstance(res, dict) else res
                         if isinstance(raw_list, list):
                             for q in raw_list:

@@ -1515,12 +1515,21 @@ class StraddleManager:
         step = STRIKE_STEPS.get(clean_und, 50)
         und_key = UNDERLYING_KEYS.get(clean_und, f"NSE_INDEX|{clean_und}")
 
-        # Check sub-second snapshot cache (150ms TTL for 300ms ultra-rapid polling)
+        # Resolve and validate Expiry (instant memory cache)
+        all_expiries = self.get_expiries_for_underlying(clean_und)
+        valid_exp_ms = {e["expiry_ms"] for e in all_expiries} if all_expiries else set()
+
+        if expiry_ms and int(expiry_ms) in valid_exp_ms:
+            selected_expiry_ms = int(expiry_ms)
+        else:
+            selected_expiry_ms = all_expiries[0]["expiry_ms"] if all_expiries else None
+
+        # Check sub-second snapshot cache (1.0s TTL for smooth real-time performance)
         now_ts = time.time()
-        cache_key = f"{clean_und}_{expiry_ms}_{strike_range}"
+        cache_key = f"{clean_und}_{selected_expiry_ms}_{strike_range}"
         if cache_key in self._chain_snapshot_cache:
             c_ts, c_snap = self._chain_snapshot_cache[cache_key]
-            if (now_ts - c_ts) < 0.15:
+            if (now_ts - c_ts) < 1.0:
                 return c_snap
 
         instruments = self._load_instruments_data()
@@ -1533,10 +1542,6 @@ class StraddleManager:
             spot_price = COMMODITY_FALLBACK_PRICES.get(clean_und, 22453.0 if clean_und == "NIFTY" else 48150.0)
 
         atm_strike = round(spot_price / step) * step
-
-        # Resolve Expiry (instant memory cache)
-        all_expiries = self.get_expiries_for_underlying(clean_und)
-        selected_expiry_ms = expiry_ms or (all_expiries[0]["expiry_ms"] if all_expiries else None)
 
         # Calculate DTE (days to expiry)
         dte_days = 3.0
@@ -1764,13 +1769,18 @@ class StraddleManager:
 
         max_single_oi = max(1, max(max_ce_oi, max_pe_oi))
 
+        matching_exp = next((e for e in all_expiries if e.get("expiry_ms") == selected_expiry_ms), None)
+        expiry_date_label = matching_exp["formatted_label"] if matching_exp else ""
+
         snapshot = {
             "underlying": clean_und,
             "spot_price": spot_price,
             "atm_strike": atm_strike,
             "step": step,
             "expiries": all_expiries,
+            "expiry_ms": selected_expiry_ms,
             "selected_expiry_ms": selected_expiry_ms,
+            "expiry_date": expiry_date_label,
             "strike_range": strike_range,
             "pcr": pcr,
             "sentiment": sentiment,

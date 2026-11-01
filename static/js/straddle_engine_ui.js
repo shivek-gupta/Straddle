@@ -6035,7 +6035,7 @@ function startOptionChainTicker() {
         } else {
             stopOptionChainTicker();
         }
-    }, 300); // 300ms lightning-speed real-time ticks (~3.3 ticks/sec)
+    }, 1500); // 1.5s smooth, reliable real-time ticks
 }
 
 function stopOptionChainTicker() {
@@ -6167,10 +6167,19 @@ function closeStraddleOptionChainModal() {
 
 async function onChangeOptChainUnderlying(und) {
     window._straddleState.optionChainUnderlying = und;
+    stopOptionChainTicker();
+    _isLoadingOptionChain = false;
+
+    const tbody = document.getElementById("straddleOptionChainBody");
+    if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:#94a3b8;"><span style="font-size:16px;">⏳</span> Loading ${und} Option Depth & Greeks...</td></tr>`;
+    }
+
     try {
         const resp = await fetch(`/api/straddle/expiries?underlying=${und}`);
         const data = await resp.json();
-        if (data.success && data.expiries) {
+        let targetExpMs = null;
+        if (data.success && data.expiries && data.expiries.length > 0) {
             const sel = document.getElementById("optChainExpirySelect");
             if (sel) {
                 sel.innerHTML = "";
@@ -6180,16 +6189,16 @@ async function onChangeOptChainUnderlying(und) {
                     opt.textContent = e.formatted_label + " (" + e.tag + ")";
                     sel.appendChild(opt);
                 });
+                sel.value = data.expiries[0].expiry_ms;
             }
-            if (data.expiries.length > 0) {
-                await loadStraddleOptionChain(data.expiries[0].expiry_ms);
-            } else {
-                await loadStraddleOptionChain();
-            }
+            targetExpMs = data.expiries[0].expiry_ms;
         }
+        await loadStraddleOptionChain(targetExpMs, false);
     } catch (e) {
         console.error("Error loading expiries for underlying:", e);
-        await loadStraddleOptionChain();
+        await loadStraddleOptionChain(null, false);
+    } finally {
+        startOptionChainTicker();
     }
 }
 
@@ -6500,16 +6509,25 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
         let url = `/api/straddle/option_chain?underlying=${und}&strike_range=${strikeRange}`;
         if (exp) url += `&expiry_ms=${exp}`;
 
-        // Abort previous in-flight tick request if any to avoid out-of-order responses
-        if (window._optChainAbortController) {
-            try { window._optChainAbortController.abort(); } catch(_) {}
+        // Only abort previous in-flight request if user triggered an explicit new foreground action
+        if (!isBackgroundUpdate) {
+            if (window._optChainAbortController) {
+                try { window._optChainAbortController.abort(); } catch(_) {}
+            }
+            window._optChainAbortController = new AbortController();
+        } else if (!window._optChainAbortController) {
+            window._optChainAbortController = new AbortController();
         }
-        window._optChainAbortController = new AbortController();
 
-        const resp = await fetch(url, { signal: window._optChainAbortController.signal });
+        const resp = await fetch(url, { signal: window._optChainAbortController?.signal });
         const data = await resp.json();
         if (data.success && data.data) {
             const chain = data.data;
+
+            // Sync expiry dropdown if backend resolved a valid expiry for this underlying
+            if (expSel && chain.selected_expiry_ms && expSel.value != chain.selected_expiry_ms) {
+                expSel.value = chain.selected_expiry_ms;
+            }
 
             // Spot outlier anomaly filter (ignore >15% sub-second bounce)
             const spotKey = `${und}`;
@@ -6894,6 +6912,10 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         </td>
                     </tr>
                 `;
+            }
+
+            if (!renderRows || renderRows.length === 0) {
+                rowsHtml = `<tr><td colspan="7" style="text-align:center; padding:30px; color:#94a3b8;"><span style="font-size:16px;">⚠️</span> No active option contracts found for ${und} (${currentExpDateStr}). Try selecting a different expiry.</td></tr>`;
             }
 
             tbody.innerHTML = rowsHtml;
