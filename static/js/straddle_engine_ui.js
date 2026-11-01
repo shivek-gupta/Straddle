@@ -4740,16 +4740,82 @@ function populateStraddleSettingsForm(s) {
 
     // MTM Target & SL
     const mtm = s.mtm_target || {};
+    const sl = s.mtm_stoploss || s.mtm_sl || {};
+
+    const mtmSecToggle = document.getElementById("cfgToggleMtmSection");
+    const mtmTgtToggle = document.getElementById("cfgToggleMtmTarget");
+    const mtmSlToggle = document.getElementById("cfgToggleMtmSl");
+
+    const mtmEnabled = (s.mtm_enabled !== undefined) ? !!s.mtm_enabled : ((mtm.type && mtm.type !== "None") || (sl.type && sl.type !== "None"));
+    if (mtmSecToggle) mtmSecToggle.checked = mtmEnabled;
+
+    if (mtmTgtToggle) {
+        mtmTgtToggle.checked = (mtm.enabled !== undefined) ? !!mtm.enabled : (mtm.type !== "None");
+    }
+    if (mtmSlToggle) {
+        mtmSlToggle.checked = (sl.enabled !== undefined) ? !!sl.enabled : (sl.type !== "None");
+    }
+
     document.getElementById("cfgMtmTargetType").value = mtm.type || "MTM in total amount";
     document.getElementById("cfgMtmTargetValue").value = mtm.value !== undefined ? mtm.value : 10000;
     document.getElementById("cfgMtmTargetReEntry").value = mtm.re_entry || "None";
     document.getElementById("cfgMtmTargetAction").value = mtm.action || "Square off all positions";
 
-    const sl = s.mtm_sl || {};
     document.getElementById("cfgMtmSlType").value = sl.type || "None";
     document.getElementById("cfgMtmSlValue").value = sl.value !== undefined ? sl.value : -5000;
     document.getElementById("cfgMtmProfitLock").value = sl.profit_lock || "None";
     document.getElementById("cfgMtmSlAction").value = sl.action || "Square off all positions";
+
+    syncMtmFieldStates();
+
+    // Premium Matching & Range
+    const pm = s.premium_matching || {};
+    const premSecToggle = document.getElementById("cfgTogglePremSection");
+    if (premSecToggle) {
+        premSecToggle.checked = !!pm.enabled;
+    }
+    const pmMode = pm.mode || "No matching of premiums";
+    if (pmMode === "Match premiums with maximum difference") {
+        const r = document.getElementById("radPremMaxDiff");
+        if (r) r.checked = true;
+    } else if (pmMode === "Premium close to") {
+        const r = document.getElementById("radPremCloseTo");
+        if (r) r.checked = true;
+    } else if (pmMode === "Premium range") {
+        const r = document.getElementById("radPremRange");
+        if (r) r.checked = true;
+    } else {
+        const r = document.getElementById("radPremNone");
+        if (r) r.checked = true;
+    }
+    if (document.getElementById("cfgPremMaxDiffVal")) {
+        document.getElementById("cfgPremMaxDiffVal").value = pm.max_difference || "";
+    }
+    if (document.getElementById("cfgPremCloseToVal")) {
+        document.getElementById("cfgPremCloseToVal").value = pm.close_to || "";
+    }
+    if (document.getElementById("cfgPremRangeMin")) {
+        document.getElementById("cfgPremRangeMin").value = pm.range_min || "";
+    }
+    if (document.getElementById("cfgPremRangeMax")) {
+        document.getElementById("cfgPremRangeMax").value = pm.range_max || "";
+    }
+
+    const combToggle = document.getElementById("cfgToggleCombinedPrem");
+    if (combToggle) {
+        combToggle.checked = !!(pm.combined_premium_type && pm.combined_premium_type !== "None");
+    }
+    if (document.getElementById("cfgCombinedPremType")) {
+        document.getElementById("cfgCombinedPremType").value = pm.combined_premium_type || "Lower than";
+    }
+    if (document.getElementById("cfgCombinedPremVal")) {
+        document.getElementById("cfgCombinedPremVal").value = pm.combined_premium_value !== undefined ? pm.combined_premium_value : "";
+    }
+    if (document.getElementById("cfgPremFrequency")) {
+        document.getElementById("cfgPremFrequency").value = pm.condition_frequency || "LTP (Continuous Monitoring)";
+    }
+
+    syncPremiumMatchingFieldStates();
 
     // Advanced sequencing
     const adv = s.advanced_settings || s.advanced || {};
@@ -4952,7 +5018,7 @@ function addStraddleLegRow(leg = null) {
         </td>
         <td>
             <div style="display:flex; gap:2px;">
-                <select class="straddle-select leg-tgt-type" style="width:85px;">
+                <select class="straddle-select leg-tgt-type" style="width:85px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
                     ${tgtOptionsHtml}
                 </select>
                 <input type="number" class="straddle-input leg-tgt-val" style="width:50px;" value="${l.target_value !== undefined ? l.target_value : 45}">
@@ -4960,7 +5026,7 @@ function addStraddleLegRow(leg = null) {
         </td>
         <td>
             <div style="display:flex; gap:2px;">
-                <select class="straddle-select leg-tgt-re-type" style="width:120px;">
+                <select class="straddle-select leg-tgt-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
                     ${tgtReOptionsHtml}
                 </select>
                 <input type="number" class="straddle-input leg-tgt-re-cnt" style="width:40px;" value="${l.target_re_execute_count || 6}">
@@ -4968,7 +5034,7 @@ function addStraddleLegRow(leg = null) {
         </td>
         <td>
             <div style="display:flex; gap:2px;">
-                <select class="straddle-select leg-sl-type" style="width:80px;">
+                <select class="straddle-select leg-sl-type" style="width:80px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
                     ${slOptionsHtml}
                 </select>
                 <input type="number" class="straddle-input leg-sl-val" style="width:50px;" value="${l.sl_value !== undefined ? l.sl_value : 66}">
@@ -4983,7 +5049,7 @@ function addStraddleLegRow(leg = null) {
         </td>
         <td>
             <div style="display:flex; gap:2px;">
-                <select class="straddle-select leg-sl-re-type" style="width:120px;">
+                <select class="straddle-select leg-sl-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
                     ${slReOptionsHtml}
                 </select>
                 <input type="number" class="straddle-input leg-sl-re-cnt" style="width:40px;" value="${l.sl_re_execute_count || 1}">
@@ -5010,12 +5076,278 @@ function addStraddleLegRow(leg = null) {
         </td>
     `;
     tbody.appendChild(tr);
+    syncLegRowDisabledFields(tr);
 }
 
 function removeStraddleLegRow(rowId) {
     const tr = document.getElementById(rowId);
     if (tr) tr.remove();
 }
+
+function syncLegRowDisabledFields(tr) {
+    if (!tr) return;
+
+    // 1. Target
+    const tgtTypeSel = tr.querySelector(".leg-tgt-type");
+    const tgtValInput = tr.querySelector(".leg-tgt-val");
+    if (tgtTypeSel && tgtValInput) {
+        const isNone = (tgtTypeSel.value || "").toLowerCase() === "none";
+        tgtValInput.disabled = isNone;
+        tgtValInput.classList.toggle("input-disabled-muted", isNone);
+        if (isNone) {
+            tgtValInput.setAttribute("title", "Target type is set to None. Select a target mode (%, pts) to enter a target value.");
+        } else {
+            tgtValInput.removeAttribute("title");
+        }
+    }
+
+    // 2. Target Re-execution
+    const tgtReSel = tr.querySelector(".leg-tgt-re-type");
+    const tgtReInput = tr.querySelector(".leg-tgt-re-cnt");
+    if (tgtReSel && tgtReInput) {
+        const isNone = (tgtReSel.value || "").toUpperCase() === "NONE";
+        tgtReInput.disabled = isNone;
+        tgtReInput.classList.toggle("input-disabled-muted", isNone);
+        if (isNone) {
+            tgtReInput.setAttribute("title", "Target Re-execution is NONE. Choose a re-execution mode to enter execution count.");
+        } else {
+            tgtReInput.removeAttribute("title");
+        }
+    }
+
+    // 3. Stoploss
+    const slTypeSel = tr.querySelector(".leg-sl-type");
+    const slValInput = tr.querySelector(".leg-sl-val");
+    if (slTypeSel && slValInput) {
+        const isNone = (slTypeSel.value || "").toLowerCase() === "none";
+        slValInput.disabled = isNone;
+        slValInput.classList.toggle("input-disabled-muted", isNone);
+        if (isNone) {
+            slValInput.setAttribute("title", "Stoploss type is set to None. Select a stoploss mode (%, pts) to enter a stoploss value.");
+        } else {
+            slValInput.removeAttribute("title");
+        }
+    }
+
+    // 4. Stoploss Re-execution
+    const slReSel = tr.querySelector(".leg-sl-re-type");
+    const slReInput = tr.querySelector(".leg-sl-re-cnt");
+    if (slReSel && slReInput) {
+        const isNone = (slReSel.value || "").toUpperCase() === "NONE";
+        slReInput.disabled = isNone;
+        slReInput.classList.toggle("input-disabled-muted", isNone);
+        if (isNone) {
+            slReInput.setAttribute("title", "Stoploss Re-execution is NONE. Choose a re-execution mode to enter execution count.");
+        } else {
+            slReInput.removeAttribute("title");
+        }
+    }
+}
+window.syncLegRowDisabledFields = syncLegRowDisabledFields;
+
+function onToggleMtmSection(enabled) {
+    const sec = document.getElementById("sec_builder_mtm");
+    if (enabled && sec && sec.style.display === "none") {
+        sec.style.display = "block";
+        const ch = document.getElementById("chevron_sec_builder_mtm");
+        if (ch) ch.textContent = "▼";
+    }
+    syncMtmFieldStates();
+}
+window.onToggleMtmSection = onToggleMtmSection;
+
+function onToggleMtmSubTarget(enabled) {
+    syncMtmFieldStates();
+}
+window.onToggleMtmSubTarget = onToggleMtmSubTarget;
+
+function onToggleMtmSubSl(enabled) {
+    syncMtmFieldStates();
+}
+window.onToggleMtmSubSl = onToggleMtmSubSl;
+
+function syncMtmFieldStates() {
+    const secToggle = document.getElementById("cfgToggleMtmSection");
+    const isSecEnabled = secToggle ? secToggle.checked : true;
+    const secBody = document.getElementById("sec_builder_mtm");
+    const secBadge = document.getElementById("badge_mtm_section");
+
+    if (secBadge) {
+        secBadge.textContent = isSecEnabled ? "ENABLED" : "DISABLED";
+        secBadge.className = "section-status-badge " + (isSecEnabled ? "badge-active" : "badge-disabled");
+    }
+
+    if (secBody) {
+        secBody.classList.toggle("section-muted-locked", !isSecEnabled);
+    }
+
+    // Target Box
+    const cardTgt = document.getElementById("card_mtm_target");
+    const tgtSubToggle = document.getElementById("cfgToggleMtmTarget");
+    const isTgtSubEnabled = isSecEnabled && (tgtSubToggle ? tgtSubToggle.checked : true);
+    const tgtBadge = document.getElementById("badge_mtm_sub_target");
+
+    if (tgtBadge) {
+        tgtBadge.textContent = isTgtSubEnabled ? "ACTIVE" : "MUTED";
+        tgtBadge.style.color = isTgtSubEnabled ? "#38bdf8" : "#64748b";
+    }
+    if (cardTgt) {
+        cardTgt.classList.toggle("card-muted-locked", !isTgtSubEnabled);
+    }
+
+    const tgtTypeSel = document.getElementById("cfgMtmTargetType");
+    const tgtVal = document.getElementById("cfgMtmTargetValue");
+    const tgtRe = document.getElementById("cfgMtmTargetReEntry");
+    const tgtAction = document.getElementById("cfgMtmTargetAction");
+
+    if (tgtTypeSel) tgtTypeSel.disabled = !isTgtSubEnabled;
+    if (tgtRe) tgtRe.disabled = !isTgtSubEnabled;
+    if (tgtAction) tgtAction.disabled = !isTgtSubEnabled;
+    if (tgtSubToggle) tgtSubToggle.disabled = !isSecEnabled;
+
+    if (tgtVal) {
+        const isTgtNone = !isTgtSubEnabled || (tgtTypeSel && tgtTypeSel.value === "None");
+        tgtVal.disabled = isTgtNone;
+        tgtVal.classList.toggle("input-disabled-muted", isTgtNone);
+        if (isTgtNone) {
+            tgtVal.setAttribute("title", "MTM Target is disabled or set to None.");
+        } else {
+            tgtVal.removeAttribute("title");
+        }
+    }
+
+    // Stoploss Box
+    const cardSl = document.getElementById("card_mtm_sl");
+    const slSubToggle = document.getElementById("cfgToggleMtmSl");
+    const isSlSubEnabled = isSecEnabled && (slSubToggle ? slSubToggle.checked : true);
+    const slBadge = document.getElementById("badge_mtm_sub_sl");
+
+    if (slBadge) {
+        slBadge.textContent = isSlSubEnabled ? "ACTIVE" : "MUTED";
+        slBadge.style.color = isSlSubEnabled ? "#f43f5e" : "#64748b";
+    }
+    if (cardSl) {
+        cardSl.classList.toggle("card-muted-locked", !isSlSubEnabled);
+    }
+
+    const slTypeSel = document.getElementById("cfgMtmSlType");
+    const slVal = document.getElementById("cfgMtmSlValue");
+    const slLock = document.getElementById("cfgMtmProfitLock");
+    const slAction = document.getElementById("cfgMtmSlAction");
+
+    if (slTypeSel) slTypeSel.disabled = !isSlSubEnabled;
+    if (slLock) slLock.disabled = !isSlSubEnabled;
+    if (slAction) slAction.disabled = !isSlSubEnabled;
+    if (slSubToggle) slSubToggle.disabled = !isSecEnabled;
+
+    if (slVal) {
+        const isSlNone = !isSlSubEnabled || (slTypeSel && slTypeSel.value === "None");
+        slVal.disabled = isSlNone;
+        slVal.classList.toggle("input-disabled-muted", isSlNone);
+        if (isSlNone) {
+            slVal.setAttribute("title", "MTM Stoploss is disabled or set to None.");
+        } else {
+            slVal.removeAttribute("title");
+        }
+    }
+}
+window.syncMtmFieldStates = syncMtmFieldStates;
+
+function onTogglePremSection(enabled) {
+    const sec = document.getElementById("sec_builder_premium");
+    if (enabled && sec && sec.style.display === "none") {
+        sec.style.display = "block";
+        const ch = document.getElementById("chevron_sec_builder_premium");
+        if (ch) ch.textContent = "▼";
+    }
+    syncPremiumMatchingFieldStates();
+}
+window.onTogglePremSection = onTogglePremSection;
+
+function syncPremiumMatchingFieldStates() {
+    const secToggle = document.getElementById("cfgTogglePremSection");
+    const isSecEnabled = secToggle ? secToggle.checked : false;
+    const secBody = document.getElementById("sec_builder_premium");
+    const secBadge = document.getElementById("badge_prem_section");
+
+    if (secBadge) {
+        secBadge.textContent = isSecEnabled ? "ENABLED" : "DISABLED";
+        secBadge.className = "section-status-badge " + (isSecEnabled ? "badge-active" : "badge-disabled");
+    }
+
+    if (secBody) {
+        secBody.classList.toggle("section-muted-locked", !isSecEnabled);
+    }
+
+    const radNone = document.getElementById("radPremNone");
+    const radMaxDiff = document.getElementById("radPremMaxDiff");
+    const radCloseTo = document.getElementById("radPremCloseTo");
+    const radRange = document.getElementById("radPremRange");
+
+    const diffVal = document.getElementById("cfgPremMaxDiffVal");
+    const closeToVal = document.getElementById("cfgPremCloseToVal");
+    const rangeMin = document.getElementById("cfgPremRangeMin");
+    const rangeMax = document.getElementById("cfgPremRangeMax");
+
+    const combToggle = document.getElementById("cfgToggleCombinedPrem");
+    const combType = document.getElementById("cfgCombinedPremType");
+    const combVal = document.getElementById("cfgCombinedPremVal");
+    const combFreq = document.getElementById("cfgPremFrequency");
+
+    // All controls disabled if section is disabled
+    [radNone, radMaxDiff, radCloseTo, radRange, combToggle].forEach(ctrl => {
+        if (ctrl) ctrl.disabled = !isSecEnabled;
+    });
+
+    if (!isSecEnabled) {
+        [diffVal, closeToVal, rangeMin, rangeMax, combType, combVal, combFreq].forEach(el => {
+            if (el) {
+                el.disabled = true;
+                el.classList.add("input-disabled-muted");
+            }
+        });
+        return;
+    }
+
+    // Section is enabled: enable fields according to selected radio and checkbox
+    const isDiffActive = radMaxDiff && radMaxDiff.checked;
+    if (diffVal) {
+        diffVal.disabled = !isDiffActive;
+        diffVal.classList.toggle("input-disabled-muted", !isDiffActive);
+    }
+
+    const isCloseToActive = radCloseTo && radCloseTo.checked;
+    if (closeToVal) {
+        closeToVal.disabled = !isCloseToActive;
+        closeToVal.classList.toggle("input-disabled-muted", !isCloseToActive);
+    }
+
+    const isRangeActive = radRange && radRange.checked;
+    if (rangeMin) {
+        rangeMin.disabled = !isRangeActive;
+        rangeMin.classList.toggle("input-disabled-muted", !isRangeActive);
+    }
+    if (rangeMax) {
+        rangeMax.disabled = !isRangeActive;
+        rangeMax.classList.toggle("input-disabled-muted", !isRangeActive);
+    }
+
+    const isCombActive = combToggle && combToggle.checked;
+    if (combType) {
+        combType.disabled = !isCombActive;
+        combType.classList.toggle("input-disabled-muted", !isCombActive);
+    }
+    if (combVal) {
+        combVal.disabled = !isCombActive;
+        combVal.classList.toggle("input-disabled-muted", !isCombActive);
+    }
+    if (combFreq) {
+        combFreq.disabled = !isCombActive;
+        combFreq.classList.toggle("input-disabled-muted", !isCombActive);
+    }
+}
+window.syncPremiumMatchingFieldStates = syncPremiumMatchingFieldStates;
+
 
 function onStrategyUnderlyingChange(newUnd) {
     if (!newUnd) return;
@@ -5085,6 +5417,7 @@ function applyStraddleBulkEdit(action) {
     } else if (action === "PROD_MIS") {
         document.querySelectorAll(".leg-product").forEach(el => el.value = "MIS");
     }
+    document.querySelectorAll("#straddleLegsBuilderBody tr").forEach(tr => syncLegRowDisabledFields(tr));
     document.getElementById("cfgBulkEdit").value = "";
 }
 
@@ -5314,17 +5647,38 @@ function serializeCurrentStrategySettings() {
         underlying_price_source: undSource,
         trade_type: document.getElementById("btnTradePositional")?.classList.contains("active-toggle") ? "Positional" : "Intraday",
         schedule_days: active.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+        mtm_enabled: !!document.getElementById("cfgToggleMtmSection")?.checked,
         mtm_target: {
+            enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmTarget")?.checked),
             type: document.getElementById("cfgMtmTargetType")?.value,
             value: parseFloat(document.getElementById("cfgMtmTargetValue")?.value) || 10000,
             re_entry: document.getElementById("cfgMtmTargetReEntry")?.value,
             action: document.getElementById("cfgMtmTargetAction")?.value
         },
-        mtm_sl: {
+        mtm_stoploss: {
+            enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmSl")?.checked),
             type: document.getElementById("cfgMtmSlType")?.value,
             value: parseFloat(document.getElementById("cfgMtmSlValue")?.value) || -5000,
             profit_lock: document.getElementById("cfgMtmProfitLock")?.value,
             action: document.getElementById("cfgMtmSlAction")?.value
+        },
+        mtm_sl: {
+            enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmSl")?.checked),
+            type: document.getElementById("cfgMtmSlType")?.value,
+            value: parseFloat(document.getElementById("cfgMtmSlValue")?.value) || -5000,
+            profit_lock: document.getElementById("cfgMtmProfitLock")?.value,
+            action: document.getElementById("cfgMtmSlAction")?.value
+        },
+        premium_matching: {
+            enabled: !!document.getElementById("cfgTogglePremSection")?.checked,
+            mode: document.querySelector("input[name='prem_match_mode']:checked")?.value || "No matching of premiums",
+            max_difference: parseFloat(document.getElementById("cfgPremMaxDiffVal")?.value) || 0.0,
+            close_to: parseFloat(document.getElementById("cfgPremCloseToVal")?.value) || 0.0,
+            range_min: parseFloat(document.getElementById("cfgPremRangeMin")?.value) || 0.0,
+            range_max: parseFloat(document.getElementById("cfgPremRangeMax")?.value) || 0.0,
+            combined_premium_type: document.getElementById("cfgToggleCombinedPrem")?.checked ? (document.getElementById("cfgCombinedPremType")?.value || "Lower than") : "None",
+            combined_premium_value: parseFloat(document.getElementById("cfgCombinedPremVal")?.value) || 0.0,
+            condition_frequency: document.getElementById("cfgPremFrequency")?.value || "LTP (Continuous Monitoring)"
         },
         advanced_settings: {
             entry_order_type: document.getElementById("cfgEntryOrderType")?.value || "Limit (L) / Stoploss Limit (SL-L)",

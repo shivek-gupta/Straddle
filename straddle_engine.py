@@ -8186,29 +8186,38 @@ class StraddleManager:
                 total_portfolio_mtm += strat["mtm"]
 
                 # Check Strategy-level MTM Target
+                mtm_sec_enabled = strat.get("mtm_enabled", True)
                 mtm_tgt = strat.get("mtm_target", {})
-                if mtm_tgt.get("type") == "MTM in total amount":
-                    tgt_val = float(mtm_tgt.get("value", 0.0))
-                    if tgt_val > 0 and strat_mtm >= tgt_val and strat.get("status") == "TRADE_ACTIVE":
-                        self._log_event(f"MTM Target reached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f}. Squaring off.")
-                        self._square_off_strategy_positions(strat, broker, reason="MTM TARGET HIT")
-                        strat["status"] = "TERMINATED"
-                        self._save_strategies()
+                mtm_tgt_enabled = mtm_sec_enabled and mtm_tgt.get("enabled", True)
+                tgt_type = mtm_tgt.get("type", "None")
+
+                if mtm_tgt_enabled and tgt_type not in ("None", None, ""):
+                    if tgt_type in ("MTM in total amount", "Fixed Amount"):
+                        tgt_val = abs(float(mtm_tgt.get("value", 0.0)))
+                        if tgt_val > 0 and strat_mtm >= tgt_val and strat.get("status") == "TRADE_ACTIVE":
+                            self._log_event(f"MTM Target reached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f}. Squaring off.")
+                            self._square_off_strategy_positions(strat, broker, reason="MTM TARGET HIT")
+                            strat["status"] = "TERMINATED"
+                            self._save_strategies()
 
                 # Check Strategy-level MTM Stoploss
-                mtm_sl = strat.get("mtm_stoploss", {})
-                if mtm_sl.get("type") == "MTM in total amount":
-                    sl_val = float(mtm_sl.get("value", 0.0))
-                    adv_cfg = strat.get("advanced_settings") or strat.get("advanced") or {}
-                    mtm_delay = int(adv_cfg.get("mtm_sl_delay_sec") or 0)
-                    trade_ts = float(strat.get("_trade_active_ts") or strat.get("_last_entry_attempt_ts") or 0.0)
-                    delay_active = (mtm_delay > 0 and trade_ts > 0 and (time.time() - trade_ts) < mtm_delay)
+                mtm_sl = strat.get("mtm_stoploss") or strat.get("mtm_sl") or {}
+                mtm_sl_enabled = mtm_sec_enabled and mtm_sl.get("enabled", True)
+                sl_type = mtm_sl.get("type", "None")
 
-                    if sl_val > 0 and strat_mtm <= -sl_val and strat.get("status") == "TRADE_ACTIVE" and not delay_active:
-                        self._log_event(f"MTM Stoploss breached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f}. Squaring off.")
-                        self._square_off_strategy_positions(strat, broker, reason="MTM STOPLOSS BREACHED")
-                        strat["status"] = "TERMINATED"
-                        self._save_strategies()
+                if mtm_sl_enabled and sl_type not in ("None", None, ""):
+                    if sl_type in ("MTM in total amount", "Fixed Amount"):
+                        sl_val = abs(float(mtm_sl.get("value", 0.0)))
+                        adv_cfg = strat.get("advanced_settings") or strat.get("advanced") or {}
+                        mtm_delay = int(adv_cfg.get("mtm_sl_delay_sec") or 0)
+                        trade_ts = float(strat.get("_trade_active_ts") or strat.get("_last_entry_attempt_ts") or 0.0)
+                        delay_active = (mtm_delay > 0 and trade_ts > 0 and (time.time() - trade_ts) < mtm_delay)
+
+                        if sl_val > 0 and strat_mtm <= -sl_val and strat.get("status") == "TRADE_ACTIVE" and not delay_active:
+                            self._log_event(f"MTM Stoploss breached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f}. Squaring off.")
+                            self._square_off_strategy_positions(strat, broker, reason="MTM STOPLOSS BREACHED")
+                            strat["status"] = "TERMINATED"
+                            self._save_strategies()
 
             self._state["group_mtm"] = round(total_portfolio_mtm, 2)
             self._state["total_mtm"] = round(total_portfolio_mtm, 2)

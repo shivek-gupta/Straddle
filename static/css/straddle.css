@@ -1213,6 +1213,79 @@ body {
     transform: translateX(16px);
 }
 
+/* Compact Quantiply Switch for sub-headings & cards */
+.quantiply-switch.switch-compact {
+    width: 28px;
+    height: 15px;
+}
+
+.quantiply-switch.switch-compact .quantiply-slider:before {
+    height: 11px;
+    width: 11px;
+    left: 2px;
+    bottom: 2px;
+}
+
+.quantiply-switch.switch-compact input:checked + .quantiply-slider:before {
+    transform: translateX(13px);
+}
+
+/* Disabled & Muted Input Fields */
+.input-disabled-muted,
+input:disabled.straddle-input,
+select:disabled.straddle-select {
+    opacity: 0.35 !important;
+    cursor: not-allowed !important;
+    background-color: rgba(15, 23, 42, 0.6) !important;
+    border-color: rgba(255, 255, 255, 0.05) !important;
+    color: #64748b !important;
+    pointer-events: none !important;
+    user-select: none !important;
+}
+
+/* Entire Collapsible Section Muted & Locked */
+.section-muted-locked {
+    opacity: 0.38 !important;
+    filter: grayscale(85%) !important;
+    pointer-events: none !important;
+    user-select: none !important;
+    transition: opacity 0.25s ease, filter 0.25s ease !important;
+}
+
+/* Card Muted & Locked */
+.card-muted-locked {
+    opacity: 0.42 !important;
+    filter: grayscale(80%) !important;
+    pointer-events: none !important;
+    user-select: none !important;
+    border-color: rgba(255, 255, 255, 0.04) !important;
+    transition: opacity 0.25s ease, filter 0.25s ease !important;
+}
+
+/* Status Badges in Section Headers */
+.section-status-badge {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    display: inline-block;
+    transition: all 0.2s ease;
+}
+
+.section-status-badge.badge-active {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.section-status-badge.badge-disabled {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
 /* 3-Dots Action Dropdown Menu */
 .straddle-dropdown {
     position: relative;

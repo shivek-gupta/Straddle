@@ -910,16 +910,16 @@
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Underlying:</label>
                                 <div style="display:flex; gap:4px;">
-                                    <button type="button" class="straddle-btn btn-outline active-toggle" id="btnUndSpot" onclick="setUnderlyingPriceSource('Spot')">Spot</button>
-                                    <button type="button" class="straddle-btn btn-outline" id="btnUndFutures" onclick="setUnderlyingPriceSource('Futures')">Futures</button>
-                                    <button type="button" class="straddle-btn btn-outline" id="btnUndSynthetic" onclick="setUnderlyingPriceSource('Synthetic Futures')">Synthetic Futures</button>
+                                    <button type="button" class="straddle-btn btn-outline active-toggle" id="btnUndSpot" onclick="setUnderlyingPriceSource('Spot')" title="Spot: Uses Cash Index LTP (e.g. NIFTY 50 Index). For MCX Commodities, maps to near-month futures.">Spot</button>
+                                    <button type="button" class="straddle-btn btn-outline" id="btnUndFutures" onclick="setUnderlyingPriceSource('Futures')" title="Futures: Uses active Near-Month Futures price for ATM calculation. Primary underlying reference for Commodities.">Futures</button>
+                                    <button type="button" class="straddle-btn btn-outline" id="btnUndSynthetic" onclick="setUnderlyingPriceSource('Synthetic Futures')" title="Synthetic Futures: Calculated via Put-Call Parity (Strike + Call LTP - Put LTP). Reflects true options market implied price.">Synthetic Futures</button>
                                 </div>
                             </div>
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Trade type:</label>
                                 <div style="display:flex; gap:4px;">
-                                    <button type="button" class="straddle-btn btn-outline active-toggle" id="btnTradeIntraday" onclick="setStraddleTradeType('Intraday')">Intraday</button>
-                                    <button type="button" class="straddle-btn btn-outline" id="btnTradePositional" onclick="setStraddleTradeType('Positional')">Positional</button>
+                                    <button type="button" class="straddle-btn btn-outline active-toggle" id="btnTradeIntraday" onclick="setStraddleTradeType('Intraday')" title="Intraday (MIS): Auto square-off at session end time (e.g. 15:25 for Equity, 23:25 for MCX). Zero overnight carry risk.">Intraday</button>
+                                    <button type="button" class="straddle-btn btn-outline" id="btnTradePositional" onclick="setStraddleTradeType('Positional')" title="Positional (NRML): Carry forward positions overnight across days until target, stoploss, or expiry.">Positional</button>
                                 </div>
                             </div>
                         </div>
@@ -1024,16 +1024,32 @@
                         <span id="chevron_sec_builder_mtm" class="chevron-icon">▼</span>
                         <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">MTM TARGET & MTM STOPLOSS</span>
                     </div>
+                    <div style="display:flex; align-items:center; gap:10px;" onclick="event.stopPropagation()">
+                        <span id="badge_mtm_section" class="section-status-badge badge-active">ENABLED</span>
+                        <label class="quantiply-switch" title="Enable / Disable MTM Target & Stoploss Section">
+                            <input type="checkbox" id="cfgToggleMtmSection" checked onchange="onToggleMtmSection(this.checked)">
+                            <span class="quantiply-slider"></span>
+                        </label>
+                    </div>
                 </div>
 
                 <div id="sec_builder_mtm" class="straddle-collapsible-body">
                     <div class="straddle-grid-2col">
                         <!-- MTM Target Box -->
-                        <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-                            <div style="font-size:12px; font-weight:800; color:#38bdf8; margin-bottom:10px;">MTM TARGET</div>
+                        <div id="card_mtm_target" style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:all 0.2s ease;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                <div style="font-size:12px; font-weight:800; color:#38bdf8;">MTM TARGET</div>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span id="badge_mtm_sub_target" style="font-size:9.5px; font-weight:700; color:#38bdf8; text-transform:uppercase;">ACTIVE</span>
+                                    <label class="quantiply-switch switch-compact" title="Enable / Disable MTM Target">
+                                        <input type="checkbox" id="cfgToggleMtmTarget" checked onchange="onToggleMtmSubTarget(this.checked)">
+                                        <span class="quantiply-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
                             <div class="straddle-form-group">
                                 <label>Type:</label>
-                                <select id="cfgMtmTargetType" class="straddle-select">
+                                <select id="cfgMtmTargetType" class="straddle-select" onchange="syncMtmFieldStates()">
                                     <option value="MTM in total amount" selected>MTM in total amount</option>
                                     <option value="MTM in %">MTM in %</option>
                                     <option value="None">None</option>
@@ -1061,11 +1077,20 @@
                         </div>
 
                         <!-- MTM Stoploss Box -->
-                        <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-                            <div style="font-size:12px; font-weight:800; color:#f43f5e; margin-bottom:10px;">MTM STOPLOSS</div>
+                        <div id="card_mtm_sl" style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:all 0.2s ease;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                <div style="font-size:12px; font-weight:800; color:#f43f5e;">MTM STOPLOSS</div>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span id="badge_mtm_sub_sl" style="font-size:9.5px; font-weight:700; color:#f43f5e; text-transform:uppercase;">ACTIVE</span>
+                                    <label class="quantiply-switch switch-compact" title="Enable / Disable MTM Stoploss">
+                                        <input type="checkbox" id="cfgToggleMtmSl" checked onchange="onToggleMtmSubSl(this.checked)">
+                                        <span class="quantiply-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
                             <div class="straddle-form-group">
                                 <label>Fixed Stoploss:</label>
-                                <select id="cfgMtmSlType" class="straddle-select">
+                                <select id="cfgMtmSlType" class="straddle-select" onchange="syncMtmFieldStates()">
                                     <option value="None" selected>None</option>
                                     <option value="Fixed Amount">Fixed Amount (₹)</option>
                                     <option value="Fixed %">Fixed %</option>
@@ -1099,24 +1124,31 @@
                         <span id="chevron_sec_builder_premium" class="chevron-icon">▶</span>
                         <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">PREMIUM MATCHING & RANGE 🔗</span>
                     </div>
+                    <div style="display:flex; align-items:center; gap:10px;" onclick="event.stopPropagation()">
+                        <span id="badge_prem_section" class="section-status-badge badge-disabled">DISABLED</span>
+                        <label class="quantiply-switch" title="Enable / Disable Premium Matching & Range Section">
+                            <input type="checkbox" id="cfgTogglePremSection" onchange="onTogglePremSection(this.checked)">
+                            <span class="quantiply-slider"></span>
+                        </label>
+                    </div>
                 </div>
 
                 <div id="sec_builder_premium" class="straddle-collapsible-body" style="display:none;">
                     <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
                         <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
                             <label class="straddle-checkbox-label">
-                                <input type="radio" name="prem_match_mode" id="radPremNone" value="No matching of premiums" checked> No matching of premiums 🔗
+                                <input type="radio" name="prem_match_mode" id="radPremNone" value="No matching of premiums" checked onchange="syncPremiumMatchingFieldStates()"> No matching of premiums 🔗
                             </label>
                             <label class="straddle-checkbox-label">
-                                <input type="radio" name="prem_match_mode" id="radPremMaxDiff" value="Match premiums with maximum difference"> Match premiums with max difference: 🔗
+                                <input type="radio" name="prem_match_mode" id="radPremMaxDiff" value="Match premiums with maximum difference" onchange="syncPremiumMatchingFieldStates()"> Match premiums with max difference: 🔗
                             </label>
                             <input type="number" id="cfgPremMaxDiffVal" class="straddle-input" style="width:90px;" placeholder="₹ Diff">
                             <label class="straddle-checkbox-label">
-                                <input type="radio" name="prem_match_mode" id="radPremCloseTo" value="Premium close to"> Premium close to: 🔗
+                                <input type="radio" name="prem_match_mode" id="radPremCloseTo" value="Premium close to" onchange="syncPremiumMatchingFieldStates()"> Premium close to: 🔗
                             </label>
                             <input type="number" id="cfgPremCloseToVal" class="straddle-input" style="width:90px;" placeholder="₹ Target">
                             <label class="straddle-checkbox-label">
-                                <input type="radio" name="prem_match_mode" id="radPremRange" value="Premium range"> Premium range: 🔗
+                                <input type="radio" name="prem_match_mode" id="radPremRange" value="Premium range" onchange="syncPremiumMatchingFieldStates()"> Premium range: 🔗
                             </label>
                             <input type="number" id="cfgPremRangeMin" class="straddle-input" style="width:70px;" placeholder="Min">
                             <span>To</span>
@@ -1125,9 +1157,9 @@
 
                         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">
                             <label class="straddle-checkbox-label">
-                                <input type="checkbox" id="cfgToggleCombinedPrem"> Combined Premium: 🔗
+                                <input type="checkbox" id="cfgToggleCombinedPrem" onchange="syncPremiumMatchingFieldStates()"> Combined Premium: 🔗
                             </label>
-                            <select id="cfgCombinedPremType" class="straddle-select" style="width:120px;">
+                            <select id="cfgCombinedPremType" class="straddle-select" style="width:120px;" onchange="syncPremiumMatchingFieldStates()">
                                 <option value="Lower than">Lower than</option>
                                 <option value="Higher than">Higher than</option>
                             </select>
