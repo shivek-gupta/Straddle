@@ -2215,6 +2215,39 @@
                                 <input type="number" id="adopt_sl_val" class="straddle-input" value="15" step="0.5" style="flex:1;">
                             </div>
                         </div>
+                        <div>
+                            <label style="font-size:11px; font-weight:700; color:#94a3b8; display:block; margin-bottom:4px;">Target Re-Entry / Re-Execute:</label>
+                            <div style="display:flex; align-items:center; gap:4px;">
+                                <select id="adopt_tgt_re_type" class="straddle-select" style="flex:1;">
+                                    <option value="NONE">NONE</option>
+                                    <option value="RE EXECUTE" selected>RE EXECUTE</option>
+                                    <option value="RE ENTRY">RE ENTRY</option>
+                                    <option value="RE COST">RE COST</option>
+                                    <option value="RE ENTRY (COST)">RE ENTRY (COST)</option>
+                                </select>
+                                <input type="number" id="adopt_tgt_re_count" class="straddle-input" value="1" min="0" max="20" style="width:48px;" title="Max re-entries on Target">
+                            </div>
+                        </div>
+                        <div>
+                            <label style="font-size:11px; font-weight:700; color:#94a3b8; display:block; margin-bottom:4px;">Stoploss Re-Entry / Re-Execute:</label>
+                            <div style="display:flex; align-items:center; gap:4px;">
+                                <select id="adopt_sl_re_type" class="straddle-select" style="flex:1;">
+                                    <option value="NONE">NONE</option>
+                                    <option value="RE EXECUTE" selected>RE EXECUTE</option>
+                                    <option value="RE ENTRY">RE ENTRY</option>
+                                    <option value="RE COST">RE COST</option>
+                                    <option value="RE ENTRY (COST)">RE ENTRY (COST)</option>
+                                </select>
+                                <input type="number" id="adopt_sl_re_count" class="straddle-input" value="1" min="0" max="20" style="width:48px;" title="Max re-entries on Stoploss">
+                            </div>
+                        </div>
+                        <div style="grid-column: 1 / -1; display:flex; align-items:center; gap:8px; padding-top:4px; border-top:1px dashed rgba(255,255,255,0.08);">
+                            <span style="font-size:11px; font-weight:700; color:#94a3b8;">Trailing Stoploss (Pts):</span>
+                            <span style="font-size:10px; color:#64748b;">Lock Profit:</span>
+                            <input type="number" id="adopt_tsl_profit" class="straddle-input" value="0" min="0" step="1" style="width:55px;" placeholder="0">
+                            <span style="font-size:10px; color:#64748b;">Trail by:</span>
+                            <input type="number" id="adopt_tsl_trail" class="straddle-input" value="0" min="0" step="1" style="width:55px;" placeholder="0">
+                        </div>
                     </div>
                 </div>
             </div>

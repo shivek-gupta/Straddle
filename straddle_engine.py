@@ -151,6 +151,38 @@ def slice_quantity_by_freeze(total_qty: int, lot_size: int, underlying: str = "N
     return [l * lot_size for l in lot_slices]
 
 
+def _is_same_instrument(sym1: str, key1: str = "", sym2: str = "", key2: str = "") -> bool:
+    """Robust matcher between broker symbols/tokens and engine leg symbols/tokens."""
+    if not sym1 and not key1:
+        return False
+    if not sym2 and not key2:
+        return False
+    # 1. Normalized tokens without exchange prefixes
+    t1 = str(key1 or "").split("|")[-1].split(":")[-1].strip()
+    t2 = str(key2 or "").split("|")[-1].split(":")[-1].strip()
+    if t1 and t2 and t1 == t2:
+        return True
+    # 2. Raw uppercase symbols
+    s1 = str(sym1 or "").strip().upper()
+    s2 = str(sym2 or "").strip().upper()
+    if s1 and s2 and s1 == s2:
+        return True
+    # 3. Clean symbols (spaces, underscores, hyphens stripped)
+    c1 = re.sub(r'[^A-Z0-9]', '', s1)
+    c2 = re.sub(r'[^A-Z0-9]', '', s2)
+    if c1 and c2 and (c1 == c2 or c1 in c2 or c2 in c1):
+        return True
+    # 4. Resolved Kotak canonical symbols
+    try:
+        k1 = _resolve_kotak_trading_symbol(s1, key1).replace(" ", "").upper()
+        k2 = _resolve_kotak_trading_symbol(s2, key2).replace(" ", "").upper()
+        if k1 and k2 and k1 == k2:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 # ==========================================================
 # Paths & Lock Configuration
 # ==========================================================
@@ -4809,6 +4841,18 @@ class StraddleManager:
                     except Exception as e_q:
                         logger.warning(f"Could not update quantity on advance Target order {adv_tgt_oid}: {e_q}")
 
+            if pos.get("status") == "ERROR" and int(pos.get("quantity", 0)) > 0:
+                pos["status"] = "OPEN"
+                pos.pop("error", None)
+                pos.pop("error_message", None)
+                pos["repair_needed"] = False
+                if strat.get("status") in ("EXIT_FAILED", "ENTRY_FAILED"):
+                    strat["status"] = "TRADE_ACTIVE"
+                    strat.pop("entry_error", None)
+                    strat.pop("last_error", None)
+                    strat["repair_needed"] = False
+                self._log_event(f"Restored error position {pos.get('symbol')} to OPEN status with updated parameters.", level="SUCCESS")
+
             self._save_strategies()
             self._save_state()
             self._log_event(f"Updated live trade parameters for {pos['symbol']}: Lots={pos.get('lots')}, TGT={pos.get('target_price')}, SL={pos.get('sl_price')}")
@@ -4950,173 +4994,6 @@ class StraddleManager:
                 logger.info(f"[Advance Target] Order placed with broker ID: {pos['target_broker_order_id']}")
         except Exception as e:
             logger.error(f"[Advance Target] Exception placing Target order: {e}")
-
-    def get_adoptable_broker_positions(self, strategy_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Fetch open positions from Kotak Neo broker that are not currently running in the given strategy."""
-        with _ENGINE_LOCK:
-            sid = strategy_id or self._active_strategy_id
-            strat = self.get_strategy(sid)
-            existing_syms = set()
-            if strat and "positions" in strat:
-                for p in strat.get("positions", []):
-                    if p.get("status") == "OPEN":
-                        if p.get("symbol"):
-                            existing_syms.add(str(p.get("symbol")).upper())
-                        if p.get("trading_symbol"):
-                            existing_syms.add(str(p.get("trading_symbol")).upper())
-
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
-            broker = get_broker_adapter(mode)
-            broker_positions = []
-            try:
-                broker_positions = broker.get_positions()
-            except Exception as e:
-                logger.error(f"Error reading broker positions for adoption: {e}")
-                return []
-
-            adoptable = []
-            for bp in broker_positions:
-                net_qty = int(bp.get("net_qty", bp.get("quantity", 0)) or 0)
-                if net_qty == 0:
-                    continue  # closed position
-                tsym = bp.get("trading_symbol") or bp.get("symbol", "")
-                if not tsym or tsym.upper() in existing_syms:
-                    continue  # already tracked in current strategy
-
-                # Determine underlying lot size to compute lots
-                lot_size = 65
-                tsym_u = tsym.upper()
-                if "BANKNIFTY" in tsym_u:
-                    lot_size = 15
-                elif "SENSEX" in tsym_u:
-                    lot_size = 10
-                elif "BANKEX" in tsym_u:
-                    lot_size = 15
-                elif "FINNIFTY" in tsym_u:
-                    lot_size = 65
-                elif "MIDCPNIFTY" in tsym_u:
-                    lot_size = 50
-                elif "NIFTY" in tsym_u:
-                    lot_size = 65
-
-                qty_abs = abs(net_qty)
-                lots = max(1, round(qty_abs / lot_size))
-                side = "BUY" if net_qty > 0 else "SELL"
-                avg_p = float(bp.get("average_price") or bp.get("buy_avg") or bp.get("sell_avg") or 0.0)
-                ltp = float(bp.get("ltp") or bp.get("last_price") or avg_p)
-                pnl = float(bp.get("pnl") or 0.0)
-
-                adoptable.append({
-                    "symbol": tsym,
-                    "trading_symbol": tsym,
-                    "instrument_key": bp.get("instrument_key", ""),
-                    "side": side,
-                    "quantity": qty_abs,
-                    "net_qty": net_qty,
-                    "lots": lots,
-                    "lot_size": lot_size,
-                    "average_price": avg_p,
-                    "ltp": ltp,
-                    "pnl": pnl,
-                    "product": bp.get("product", "NRML"),
-                    "client_id": bp.get("client_id", "Kotak Neo")
-                })
-
-            return adoptable
-
-    def adopt_broker_position(self, strategy_id: str, position_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Import an existing open Kotak Neo broker position into this strategy for active SL/Target tracking."""
-        with _ENGINE_LOCK:
-            strat = self.get_strategy(strategy_id)
-            if not strat:
-                return {"success": False, "error": f"Strategy {strategy_id} not found."}
-
-            sym = position_data.get("symbol") or position_data.get("trading_symbol")
-            if not sym:
-                return {"success": False, "error": "Symbol is required to adopt position."}
-
-            side = str(position_data.get("side", "BUY")).upper()
-            qty = int(position_data.get("quantity") or 65)
-            lots = int(position_data.get("lots") or 1)
-            avg_p = float(position_data.get("average_price") or position_data.get("avg_ent_price") or 0.0)
-            if avg_p <= 0:
-                avg_p = float(position_data.get("ltp") or 100.0)
-
-            t_mode = str(position_data.get("target_mode", "%"))
-            t_val = float(position_data.get("target_val", 25.0))
-            sl_mode = str(position_data.get("sl_mode", "%"))
-            sl_val = float(position_data.get("sl_val", 15.0))
-
-            # Calculate target and SL prices
-            if "%" in t_mode:
-                target_price = round_to_tick(avg_p * (1.0 + t_val / 100.0) if side == "BUY" else avg_p * (1.0 - t_val / 100.0), 0.05)
-            else:
-                target_price = round_to_tick(avg_p + t_val if side == "BUY" else avg_p - t_val, 0.05)
-
-            if "%" in sl_mode:
-                sl_price = round_to_tick(avg_p * (1.0 - sl_val / 100.0) if side == "BUY" else avg_p * (1.0 + sl_val / 100.0), 0.05)
-            else:
-                sl_price = round_to_tick(avg_p - sl_val if side == "BUY" else avg_p + sl_val, 0.05)
-
-            now_str = time.strftime("%H:%M:%S")
-            leg_id = f"leg_adopt_{int(time.time()*1000)}"
-
-            pos_record = {
-                "id": leg_id,
-                "strategy_id": strat.get("strategy_id"),
-                "strategy_name": strat.get("name", "Strategy"),
-                "symbol": sym,
-                "trading_symbol": sym,
-                "instrument_key": position_data.get("instrument_key", ""),
-                "side": side,
-                "lots": lots,
-                "quantity": qty,
-                "entry_qty": qty,
-                "avg_ent_price": avg_p,
-                "entry_price": avg_p,
-                "entry_time": now_str,
-                "target_value": t_val,
-                "target_type": "TGT: %" if "%" in t_mode else "TGT: Pts",
-                "target_type_label": f"TGT: {t_val:.0f}%" if "%" in t_mode else f"TGT: ₹{t_val:.2f}",
-                "target_price": target_price,
-                "sl_value": sl_val,
-                "sl_type": "SL: -%" if "%" in sl_mode else "SL: -Pts",
-                "sl_type_label": f"SL: -{sl_val:.0f}%" if "%" in sl_mode else f"SL: -₹{sl_val:.2f}",
-                "sl_price": sl_price,
-                "status": "OPEN",
-                "ltp": avg_p,
-                "mtm": 0.0,
-                "adopted": True,
-                "is_re_entry": False,
-                "product": position_data.get("product", "NRML")
-            }
-
-            if "positions" not in strat or not isinstance(strat["positions"], list):
-                strat["positions"] = []
-            strat["positions"].append(pos_record)
-
-            if strat.get("status") not in ("TRADE_ACTIVE", "ACTIVE", "RUNNING"):
-                strat["status"] = "TRADE_ACTIVE"
-
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
-            broker = get_broker_adapter(mode)
-            adv = strat.get("advanced") or strat.get("advanced_settings", {})
-
-            # Place advance broker orders if configured in advanced settings
-            if adv.get("sl_order_placement") == "Place in advance" and sl_price > 0:
-                threading.Thread(target=self._place_advance_sl_order, args=(broker, pos_record, 0), daemon=True).start()
-            if (adv.get("target_order_placement") == "Place in advance" or adv.get("sl_order_placement") == "Place in advance") and target_price > 0:
-                threading.Thread(target=self._place_advance_target_order, args=(broker, pos_record, 0), daemon=True).start()
-
-            self._save_strategies()
-            self._save_state()
-            self._log_event(f"Adopted external broker trade {sym} ({side} {lots} lots, Qty: {qty}) into '{strat.get('name')}' (TGT: ₹{target_price}, SL: ₹{sl_price})")
-
-            return {
-                "success": True,
-                "message": f"Adopted {sym} successfully into algorithm.",
-                "position": pos_record
-            }
 
     def detach_position(self, strategy_id: str, leg_id: Optional[str] = None, leg_index: Optional[int] = None) -> Dict[str, Any]:
         """Remove a running position from algorithm monitoring WITHOUT squaring it off on Kotak Neo broker."""
@@ -5333,6 +5210,35 @@ class StraddleManager:
         exit_side = "BUY" if pos.get("side") == "SELL" else "SELL"
         qty = pos.get("quantity", 0)
         ltp = float(pos.get("ltp", pos.get("avg_ent_price", 100.0)))
+
+        # Verify broker position before placing exit order to avoid duplicate naked exit attempts
+        mode = self._state.get("execution_mode", "LIVE_BROKER")
+        if mode == "LIVE_BROKER":
+            try:
+                b_positions = broker.get_positions(force=False) or []
+                sym_to_match = pos.get("symbol", "")
+                key_to_match = pos.get("instrument_key", "")
+                broker_pos = None
+                for bp in b_positions:
+                    bp_sym = bp.get("symbol") or bp.get("trading_symbol") or ""
+                    bp_key = bp.get("instrument_key") or bp.get("token") or ""
+                    if _is_same_instrument(sym_to_match, key_to_match, bp_sym, bp_key):
+                        broker_pos = bp
+                        break
+
+                if broker_pos is not None:
+                    b_net_qty = int(broker_pos.get("net_qty") or broker_pos.get("quantity") or 0)
+                    if b_net_qty == 0:
+                        self._log_event(f"Position {sym_to_match} is already closed on broker (net quantity 0). Marking leg COMPLETE without duplicate order.", level="INFO")
+                        pos["status"] = "COMPLETE"
+                        pos["avg_exit_price"] = float(broker_pos.get("sell_avg") if pos.get("side") == "BUY" else (broker_pos.get("buy_avg") or ltp))
+                        pos["exit_time"] = now_ist_str()
+                        pos["exit_reason"] = f"{reason} (Already closed on broker)"
+                        pos["mtm"] = float(broker_pos.get("pnl") or pos.get("mtm", 0.0))
+                        pos["_exit_in_progress"] = False
+                        return {"success": True, "order_id": "", "filled": True, "price": pos["avg_exit_price"], "pos": pos}
+            except Exception as e:
+                logger.warning(f"Error checking broker open quantity before exit: {e}")
 
         strat_name = pos.get("strategy_name") or "abc"
         strat_id = pos.get("strategy_id") or ""
@@ -5617,15 +5523,43 @@ class StraddleManager:
         legs_cfg = strat.get("legs", [])
         leg_cfg = next((l for l in legs_cfg if l.get("id") == pos.get("id")), None)
         if not leg_cfg:
-            return
+            pos_opt = (pos.get("option_type") or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")).upper()
+            pos_side = str(pos.get("side", "SELL")).upper()
+            leg_cfg = next((l for l in legs_cfg if str(l.get("option_type", "")).upper() == pos_opt and str(l.get("side", "")).upper() == pos_side), None)
 
-        re_type = leg_cfg.get("sl_re_execute_type", "NONE") if trigger == "STOPLOSS" else leg_cfg.get("target_re_execute_type", "NONE")
-        re_max = int(leg_cfg.get("sl_re_execute_count", 0) if trigger == "STOPLOSS" else leg_cfg.get("target_re_execute_count", 0))
+        if not leg_cfg:
+            # Fallback configuration built directly from pos
+            leg_cfg = {
+                "id": pos.get("id"),
+                "underlying": strat.get("underlying", pos.get("underlying", "NIFTY")),
+                "option_type": pos.get("option_type") or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE"),
+                "side": pos.get("side", "SELL"),
+                "lots": pos.get("lots", 1),
+                "lot_size": pos.get("lot_size", 65),
+                "product": pos.get("product", "NRML"),
+                "strike_selection": str(int(pos.get("strike_price"))) if pos.get("strike_price") else "ATM",
+                "sl_re_execute_type": pos.get("sl_re_execute_type", "NONE"),
+                "sl_re_execute_count": pos.get("sl_re_execute_count", 0),
+                "target_re_execute_type": pos.get("target_re_execute_type", "NONE"),
+                "target_re_execute_count": pos.get("target_re_execute_count", 0),
+                "target_type": pos.get("target_type", "TGT: %"),
+                "target_value": pos.get("target_value", 25.0),
+                "sl_type": pos.get("sl_type", "SL: -%"),
+                "sl_value": pos.get("sl_value", 15.0),
+                "tsl_profit_pts": pos.get("tsl_profit_pts", 0.0),
+                "tsl_trail_pts": pos.get("tsl_trail_pts", 0.0),
+            }
+
+        re_type = pos.get("sl_re_execute_type") or leg_cfg.get("sl_re_execute_type", "NONE") if trigger == "STOPLOSS" else (pos.get("target_re_execute_type") or leg_cfg.get("target_re_execute_type", "NONE"))
+        re_max = int(pos.get("sl_re_execute_count") if pos.get("sl_re_execute_count") is not None else leg_cfg.get("sl_re_execute_count", 0) if trigger == "STOPLOSS" else (pos.get("target_re_execute_count") if pos.get("target_re_execute_count") is not None else leg_cfg.get("target_re_execute_count", 0)))
         cur_count = int(pos.get("re_execute_count", 0))
 
-        if "RE EXECUTE" in str(re_type).upper() and cur_count < re_max:
+        re_type_u = str(re_type or "").upper()
+        is_re_enabled = any(k in re_type_u for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY"))
+
+        if is_re_enabled and cur_count < re_max:
             new_count = cur_count + 1
-            self._log_event(f"Triggering Re-Execute #{new_count}/{re_max} for leg '{pos.get('symbol')}' ({trigger} hit)...")
+            self._log_event(f"Triggering {re_type_u} #{new_count}/{re_max} for leg '{pos.get('symbol')}' ({trigger} hit)...")
 
             target_exit_order_id = exit_order_id or pos.get("exit_order_id")
 
@@ -5660,30 +5594,53 @@ class StraddleManager:
                 if not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
                     return
 
-                und = strat.get("underlying", "NIFTY")
+                und = strat.get("underlying", pos.get("underlying", "NIFTY"))
                 mult = self.get_effective_multiplier(strat)
+                opt_type = leg_cfg.get("option_type") or pos.get("option_type") or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")
+
+                # Strike selection: for RE-ENTRY or RE-COST on same strike, or resolve strike_selection
+                strike_sel = leg_cfg.get("strike_selection") or (str(int(pos.get("strike_price"))) if pos.get("strike_price") else "ATM")
+                if "RE ENTRY" in re_type_u or "RE COST" in re_type_u:
+                    if pos.get("strike_price"):
+                        strike_sel = str(int(pos.get("strike_price")))
 
                 contract = self.resolve_strike_and_contract(
                     underlying=und,
-                    strike_selection=leg_cfg.get("strike_selection", "ATM"),
-                    option_type=leg_cfg.get("option_type", "CE"),
+                    strike_selection=strike_sel,
+                    option_type=opt_type,
                     expiry_type=leg_cfg.get("expiry", "Weekly"),
                 )
                 if not contract:
-                    self._log_event(f"Re-Execute contract resolution failed for {und} {leg_cfg.get('option_type')}")
+                    self._log_event(f"Re-Execute contract resolution failed for {und} {opt_type}")
                     return
 
                 new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat, is_re_entry=True)
                 if new_pos:
                     new_pos["re_execute_count"] = new_count
                     new_pos["is_re_entry"] = True
-                    with _ENGINE_LOCK:
-                        strat.setdefault("positions", []).append(new_pos)
-                        if self._active_strategy_id == strat.get("strategy_id"):
-                            self._state["positions"] = strat.get("positions", [])
-                        self._save_strategies()
-                        self._save_state()
-                    self._log_event(f"Re-Execute #{new_count} filled for {new_pos['symbol']} @ ₹{new_pos.get('avg_ent_price', 0):.2f}")
+                    # Preserve re-execute configurations on the new position
+                    new_pos["sl_re_execute_type"] = leg_cfg.get("sl_re_execute_type") or pos.get("sl_re_execute_type", "NONE")
+                    new_pos["sl_re_execute_count"] = int(leg_cfg.get("sl_re_execute_count") or pos.get("sl_re_execute_count", 0))
+                    new_pos["target_re_execute_type"] = leg_cfg.get("target_re_execute_type") or pos.get("target_re_execute_type", "NONE")
+                    new_pos["target_re_execute_count"] = int(leg_cfg.get("target_re_execute_count") or pos.get("target_re_execute_count", 0))
+
+                    if new_pos.get("status") == "OPEN":
+                        with _ENGINE_LOCK:
+                            strat.setdefault("positions", []).append(new_pos)
+                            if self._active_strategy_id == strat.get("strategy_id"):
+                                self._state["positions"] = strat.get("positions", [])
+                            self._save_strategies()
+                            self._save_state()
+                        self._log_event(f"Re-Execute #{new_count} filled for {new_pos['symbol']} @ ₹{new_pos.get('avg_ent_price', 0):.2f}", level="SUCCESS")
+                    else:
+                        with _ENGINE_LOCK:
+                            strat.setdefault("positions", []).append(new_pos)
+                            if self._active_strategy_id == strat.get("strategy_id"):
+                                self._state["positions"] = strat.get("positions", [])
+                            self._save_strategies()
+                            self._save_state()
+                        err_msg = new_pos.get("error") or "Order rejected by broker"
+                        self._log_event(f"Re-Execute #{new_count} order rejected for {new_pos['symbol']}: {err_msg}", level="ERROR")
 
             threading.Thread(target=_re_entry_worker, daemon=True).start()
 
@@ -6148,23 +6105,23 @@ class StraddleManager:
     def get_adoptable_broker_positions(self, strategy_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Scans Kotak Neo broker positions for open positions not yet adopted or tracked by any strategy.
+        Performs network calls outside lock and uses cached broker positions to prevent UI freezes.
         """
-        with _ENGINE_LOCK:
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
-            broker = get_broker_adapter(mode)
-            raw_pos = broker.get_positions() or []
+        mode = self._state.get("execution_mode", "LIVE_BROKER")
+        broker = get_broker_adapter(mode)
+        try:
+            raw_pos = broker.get_positions(force=False) or []
+        except Exception as e:
+            logger.warning(f"Error fetching broker positions for adoption: {e}")
+            raw_pos = []
 
-            # Map existing open positions to their managing strategy
-            assigned_map = {}
+        with _ENGINE_LOCK:
+            # Map existing open positions to their managing strategy using robust instrument matcher
+            active_engine_positions = []
             for s in self._strategies:
                 for p in s.get("positions", []):
-                    if p.get("status") == "OPEN":
-                        tok = str(p.get("token") or p.get("instrument_key") or "")
-                        sym = str(p.get("symbol") or p.get("trading_symbol") or "").upper()
-                        if tok:
-                            assigned_map[tok] = s
-                        if sym:
-                            assigned_map[sym] = s
+                    if p.get("status") in ("OPEN", "LIVE OPEN"):
+                        active_engine_positions.append((s, p))
 
             adoptable = []
             for p in raw_pos:
@@ -6176,7 +6133,11 @@ class StraddleManager:
                 sym = str(p.get("symbol") or p.get("trading_symbol") or "")
                 tsym = str(p.get("trading_symbol") or sym)
 
-                managing_strat = assigned_map.get(tok) or assigned_map.get(sym.upper()) or assigned_map.get(tsym.upper())
+                managing_strat = None
+                for s, pos_p in active_engine_positions:
+                    if _is_same_instrument(pos_p.get("symbol"), pos_p.get("instrument_key"), sym or tsym, tok):
+                        managing_strat = s
+                        break
 
                 # If requested for a specific strategy, skip only if already managed by THIS exact strategy
                 if strategy_id and managing_strat and managing_strat.get("strategy_id") == strategy_id:
@@ -6240,6 +6201,12 @@ class StraddleManager:
             t_mode = str(pos.get("target_mode") or "%")
             sl_val = float(pos.get("sl_val") or 40.0)
             sl_mode = str(pos.get("sl_mode") or "%")
+            tgt_re_type = str(pos.get("target_re_execute_type") or "RE EXECUTE")
+            tgt_re_count = int(pos.get("target_re_execute_count") or 0)
+            sl_re_type = str(pos.get("sl_re_execute_type") or "RE EXECUTE")
+            sl_re_count = int(pos.get("sl_re_execute_count") or 0)
+            tsl_profit = float(pos.get("tsl_profit_pts") or 0.0)
+            tsl_trail = float(pos.get("tsl_trail_pts") or 0.0)
 
             # Calculate target & stoploss prices
             if "%" in t_mode:
@@ -6258,6 +6225,9 @@ class StraddleManager:
             sl_label = f"SL: -{sl_val:.0f}%" if "%" in sl_mode else f"SL: -₹{sl_val:.2f}"
 
             adopted_id = f"leg_adopted_{int(time.time()*1000)%1000000}"
+            opt_type = pos.get("option_type") or ("CE" if "CE" in sym.upper() else "PE")
+            strike_price_val = float(pos.get("strike_price") or 0.0)
+
             adopted_leg = {
                 "id": adopted_id,
                 "leg_id": adopted_id,
@@ -6285,17 +6255,47 @@ class StraddleManager:
                 "sl_type_label": sl_label,
                 "sl_value": sl_val,
                 "sl_price": round(max(0.05, sl_p), 2),
+                "target_re_execute_type": tgt_re_type,
+                "target_re_execute_count": tgt_re_count,
+                "sl_re_execute_type": sl_re_type,
+                "sl_re_execute_count": sl_re_count,
+                "re_execute_count": 0,
+                "tsl_profit_pts": tsl_profit,
+                "tsl_trail_pts": tsl_trail,
                 "status": "OPEN",
                 "pnl": float(pos.get("pnl") or 0.0),
                 "mtm": float(pos.get("pnl") or 0.0),
                 "is_adopted": True,
-                "strike_price": float(pos.get("strike_price") or 0.0),
-                "option_type": pos.get("option_type") or ("CE" if "CE" in sym.upper() else "PE"),
+                "strike_price": strike_price_val,
+                "option_type": opt_type,
                 "expiry_str": pos.get("expiry_date") or "",
                 "strategy_id": strat.get("strategy_id"),
                 "strategy_name": strat.get("name"),
                 "date": today_ist_str()
             }
+
+            # Create or update matching leg configuration in strat["legs"] so re-entry works seamlessly
+            adopted_leg_cfg = {
+                "id": adopted_id,
+                "underlying": strat.get("underlying") or "NIFTY",
+                "option_type": opt_type,
+                "side": side,
+                "product": adopted_leg["product"],
+                "lots": lots,
+                "lot_size": lot_size,
+                "strike_selection": str(int(strike_price_val)) if strike_price_val > 0 else "ATM",
+                "target_type": tgt_type,
+                "target_value": t_val,
+                "target_re_execute_type": tgt_re_type,
+                "target_re_execute_count": tgt_re_count,
+                "sl_type": sl_type,
+                "sl_value": sl_val,
+                "sl_re_execute_type": sl_re_type,
+                "sl_re_execute_count": sl_re_count,
+                "tsl_profit_pts": tsl_profit,
+                "tsl_trail_pts": tsl_trail,
+            }
+            strat.setdefault("legs", []).append(adopted_leg_cfg)
 
             # Remove this position from any other strategy where it might have been placed
             tok_key = str(pos.get("token") or pos.get("instrument_key") or "")
@@ -6305,9 +6305,8 @@ class StraddleManager:
                     other_s["positions"] = [
                         op for op in other_s.get("positions", [])
                         if not (
-                            op.get("status") == "OPEN" and (
-                                (tok_key and str(op.get("token") or op.get("instrument_key") or "") == tok_key) or
-                                (str(op.get("symbol") or op.get("trading_symbol") or "").upper() == sym_key)
+                            op.get("status") in ("OPEN", "LIVE OPEN") and (
+                                _is_same_instrument(op.get("symbol"), op.get("instrument_key"), sym_key, tok_key)
                             )
                         )
                     ]
@@ -8014,13 +8013,13 @@ class StraddleManager:
 
                 leg_mtm = round((ltp - avg_price) * net_qty if side == "BUY" else (avg_price - ltp) * abs(net_qty), 2)
 
-                # 1. Check if already present in any strategy
+                # 1. Check if already present in any strategy using robust instrument matcher
                 matched_strat = None
                 matched_leg_pos = None
 
                 for s in self._strategies:
                     for p in s.get("positions", []):
-                        if (p.get("symbol") == bp_sym or (bp_ikey and p.get("instrument_key") == bp_ikey)):
+                        if _is_same_instrument(p.get("symbol"), p.get("instrument_key"), bp_sym, bp_ikey):
                             matched_strat = s
                             matched_leg_pos = p
                             break
@@ -8054,105 +8053,9 @@ class StraddleManager:
                     matched_strat["repair_needed"] = False
                     changes_made = True
                 else:
-                    # 2. Strategy doesn't have it in positions list yet. Find target strategy
-                    target_strat = None
-                    active = self.get_strategy(self._active_strategy_id)
-
-                    # Try matching configured legs of strategies first
-                    for s in self._strategies:
-                        legs = s.get("legs", [])
-                        for leg in legs:
-                            leg_und = (leg.get("underlying") or s.get("underlying") or "NIFTY").upper()
-                            leg_type = (leg.get("option_type") or "CE").upper()
-                            if leg_und in bp_sym.upper() and leg_type in bp_sym.upper():
-                                target_strat = s
-                                break
-                        if target_strat:
-                            break
-
-                    if not target_strat:
-                        continue  # Leave manual/external positions unassigned so user can adopt them into whichever algo they choose
-
-                    if target_strat:
-                        # Extract leg configuration if any
-                        leg_cfg = None
-                        for l in target_strat.get("legs", []):
-                            if (l.get("option_type") or "CE").upper() in bp_sym.upper():
-                                leg_cfg = l
-                                break
-                        if not leg_cfg and target_strat.get("legs"):
-                            leg_cfg = target_strat.get("legs")[0]
-
-                        target_type = leg_cfg.get("target_type", "None") if leg_cfg else "None"
-                        target_val = float(leg_cfg.get("target_value", 0.0)) if leg_cfg else 0.0
-                        sl_type = leg_cfg.get("sl_type", "None") if leg_cfg else "None"
-                        sl_val = float(leg_cfg.get("sl_value", 0.0)) if leg_cfg else 0.0
-
-                        target_price = 0.0
-                        if "TGT: %" in target_type or "%" in target_type:
-                            target_price = round_to_tick(avg_price * (1.0 + target_val / 100.0) if side == "BUY" else avg_price * (1.0 - target_val / 100.0), 0.05)
-                        elif "Pts" in target_type:
-                            target_price = round_to_tick(avg_price + target_val if side == "BUY" else avg_price - target_val, 0.05)
-
-                        sl_price = 0.0
-                        if "SL: %" in sl_type or "%" in sl_type:
-                            sl_price = round_to_tick(avg_price * (1.0 - sl_val / 100.0) if side == "BUY" else avg_price * (1.0 + sl_val / 100.0), 0.05)
-                        elif "Pts" in sl_type:
-                            sl_price = round_to_tick(avg_price - sl_val if side == "BUY" else avg_price + sl_val, 0.05)
-
-                        target_type_label = f"TGT: {target_val:.0f}%" if ("%" in target_type or "TGT: %" in target_type) else (f"TGT: {target_val:.1f} pts" if "Pts" in target_type else target_type)
-                        sl_type_label = f"SL: -{sl_val:.0f}%" if ("%" in sl_type or "SL: %" in sl_type) else (f"SL: -{sl_val:.1f} pts" if "Pts" in sl_type else sl_type)
-                        orig_sl_label = f"ORIGINAL SL: -{sl_val:.0f}%" if ("%" in sl_type or "SL: %" in sl_type) else (f"ORIGINAL SL: {sl_price:.2f}" if sl_price > 0 else "")
-
-                        pos_record = {
-                            "id": leg_cfg.get("id") if leg_cfg else f"leg_{len(target_strat.get('positions', []))+1}",
-                            "status": "OPEN",
-                            "side": side,
-                            "product": bp.get("product", "NRML"),
-                            "symbol": bp_sym,
-                            "instrument_key": bp_ikey,
-                            "quantity": abs(net_qty),
-                            "entry_qty": abs(net_qty),
-                            "avg_ent_price": avg_price,
-                            "entry_time": bp.get("entry_time") or now_ist_str(),
-                            "target_type": target_type,
-                            "target_type_label": target_type_label,
-                            "target_value": target_val,
-                            "target_price": target_price,
-                            "sl_type": sl_type,
-                            "sl_type_label": sl_type_label,
-                            "sl_value": sl_val,
-                            "sl_price": sl_price,
-                            "original_sl_label": orig_sl_label,
-                            "original_sl_price": sl_price,
-                            "tsl_profit_pts": float(leg_cfg.get("tsl_profit_pts", 0.0)) if leg_cfg else 0.0,
-                            "tsl_trail_pts": float(leg_cfg.get("tsl_trail_pts", 0.0)) if leg_cfg else 0.0,
-                            "highest_profit_pts": 0.0,
-                            "avg_exit_price": 0.0,
-                            "exit_time": None,
-                            "exit_qty": 0,
-                            "exit_reason": None,
-                            "is_re_entry": False,
-                            "ltp": ltp,
-                            "mtm": leg_mtm,
-                            "strategy_id": target_strat.get("strategy_id"),
-                            "strategy_name": target_strat.get("name"),
-                            "date": today_ist_str(),
-                        }
-
-                        target_strat.setdefault("positions", []).append(pos_record)
-                        target_strat["status"] = "TRADE_ACTIVE"
-                        target_strat["enabled"] = target_strat.get("enabled", True)
-                        target_strat["_manual_reset"] = False
-                        target_strat["entry_error"] = "-"
-                        target_strat["repair_needed"] = False
-
-                        if self._active_strategy_id == target_strat.get("strategy_id"):
-                            self._state["positions"] = target_strat["positions"]
-                            self._state["status"] = "TRADE_ACTIVE"
-
-                        changes_made = True
-                        self._log_event(f"Reconciled live Kotak Neo broker position {bp_sym} (Qty: {net_qty} @ ₹{avg_price:.2f}) to strategy '{target_strat.get('name')}'.")
+                    # External / manual position on Kotak Neo not yet adopted into any strategy.
+                    # Never auto-inject phantom duplicates. Kept available for explicit adoption via modal.
+                    continue
 
             if changes_made:
                 self._save_strategies()

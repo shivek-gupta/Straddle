@@ -3412,7 +3412,15 @@ async function saveRunningPositionChanges(stratId, legId, legIndex) {
             await fetchStraddleState();
             await loadStraddleOpenPositions();
         } else {
-            showStraddleToast(res.error || "Failed to update position", "error", 4000);
+            // Discard pending edits on error so inputs and lot counters don't stay stuck with failed values
+            if (window._straddlePendingLegEdits && window._straddlePendingLegEdits[legIndex]) {
+                delete window._straddlePendingLegEdits[legIndex];
+            }
+            const btn = document.getElementById(`btn_save_running_${legIndex}`);
+            if (btn) btn.style.display = "none";
+            showStraddleToast(res.error || "Failed to update position", "error", 4500);
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
         }
     } catch (e) {
         showStraddleToast("Error updating position: " + e.message, "error", 3000);
@@ -3628,6 +3636,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const isClosed = !isError && (isCompleteOrClosed || (!isOpen && !isError));
                 const isReEntry = !!(pos.is_re_entry || pos.re_entry || (pos.re_execute_count && pos.re_execute_count > 0));
                 const stratId = pos.strategy_id || window._straddleState?.activeStrategy?.strategy_id || '';
+                const hasLiveQty = Number(pos.quantity || pos.entry_qty || 0) > 0;
+                const isInteractiveRow = (isOpen || (isError && hasLiveQty && !isCompleteOrClosed));
 
                 // Retrieve any pending user edits for this leg so they are never lost
                 const pending = (window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]) || null;
@@ -3684,15 +3694,17 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 rawExp = String(rawExp).replace(/^(NFO|MCX|BFO|BSE|NSE)\s*/i, '').trim();
                 let expiryText = rawExp ? `${segPrefix} ${rawExp}` : segPrefix;
 
-                // Quantity column
-                const lots = pending ? pending.lots : (pos.lots || 1);
-                const totalQty = pos.quantity || 65;
+                // Quantity column - derive lots from actual filled quantity so failed orders never display ghost lots
+                const lotSizeVal = Number(pos.lot_size || 65);
+                const actualFilledLots = Math.max(1, Math.round((Number(pos.quantity || pos.entry_qty || 65)) / lotSizeVal));
+                const lots = pending ? pending.lots : (pos.quantity ? actualFilledLots : (pos.lots || 1));
+                const totalQty = pos.quantity || (lots * lotSizeVal);
                 const entryQty = pos.entry_qty || totalQty;
                 const exitQty = (isClosed || (pos.exit_qty && pos.exit_qty > 0)) ? (pos.exit_qty || totalQty) : "-";
 
-                // Quantity HTML (Interactive with stepper arrows for OPEN legs)
+                // Quantity HTML (Interactive with stepper arrows for OPEN and editable error legs)
                 let qtyHtml = "";
-                if (isOpen) {
+                if (isInteractiveRow) {
                     qtyHtml = `
                         <div style="display:flex; align-items:center; gap:4px;">
                             <div class="straddle-stepper-box" style="height:28px;">
@@ -3715,10 +3727,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     `;
                 }
 
-                // Symbol HTML (With shift strike option and step arrows for OPEN legs)
+                // Symbol HTML (With shift strike option and step arrows for OPEN and editable legs)
                 let symHtml = "";
                 const curStrikeMatch = pending ? pending.strike : (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
-                if (isOpen) {
+                if (isInteractiveRow) {
                     symHtml = `
                         <div class="straddle-sym-card ${symAccentClass}">
                             <div class="straddle-sym-title">${sym}</div>
@@ -3748,9 +3760,9 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const avgEntPrice = pos.avg_ent_price ? Number(pos.avg_ent_price).toFixed(2) : '-';
                 const entryTime = pos.entry_time || '-';
 
-                // Per Leg Target (Interactive for OPEN legs)
+                // Per Leg Target (Interactive for OPEN and live error legs)
                 let targetHtml = "-";
-                if (isOpen) {
+                if (isInteractiveRow) {
                     const isPts = pending ? (pending.target_mode === "₹" || pending.target_mode.includes("Pts")) : (pos.target_type && (pos.target_type.includes("Pts") || pos.target_type.includes("₹")));
                     const tVal = pending ? pending.target_val : (pos.target_value !== undefined ? pos.target_value : 25);
                     targetHtml = `
@@ -3771,9 +3783,9 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>`;
                 }
 
-                // Per Leg Stoploss (Interactive for OPEN legs)
+                // Per Leg Stoploss (Interactive for OPEN and live error legs)
                 let slHtml = "-";
-                if (isOpen) {
+                if (isInteractiveRow) {
                     const isPts = pending ? (pending.sl_mode === "₹" || pending.sl_mode.includes("Pts")) : (pos.sl_type && (pos.sl_type.includes("Pts") || pos.sl_type.includes("₹")));
                     const sVal = pending ? pending.sl_val : (pos.sl_value !== undefined ? pos.sl_value : 15);
                     slHtml = `
@@ -3817,7 +3829,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
                 // Action buttons (Save on live change + Exit + Detach)
                 let actionHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
-                if (isOpen) {
+                if (isInteractiveRow) {
                     actionHtml = `
                         <div style="display:flex; flex-direction:column; gap:4px; align-items:center;">
                             <button type="button" id="btn_save_running_${idx}" class="straddle-btn btn-primary" style="${hasPending ? 'display:inline-flex;' : 'display:none;'} padding:3px 8px; font-size:11px; font-weight:800; background:#0ea5e9; border:none; box-shadow:0 0 8px rgba(14,165,233,0.6);" onclick="saveRunningPositionChanges('${stratId}', '${pos.id || ''}', ${idx})" title="Save and apply live modifications immediately">
@@ -3994,6 +4006,11 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                                 </div>
                                             </div>
                                         </div>
+                                        ${(hasLiveQty && !isCompleteOrClosed) ? `
+                                            <button type="button" class="algo-btn-retry" style="background:#0ea5e9; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="saveRunningPositionChanges('${stratId}', '${legId}', ${idx})" title="Save current Target/Stoploss and resume live monitoring">
+                                                🔄 Save & Resume Monitoring
+                                            </button>
+                                        ` : ''}
                                         <button type="button" class="algo-btn-retry" style="background:#10b981; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLegInline('${stratId}', '${legId}', ${idx})" title="Retry order with updated lots and strike">
                                             🔄 Retry with Settings
                                         </button>
@@ -8273,6 +8290,12 @@ async function submitAdoptBrokerPosition() {
     const tgtVal = parseFloat(document.getElementById("adopt_tgt_val")?.value) || 25;
     const slMode = document.getElementById("adopt_sl_mode")?.value || "%";
     const slVal = parseFloat(document.getElementById("adopt_sl_val")?.value) || 15;
+    const tgtReType = document.getElementById("adopt_tgt_re_type")?.value || "RE EXECUTE";
+    const tgtReCount = parseInt(document.getElementById("adopt_tgt_re_count")?.value, 10) || 0;
+    const slReType = document.getElementById("adopt_sl_re_type")?.value || "RE EXECUTE";
+    const slReCount = parseInt(document.getElementById("adopt_sl_re_count")?.value, 10) || 0;
+    const tslProfit = parseFloat(document.getElementById("adopt_tsl_profit")?.value) || 0;
+    const tslTrail = parseFloat(document.getElementById("adopt_tsl_trail")?.value) || 0;
 
     const confirmBtn = document.getElementById("btnConfirmAdoptPosition");
     if (confirmBtn) {
@@ -8292,7 +8315,7 @@ async function submitAdoptBrokerPosition() {
                     token: pos.token,
                     exchange_segment: pos.exchange_segment || "nfo",
                     side: pos.side,
-                    product: pos.product || "MIS",
+                    product: pos.product || "NRML",
                     quantity: pos.quantity,
                     lots: pos.lots || 1,
                     lot_size: pos.lot_size || 65,
@@ -8304,7 +8327,13 @@ async function submitAdoptBrokerPosition() {
                     target_mode: tgtMode,
                     target_val: tgtVal,
                     sl_mode: slMode,
-                    sl_val: slVal
+                    sl_val: slVal,
+                    target_re_execute_type: tgtReType,
+                    target_re_execute_count: tgtReCount,
+                    sl_re_execute_type: slReType,
+                    sl_re_execute_count: slReCount,
+                    tsl_profit_pts: tslProfit,
+                    tsl_trail_pts: tslTrail
                 }
             })
         });

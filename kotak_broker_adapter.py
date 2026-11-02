@@ -277,7 +277,7 @@ class BaseBrokerAdapter:
     def get_trades(self) -> List[Dict[str, Any]]:
         return []
 
-    def get_positions(self) -> List[Dict[str, Any]]:
+    def get_positions(self, force: bool = False) -> List[Dict[str, Any]]:
         return []
 
     def get_funds(self) -> Dict[str, Any]:
@@ -331,6 +331,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         self._quotes_cache_ts: Dict[str, float] = {}
         self._funds_cache: Dict[str, Any] = {}
         self._funds_cache_ts: float = 0.0
+        self._positions_cache: List[Dict[str, Any]] = []
+        self._positions_cache_ts: float = 0.0
         self._last_429_ts: float = 0.0
         _init_kotak_symbol_maps()
 
@@ -767,10 +769,14 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             logger.error(f"[Kotak Neo] Exception reading order report: {e}")
             return []
 
-    def get_positions(self) -> List[Dict[str, Any]]:
+    def get_positions(self, force: bool = False) -> List[Dict[str, Any]]:
+        now_ts = time.time()
+        if not force and self._positions_cache and (now_ts - self._positions_cache_ts) < 2.0:
+            return list(self._positions_cache)
+
         client = self._get_client()
         if client is None:
-            return []
+            return list(self._positions_cache) if self._positions_cache else []
 
         try:
             res = client.positions()
@@ -891,10 +897,12 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 except Exception as q_err:
                     logger.debug(f"[Kotak Neo] Backfill live quotes note: {q_err}")
 
+            self._positions_cache = standardized
+            self._positions_cache_ts = time.time()
             return standardized
         except Exception as e:
             logger.error(f"[Kotak Neo] Exception fetching positions: {e}")
-            return []
+            return list(self._positions_cache) if self._positions_cache else []
 
     def get_funds(self) -> Dict[str, Any]:
         now_ts = time.time()
@@ -1343,7 +1351,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
     def get_order_book(self) -> List[Dict[str, Any]]:
         return self._read_json(self._orderbook_file)
 
-    def get_positions(self) -> List[Dict[str, Any]]:
+    def get_positions(self, force: bool = False) -> List[Dict[str, Any]]:
         return self._read_json(self._positions_file)
 
     def get_funds(self) -> Dict[str, Any]:
