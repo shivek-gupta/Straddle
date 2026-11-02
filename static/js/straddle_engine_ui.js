@@ -3241,25 +3241,119 @@ function markRunningLegChanged(idx) {
     }
 }
 
+window._straddleErrorLegEdits = window._straddleErrorLegEdits || {};
+
+function preserveErrorLegChange(idx) {
+    if (!window._straddleErrorLegEdits) window._straddleErrorLegEdits = {};
+    const lotsInput = document.getElementById(`err_lots_${idx}`);
+    const strikeInput = document.getElementById(`err_strike_${idx}`);
+    const lotsVal = lotsInput ? (parseInt(lotsInput.value, 10) || 1) : 1;
+    const strikeVal = strikeInput ? strikeInput.value.trim() : "";
+    window._straddleErrorLegEdits[idx] = {
+        lots: lotsVal,
+        strike: strikeVal,
+        ts: Date.now()
+    };
+}
+window.preserveErrorLegChange = preserveErrorLegChange;
+
+function stepErrorStrikePrice(idx, direction) {
+    const input = document.getElementById(`err_strike_${idx}`);
+    if (!input) return;
+    let curVal = parseFloat(input.value.replace(/[^0-9.]/g, '')) || 0;
+    let posUnd = "NIFTY";
+    if (window._straddleState?.activeStrategy) {
+        posUnd = window._straddleState.activeStrategy.underlying || "NIFTY";
+        const positions = window._straddleState.activeStrategy.positions || window._straddleState.positions || [];
+        if (positions[idx]) {
+            posUnd = positions[idx].underlying || (positions[idx].contract && positions[idx].contract.underlying) || posUnd;
+        }
+    }
+    const step = (typeof getStrikeStepForUnderlying === "function") ? getStrikeStepForUnderlying(posUnd) : 50;
+    if (curVal === 0) {
+        const spot = Number(window._straddleSpotPrices?.[posUnd] || 23300);
+        curVal = Math.round(spot / step) * step;
+    }
+    curVal += direction * step;
+    input.value = curVal;
+    preserveErrorLegChange(idx);
+}
+window.stepErrorStrikePrice = stepErrorStrikePrice;
+
+function stepErrorLots(idx, direction) {
+    const input = document.getElementById(`err_lots_${idx}`);
+    if (!input) return;
+    let curVal = parseInt(input.value, 10) || 1;
+    curVal = Math.max(1, Math.min(200, curVal + direction));
+    input.value = curVal;
+    preserveErrorLegChange(idx);
+}
+window.stepErrorLots = stepErrorLots;
+
+function stepLegStrikeSelect(rowId, dir) {
+    const row = document.getElementById(rowId);
+    if (!row) return;
+    const sel = row.querySelector(".leg-strike");
+    if (!sel || !sel.options || sel.options.length === 0) return;
+    const curIdx = sel.selectedIndex >= 0 ? sel.selectedIndex : 0;
+    const nextIdx = Math.max(0, Math.min(sel.options.length - 1, curIdx + dir));
+    sel.selectedIndex = nextIdx;
+    syncStrategyLegChange(rowId);
+}
+window.stepLegStrikeSelect = stepLegStrikeSelect;
+
+function stepLegLotsInput(rowId, dir) {
+    const row = document.getElementById(rowId);
+    if (!row) return;
+    const input = row.querySelector(".leg-lots");
+    if (!input) return;
+    let curVal = parseInt(input.value, 10) || 1;
+    curVal = Math.max(1, Math.min(500, curVal + dir));
+    input.value = curVal;
+    syncStrategyLegChange(rowId);
+}
+window.stepLegLotsInput = stepLegLotsInput;
+
+function syncStrategyLegChange(rowId) {
+    if (!window._straddleState?.activeStrategy) return;
+    const legs = window._straddleState.activeStrategy.legs || [];
+    const tr = document.getElementById(rowId);
+    if (!tr) return;
+    const legIdx = Array.from(tr.parentElement ? tr.parentElement.children : []).indexOf(tr);
+    const legObj = (legIdx >= 0 && legs[legIdx]) ? legs[legIdx] : legs.find(l => l.id === rowId);
+    if (legObj) {
+        legObj.lots = parseInt(tr.querySelector(".leg-lots")?.value, 10) || 1;
+        legObj.strike_selection = tr.querySelector(".leg-strike")?.value || "ATM";
+        legObj.underlying = tr.querySelector(".leg-underlying")?.value || window._straddleState.activeStrategy.underlying || "NIFTY";
+    }
+}
+window.syncStrategyLegChange = syncStrategyLegChange;
+
 function stepLiveStrikePrice(idx, direction) {
     const input = document.getElementById(`live_strike_${idx}`);
     if (!input) return;
     let curVal = parseInt(input.value.replace(/[^0-9]/g, '')) || 0;
 
-    // Detect strike interval: BankNifty/Sensex = 100, MidcpNifty = 25, Nifty/Finnifty = 50
-    let step = 50;
+    // Detect strike interval dynamically for underlying
     const symEl = document.querySelector(`tr[data-leg-index="${idx}"] .straddle-sym-title`);
     const symText = (symEl ? symEl.textContent : "").toUpperCase();
-    if (symText.includes("BANKNIFTY") || symText.includes("SENSEX") || symText.includes("BANKEX")) {
-        step = 100;
-    } else if (symText.includes("MIDCPNIFTY")) {
-        step = 25;
-    } else {
-        step = 50;
-    }
+    let posUnd = window._straddleState?.activeStrategy?.underlying || "NIFTY";
+    if (symText.includes("BANKNIFTY")) posUnd = "BANKNIFTY";
+    else if (symText.includes("SENSEX")) posUnd = "SENSEX";
+    else if (symText.includes("BANKEX")) posUnd = "BANKEX";
+    else if (symText.includes("MIDCPNIFTY")) posUnd = "MIDCPNIFTY";
+    else if (symText.includes("FINNIFTY")) posUnd = "FINNIFTY";
+    else if (symText.includes("CRUDEOIL")) posUnd = "CRUDEOIL";
+    else if (symText.includes("NATURALGAS")) posUnd = "NATURALGAS";
+    else if (symText.includes("GOLD")) posUnd = "GOLD";
+    else if (symText.includes("SILVER")) posUnd = "SILVER";
+    else if (symText.includes("COPPER")) posUnd = "COPPER";
+
+    let step = (typeof getStrikeStepForUnderlying === "function") ? getStrikeStepForUnderlying(posUnd) : 50;
 
     if (curVal === 0) {
-        curVal = 22500;
+        const spot = Number(window._straddleSpotPrices?.[posUnd] || 23300);
+        curVal = Math.round(spot / step) * step;
     }
     curVal += direction * step;
     input.value = curVal;
@@ -3357,8 +3451,9 @@ async function detachRunningPosition(stratId, legId, legIndex) {
 async function retrySingleStraddleLegInline(stratId, legId, legIndex) {
     const lotsInput = document.getElementById(`err_lots_${legIndex}`);
     const strikeInput = document.getElementById(`err_strike_${legIndex}`);
-    const newLots = lotsInput ? parseInt(lotsInput.value) || 1 : 1;
-    const newStrike = strikeInput ? strikeInput.value.trim() : "";
+    const savedEdit = window._straddleErrorLegEdits?.[legIndex];
+    const newLots = lotsInput ? (parseInt(lotsInput.value, 10) || 1) : (savedEdit?.lots || 1);
+    const newStrike = strikeInput ? strikeInput.value.trim() : (savedEdit?.strike || "");
 
     showStraddleToast(`Retrying leg ${legIndex + 1} with Lots: ${newLots}, Strike: ${newStrike || 'Auto'}...`, "info", 2000);
     try {
@@ -3384,6 +3479,9 @@ async function retrySingleStraddleLegInline(stratId, legId, legIndex) {
         });
         const res = await resp.json();
         if (res.success) {
+            if (window._straddleErrorLegEdits) {
+                delete window._straddleErrorLegEdits[legIndex];
+            }
             showStraddleToast(res.message || "Order retried successfully!", "success", 3000);
             await fetchStraddleState();
             await loadStraddleOpenPositions();
@@ -3434,14 +3532,35 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
     } else {
         const prevMap = window._straddleState.prevLtpMap || {};
 
+        // Snapshot any active error banner inputs into persistent store so they never reset
+        positions.forEach((pos, idx) => {
+            const elLots = document.getElementById(`err_lots_${idx}`);
+            const elStrike = document.getElementById(`err_strike_${idx}`);
+            if (elLots && elLots.value) {
+                if (!window._straddleErrorLegEdits) window._straddleErrorLegEdits = {};
+                if (!window._straddleErrorLegEdits[idx]) window._straddleErrorLegEdits[idx] = {};
+                window._straddleErrorLegEdits[idx].lots = parseInt(elLots.value, 10) || 1;
+            }
+            if (elStrike && elStrike.value) {
+                if (!window._straddleErrorLegEdits) window._straddleErrorLegEdits = {};
+                if (!window._straddleErrorLegEdits[idx]) window._straddleErrorLegEdits[idx] = {};
+                window._straddleErrorLegEdits[idx].strike = elStrike.value.trim();
+            }
+        });
+
         // Check if we can perform smooth in-place DOM update instead of destroying innerHTML
         const existingRows = tbody.querySelectorAll("tr[data-leg-index]:not(.straddle-error-banner-row)");
-        const hasErrors = positions.some(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message || !!p.sl_cancelled_unexpectedly));
+        const existingErrorBanners = tbody.querySelectorAll("tr.straddle-error-banner-row");
+        const numErrorsExpected = positions.filter(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message || !!p.sl_cancelled_unexpectedly)).length;
+
+        // Active focus check - NEVER destroy DOM if user is actively interacting inside the table!
+        const activeEl = document.activeElement;
+        const isUserInteractingInTable = activeEl && tbody.contains(activeEl) && (activeEl.tagName === "INPUT" || activeEl.tagName === "SELECT");
+
         const canUpdateInPlace = (
             existingRows.length === positions.length &&
             positions.length > 0 &&
-            !hasErrors &&
-            !tbody.querySelector(".straddle-error-banner-row")
+            (existingErrorBanners.length === numErrorsExpected || isUserInteractingInTable)
         );
 
         if (canUpdateInPlace) {
@@ -3481,7 +3600,6 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
                 // Check pending edits or active focus
                 const hasPending = !!(window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]);
-                const activeEl = document.activeElement;
                 const isFocusedInRow = activeEl && row.contains(activeEl);
 
                 const btnSave = document.getElementById(`btn_save_running_${idx}`);
@@ -3496,7 +3614,11 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 }
             });
         } else {
-            // Full render with preserved pending edits
+            // Full render with preserved pending edits and error leg inputs
+            const activeId = (activeEl && tbody.contains(activeEl) && activeEl.id) ? activeEl.id : null;
+            const selStart = (activeEl && typeof activeEl.selectionStart === "number") ? activeEl.selectionStart : null;
+            const selEnd = (activeEl && typeof activeEl.selectionEnd === "number") ? activeEl.selectionEnd : null;
+
             let html = "";
             positions.forEach((pos, idx) => {
                 const rawStatus = String(pos.status || "OPEN").toUpperCase();
@@ -3831,6 +3953,12 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         `;
                     }
                     const curStrikeMatch = (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
+                    const savedErr = (window._straddleErrorLegEdits && window._straddleErrorLegEdits[idx]) || null;
+                    const errLotsVal = savedErr && savedErr.lots !== undefined ? savedErr.lots : (pos.lots || 1);
+                    const errStrikeVal = savedErr && savedErr.strike !== undefined ? savedErr.strike : curStrikeMatch;
+                    const posUnd = (pos.underlying || (pos.contract && pos.contract.underlying) || window._straddleState?.activeStrategy?.underlying || "NIFTY").toUpperCase();
+                    const strikeStep = (typeof getStrikeStepForUnderlying === "function") ? getStrikeStepForUnderlying(posUnd) : 50;
+
                     html += `
                         <tr class="straddle-error-banner-row">
                             <td colspan="13">
@@ -3848,11 +3976,23 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                     <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:rgba(0,0,0,0.3); padding:6px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
                                         <div style="display:flex; align-items:center; gap:4px;">
                                             <span style="font-size:11px; color:#cbd5e1; font-weight:700;">Lots:</span>
-                                            <input type="number" id="err_lots_${idx}" class="straddle-input" style="width:52px; padding:3px 6px; font-size:11.5px; font-weight:700; text-align:center;" value="${pos.lots || 1}" min="1" max="100" title="Adjust lots to fit margin">
+                                            <div class="straddle-stepper-box" style="height:28px;">
+                                                <input type="number" id="err_lots_${idx}" class="straddle-stepper-input" style="width:40px; font-size:12px; font-weight:700;" value="${errLotsVal}" min="1" max="100" oninput="preserveErrorLegChange(${idx})" onchange="preserveErrorLegChange(${idx})" title="Adjust lots: increase to buy/sell more, decrease to reduce">
+                                                <div class="straddle-stepper-arrows" style="width:18px;">
+                                                    <button type="button" class="lot-step-btn" onclick="stepErrorLots(${idx}, 1)" title="Lots +">▲</button>
+                                                    <button type="button" class="lot-step-btn" onclick="stepErrorLots(${idx}, -1)" title="Lots -">▼</button>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div style="display:flex; align-items:center; gap:4px;">
                                             <span style="font-size:11px; color:#cbd5e1; font-weight:700;">Strike:</span>
-                                            <input type="text" id="err_strike_${idx}" class="straddle-input" style="width:80px; padding:3px 6px; font-size:11.5px; font-weight:700;" value="${curStrikeMatch}" placeholder="e.g. 23250" title="Adjust strike to fit margin">
+                                            <div class="straddle-stepper-box" style="height:28px;">
+                                                <input type="number" id="err_strike_${idx}" class="straddle-stepper-input" style="width:72px; font-size:12px; font-weight:700;" value="${errStrikeVal}" step="${strikeStep}" oninput="preserveErrorLegChange(${idx})" onchange="preserveErrorLegChange(${idx})" placeholder="Strike" title="Enter or step strike price">
+                                                <div class="straddle-stepper-arrows" style="width:18px;">
+                                                    <button type="button" class="strike-step-btn" onclick="stepErrorStrikePrice(${idx}, 1)" title="Strike +">▲</button>
+                                                    <button type="button" class="strike-step-btn" onclick="stepErrorStrikePrice(${idx}, -1)" title="Strike -">▼</button>
+                                                </div>
+                                            </div>
                                         </div>
                                         <button type="button" class="algo-btn-retry" style="background:#10b981; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLegInline('${stratId}', '${legId}', ${idx})" title="Retry order with updated lots and strike">
                                             🔄 Retry with Settings
@@ -3871,6 +4011,15 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 }
             });
             tbody.innerHTML = html;
+            if (activeId) {
+                const el = document.getElementById(activeId);
+                if (el) {
+                    el.focus();
+                    if (selStart !== null && selEnd !== null && typeof el.setSelectionRange === "function") {
+                        try { el.setSelectionRange(selStart, selEnd); } catch(e) {}
+                    }
+                }
+            }
         }
     }
 
@@ -4095,13 +4244,14 @@ async function openRectifyLegModal(strategyId, legId, legIndex) {
     if (legId) legCfg = legsCfg.find(l => l.id === legId);
     if (!legCfg && legIndex !== undefined && legsCfg[legIndex]) legCfg = legsCfg[legIndex];
 
+    const savedEdit = (legIndex !== undefined && window._straddleErrorLegEdits) ? window._straddleErrorLegEdits[legIndex] : null;
     const und = (pos?.underlying || legCfg?.underlying || strat.underlying || "NIFTY").toUpperCase();
-    const lotSize = Number(pos?.lot_size || legCfg?.lot_size || (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : (und === "MIDCPNIFTY" ? 50 : (und === "SENSEX" ? 10 : 65)))));
-    const currentLots = Number(pos?.lots || legCfg?.lots || 1);
+    const lotSize = Number(pos?.lot_size || legCfg?.lot_size || (typeof getLotSizeForUnderlying === "function" ? getLotSizeForUnderlying(und) : (und === "BANKNIFTY" ? 15 : (und === "FINNIFTY" ? 25 : (und === "MIDCPNIFTY" ? 50 : (und === "SENSEX" ? 10 : 65))))));
+    const currentLots = Number(savedEdit?.lots || pos?.lots || legCfg?.lots || 1);
     const side = (pos?.side || legCfg?.side || "SELL").toUpperCase();
     const prod = (pos?.product || legCfg?.product || "NRML").toUpperCase();
     const optType = (pos?.option_type || legCfg?.option_type || "CE").toUpperCase();
-    const strike = (pos?.strike_selection || legCfg?.strike_selection || "ATM").toUpperCase().replace("_", " ").trim();
+    const strike = String(savedEdit?.strike || pos?.strike_selection || legCfg?.strike_selection || "ATM").toUpperCase().replace("_", " ").trim();
     const tgtVal = Number(pos?.target_value || legCfg?.target_value || 10.0);
     const slVal = Number(pos?.sl_value || legCfg?.sl_value || 20.0);
     const errText = pos?.error_message || pos?.error || strat.entry_error || "Margin Exceeded / Broker RMS rejection";
@@ -5024,23 +5174,35 @@ function addStraddleLegRow(leg = null) {
             </select>
         </td>
         <td>
-            <div style="display:flex; align-items:center; gap:4px;">
-                <select class="straddle-select leg-strike" style="min-width:90px;">
-                    ${strikeOptionsHtml}
-                </select>
+            <div style="display:flex; align-items:center; gap:3px;">
+                <div class="straddle-stepper-box" style="height:28px;">
+                    <select class="straddle-select leg-strike straddle-stepper-input" style="min-width:85px; border:none; background:transparent; font-size:11.5px; font-weight:700; padding:2px 4px; color:#f8fafc;" onchange="syncStrategyLegChange('${rowId}')">
+                        ${strikeOptionsHtml}
+                    </select>
+                    <div class="straddle-stepper-arrows" style="width:16px;">
+                        <button type="button" class="strike-step-btn" onclick="stepLegStrikeSelect('${rowId}', -1)" title="Prev Strike">▲</button>
+                        <button type="button" class="strike-step-btn" onclick="stepLegStrikeSelect('${rowId}', 1)" title="Next Strike">▼</button>
+                    </div>
+                </div>
                 <input type="hidden" class="leg-multiple-strike" value="${l.multiple_strike_selection || 'None'}">
                 <button type="button" class="straddle-btn btn-outline leg-strike-cfg-btn" style="padding:2px 6px; font-size:11px;" title="Strike & 500/100 Multiple Settings" onclick="openLegSettingsModal('${rowId}')">⚙️</button>
                 <span class="leg-mult-badge" style="display:${hasMult ? 'inline-block' : 'none'}; font-size:9px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.3); border-radius:3px; padding:1px 3px;" title="500/100 Multiple Strike Active">500/100</span>
             </div>
         </td>
         <td>
-            <select class="straddle-select leg-type">
+            <select class="straddle-select leg-type" onchange="syncStrategyLegChange('${rowId}')">
                 <option value="CE" ${l.option_type === "CE" ? "selected" : ""}>CE</option>
                 <option value="PE" ${l.option_type === "PE" ? "selected" : ""}>PE</option>
             </select>
         </td>
         <td>
-            <input type="number" class="straddle-input leg-lots" style="width:50px;" value="${l.lots || 1}" min="1" max="500">
+            <div class="straddle-stepper-box" style="height:28px;">
+                <input type="number" class="straddle-input leg-lots straddle-stepper-input" style="width:38px; border:none; background:transparent; font-size:12px; font-weight:700; text-align:center; padding:2px 2px; color:#f8fafc;" value="${l.lots || 1}" min="1" max="500" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
+                <div class="straddle-stepper-arrows" style="width:16px;">
+                    <button type="button" class="lot-step-btn" onclick="stepLegLotsInput('${rowId}', 1)" title="Lots +">▲</button>
+                    <button type="button" class="lot-step-btn" onclick="stepLegLotsInput('${rowId}', -1)" title="Lots -">▼</button>
+                </div>
+            </div>
         </td>
         <td>
             <div style="display:flex; gap:2px;">
@@ -5088,12 +5250,12 @@ function addStraddleLegRow(leg = null) {
             </select>
         </td>
         <td>
-            <select class="straddle-select leg-underlying">
+            <select class="straddle-select leg-underlying" onchange="syncStrategyLegChange('${rowId}')">
                 ${undOptionsHtml}
             </select>
         </td>
         <td>
-            <select class="straddle-select leg-expiry">
+            <select class="straddle-select leg-expiry" onchange="syncStrategyLegChange('${rowId}')">
                 ${expOptionsHtml}
             </select>
         </td>
@@ -5386,22 +5548,37 @@ window.syncPremiumMatchingFieldStates = syncPremiumMatchingFieldStates;
 
 function onStrategyUnderlyingChange(newUnd) {
     if (!newUnd) return;
-    newUnd = newUnd.toUpperCase();
-    if (window._straddleState?.activeStrategy) {
-        window._straddleState.activeStrategy.underlying = newUnd;
-    }
-    const isCommodity = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(newUnd);
+    const und = String(newUnd).toUpperCase().trim();
+    const isComm = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(und);
 
-    // Update all existing leg rows
+    // 1. Update in-memory active strategy underlying and its legs
+    if (window._straddleState && window._straddleState.activeStrategy) {
+        window._straddleState.activeStrategy.underlying = und;
+        if (Array.isArray(window._straddleState.activeStrategy.legs)) {
+            window._straddleState.activeStrategy.legs.forEach(leg => {
+                leg.underlying = und;
+            });
+        }
+    }
+
+    // 2. Ensure header dropdown displays chosen underlying
+    const stratUndEl = document.getElementById("cfgStrategyUnderlying");
+    if (stratUndEl && stratUndEl.value !== und) {
+        stratUndEl.value = und;
+    }
+
+    // 3. Update all existing leg rows in the legs table
     const trs = document.querySelectorAll("#straddleLegsBuilderBody tr");
     trs.forEach(tr => {
         const undSel = tr.querySelector(".leg-underlying");
-        if (undSel) undSel.value = newUnd;
+        if (undSel) {
+            undSel.value = und;
+        }
 
         const expSel = tr.querySelector(".leg-expiry");
         if (expSel) {
             const curExp = expSel.value;
-            if (isCommodity) {
+            if (isComm) {
                 expSel.innerHTML = `
                     <option value="Current Month" ${curExp === "Current Month" || curExp === "Monthly" ? "selected" : ""}>Current Month</option>
                     <option value="Next Month" ${curExp === "Next Month" || curExp === "Next Monthly" ? "selected" : ""}>Next Month</option>
@@ -5417,8 +5594,35 @@ function onStrategyUnderlyingChange(newUnd) {
         }
     });
 
-    // Refresh live margin preview and auto multiplier preview for this underlying
+    // Also update any other leg underlying selects with class .leg-underlying-select
+    document.querySelectorAll(".leg-underlying-select").forEach(sel => {
+        sel.value = und;
+    });
+
+    // 4. Auto-adjust start/end times if they were at defaults
+    const startEl = document.getElementById("cfgStartTime");
+    const endEl = document.getElementById("cfgEndTime");
+    if (isComm) {
+        if (startEl && (startEl.value === "09:15:56" || startEl.value === "09:15:00")) {
+            setStraddleTimeInputValue("cfgStartTime", "09:00:00");
+        }
+        if (endEl && (endEl.value === "15:29:50" || endEl.value === "15:30:00")) {
+            setStraddleTimeInputValue("cfgEndTime", "23:30:00");
+        }
+    } else {
+        if (startEl && startEl.value === "09:00:00") {
+            setStraddleTimeInputValue("cfgStartTime", "09:15:56");
+        }
+        if (endEl && (endEl.value === "23:30:00" || endEl.value === "23:55:00")) {
+            setStraddleTimeInputValue("cfgEndTime", "15:29:50");
+        }
+    }
+
+    // 5. Refresh live margin preview and auto multiplier preview
     updateFormAutoMultiplierPreview();
+    if (typeof renderStrategyMarginEstimate === "function") {
+        renderStrategyMarginEstimate();
+    }
 }
 window.onStrategyUnderlyingChange = onStrategyUnderlyingChange;
 
@@ -7875,6 +8079,12 @@ window.markRunningLegChanged = markRunningLegChanged;
 window.squareOffSingleLegIndex = squareOffSingleLegIndex;
 window.stepLiveStrikePrice = stepLiveStrikePrice;
 window.stepLiveLots = stepLiveLots;
+window.stepErrorStrikePrice = stepErrorStrikePrice;
+window.stepErrorLots = stepErrorLots;
+window.preserveErrorLegChange = preserveErrorLegChange;
+window.stepLegStrikeSelect = stepLegStrikeSelect;
+window.stepLegLotsInput = stepLegLotsInput;
+window.syncStrategyLegChange = syncStrategyLegChange;
 window.detachRunningPosition = detachRunningPosition;
 
 // Broker position adoption functions and exports
@@ -9296,46 +9506,7 @@ window.resetBasketAutoName = resetBasketAutoName;
 // STRATEGY BUILDER MULTIPLIER MODE & CUSHION MARGIN HANDLERS
 // =========================================================================
 
-function onStrategyUnderlyingChange(newUnd) {
-    if (!newUnd) return;
-    const und = newUnd.toUpperCase();
-    const isComm = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(und);
-    
-    // Auto-adjust start/end times if they were at defaults
-    const startEl = document.getElementById("cfgStartTime");
-    const endEl = document.getElementById("cfgEndTime");
-    if (isComm) {
-        if (startEl && (startEl.value === "09:15:56" || startEl.value === "09:15:00")) {
-            setStraddleTimeInputValue("cfgStartTime", "09:00:00");
-        }
-        if (endEl && (endEl.value === "15:29:50" || endEl.value === "15:30:00")) {
-            setStraddleTimeInputValue("cfgEndTime", "23:30:00");
-        }
-    } else {
-        if (startEl && startEl.value === "09:00:00") {
-            setStraddleTimeInputValue("cfgStartTime", "09:15:56");
-        }
-        if (endEl && (endEl.value === "23:30:00" || endEl.value === "23:55:00")) {
-            setStraddleTimeInputValue("cfgEndTime", "15:29:50");
-        }
-    }
-
-    // Update underlying in active strategy in memory
-    if (window._straddleState && window._straddleState.activeStrategy) {
-        window._straddleState.activeStrategy.underlying = und;
-    }
-
-    // Update all leg rows underlying selects if present
-    document.querySelectorAll(".leg-underlying-select").forEach(sel => {
-        sel.value = und;
-    });
-
-    // Re-calculate margin estimate
-    if (typeof renderStrategyMarginEstimate === "function") {
-        renderStrategyMarginEstimate();
-    }
-}
-window.onStrategyUnderlyingChange = onStrategyUnderlyingChange;
+// Note: onStrategyUnderlyingChange is consolidated and defined in the Strategy Builder section.
 
 function setFormMultiplierMode(mode, syncToServer = true) {
     const isManual = (mode === "MANUAL");
