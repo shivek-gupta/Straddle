@@ -284,7 +284,29 @@ class BaseBrokerAdapter:
         return {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
 
     def get_live_quotes(self, instrument_tokens: List[str]) -> Dict[str, Any]:
-        return {}
+        quotes = {}
+        now_ts = time.time()
+        import straddle_engine
+        for tok in instrument_tokens:
+            raw_tok = str(tok).strip()
+            if not raw_tok:
+                continue
+            if raw_tok in _LIVE_ADAPTER._quotes_cache:
+                quotes[raw_tok] = _LIVE_ADAPTER._quotes_cache[raw_tok]
+                continue
+            clean_sym = raw_tok.split("|")[-1].strip().upper()
+            if clean_sym in straddle_engine._SPOT_CACHE and straddle_engine._SPOT_CACHE[clean_sym] > 0:
+                p = straddle_engine._SPOT_CACHE[clean_sym]
+                quotes[raw_tok] = {"ltp": p, "bid": p, "ask": p, "oi": 0, "volume": 0}
+                continue
+            if clean_sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"):
+                try:
+                    p = straddle_engine._fetch_live_index_spot_network(clean_sym)
+                    if p > 0:
+                        quotes[raw_tok] = {"ltp": p, "bid": p, "ask": p, "oi": 0, "volume": 0}
+                except Exception:
+                    pass
+        return quotes
 
     def wait_for_order_fill(
         self,
@@ -930,57 +952,64 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             now_ts = time.time()
 
             # If Kotak recently returned 429 Too Many Requests, serve from cache to prevent API flooding
-            if (now_ts - getattr(self, "_last_429_ts", 0.0)) < 3.0:
+            if (now_ts - getattr(self, "_last_429_ts", 0.0)) < 2.0:
                 cached_res = {}
                 for tok in instrument_tokens:
                     raw_tok = str(tok).strip()
                     if raw_tok in self._quotes_cache:
                         cached_res[raw_tok] = self._quotes_cache[raw_tok]
                 return cached_res
+
             quotes_data = {}
             req_tokens = []
             tokens_to_fetch = []
+
+            # Mapping for index symbols to Kotak Neo cm tokens
+            index_neo_tokens = {
+                "NIFTY": ("Nifty 50", "nse_cm"),
+                "BANKNIFTY": ("Nifty Bank", "nse_cm"),
+                "FINNIFTY": ("Nifty Fin Service", "nse_cm"),
+                "MIDCPNIFTY": ("NIFTY MID SELECT", "nse_cm"),
+                "SENSEX": ("SENSEX", "bse_cm"),
+                "BANKEX": ("BANKEX", "bse_cm"),
+                "NSE_INDEX|NIFTY 50": ("Nifty 50", "nse_cm"),
+                "NSE_INDEX|NIFTY BANK": ("Nifty Bank", "nse_cm"),
+                "NSE_INDEX|NIFTY FIN SERVICE": ("Nifty Fin Service", "nse_cm"),
+                "NSE_INDEX|NIFTY MID SELECT": ("NIFTY MID SELECT", "nse_cm"),
+                "BSE_INDEX|SENSEX": ("SENSEX", "bse_cm"),
+                "BSE_INDEX|BANKEX": ("BANKEX", "bse_cm"),
+            }
+
+            comm_fut_map = {
+                "GOLD": ("495213", "mcx_fo"),
+                "GOLDM": ("571445", "mcx_fo"),
+                "SILVER": ("495214", "mcx_fo"),
+                "SILVERM": ("483080", "mcx_fo"),
+                "CRUDEOIL": ("573422", "mcx_fo"),
+                "CRUDEOILM": ("573423", "mcx_fo"),
+                "NATURALGAS": ("574319", "mcx_fo"),
+                "NATGASMINI": ("574320", "mcx_fo"),
+                "COPPER": ("578634", "mcx_fo"),
+            }
 
             for tok in instrument_tokens:
                 raw_tok = str(tok).strip()
                 if not raw_tok:
                     continue
 
-                # Check recent memory cache (2.0s TTL for smooth real-time ticking)
-                if raw_tok in self._quotes_cache and (now_ts - self._quotes_cache_ts.get(raw_tok, 0)) < 2.0:
+                # Check recent memory cache (1.5s TTL for smooth real-time ticking)
+                if raw_tok in self._quotes_cache and (now_ts - self._quotes_cache_ts.get(raw_tok, 0)) < 1.5:
                     quotes_data[raw_tok] = self._quotes_cache[raw_tok]
                     continue
 
                 clean_sym = raw_tok.split("|")[-1].strip().upper()
-                if clean_sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"):
-                    spot_p = straddle_engine._SPOT_CACHE.get(clean_sym, 0.0)
-                    if spot_p <= 0:
-                        try:
-                            spot_p = straddle_engine._fetch_live_index_spot_network(clean_sym)
-                        except Exception:
-                            pass
-                    if spot_p > 0:
-                        entry = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
-                        quotes_data[clean_sym] = entry
-                        quotes_data[raw_tok] = entry
-                        quotes_data[raw_tok.replace("|", ":")] = entry
-                        self._quotes_cache[raw_tok] = entry
-                        self._quotes_cache[clean_sym] = entry
-                        self._quotes_cache_ts[raw_tok] = now_ts
-                        self._quotes_cache_ts[clean_sym] = now_ts
-                elif clean_sym in ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"):
-                    comm_fut_map = {
-                        "GOLD": ("495213", "mcx_fo"),
-                        "GOLDM": ("571445", "mcx_fo"),
-                        "SILVER": ("495214", "mcx_fo"),
-                        "SILVERM": ("483080", "mcx_fo"),
-                        "CRUDEOIL": ("573422", "mcx_fo"),
-                        "CRUDEOILM": ("573423", "mcx_fo"),
-                        "NATURALGAS": ("574319", "mcx_fo"),
-                        "NATGASMINI": ("574320", "mcx_fo"),
-                        "COPPER": ("574829", "mcx_fo"),
-                    }
-                    tok_id, comm_seg = comm_fut_map.get(clean_sym, ("", "mcx_fo"))
+                if raw_tok.upper() in index_neo_tokens or clean_sym in index_neo_tokens:
+                    idx_pair = index_neo_tokens.get(raw_tok.upper()) or index_neo_tokens.get(clean_sym)
+                    if idx_pair:
+                        req_tokens.append({"instrument_token": idx_pair[0], "exchange_segment": idx_pair[1]})
+                        tokens_to_fetch.append(clean_sym)
+                elif clean_sym in comm_fut_map or raw_tok in comm_fut_map:
+                    tok_id, comm_seg = comm_fut_map.get(clean_sym) or comm_fut_map.get(raw_tok)
                     dyn_key = getattr(straddle_engine, "UNDERLYING_KEYS", {}).get(clean_sym)
                     if dyn_key and "|" in dyn_key:
                         tok_id = dyn_key.split("|")[-1]
@@ -1006,37 +1035,59 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         deduped_tokens.append(rt)
                 req_tokens = deduped_tokens
 
-                # Kotak Neo limits maximum 50 symbols per quotes call. We chunk into batches of 40.
+                reverse_index = {
+                    "Nifty 50": "NIFTY",
+                    "Nifty Bank": "BANKNIFTY",
+                    "Nifty Fin Service": "FINNIFTY",
+                    "NIFTY MID SELECT": "MIDCPNIFTY",
+                    "SENSEX": "SENSEX",
+                    "BANKEX": "BANKEX",
+                }
+
                 reverse_comm = {
                     "495213": "GOLD", "571445": "GOLDM",
                     "495214": "SILVER", "483080": "SILVERM",
                     "573422": "CRUDEOIL", "573423": "CRUDEOILM",
                     "574319": "NATURALGAS", "574320": "NATGASMINI",
-                    "574829": "COPPER"
+                    "578634": "COPPER"
                 }
-                from concurrent.futures import ThreadPoolExecutor, as_completed
+                # Also include dynamically resolved futures tokens
+                for c_k, c_ik in getattr(straddle_engine, "UNDERLYING_KEYS", {}).items():
+                    if "|" in c_ik:
+                        reverse_comm[c_ik.split("|")[-1]] = c_k
 
                 def _fetch_single_batch(b_tokens):
                     try:
+                        # Enforce 150ms minimum spacing between Kotak REST calls
+                        with self._lock:
+                            elapsed = time.time() - getattr(self, "_last_api_request_ts", 0.0)
+                            if elapsed < 0.15:
+                                time.sleep(0.15 - elapsed)
+                            self._last_api_request_ts = time.time()
                         return client.quotes(instrument_tokens=b_tokens, quote_type="all")
                     except Exception as eb:
-                        eb_str = str(eb)
-                        if "429" in eb_str or "too many request" in eb_str.lower():
+                        eb_str = str(eb).lower()
+                        if "429" in eb_str or "too many request" in eb_str:
                             self._last_429_ts = time.time()
+                            logger.debug("[Kotak Neo] Rate limited (429) during quotes. Throttling.")
+                        elif "401" in eb_str or "unauthorized" in eb_str:
+                            logger.warning("[Kotak Neo] 401 Unauthorized during quotes. Triggering session refresh...")
+                            try:
+                                kotak_auth.invalidate_session()
+                                kotak_auth.get_authenticated_client(force=True)
+                            except Exception:
+                                pass
                         logger.debug(f"[Kotak Neo] Batch quotes error: {eb}")
                         return None
 
                 batches = [req_tokens[i:i + 40] for i in range(0, len(req_tokens), 40)]
                 batch_results = []
-                if len(batches) == 1:
-                    batch_results.append(_fetch_single_batch(batches[0]))
-                else:
-                    with ThreadPoolExecutor(max_workers=min(2, len(batches))) as pool:
-                        fut_to_b = {pool.submit(_fetch_single_batch, b): b for b in batches}
-                        for fut in as_completed(fut_to_b):
-                            res = fut.result()
-                            if res:
-                                batch_results.append(res)
+                for b in batches:
+                    res = _fetch_single_batch(b)
+                    if res:
+                        batch_results.append(res)
+                    if len(batches) > 1:
+                        time.sleep(0.1)
 
                 for res in batch_results:
                     if not res:
@@ -1073,6 +1124,20 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                                     self._quotes_cache_ts[f"BSE_FO|{tok}"] = now_ts
                                     self._quotes_cache_ts[f"MCX_FO|{tok}"] = now_ts
 
+                                    if tok in reverse_index:
+                                        idx_sym = reverse_index[tok]
+                                        quotes_data[idx_sym] = entry
+                                        quotes_data[f"NSE_INDEX|{tok}"] = entry
+                                        quotes_data[f"BSE_INDEX|{tok}"] = entry
+                                        self._quotes_cache[idx_sym] = entry
+                                        self._quotes_cache[f"NSE_INDEX|{tok}"] = entry
+                                        self._quotes_cache[f"BSE_INDEX|{tok}"] = entry
+                                        self._quotes_cache_ts[idx_sym] = now_ts
+                                        if entry["ltp"] > 0:
+                                            with straddle_engine._SPOT_FETCH_LOCK:
+                                                straddle_engine._SPOT_CACHE[idx_sym] = entry["ltp"]
+                                                straddle_engine._LAST_SPOT_FETCH_TS[idx_sym] = now_ts
+
                                     if tok in reverse_comm:
                                         c_sym = reverse_comm[tok]
                                         quotes_data[c_sym] = entry
@@ -1098,6 +1163,23 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                                     self._quotes_cache_ts[tsym] = now_ts
                     except Exception as ex_b:
                         logger.debug(f"[Kotak Neo] Batch quotes note: {ex_b}")
+
+            # Fallback for equity indices if broker quote didn't arrive or returned zero
+            for idx_cand in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"):
+                if any(idx_cand in str(t).upper() for t in instrument_tokens) and (idx_cand not in quotes_data or float(quotes_data[idx_cand].get("ltp", 0.0)) <= 0):
+                    try:
+                        spot_p = straddle_engine._fetch_live_index_spot_network(idx_cand)
+                        if spot_p > 0:
+                            entry = {"ltp": spot_p, "bid": spot_p, "ask": spot_p, "oi": 0, "volume": 0}
+                            quotes_data[idx_cand] = entry
+                            quotes_data[f"NSE_INDEX|{idx_cand}"] = entry
+                            self._quotes_cache[idx_cand] = entry
+                            self._quotes_cache_ts[idx_cand] = now_ts
+                            with straddle_engine._SPOT_FETCH_LOCK:
+                                straddle_engine._SPOT_CACHE[idx_cand] = spot_p
+                                straddle_engine._LAST_SPOT_FETCH_TS[idx_cand] = now_ts
+                    except Exception:
+                        pass
             return quotes_data
         except Exception as e:
             logger.warning(f"[Kotak Neo] Exception fetching quotes: {e}")
@@ -1272,7 +1354,29 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         }
 
     def get_live_quotes(self, instrument_tokens: List[str]) -> Dict[str, Any]:
-        return {}
+        quotes = {}
+        now_ts = time.time()
+        import straddle_engine
+        for tok in instrument_tokens:
+            raw_tok = str(tok).strip()
+            if not raw_tok:
+                continue
+            if raw_tok in _LIVE_ADAPTER._quotes_cache:
+                quotes[raw_tok] = _LIVE_ADAPTER._quotes_cache[raw_tok]
+                continue
+            clean_sym = raw_tok.split("|")[-1].strip().upper()
+            if clean_sym in straddle_engine._SPOT_CACHE and straddle_engine._SPOT_CACHE[clean_sym] > 0:
+                p = straddle_engine._SPOT_CACHE[clean_sym]
+                quotes[raw_tok] = {"ltp": p, "bid": p, "ask": p, "oi": 0, "volume": 0}
+                continue
+            if clean_sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"):
+                try:
+                    p = straddle_engine._fetch_live_index_spot_network(clean_sym)
+                    if p > 0:
+                        quotes[raw_tok] = {"ltp": p, "bid": p, "ask": p, "oi": 0, "volume": 0}
+                except Exception:
+                    pass
+        return quotes
 
     def wait_for_order_fill(
         self,

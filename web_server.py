@@ -144,13 +144,16 @@ def api_straddle_spot():
         spot = mgr.get_cached_spot_price(und)
         step = float(STRIKE_STEPS.get(und, 50))
         atm = round(spot / step) * step if (spot > 0 and step > 0) else 0
-        return jsonify({
+        resp = jsonify({
             "success": True,
             "underlying": und,
             "spot": spot,
+            "spot_price": spot,
             "atm": atm,
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

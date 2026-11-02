@@ -115,6 +115,18 @@ def save_cached_session(data: Dict[str, Any]):
         logger.error(f"Failed to save session state: {e}")
 
 
+def invalidate_session():
+    """Clear memory client and cached session state on 401 or token expiration."""
+    global _ACTIVE_CLIENT, _LAST_AUTH_ERROR
+    with _AUTH_LOCK:
+        _ACTIVE_CLIENT = None
+        _LAST_AUTH_ERROR = "Session expired or unauthorized"
+        session = get_cached_session()
+        session["is_authenticated"] = False
+        save_cached_session(session)
+        logger.info("[Kotak Auth] Session invalidated. Ready for re-authentication.")
+
+
 def is_session_active_for_today() -> bool:
     """Check if we already have an active verified session for today."""
     session = get_cached_session()
@@ -124,9 +136,7 @@ def is_session_active_for_today() -> bool:
     if session_date != today_ist_str():
         return False
     global _ACTIVE_CLIENT
-    if _ACTIVE_CLIENT is not None:
-        return True
-    return False
+    return _ACTIVE_CLIENT is not None
 
 
 def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
@@ -263,6 +273,12 @@ def get_auth_status() -> Dict[str, Any]:
     session = get_cached_session()
     has_creds = bool(creds.get("consumer_key") and creds.get("mobile_number") and creds.get("ucc") and creds.get("totp_key") and creds.get("mpin"))
     is_active = (_ACTIVE_CLIENT is not None) or (session.get("is_authenticated") and session.get("date") == today_ist_str())
+    if not _ACTIVE_CLIENT and has_creds:
+        try:
+            get_authenticated_client(force=False)
+            is_active = (_ACTIVE_CLIENT is not None)
+        except Exception:
+            pass
 
     return {
         "configured": has_creds,

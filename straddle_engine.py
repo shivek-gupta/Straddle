@@ -242,7 +242,7 @@ UNDERLYING_KEYS = {
     "GOLDM": "MCX_FO|571445",
     "SILVER": "MCX_FO|495214",
     "SILVERM": "MCX_FO|483080",
-    "COPPER": "MCX_FO|574829",
+    "COPPER": "MCX_FO|578634",
 }
 
 # Default lot sizes
@@ -640,6 +640,10 @@ class StraddleManager:
         self._load_pnl_history()
         self._load_orderbook()
         self._load_order_registry()
+        try:
+            self._load_instruments_data()
+        except Exception as e:
+            logger.warning(f"Note loading instruments on init: {e}")
         self._start_runner()
 
     # ==========================================================
@@ -1678,7 +1682,85 @@ class StraddleManager:
                 item["pe"]["delta"] = bs_pe["delta"]
                 active_keys.append(pe_key)
 
-        live_prices, live_quotes = self._fetch_live_quotes(active_keys)
+        # 1. Try Kotak Neo direct native option_chain API for instant authoritative quotes & OI
+        neo_chain_loaded = False
+        try:
+            from kotak_broker_adapter import get_broker_adapter
+            adapter = get_broker_adapter()
+            client = getattr(adapter, "_get_client", lambda: None)()
+            if client is not None:
+                exp_date_str = None
+                matching_exp = next((e for e in all_expiries if e.get("expiry_ms") == selected_expiry_ms), None)
+                if matching_exp and matching_exp.get("date_str"):
+                    exp_date_str = matching_exp["date_str"]
+
+                neo_oc = client.option_chain(
+                    exchange=target_seg.lower(),
+                    underlying=clean_und,
+                    expiry=exp_date_str
+                )
+                if isinstance(neo_oc, dict) and (neo_oc.get("call") or neo_oc.get("put")):
+                    # Sync real spot from Kotak option chain response
+                    spot_obj = neo_oc.get("spot")
+                    if isinstance(spot_obj, dict) and spot_obj.get("ltp"):
+                        n_spot = float(spot_obj["ltp"])
+                        if n_spot > 0:
+                            spot_price = n_spot
+                            atm_strike = round(spot_price / step) * step
+                            with _SPOT_FETCH_LOCK:
+                                _SPOT_CACHE[clean_und] = n_spot
+                                _LAST_SPOT_FETCH_TS[clean_und] = now_ts
+
+                    # Map calls
+                    for c_entry in neo_oc.get("call", []):
+                        inst = c_entry.get("inst", {})
+                        strk_val = float(inst.get("strkPrc") or 0.0)
+                        q_data = c_entry.get("quote", {})
+                        oi_data = c_entry.get("oi", {})
+                        if strk_val in chain_by_strike and chain_by_strike[strk_val].get("ce"):
+                            ce_item = chain_by_strike[strk_val]["ce"]
+                            c_ltp = float(q_data.get("ltp") or 0.0)
+                            if c_ltp > 0:
+                                ce_item["ltp"] = round(c_ltp, 2)
+                                self._option_last_ltp[ce_item["instrument_key"]] = round(c_ltp, 2)
+                            if q_data.get("vol"):
+                                ce_item["volume"] = int(q_data["vol"])
+                            if oi_data.get("cur"):
+                                ce_item["oi"] = int(oi_data["cur"])
+                            if oi_data.get("chgPct") is not None:
+                                ce_item["net_change_pct"] = round(float(oi_data["chgPct"]), 2)
+                            if oi_data.get("chg") is not None:
+                                ce_item["net_change"] = round(float(oi_data["chg"]), 2)
+
+                    # Map puts
+                    for p_entry in neo_oc.get("put", []):
+                        inst = p_entry.get("inst", {})
+                        strk_val = float(inst.get("strkPrc") or 0.0)
+                        q_data = p_entry.get("quote", {})
+                        oi_data = p_entry.get("oi", {})
+                        if strk_val in chain_by_strike and chain_by_strike[strk_val].get("pe"):
+                            pe_item = chain_by_strike[strk_val]["pe"]
+                            p_ltp = float(q_data.get("ltp") or 0.0)
+                            if p_ltp > 0:
+                                pe_item["ltp"] = round(p_ltp, 2)
+                                self._option_last_ltp[pe_item["instrument_key"]] = round(p_ltp, 2)
+                            if q_data.get("vol"):
+                                pe_item["volume"] = int(q_data["vol"])
+                            if oi_data.get("cur"):
+                                pe_item["oi"] = int(oi_data["cur"])
+                            if oi_data.get("chgPct") is not None:
+                                pe_item["net_change_pct"] = round(float(oi_data["chgPct"]), 2)
+                            if oi_data.get("chg") is not None:
+                                pe_item["net_change"] = round(float(oi_data["chg"]), 2)
+
+                    neo_chain_loaded = True
+        except Exception as ex_oc:
+            logger.debug(f"[OptionChain] Native option chain note for {clean_und}: {ex_oc}")
+
+        if not neo_chain_loaded:
+            live_prices, live_quotes = self._fetch_live_quotes(active_keys)
+        else:
+            live_prices, live_quotes = {}, {}
 
         # Inject authoritative live prices & quotes into chain
         final_rows = []
@@ -1811,6 +1893,7 @@ class StraddleManager:
 
         snapshot = {
             "underlying": clean_und,
+            "spot": spot_price,
             "spot_price": spot_price,
             "atm_strike": atm_strike,
             "step": step,
@@ -1841,22 +1924,34 @@ class StraddleManager:
     def get_cached_spot_price(self, underlying: str = "NIFTY") -> float:
         """Returns the in-memory cached spot price instantly (<0.01ms) without blocking."""
         clean_und = (underlying or "NIFTY").upper().replace(" ", "")
+        now_ts = time.time()
         with _SPOT_FETCH_LOCK:
             p = _SPOT_CACHE.get(clean_und, 0.0)
-            if p > 0:
+            last_ts = _LAST_SPOT_FETCH_TS.get(clean_und, 0.0)
+            if p > 0 and (now_ts - last_ts) < 3.0:
                 return p
-        # Instant non-blocking fallback to avoid stalling web server threads
+
+        # If cache is missing or stale (>3s), resolve live spot price
+        p = self._get_underlying_spot_price(clean_und)
+        if p > 0:
+            return p
+
+        with _SPOT_FETCH_LOCK:
+            if clean_und in _SPOT_CACHE and _SPOT_CACHE[clean_und] > 0:
+                return _SPOT_CACHE[clean_und]
+
+        # Non-blocking fallback if market is closed or feeds unavailable
         if clean_und in COMMODITY_FALLBACK_PRICES:
             return COMMODITY_FALLBACK_PRICES[clean_und]
         fallbacks = {
-            "NIFTY": 23053.10,
-            "BANKNIFTY": 55300.0,
-            "FINNIFTY": 24200.0,
-            "MIDCPNIFTY": 13000.0,
-            "SENSEX": 72900.0,
-            "BANKEX": 60500.0,
+            "NIFTY": 23340.0,
+            "BANKNIFTY": 54900.0,
+            "FINNIFTY": 24870.0,
+            "MIDCPNIFTY": 13390.0,
+            "SENSEX": 75450.0,
+            "BANKEX": 61200.0,
         }
-        return fallbacks.get(clean_und, 23000.0)
+        return fallbacks.get(clean_und, 23300.0)
 
     def _get_underlying_spot_price(self, underlying: str = "NIFTY") -> float:
         """Resolves live continuous spot index price with sub-second caching."""
@@ -1901,14 +1996,14 @@ class StraddleManager:
                 return _SPOT_CACHE[clean_und]
 
         fallbacks = {
-            "NIFTY": 22630.0,
-            "BANKNIFTY": 55300.0,
-            "FINNIFTY": 24200.0,
-            "MIDCPNIFTY": 13000.0,
-            "SENSEX": 72900.0,
-            "BANKEX": 60500.0,
+            "NIFTY": 23340.0,
+            "BANKNIFTY": 54900.0,
+            "FINNIFTY": 24870.0,
+            "MIDCPNIFTY": 13390.0,
+            "SENSEX": 75450.0,
+            "BANKEX": 61200.0,
         }
-        return fallbacks.get(clean_und, 22630.0)
+        return fallbacks.get(clean_und, 23300.0)
 
     def get_underlying_atm_strike(self, underlying: str = "NIFTY") -> float:
         """Calculate the nearest ATM strike based on live spot price."""
@@ -8115,7 +8210,7 @@ class StraddleManager:
                 # 2. For equity indices, if broker didn't return fresh quote, check network index feed
                 for und in ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"]:
                     with _SPOT_FETCH_LOCK:
-                        has_fresh = (und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(und, 0)) < 2.0)
+                        has_fresh = (und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(und, 0)) < 3.0)
                     if not has_fresh:
                         p = _fetch_live_index_spot_network(und)
                         if p > 0:
@@ -8135,7 +8230,7 @@ class StraddleManager:
                         self._state["last_tick_time"] = now_ist_str()
             except Exception as e:
                 logger.debug(f"Spot tick note: {e}")
-            time.sleep(0.4)
+            time.sleep(1.2)
 
     def _runner_loop(self):
         logger.info("Straddle Engine background evaluation loop started.")

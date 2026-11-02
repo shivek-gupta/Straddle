@@ -6615,12 +6615,14 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 expSel.value = chain.selected_expiry_ms;
             }
 
-            // Spot outlier anomaly filter (ignore >15% sub-second bounce)
+            if (!chain.spot_price && chain.spot) chain.spot_price = chain.spot;
+
+            // Spot outlier anomaly filter (ignore >40% sub-second bounce)
             const spotKey = `${und}`;
             if (chain.spot_price > 0) {
                 if (window._lastOptionChainSpotMap && window._lastOptionChainSpotMap[spotKey] > 0) {
                     const prevSpot = window._lastOptionChainSpotMap[spotKey];
-                    if (Math.abs(chain.spot_price - prevSpot) / prevSpot > 0.15) {
+                    if (Math.abs(chain.spot_price - prevSpot) / prevSpot > 0.40) {
                         console.warn(`[OptionChain] Ignoring anomalous spot spike: ${chain.spot_price} vs prev ${prevSpot}`);
                         chain.spot_price = prevSpot;
                     } else {
