@@ -74,12 +74,12 @@ DEFAULT_LOT_SIZES = {
 
 # Exchange Freeze Limits in Lots
 FREEZE_LIMIT_LOTS = {
-    "NIFTY": 54,        # NSE NIFTY Freeze: 54 lots (3,510 qty @ 65 lot size)
-    "BANKNIFTY": 30,    # NSE BANKNIFTY Freeze: 30 lots (450 qty @ 15 lot size)
-    "FINNIFTY": 40,     # NSE FINNIFTY Freeze: 40 lots (2,600 qty @ 65 lot size)
-    "MIDCPNIFTY": 50,   # NSE MIDCPNIFTY Freeze: 50 lots (6,000 qty @ 120 lot size)
-    "SENSEX": 50,       # BSE SENSEX Freeze: 50 lots (500 qty @ 10 lot size)
-    "BANKEX": 50,       # BSE BANKEX Freeze: 50 lots (750 qty @ 15 lot size)
+    "NIFTY": 27,        # NSE NIFTY Freeze: 27 lots (1,755 qty <= 1,800 freeze limit @ 65 lot size)
+    "BANKNIFTY": 60,    # NSE BANKNIFTY Freeze: 60 lots (900 qty @ 15 lot size)
+    "FINNIFTY": 27,     # NSE FINNIFTY Freeze: 27 lots (1,755 qty <= 1,800 freeze limit @ 65 lot size)
+    "MIDCPNIFTY": 23,   # NSE MIDCPNIFTY Freeze: 23 lots (2,760 qty <= 2,800 freeze limit @ 120 lot size)
+    "SENSEX": 100,      # BSE SENSEX Freeze: 100 lots (1,000 qty @ 10 lot size)
+    "BANKEX": 60,       # BSE BANKEX Freeze: 60 lots (900 qty @ 15 lot size)
     "CRUDEOIL": 100,    # MCX CRUDEOIL: 100 lots (10,000 qty @ 100)
     "CRUDEOILM": 1000,  # MCX CRUDEOILM: 1000 lots (10,000 qty @ 10)
     "NATURALGAS": 40,   # MCX NATURALGAS: 40 lots (50,000 qty @ 1250)
@@ -93,12 +93,12 @@ FREEZE_LIMIT_LOTS = {
 
 # Quantity Freeze Limits for Order Slicing (Quantity = Freeze Lots * Lot Size)
 FREEZE_LIMITS = {
-    "NIFTY": 3510,       # 54 lots * 65
-    "BANKNIFTY": 450,    # 30 lots * 15
-    "FINNIFTY": 2600,    # 40 lots * 65
-    "MIDCPNIFTY": 6000,  # 50 lots * 120
-    "SENSEX": 500,       # 50 lots * 10
-    "BANKEX": 750,       # 50 lots * 15
+    "NIFTY": 1800,       # Max order limit: 1800 qty (27 lots * 65 = 1755)
+    "BANKNIFTY": 900,    # 60 lots * 15
+    "FINNIFTY": 1800,    # Max order limit: 1800 qty (27 lots * 65 = 1755)
+    "MIDCPNIFTY": 2800,  # Max order limit: 2800 qty (23 lots * 120 = 2760)
+    "SENSEX": 1000,      # 100 lots * 10
+    "BANKEX": 900,       # 60 lots * 15
     "CRUDEOIL": 10000,   # 100 lots * 100
     "CRUDEOILM": 10000,  # 1000 lots * 10
     "NATURALGAS": 50000, # 40 lots * 1250

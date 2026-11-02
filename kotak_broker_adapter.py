@@ -207,7 +207,7 @@ def get_freeze_limit_lots_for_symbol(symbol: str = "", instrument_key: str = "")
     for und, fl_lots in sorted(getattr(config, "FREEZE_LIMIT_LOTS", {}).items(), key=lambda x: len(x[0]), reverse=True):
         if und in s:
             return fl_lots
-    return 54 if "NIFTY" in s else 30
+    return 27 if "NIFTY" in s else 60
 
 
 def get_freeze_limit_for_symbol(symbol: str = "", instrument_key: str = "") -> int:
@@ -483,7 +483,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         if total_qty <= 0:
             return {"success": False, "error": "Invalid quantity <= 0"}
 
-        # Calculate slices strictly in multiples of lot size and exchange freeze limit lots (e.g. 54 lots for NIFTY)
+        # Calculate slices strictly in multiples of lot size and exchange freeze limit lots (e.g. 27 lots for NIFTY)
         slices = []
         if total_qty <= freeze_limit_qty:
             slices = [total_qty]

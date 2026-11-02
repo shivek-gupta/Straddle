@@ -94,12 +94,12 @@ def normalize_time_str(t_str: Any, default: str = "15:29:50") -> str:
 # ==========================================================
 
 FREEZE_LIMIT_LOTS = {
-    "NIFTY": 54,        # NSE NIFTY Freeze: 54 lots (3,510 qty @ 65 lot size)
-    "BANKNIFTY": 30,    # NSE BANKNIFTY Freeze: 30 lots (450 qty @ 15 lot size)
-    "FINNIFTY": 40,     # NSE FINNIFTY Freeze: 40 lots (2,600 qty @ 65 lot size)
-    "MIDCPNIFTY": 50,   # NSE MIDCPNIFTY Freeze: 50 lots (6,000 qty @ 120 lot size)
-    "SENSEX": 50,       # BSE SENSEX Freeze: 50 lots (500 qty @ 10 lot size)
-    "BANKEX": 50,       # BSE BANKEX Freeze: 50 lots (750 qty @ 15 lot size)
+    "NIFTY": 27,        # NSE NIFTY Freeze: 27 lots (1,755 qty <= 1,800 freeze limit @ 65 lot size)
+    "BANKNIFTY": 60,    # NSE BANKNIFTY Freeze: 60 lots (900 qty @ 15 lot size)
+    "FINNIFTY": 27,     # NSE FINNIFTY Freeze: 27 lots (1,755 qty <= 1,800 freeze limit @ 65 lot size)
+    "MIDCPNIFTY": 23,   # NSE MIDCPNIFTY Freeze: 23 lots (2,760 qty <= 2,800 freeze limit @ 120 lot size)
+    "SENSEX": 100,      # BSE SENSEX Freeze: 100 lots (1,000 qty @ 10 lot size)
+    "BANKEX": 60,       # BSE BANKEX Freeze: 60 lots (900 qty @ 15 lot size)
     "CRUDEOIL": 100,    # MCX CRUDEOIL Freeze: 100 lots
     "CRUDEOILM": 1000,  # MCX CRUDEOILM Freeze: 1000 lots
     "NATURALGAS": 40,   # MCX NATURALGAS Freeze: 40 lots
@@ -115,16 +115,16 @@ FREEZE_LIMIT_LOTS = {
 def get_freeze_limit_lots(underlying: str = "NIFTY") -> int:
     """Returns exchange freeze size in lots for an underlying asset."""
     und_upper = str(underlying or "NIFTY").upper().strip()
-    return FREEZE_LIMIT_LOTS.get(und_upper, 54)
+    return FREEZE_LIMIT_LOTS.get(und_upper, 27)
 
 
 def slice_lots_by_freeze(lots: int, underlying: str = "NIFTY") -> List[int]:
     """
     Slices total lots into freeze-compliant chunks.
-    For NIFTY, freeze limit is 54 lots.
-    e.g. 60 lots -> [54, 6]
-    110 lots -> [54, 54, 2]
-    50 lots -> [50]
+    For NIFTY, freeze limit is 27 lots (1,800 max qty).
+    e.g. 60 lots -> [27, 27, 6]
+    110 lots -> [27, 27, 27, 27, 2]
+    25 lots -> [25]
     """
     freeze_size = get_freeze_limit_lots(underlying)
     if lots <= freeze_size:
@@ -6580,8 +6580,8 @@ class StraddleManager:
     def execute_basket_orders(self, orders: List[Dict[str, Any]], multiplier: int = 1) -> Dict[str, Any]:
         """
         Executes a batch/basket of orders with:
-        1. Auto Freeze Slicing: Any leg exceeding freeze size (54 lots for NIFTY) is automatically
-           sliced into child orders of max 54 lots.
+        1. Auto Freeze Slicing: Any leg exceeding freeze size (27 lots for NIFTY) is automatically
+           sliced into child orders of max 27 lots (or underlying exchange freeze limit).
         2. BUY-First Margin Priority:
            - All BUY slice orders are dispatched concurrently in parallel via ThreadPoolExecutor.
            - Ultra-low latency polling (15-20ms) confirms BUY fills or broker ACK.
@@ -6614,7 +6614,7 @@ class StraddleManager:
             ot = "MARKET" if str(ord_spec.get("order_type", "")).upper() in ("MARKET", "MKT") else "LIMIT"
             prc = float(ord_spec.get("price") or 0.0) if ot == "LIMIT" else 0.0
 
-            # Freeze slicing (54 lots for NIFTY)
+            # Freeze slicing (e.g. 27 lots for NIFTY, 60 for BANKNIFTY)
             sliced_lots = slice_lots_by_freeze(total_lots, und)
             
             for slice_idx, s_lot in enumerate(sliced_lots):
@@ -6643,7 +6643,7 @@ class StraddleManager:
         fail_count = 0
 
         self._log_event(
-            f"Executing Basket: {len(buy_slices)} BUY slices & {len(sell_slices)} SELL slices (Freeze Sliced @ 54 Lots, {mult}x multiplier)...",
+            f"Executing Basket: {len(buy_slices)} BUY slices & {len(sell_slices)} SELL slices (Freeze Sliced, {mult}x multiplier)...",
             level="INFO"
         )
 
