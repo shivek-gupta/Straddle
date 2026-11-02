@@ -1680,7 +1680,23 @@ class StraddleManager:
             filtered_strikes = strikes_sorted[start_idx:end_idx]
 
         # Calculate Black-Scholes baseline Greeks & synthetic OI ONLY for visible filtered strikes
-        iv_est = 0.135 if clean_und == "NIFTY" else 0.155
+        if "CRUDE" in clean_und:
+            iv_est = 0.50
+        elif "NAT" in clean_und:
+            iv_est = 0.60
+        elif "GOLD" in clean_und:
+            iv_est = 0.22
+        elif "SILVER" in clean_und:
+            iv_est = 0.28
+        elif "COPPER" in clean_und:
+            iv_est = 0.25
+        elif clean_und in ("BANKNIFTY", "FINNIFTY", "BANKEX"):
+            iv_est = 0.18
+        elif clean_und == "NIFTY":
+            iv_est = 0.135
+        else:
+            iv_est = 0.16
+
         active_keys = [und_key]
         for s in filtered_strikes:
             item = chain_by_strike[s]
@@ -1716,6 +1732,7 @@ class StraddleManager:
 
         # 1. Try Kotak Neo direct native option_chain API for instant authoritative quotes & OI
         neo_chain_loaded = False
+        strikes_covered_by_neo = set()
         try:
             from kotak_broker_adapter import get_broker_adapter
             adapter = get_broker_adapter()
@@ -1738,10 +1755,17 @@ class StraddleManager:
                         n_spot = float(spot_obj["ltp"])
                         if n_spot > 0:
                             spot_price = n_spot
-                            atm_strike = round(spot_price / step) * step
+                            new_atm = round(spot_price / step) * step
                             with _SPOT_FETCH_LOCK:
                                 _SPOT_CACHE[clean_und] = n_spot
                                 _LAST_SPOT_FETCH_TS[clean_und] = now_ts
+                            if new_atm != atm_strike:
+                                atm_strike = new_atm
+                                if strike_range != 0 and atm_strike > 0 and len(strikes_sorted) > (effective_range * 2):
+                                    atm_idx = min(range(len(strikes_sorted)), key=lambda i: abs(strikes_sorted[i] - atm_strike))
+                                    start_idx = max(0, atm_idx - effective_range)
+                                    end_idx = min(len(strikes_sorted), atm_idx + effective_range + 1)
+                                    filtered_strikes = strikes_sorted[start_idx:end_idx]
 
                     # Map calls
                     for c_entry in neo_oc.get("call", []):
@@ -1755,6 +1779,7 @@ class StraddleManager:
                             if c_ltp > 0:
                                 ce_item["ltp"] = round(c_ltp, 2)
                                 self._option_last_ltp[ce_item["instrument_key"]] = round(c_ltp, 2)
+                                strikes_covered_by_neo.add((strk_val, "ce"))
                             if q_data.get("vol"):
                                 ce_item["volume"] = int(q_data["vol"])
                             if oi_data.get("cur"):
@@ -1776,6 +1801,7 @@ class StraddleManager:
                             if p_ltp > 0:
                                 pe_item["ltp"] = round(p_ltp, 2)
                                 self._option_last_ltp[pe_item["instrument_key"]] = round(p_ltp, 2)
+                                strikes_covered_by_neo.add((strk_val, "pe"))
                             if q_data.get("vol"):
                                 pe_item["volume"] = int(q_data["vol"])
                             if oi_data.get("cur"):
@@ -1789,8 +1815,25 @@ class StraddleManager:
         except Exception as ex_oc:
             logger.debug(f"[OptionChain] Native option chain note for {clean_und}: {ex_oc}")
 
+        # Check which visible contracts in filtered_strikes need real broker quotes:
+        # 1) If native neo_oc failed completely, fetch all active_keys.
+        # 2) If neo_oc loaded but missed strikes in filtered_strikes (e.g. MCX commodity truncation or missing strikes),
+        #    gather all missing visible keys and fetch authoritative live broker quotes.
+        missing_keys = []
         if not neo_chain_loaded:
-            live_prices, live_quotes = self._fetch_live_quotes(active_keys)
+            missing_keys = [k for k in active_keys if k != und_key]
+        else:
+            for s in filtered_strikes:
+                r_item = chain_by_strike.get(s, {})
+                for side in ("ce", "pe"):
+                    opt = r_item.get(side)
+                    if opt:
+                        ikey = opt["instrument_key"]
+                        if (s, side) not in strikes_covered_by_neo:
+                            missing_keys.append(ikey)
+
+        if missing_keys:
+            live_prices, live_quotes = self._fetch_live_quotes(missing_keys)
         else:
             live_prices, live_quotes = {}, {}
 
