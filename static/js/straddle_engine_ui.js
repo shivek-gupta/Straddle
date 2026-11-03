@@ -405,6 +405,9 @@ async function fetchStraddleState() {
                 renderStraddlePositions(activePositions, active ? (active.group_mtm || 0.0) : 0.0, active ? (active.mtm || 0.0) : 0.0);
             }
 
+            // Render Margin Error 15s Countdown Alert Banner (Quantiply Parity)
+            renderStraddleMarginAutoExitAlert(active);
+
             // In-place smart update for Algos view (never wipes focus/open dropdowns)
             if (window._straddleState.currentSubView === "algos") {
                 renderStraddleAlgosTable(false);
@@ -3575,6 +3578,99 @@ async function dismissErrorLeg(stratId, legId, idx) {
     }
 }
 window.dismissErrorLeg = dismissErrorLeg;
+
+function renderStraddleMarginAutoExitAlert(strat) {
+    const container = document.getElementById("straddleMarginAutoExitAlertContainer");
+    if (!container) return;
+
+    if (!strat || !strat._margin_auto_exit_pending) {
+        if (container.innerHTML !== "") {
+            container.innerHTML = "";
+        }
+        return;
+    }
+
+    const stratId = strat.strategy_id || "";
+    const countdown = strat.margin_exit_countdown !== undefined ? Math.max(0, parseInt(strat.margin_exit_countdown, 10)) : 15;
+    const source = strat._margin_auto_exit_source || "Order Execution";
+
+    // If banner already exists in DOM, update countdown numbers in place without touching buttons/DOM structure
+    const existingCountdownBadge = document.getElementById("marginCountdownSec");
+    const existingCountdownSub = document.getElementById("marginCountdownSecSub");
+    if (existingCountdownBadge && existingCountdownSub) {
+        existingCountdownBadge.textContent = countdown;
+        existingCountdownSub.textContent = countdown;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="straddle-margin-countdown-banner" style="background:linear-gradient(135deg, rgba(239,68,68,0.22), rgba(185,28,28,0.35)); border:1.5px solid #ef4444; border-radius:8px; padding:12px 18px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; box-shadow:0 4px 16px rgba(239,68,68,0.25);">
+            <div style="display:flex; align-items:center; gap:14px; flex:1; min-width:280px;">
+                <div style="font-size:26px; animation: pulse 1s infinite;">🚨</div>
+                <div>
+                    <div style="color:#ffffff; font-weight:800; font-size:13px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <span>MARGIN ERROR DETECTED (${source.toUpperCase()})</span>
+                        <span class="countdown-badge" style="background:#ef4444; color:#ffffff; padding:2px 10px; border-radius:12px; font-size:11.5px; font-weight:900; font-family:var(--font-mono); box-shadow:0 0 10px rgba(239,68,68,0.8);">Auto-Exiting in <span id="marginCountdownSec">${countdown}</span>s</span>
+                    </div>
+                    <div style="color:#fca5a5; font-size:11px; margin-top:4px; line-height:1.4;">
+                        Due to margin shortfall on one or more legs, all open positions will be automatically squared off in <b><span id="marginCountdownSecSub">${countdown}</span> seconds</b> to prevent naked exposure.
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <button type="button" class="straddle-btn" style="background:#dc2626; color:#ffffff; font-weight:800; font-size:12px; padding:8px 16px; border-radius:6px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 8px rgba(220,38,38,0.5);" onclick="triggerImmediateMarginAutoExit('${stratId}')">
+                    🚨 Square Off Now
+                </button>
+                <button type="button" class="straddle-btn btn-outline" style="border:1px solid rgba(255,255,255,0.3); color:#f1f5f9; font-weight:700; font-size:12px; padding:8px 14px; border-radius:6px;" onclick="cancelMarginAutoExit('${stratId}')">
+                    ✕ Cancel Auto-Exit
+                </button>
+            </div>
+        </div>
+    `;
+}
+window.renderStraddleMarginAutoExitAlert = renderStraddleMarginAutoExitAlert;
+
+async function triggerImmediateMarginAutoExit(strategyId) {
+    const stratId = strategyId || window._straddleState?.activeStrategyId;
+    try {
+        const resp = await fetch("/api/straddle/trigger_margin_auto_exit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ strategy_id: stratId })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            if (typeof showStraddleToast === "function") showStraddleToast("Square off executed successfully", "success", 2000);
+            await fetchStraddleState();
+        } else {
+            alert(res.error || "Failed to trigger immediate margin auto-exit");
+        }
+    } catch (e) {
+        console.error("Error triggering margin auto exit:", e);
+    }
+}
+window.triggerImmediateMarginAutoExit = triggerImmediateMarginAutoExit;
+
+async function cancelMarginAutoExit(strategyId) {
+    const stratId = strategyId || window._straddleState?.activeStrategyId;
+    try {
+        const resp = await fetch("/api/straddle/cancel_margin_auto_exit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ strategy_id: stratId })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            if (typeof showStraddleToast === "function") showStraddleToast("Margin auto-exit cancelled. Positions kept open.", "info", 2000);
+            await fetchStraddleState();
+        } else {
+            alert(res.error || "Failed to cancel margin auto-exit");
+        }
+    } catch (e) {
+        console.error("Error cancelling margin auto exit:", e);
+    }
+}
+window.cancelMarginAutoExit = cancelMarginAutoExit;
 
 function renderStraddlePositions(positions, groupMtm, totalMtm) {
     const tbody = document.getElementById("straddlePositionsTableBody");

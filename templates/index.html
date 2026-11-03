@@ -708,6 +708,9 @@
                 </div>
             </div>
 
+            <!-- Margin Error 15s Countdown Alert Banner (Quantiply Parity) -->
+            <div id="straddleMarginAutoExitAlertContainer"></div>
+
             <!-- 2. Live Positions Table (Screenshot 1) -->
             <div class="straddle-card" style="padding:0; overflow:hidden;">
                 <div class="straddle-table-wrap">
@@ -1327,12 +1330,12 @@
                         </div>
                     </div>
 
-                    <!-- Additional Execution Controls -->
-                    <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,0.06); padding-top:10px; margin-top:10px;">
-                        <label class="straddle-checkbox-label">
+                    <!-- Additional Execution Controls (Quantiply Standard Safety Guards) -->
+                    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px; margin-top:10px;">
+                        <label class="straddle-checkbox-label" title="Continuously tracks broker-placed SL orders. If cancelled unexpectedly by client or broker, the algo automatically takes over live price monitoring and triggers exit on SL/Target hit to avoid naked exposure.">
                             <input type="checkbox" id="cfgAutoHandlingSl" checked> Auto handling of unexpected Stoploss order cancellations
                         </label>
-                        <label class="straddle-checkbox-label">
+                        <label class="straddle-checkbox-label" title="If any leg encounters a margin/RMS shortfall error during Entry, Re-Entry, or Re-Execute, the algo displays a 15-second grace countdown buffer with 'Square Off Now' & 'Cancel Auto-Exit' options before automatically squaring off all open positions to prevent naked exposure.">
                             <input type="checkbox" id="cfgAutoExitMargin"> Auto exit on margin error (Exit all open positions)
                         </label>
                     </div>
@@ -2942,7 +2945,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261103_live_sync_clean"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261103_quantiply_guards"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

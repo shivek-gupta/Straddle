@@ -630,6 +630,8 @@ class StraddleManager:
         self._last_pnl_save_ts: float = 0.0
         self._cached_margin: Dict[str, Any] = {}
         self._cached_margin_ts: float = 0.0
+        self._last_ob_sync_ts: float = 0.0
+        self._ob_cache: Dict[str, Dict[str, Any]] = {}
 
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -3986,26 +3988,34 @@ class StraddleManager:
                     strat["repair_needed"] = False
                     return
 
-                # Safety check: Auto Exit on Margin Error
+                # Safety check: Auto Exit on Margin Error (Quantiply Standard 15s Grace Buffer)
                 auto_exit_margin = adv.get("auto_exit_on_margin_error") or adv.get("auto_exit_margin_error")
                 has_margin_err = False
-                if strat.get("entry_error") and any(w in str(strat["entry_error"]).lower() for w in ["margin", "fund", "insufficient", "rms"]):
+                if strat.get("entry_error") and self._is_margin_error(strat.get("entry_error")):
+                    has_margin_err = True
+                if not has_margin_err and any(self._is_margin_error(p.get("error_message") or p.get("error")) for p in new_positions if p.get("status") == "ERROR"):
                     has_margin_err = True
 
                 if has_margin_err and auto_exit_margin and new_positions:
                     open_only = [p for p in new_positions if p.get("status") == "OPEN"]
-                    if open_only:
-                        self._log_event(f"[SAFETY GUARD] Margin error occurred during strategy entry. Auto exiting {len(open_only)} already filled position(s).")
-                        for pos in open_only:
-                            self._square_off_single_position(pos, broker, reason="AUTO EXIT ON MARGIN ERROR")
                     strat["positions"] = new_positions
-                    strat["status"] = "TERMINATED"
                     if self._active_strategy_id == strat.get("strategy_id"):
                         self._state["positions"] = new_positions
-                        self._state["status"] = "TERMINATED"
-                    self._save_strategies()
-                    self._save_state()
-                    return
+                    if open_only:
+                        strat["status"] = "TRADE_ACTIVE"
+                        self._trigger_margin_auto_exit(strat, broker, source="Entry Execution")
+                        self._save_strategies()
+                        self._save_state()
+                        return
+                    else:
+                        strat["status"] = "ENTRY_FAILED"
+                        strat["enabled"] = False
+                        strat["_manual_reset"] = True
+                        strat["last_trade_date"] = today_ist_str()
+                        strat["_last_entry_attempt_ts"] = time.time()
+                        self._save_strategies()
+                        self._save_state()
+                        return
 
                 if new_positions:
                     strat["positions"] = new_positions
@@ -4623,6 +4633,11 @@ class StraddleManager:
             if self._active_strategy_id == sid:
                 self._state["positions"] = positions
                 self._state["status"] = strat["status"]
+
+            if retried_failed:
+                has_margin = any(self._is_margin_error(err) for _, err in retried_failed)
+                if has_margin:
+                    self._trigger_margin_auto_exit(strat, broker, source="Manual Retry")
 
             self._save_strategies()
             self._save_state()
@@ -5286,6 +5301,8 @@ class StraddleManager:
                 strat["last_trade_date"] = None
                 strat["_manual_reset"] = True
                 strat["enabled"] = False
+                strat["_margin_auto_exit_pending"] = False
+                strat["margin_exit_countdown"] = 0
 
                 # Reset nested strategy dict if present
                 if "strategy" in strat and isinstance(strat["strategy"], dict):
@@ -5337,6 +5354,8 @@ class StraddleManager:
             self._state["repair_needed"] = False
             self._state["group_mtm"] = 0.0
             self._state["total_mtm"] = 0.0
+            self._state["_margin_auto_exit_pending"] = False
+            self._state["margin_exit_countdown"] = 0
             if matched_strats:
                 self._state["active_strategy"] = matched_strats[0]
                 self._active_strategy_id = matched_strats[0].get("strategy_id")
@@ -5368,6 +5387,130 @@ class StraddleManager:
             self._save_state()
             self._log_event(f"Batch reset {count} strategies to clean READY state.")
             return {"success": True, "reset_count": count}
+
+    def _is_margin_error(self, err_val: Any) -> bool:
+        """Determines if an error message represents a margin shortfall or RMS limit error."""
+        if not err_val:
+            return False
+        s = str(err_val).lower()
+        keywords = ["margin", "fund", "insufficient", "rms", "shortfall", "limit exceeded", "exceeds"]
+        return any(k in s for k in keywords)
+
+    def _trigger_margin_auto_exit(self, strat: Dict[str, Any], broker: Any, source: str = "Order") -> bool:
+        """
+        Quantiply Standard 'Auto exit on margin error (Exit all open positions)':
+        When enabled, any margin failure triggers a 15-second grace countdown buffer.
+        If not cancelled or squared off manually, all open positions in the strategy are automatically
+        squared off upon countdown expiration to avoid unhedged / naked exposure.
+        """
+        adv = strat.get("advanced") or strat.get("advanced_settings") or {}
+        auto_exit_margin = bool(adv.get("auto_exit_on_margin_error") or adv.get("auto_exit_margin_error"))
+        if not auto_exit_margin:
+            return False
+
+        open_positions = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
+        if not open_positions:
+            return False
+
+        if strat.get("_margin_auto_exit_pending"):
+            return True
+
+        strat["_margin_auto_exit_pending"] = True
+        strat["_margin_auto_exit_source"] = source
+        strat["_margin_auto_exit_deadline"] = time.time() + 15.0
+        strat["margin_exit_countdown"] = 15
+        if self._active_strategy_id == strat.get("strategy_id"):
+            self._state["_margin_auto_exit_pending"] = True
+            self._state["margin_exit_countdown"] = 15
+
+        self._save_strategies()
+        self._save_state()
+
+        self._log_event(
+            f"[SAFETY GUARD] Margin error during {source} in '{strat.get('name')}'. "
+            f"Auto-exit countdown initiated: All {len(open_positions)} open positions will be squared off in 15 seconds unless cancelled.",
+            level="WARNING"
+        )
+        self._send_telegram_alert(
+            f"🚨 *[SAFETY GUARD] Margin Error Detected ({source})!*\n"
+            f"• Strategy: `{strat.get('name')}`\n"
+            f"• Open Positions: `{len(open_positions)}`\n"
+            f"• Auto-Exit Countdown: *15 SECONDS*\n"
+            f"Algo will auto square-off all open positions in 15s to prevent naked risk unless cancelled from dashboard."
+        )
+        return True
+
+    def trigger_immediate_margin_auto_exit(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
+        """User clicked 'Square Off Now' on the 15-second margin error countdown banner."""
+        with _ENGINE_LOCK:
+            sid = strategy_id or self._active_strategy_id
+            strat = self.get_strategy(sid)
+            if not strat:
+                return {"success": False, "error": "Strategy not found"}
+
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+
+            strat["_margin_auto_exit_pending"] = False
+            strat["margin_exit_countdown"] = 0
+
+            open_positions = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
+            self._log_event(
+                f"[SAFETY GUARD] Trader triggered immediate square-off for '{strat.get('name')}'. Exiting {len(open_positions)} open position(s)...",
+                level="WARNING"
+            )
+            for p in open_positions:
+                self._square_off_single_position(p, broker, reason="AUTO EXIT ON MARGIN ERROR (IMMEDIATE)")
+
+            strat["status"] = "ENTRY_FAILED"
+            strat["enabled"] = False
+            strat["_manual_reset"] = True
+            strat["last_trade_date"] = today_ist_str()
+
+            if self._active_strategy_id == strat.get("strategy_id"):
+                self._state["positions"] = strat.get("positions", [])
+                self._state["status"] = "ENTRY_FAILED"
+                self._state["_margin_auto_exit_pending"] = False
+                self._state["margin_exit_countdown"] = 0
+
+            self._save_strategies()
+            self._save_state()
+
+            self._send_telegram_alert(
+                f"🛑 *[MANUAL SQUARE OFF] Margin Auto-Exit Triggered Immediately!*\n"
+                f"• Strategy: `{strat.get('name')}`\n"
+                f"• All {len(open_positions)} open positions squared off immediately.\n"
+                f"• Click [Reset Algo] once funds are replenished."
+            )
+            return {"success": True, "message": f"Successfully squared off {len(open_positions)} open positions."}
+
+    def cancel_margin_auto_exit(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
+        """User clicked 'Cancel Auto-Exit' on the 15-second margin error countdown banner."""
+        with _ENGINE_LOCK:
+            sid = strategy_id or self._active_strategy_id
+            strat = self.get_strategy(sid)
+            if not strat:
+                return {"success": False, "error": "Strategy not found"}
+
+            strat["_margin_auto_exit_pending"] = False
+            strat["margin_exit_countdown"] = 0
+            if self._active_strategy_id == strat.get("strategy_id"):
+                self._state["_margin_auto_exit_pending"] = False
+                self._state["margin_exit_countdown"] = 0
+
+            self._save_strategies()
+            self._save_state()
+
+            self._log_event(
+                f"[SAFETY GUARD] Trader cancelled 15s margin auto-exit countdown for '{strat.get('name')}'. Open positions will remain active.",
+                level="INFO"
+            )
+            self._send_telegram_alert(
+                f"ℹ️ *[SAFETY GUARD] Margin Auto-Exit Cancelled by Trader!*\n"
+                f"• Strategy: `{strat.get('name')}`\n"
+                f"• Open positions retained and will remain active under live monitoring."
+            )
+            return {"success": True, "message": "Margin auto-exit countdown cancelled. Positions kept open."}
 
     def _square_off_single_position(
         self,
@@ -5942,6 +6085,8 @@ class StraddleManager:
                             self._save_state()
                         err_msg = new_pos.get("error") or "Order rejected by broker"
                         self._log_event(f"Re-Execute #{new_count} order rejected for {new_pos['symbol']}: {err_msg}", level="ERROR")
+                        if self._is_margin_error(err_msg):
+                            self._trigger_margin_auto_exit(strat, broker, source=f"Re-Execute #{new_count}")
 
             threading.Thread(target=_re_entry_worker, daemon=True).start()
         else:
@@ -8622,6 +8767,40 @@ class StraddleManager:
                         self._save_strategies()
                     continue
 
+                # Check Margin Auto-Exit Grace Countdown (Quantiply: 15s buffer before squaring off all open positions)
+                if strat.get("_margin_auto_exit_pending"):
+                    deadline = float(strat.get("_margin_auto_exit_deadline", 0.0))
+                    now_ts = time.time()
+                    remaining = max(0, int(math.ceil(deadline - now_ts)))
+                    strat["margin_exit_countdown"] = remaining
+                    open_legs = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
+                    if not open_legs:
+                        strat["_margin_auto_exit_pending"] = False
+                        strat["margin_exit_countdown"] = 0
+                    elif remaining <= 0:
+                        strat["_margin_auto_exit_pending"] = False
+                        strat["margin_exit_countdown"] = 0
+                        self._log_event(
+                            f"[SAFETY GUARD] 15s Margin Error countdown expired for '{strat.get('name')}'. "
+                            f"Auto squaring off all {len(open_legs)} open position(s)...",
+                            level="WARNING"
+                        )
+                        for p in open_legs:
+                            self._square_off_single_position(p, broker, reason="AUTO EXIT ON MARGIN ERROR")
+                        strat["status"] = "ENTRY_FAILED"
+                        strat["enabled"] = False
+                        strat["_manual_reset"] = True
+                        strat["last_trade_date"] = today_ist_str()
+                        self._save_strategies()
+                        self._save_state()
+                        self._send_telegram_alert(
+                            f"🛑 *[AUTO EXIT COMPLETE] Margin Error Fail-Safe Triggered!*\n"
+                            f"• Strategy: `{strat.get('name')}`\n"
+                            f"• Action: All {len(open_legs)} open positions squared off.\n"
+                            f"• Status: Strategy halted. Click [Reset Algo] once funds are replenished."
+                        )
+                        continue
+
                 # Diagnostic feedback for strategy schedule/enable state
                 if not is_enabled:
                     if not has_open_positions and strat_status != "ENTRY_FAILED":
@@ -8665,6 +8844,22 @@ class StraddleManager:
                 # Evaluate open leg positions of this strategy
                 strat_positions = strat.get("positions", [])
                 strat_mtm = 0.0
+
+                # Periodic Broker Order Book Sync (once every 1.0s) for non-blocking reconciliation of resting SL & Target orders
+                has_active_adv_orders = any(
+                    (p.get("sl_broker_order_id") or p.get("target_broker_order_id"))
+                    for p in strat_positions
+                    if p.get("status") == "OPEN"
+                )
+                now_ob_ts = time.time()
+                if has_active_adv_orders and (now_ob_ts - getattr(self, "_last_ob_sync_ts", 0.0) >= 1.0):
+                    self._last_ob_sync_ts = now_ob_ts
+                    try:
+                        ob = broker.get_order_book()
+                        if isinstance(ob, list):
+                            self._ob_cache = {str(o.get("order_id")): o for o in ob if o.get("order_id")}
+                    except Exception as e_ob:
+                        logger.debug(f"Error fetching order book for reconciliation: {e_ob}")
 
                 for pos in strat_positions:
                     if pos.get("status") != "OPEN" or pos.get("_exit_in_progress"):
@@ -8748,22 +8943,32 @@ class StraddleManager:
                     tgt_filled = False
                     sl_filled = False
 
+                    ob_lookup = getattr(self, "_ob_cache", {})
+
                     if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
-                        try:
-                            t_stat = broker.wait_for_order_fill(str(adv_tgt_oid), timeout_sec=0.02)
-                            if t_stat.get("filled"):
+                        t_ord = ob_lookup.get(str(adv_tgt_oid))
+                        if t_ord:
+                            t_st = str(t_ord.get("status", "")).upper()
+                            if any(w in t_st for w in ("TRAD", "COMP")):
                                 tgt_filled = True
-                                pos["avg_exit_price"] = t_stat.get("price") or pos.get("target_price") or ltp
-                        except Exception:
-                            pass
+                                pos["avg_exit_price"] = t_ord.get("price") or pos.get("target_price") or ltp
+                        else:
+                            try:
+                                t_stat = broker.wait_for_order_fill(str(adv_tgt_oid), timeout_sec=0.01)
+                                if t_stat.get("filled"):
+                                    tgt_filled = True
+                                    pos["avg_exit_price"] = t_stat.get("price") or pos.get("target_price") or ltp
+                            except Exception:
+                                pass
 
                     if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
-                        try:
-                            s_stat = broker.wait_for_order_fill(str(adv_sl_oid), timeout_sec=0.02)
-                            if s_stat.get("filled"):
+                        s_ord = ob_lookup.get(str(adv_sl_oid))
+                        if s_ord:
+                            s_st = str(s_ord.get("status", "")).upper()
+                            if any(w in s_st for w in ("TRAD", "COMP")):
                                 sl_filled = True
-                                pos["avg_exit_price"] = s_stat.get("price") or pos.get("sl_price") or ltp
-                            elif str(s_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN":
+                                pos["avg_exit_price"] = s_ord.get("price") or pos.get("sl_price") or ltp
+                            elif any(w in s_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN":
                                 # Broker Stoploss order was unexpectedly cancelled!
                                 adv_cfg = strat.get("advanced") or strat.get("advanced_settings") or {}
                                 auto_handle = adv_cfg.get("auto_handling_sl_cancellation") is not False
@@ -8787,8 +8992,37 @@ class StraddleManager:
                                             f"• Auto-Handling: *ACTIVE*\n"
                                             f"• Protection: Algo is actively monitoring live price (SL: ₹{pos.get('sl_price', 0):.2f}) & will auto-exit on trigger breach."
                                         )
-                        except Exception:
-                            pass
+                        else:
+                            try:
+                                s_stat = broker.wait_for_order_fill(str(adv_sl_oid), timeout_sec=0.01)
+                                if s_stat.get("filled"):
+                                    sl_filled = True
+                                    pos["avg_exit_price"] = s_stat.get("price") or pos.get("sl_price") or ltp
+                                elif str(s_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN":
+                                    adv_cfg = strat.get("advanced") or strat.get("advanced_settings") or {}
+                                    auto_handle = adv_cfg.get("auto_handling_sl_cancellation") is not False
+                                    if auto_handle:
+                                        pos["sl_broker_order_id"] = None
+                                        pos["sl_cancelled_unexpectedly"] = True
+                                        pos["error_message"] = "Stoploss order cancelled by the Client or Broker. Cancellation reason not received from the Broker"
+                                        pos["error_subtext"] = "You can use the Individual leg RETRY functionality to place the SL order again. If not, the algo will handle this unexpected Cancellation by monitoring the price & exiting this position when Stoploss or Target is hit."
+                                        if not pos.get("_sl_cancel_notified"):
+                                            pos["_sl_cancel_notified"] = True
+                                            self._log_event(
+                                                f"[AUTO HANDLING] Unexpected Stoploss cancellation detected for {pos.get('symbol')} on broker. "
+                                                f"Algo active protection: monitoring live price (SL ₹{pos.get('sl_price', 0):.2f}, TG ₹{pos.get('target_price', 0):.2f}) to exit automatically on trigger.",
+                                                level="WARNING"
+                                            )
+                                            self._send_telegram_alert(
+                                                f"⚠️ *[ALGO ALERT] Unexpected Stoploss Order Cancellation!*\n"
+                                                f"• Strategy: `{strat.get('name')}`\n"
+                                                f"• Leg: `{pos.get('symbol')}`\n"
+                                                f"• Status: Stoploss order cancelled by Client or Broker.\n"
+                                                f"• Auto-Handling: *ACTIVE*\n"
+                                                f"• Protection: Algo is actively monitoring live price (SL: ₹{pos.get('sl_price', 0):.2f}) & will auto-exit on trigger breach."
+                                            )
+                            except Exception:
+                                pass
 
                     if tgt_filled:
                         # Cancel SL order on broker (One Cancels Other)

@@ -473,6 +473,32 @@ def api_straddle_reset_algo():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/trigger_margin_auto_exit", methods=["POST"])
+def api_straddle_trigger_margin_auto_exit():
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id") or data.get("id")
+        mgr = get_straddle_manager()
+        res = mgr.trigger_immediate_margin_auto_exit(strategy_id=sid)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_trigger_margin_auto_exit: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/cancel_margin_auto_exit", methods=["POST"])
+def api_straddle_cancel_margin_auto_exit():
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id") or data.get("id")
+        mgr = get_straddle_manager()
+        res = mgr.cancel_margin_auto_exit(strategy_id=sid)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_cancel_margin_auto_exit: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/toggle_mode", methods=["POST"])
 def api_straddle_toggle_mode():
     try:
