@@ -182,7 +182,7 @@ async function initStraddlePlatform() {
     updateAllCommodityPillsLtp();
     window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 300);
     window._straddleState.spotsAllTimer = setInterval(updateAllCommodityPillsLtp, 1200);
-    window._straddleState.pollTimer = setInterval(pollStraddleCycle, 1500);
+    window._straddleState.pollTimer = setInterval(pollStraddleCycle, 500);
 
     // Fetch initial state asynchronously without blocking spot tickers
     try {
@@ -220,7 +220,7 @@ async function initStraddlePlatform() {
 
             window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 300);
             window._straddleState.spotsAllTimer = setInterval(updateAllCommodityPillsLtp, 1200);
-            window._straddleState.pollTimer = setInterval(pollStraddleCycle, 1500);
+            window._straddleState.pollTimer = setInterval(pollStraddleCycle, 500);
 
             fetchLiveSpotTick();
             updateAllCommodityPillsLtp();
@@ -3204,6 +3204,12 @@ function markRunningLegChanged(idx) {
         sl_val: slValInput ? parseFloat(slValInput.value) : 15
     };
 
+    if (!window._straddleErrorLegEdits) window._straddleErrorLegEdits = {};
+    window._straddleErrorLegEdits[idx] = {
+        lots: lotsInput ? parseInt(lotsInput.value, 10) || 1 : 1,
+        strike: strikeInput ? strikeInput.value.trim() : ""
+    };
+
     const btn = document.getElementById(`btn_save_running_${idx}`);
     if (btn) {
         btn.style.display = "inline-flex";
@@ -3457,13 +3463,13 @@ async function detachRunningPosition(stratId, legId, legIndex) {
 }
 
 async function retrySingleStraddleLegInline(stratId, legId, legIndex) {
-    const lotsInput = document.getElementById(`err_lots_${legIndex}`);
-    const strikeInput = document.getElementById(`err_strike_${legIndex}`);
+    const lotsInput = document.getElementById(`live_lots_${legIndex}`) || document.getElementById(`err_lots_${legIndex}`);
+    const strikeInput = document.getElementById(`live_strike_${legIndex}`) || document.getElementById(`err_strike_${legIndex}`);
     const savedEdit = window._straddleErrorLegEdits?.[legIndex];
     const newLots = lotsInput ? (parseInt(lotsInput.value, 10) || 1) : (savedEdit?.lots || 1);
     const newStrike = strikeInput ? strikeInput.value.trim() : (savedEdit?.strike || "");
 
-    showStraddleToast(`Retrying leg ${legIndex + 1} with Lots: ${newLots}, Strike: ${newStrike || 'Auto'}...`, "info", 2000);
+    showStraddleToast(`⚡ Retrying leg ${legIndex + 1} with Lots: ${newLots}, Strike: ${newStrike || 'Auto'}...`, "info", 2000);
     try {
         const payload = {
             strategy_id: stratId || window._straddleState?.activeStrategy?.strategy_id,
@@ -3524,6 +3530,52 @@ async function squareOffSingleLegIndex(legIndex) {
     }
 }
 
+function autoFitErrorLegLots(idx, marginInfo) {
+    const lotInput = document.getElementById(`live_lots_${idx}`) || document.getElementById(`err_lots_${idx}`);
+    if (!lotInput) return;
+    if (marginInfo && marginInfo.available > 0 && marginInfo.required > 0) {
+        const curLots = parseInt(lotInput.value, 10) || 1;
+        const marginPerLot = marginInfo.required / curLots;
+        const fittedLots = Math.max(1, Math.floor(marginInfo.available / marginPerLot));
+        lotInput.value = fittedLots;
+        markRunningLegChanged(idx);
+        if (marginInfo.available < marginPerLot) {
+            showStraddleToast(`⚠️ Available cash (₹${marginInfo.available.toLocaleString('en-IN', {maximumFractionDigits:2})}) is less than 1 lot required margin (₹${marginPerLot.toLocaleString('en-IN', {maximumFractionDigits:2})}). Set to 1 lot. Consider buying hedge first to reduce margin.`, "warning", 4500);
+        } else {
+            showStraddleToast(`⚙️ Auto-fitted lots to ${fittedLots} based on available cash ₹${marginInfo.available.toLocaleString('en-IN', {maximumFractionDigits:2})}.`, "success", 3000);
+        }
+    } else {
+        lotInput.value = 1;
+        markRunningLegChanged(idx);
+        showStraddleToast("⚙️ Lots set to 1.", "info", 2000);
+    }
+}
+window.autoFitErrorLegLots = autoFitErrorLegLots;
+
+async function dismissErrorLeg(stratId, legId, idx) {
+    try {
+        const sId = stratId || window._straddleState?.activeStrategy?.strategy_id;
+        showStraddleToast("✕ Dismissing error leg...", "info", 1500);
+        const resp = await fetch("/api/straddle/dismiss_error_leg", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ strategy_id: sId, leg_id: legId, leg_index: idx })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showStraddleToast("✅ Error dismissed.", "success", 2000);
+            if (window._straddleErrorLegEdits) delete window._straddleErrorLegEdits[idx];
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast("Error: " + (res.error || "Failed to dismiss"), "error", 3000);
+        }
+    } catch (e) {
+        showStraddleToast("Network error: " + e.message, "error", 3000);
+    }
+}
+window.dismissErrorLeg = dismissErrorLeg;
+
 function renderStraddlePositions(positions, groupMtm, totalMtm) {
     const tbody = document.getElementById("straddlePositionsTableBody");
     if (!tbody) return;
@@ -3565,7 +3617,30 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         const activeEl = document.activeElement;
         const isUserInteractingInTable = activeEl && tbody.contains(activeEl) && (activeEl.tagName === "INPUT" || activeEl.tagName === "SELECT");
 
+        // Verify if any leg's status, exit reason, or symbol has changed
+        let anyStateMismatch = false;
+        if (existingRows.length !== positions.length) {
+            anyStateMismatch = true;
+        } else {
+            for (let i = 0; i < positions.length; i++) {
+                const pos = positions[i];
+                const row = tbody.querySelector(`tr[data-leg-index="${i}"]`);
+                if (!row) { anyStateMismatch = true; break; }
+                const rowStatus = row.getAttribute("data-status");
+                const rowReason = row.getAttribute("data-exit-reason");
+                const rowSym = row.getAttribute("data-symbol");
+                const posStatus = String(pos.status || "OPEN").toUpperCase();
+                const posReason = String(pos.exit_reason || "");
+                const sym = pos.symbol || pos.trading_symbol || '';
+                if (rowStatus !== posStatus || rowReason !== posReason || rowSym !== sym) {
+                    anyStateMismatch = true;
+                    break;
+                }
+            }
+        }
+
         const canUpdateInPlace = (
+            !anyStateMismatch &&
             existingRows.length === positions.length &&
             positions.length > 0 &&
             (existingErrorBanners.length === numErrorsExpected || isUserInteractingInTable)
@@ -3636,8 +3711,9 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const isClosed = !isError && (isCompleteOrClosed || (!isOpen && !isError));
                 const isReEntry = !!(pos.is_re_entry || pos.re_entry || (pos.re_execute_count && pos.re_execute_count > 0));
                 const stratId = pos.strategy_id || window._straddleState?.activeStrategy?.strategy_id || '';
-                const hasLiveQty = Number(pos.quantity || pos.entry_qty || 0) > 0;
-                const isInteractiveRow = (isOpen || (isError && hasLiveQty && !isCompleteOrClosed));
+                const isFilledOrPartial = isOpen && (Number(pos.entry_qty || 0) > 0 || (pos.avg_ent_price && Number(pos.avg_ent_price) > 0));
+                const isInteractiveRow = isFilledOrPartial;
+                const canAdjustStrikeAndLots = (isOpen || isError) && !isCompleteOrClosed;
 
                 // Retrieve any pending user edits for this leg so they are never lost
                 const pending = (window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]) || null;
@@ -3697,14 +3773,15 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 // Quantity column - derive lots from actual filled quantity so failed orders never display ghost lots
                 const lotSizeVal = Number(pos.lot_size || 65);
                 const actualFilledLots = Math.max(1, Math.round((Number(pos.quantity || pos.entry_qty || 65)) / lotSizeVal));
-                const lots = pending ? pending.lots : (pos.quantity ? actualFilledLots : (pos.lots || 1));
+                const savedErr = (window._straddleErrorLegEdits && window._straddleErrorLegEdits[idx]) || null;
+                const lots = pending ? pending.lots : (savedErr && savedErr.lots !== undefined ? savedErr.lots : (pos.quantity ? actualFilledLots : (pos.lots || 1)));
                 const totalQty = pos.quantity || (lots * lotSizeVal);
-                const entryQty = pos.entry_qty || totalQty;
+                const entryQty = pos.entry_qty || (isError ? "-" : totalQty);
                 const exitQty = (isClosed || (pos.exit_qty && pos.exit_qty > 0)) ? (pos.exit_qty || totalQty) : "-";
 
                 // Quantity HTML (Interactive with stepper arrows for OPEN and editable error legs)
                 let qtyHtml = "";
-                if (isInteractiveRow) {
+                if (canAdjustStrikeAndLots) {
                     qtyHtml = `
                         <div style="display:flex; align-items:center; gap:4px;">
                             <div class="straddle-stepper-box" style="height:28px;">
@@ -3729,7 +3806,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
                 // Symbol HTML (With shift strike option and step arrows for OPEN and editable legs)
                 let symHtml = "";
-                const curStrikeMatch = pending ? pending.strike : (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
+                const curStrikeMatch = pending ? pending.strike : (savedErr && savedErr.strike !== undefined ? savedErr.strike : (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]));
                 let hedgeTagHtml = "";
                 if (pos.is_associated_hedge) {
                     const pType = pos.hedge_parent_type || "MAIN";
@@ -3738,7 +3815,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:1px 4px;" title="Protected with Dynamic Associated Hedge">🛡️ HEDGED</span></div>`;
                 }
 
-                if (isInteractiveRow) {
+                if (canAdjustStrikeAndLots) {
                     symHtml = `
                         <div class="straddle-sym-card ${symAccentClass}">
                             <div class="straddle-sym-title">${sym}</div>
@@ -3770,7 +3847,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const avgEntPrice = pos.avg_ent_price ? Number(pos.avg_ent_price).toFixed(2) : '-';
                 const entryTime = pos.entry_time || '-';
 
-                // Per Leg Target (Interactive for OPEN and live error legs)
+                // Per Leg Target (Interactive ONLY for live filled/partially filled trades)
                 let targetHtml = "-";
                 if (isInteractiveRow) {
                     const isPts = pending ? (pending.target_mode === "₹" || pending.target_mode.includes("Pts")) : (pos.target_type && (pos.target_type.includes("Pts") || pos.target_type.includes("₹")));
@@ -3785,6 +3862,9 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </div>
                         <div id="live_tgt_sub_${idx}" style="font-size:10px; color:#38bdf8; font-weight:700; margin-top:2px;">TGT: ₹${pos.target_price ? Number(pos.target_price).toFixed(2) : '-'}</div>
                     `;
+                } else if (isError) {
+                    const tgtValLabel = pos.target_value ? `${pos.target_value}${pos.target_type && pos.target_type.includes("Pts") ? " Pts" : "%"}` : "-";
+                    targetHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="tgt-label-badge" style="opacity:0.8;">TGT: ${tgtValLabel}</span></div>`;
                 } else if (pos.target_price && pos.target_price > 0) {
                     const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
                     targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span></div>`;
@@ -3793,7 +3873,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>`;
                 }
 
-                // Per Leg Stoploss (Interactive for OPEN and live error legs)
+                // Per Leg Stoploss (Interactive ONLY for live filled/partially filled trades)
                 let slHtml = "-";
                 if (isInteractiveRow) {
                     const isPts = pending ? (pending.sl_mode === "₹" || pending.sl_mode.includes("Pts")) : (pos.sl_type && (pos.sl_type.includes("Pts") || pos.sl_type.includes("₹")));
@@ -3808,6 +3888,9 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </div>
                         <div id="live_sl_sub_${idx}" style="font-size:10px; color:#f87171; font-weight:700; margin-top:2px;">SL: ₹${pos.sl_price ? Number(pos.sl_price).toFixed(2) : '-'}</div>
                     `;
+                } else if (isError) {
+                    const slValLabel = pos.sl_value ? `-${pos.sl_value}${pos.sl_type && pos.sl_type.includes("Pts") ? " Pts" : "%"}` : "-";
+                    slHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="sl-label-badge" style="opacity:0.8;">SL: ${slValLabel}</span></div>`;
                 } else if (pos.sl_price && pos.sl_price > 0) {
                     const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
                     const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
@@ -3893,7 +3976,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
 
                 html += `
-                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}">
+                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}">
                         <td style="text-align:center;">
                             <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
                         </td>
@@ -3949,7 +4032,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     `;
                 }
 
-                // If error, append error banner directly underneath row with direct action buttons (Retry with adjusted Settings / Rectify)
+                // If error, append error banner directly underneath row with streamlined, unambiguous actions
                 if (isError) {
                     const legId = pos.id || '';
                     const errDetail = pos.error_message || pos.error || "Order placement rejected by broker / exchange RMS.";
@@ -3974,15 +4057,11 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             </div>
                         `;
                     }
-                    const curStrikeMatch = (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
-                    const savedErr = (window._straddleErrorLegEdits && window._straddleErrorLegEdits[idx]) || null;
-                    const errLotsVal = savedErr && savedErr.lots !== undefined ? savedErr.lots : (pos.lots || 1);
-                    const errStrikeVal = savedErr && savedErr.strike !== undefined ? savedErr.strike : curStrikeMatch;
-                    const posUnd = (pos.underlying || (pos.contract && pos.contract.underlying) || window._straddleState?.activeStrategy?.underlying || "NIFTY").toUpperCase();
-                    const strikeStep = (typeof getStrikeStepForUnderlying === "function") ? getStrikeStepForUnderlying(posUnd) : 50;
+
+                    const safeMarginInfoJson = marginInfo ? JSON.stringify(marginInfo).replace(/'/g, "\\'") : "null";
 
                     html += `
-                        <tr class="straddle-error-banner-row">
+                        <tr class="straddle-error-banner-row" data-error-leg-index="${idx}">
                             <td colspan="13">
                                 <div class="straddle-error-banner-cell" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); padding:10px 14px; border-radius:6px; margin: 4px 0;">
                                     <div style="display:flex; flex-direction:column; gap:3px; flex:1; min-width:260px;">
@@ -3995,40 +4074,20 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                         ${marginBadgeHtml}
                                         ${marketClosedBadgeHtml}
                                     </div>
-                                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:rgba(0,0,0,0.3); padding:6px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
-                                        <div style="display:flex; align-items:center; gap:4px;">
-                                            <span style="font-size:11px; color:#cbd5e1; font-weight:700;">Lots:</span>
-                                            <div class="straddle-stepper-box" style="height:28px;">
-                                                <input type="number" id="err_lots_${idx}" class="straddle-stepper-input" style="width:40px; font-size:12px; font-weight:700;" value="${errLotsVal}" min="1" max="100" oninput="preserveErrorLegChange(${idx})" onchange="preserveErrorLegChange(${idx})" title="Adjust lots: increase to buy/sell more, decrease to reduce">
-                                                <div class="straddle-stepper-arrows" style="width:18px;">
-                                                    <button type="button" class="lot-step-btn" onclick="stepErrorLots(${idx}, 1)" title="Lots +">▲</button>
-                                                    <button type="button" class="lot-step-btn" onclick="stepErrorLots(${idx}, -1)" title="Lots -">▼</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div style="display:flex; align-items:center; gap:4px;">
-                                            <span style="font-size:11px; color:#cbd5e1; font-weight:700;">Strike:</span>
-                                            <div class="straddle-stepper-box" style="height:28px;">
-                                                <input type="number" id="err_strike_${idx}" class="straddle-stepper-input" style="width:72px; font-size:12px; font-weight:700;" value="${errStrikeVal}" step="${strikeStep}" oninput="preserveErrorLegChange(${idx})" onchange="preserveErrorLegChange(${idx})" placeholder="Strike" title="Enter or step strike price">
-                                                <div class="straddle-stepper-arrows" style="width:18px;">
-                                                    <button type="button" class="strike-step-btn" onclick="stepErrorStrikePrice(${idx}, 1)" title="Strike +">▲</button>
-                                                    <button type="button" class="strike-step-btn" onclick="stepErrorStrikePrice(${idx}, -1)" title="Strike -">▼</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        ${(hasLiveQty && !isCompleteOrClosed) ? `
-                                            <button type="button" class="algo-btn-retry" style="background:#0ea5e9; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="saveRunningPositionChanges('${stratId}', '${legId}', ${idx})" title="Save current Target/Stoploss and resume live monitoring">
-                                                🔄 Save & Resume Monitoring
+                                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                        ${marginInfo && marginInfo.hasMarginDetails ? `
+                                            <button type="button" class="algo-btn-retry" style="background:#0284c7; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick='autoFitErrorLegLots(${idx}, ${safeMarginInfoJson})' title="Automatically adjust lots to fit within available cash balance">
+                                                ⚙️ Auto-Fit Lots
                                             </button>
                                         ` : ''}
-                                        <button type="button" class="algo-btn-retry" style="background:#10b981; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLegInline('${stratId}', '${legId}', ${idx})" title="Retry order with updated lots and strike">
-                                            🔄 Retry with Settings
+                                        <button type="button" class="algo-btn-retry" style="background:#10b981; color:#ffffff; font-weight:700; font-size:11px; padding:6px 14px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLegInline('${stratId}', '${legId}', ${idx})" title="Immediately retry placing order with the Lots & Shift Strike set above">
+                                            ⚡ Retry Order
                                         </button>
-                                        <button type="button" class="algo-btn-retry" style="background:#ef4444; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="retrySingleStraddleLeg('${stratId}', '${legId}', ${idx})" title="Immediately retry placing this order on broker">
-                                            Retry Original
+                                        <button type="button" class="algo-btn-rectify" style="background:#334155; border:1px solid #475569; color:#f1f5f9; font-weight:700; font-size:11px; padding:6px 10px; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;" onclick="openRectifyLegModal('${stratId}', '${legId}', ${idx})" title="Open leg builder modal to edit configuration">
+                                            🛠️ Edit
                                         </button>
-                                        <button type="button" class="algo-btn-rectify" style="background:#2563eb; color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:4px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.3);" onclick="openRectifyLegModal('${stratId}', '${legId}', ${idx})" title="Edit lots, strike price, product or configuration">
-                                            🛠️ Rectify Leg
+                                        <button type="button" class="straddle-btn" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-weight:700; font-size:11px; padding:6px 10px; border-radius:4px; cursor:pointer;" onclick="dismissErrorLeg('${stratId}', '${legId}', ${idx})" title="Dismiss and remove this error leg">
+                                            ✕ Dismiss
                                         </button>
                                     </div>
                                 </div>
@@ -8246,6 +8305,8 @@ window.clearStraddleClosedAndExpiredPositions = clearStraddleClosedAndExpiredPos
 window.loadStraddleMargin = loadStraddleMargin;
 
 // Live trade editing and error customization exports
+window.autoFitErrorLegLots = autoFitErrorLegLots;
+window.dismissErrorLeg = dismissErrorLeg;
 window.retrySingleStraddleLegInline = retrySingleStraddleLegInline;
 window.saveRunningPositionChanges = saveRunningPositionChanges;
 window.markRunningLegChanged = markRunningLegChanged;

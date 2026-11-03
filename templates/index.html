@@ -744,6 +744,11 @@
                     <span>MTM TARGET (Total amount):</span>
                     <span class="straddle-tgt-strip-val" id="straddleMtmTargetDisplay">₹ 4000.00</span>
                 </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" class="straddle-btn" onclick="clearStraddleClosedAndExpiredPositions()" title="Wipe stale and completed closed trades from this view" style="background:rgba(255,255,255,0.06); border:1px solid #475569; color:#cbd5e1; font-weight:700; font-size:11.5px; padding:3px 10px; border-radius:4px; display:inline-flex; align-items:center; gap:5px; cursor:pointer;">
+                        🧹 Clear Closed Trades
+                    </button>
+                </div>
                 <div class="straddle-mtm-strip-right">
                     <div>
                         <span style="color:#94a3b8; margin-right:6px;">Group MTM:</span>
@@ -760,6 +765,7 @@
             <div class="straddle-action-bar" id="straddleTerminalActionBar" style="margin-bottom:14px; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
                 <button type="button" class="straddle-btn btn-success" id="btnStraddleRetryErrors" onclick="retrySelectedStraddleLegs()" style="background:#15803d; border-color:#16a34a; font-weight:800; display:none;">🔄 Retry (1)</button>
                 <button type="button" class="straddle-btn" id="btnStraddleResetAlgo" onclick="resetCurrentStraddleAlgo()" title="Clear failed order errors and reset strategy to clean Ready state" style="background:#7c3aed; border-color:#8b5cf6; color:#ffffff; font-weight:800;">🔄 Reset Algo</button>
+                <button type="button" class="straddle-btn" onclick="clearStraddleClosedAndExpiredPositions()" title="Clear closed/expired trades and keep only active positions" style="background:#334155; border-color:#475569; color:#f1f5f9; font-weight:700;">🧹 Clear Closed Trades</button>
                 <button type="button" class="straddle-btn btn-primary" onclick="toggleStraddleSettingsPanel()" title="Open strategy parameters, execution rules & leg builder" style="background:#2563eb; border-color:#3b82f6; font-weight:800;">⚙️ Configure Settings</button>
                 <button type="button" class="straddle-btn btn-success" id="btnStraddleStartAlgo" onclick="straddleStartAlgo()" title="Start algorithm and execute strategy orders" style="font-weight:800;">▶ Start / Enable Algo</button>
                 <button type="button" class="straddle-btn btn-warning" onclick="straddleTerminateAlgo()" title="Halt strategy algorithm execution without squaring off broker positions" style="background:#b45309; border-color:#d97706; font-weight:800;">⏹ Stop Algo</button>
@@ -2936,7 +2942,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261103_hedge_fix2"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261103_live_sync_clean"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

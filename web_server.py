@@ -344,6 +344,25 @@ def api_straddle_retry_legs():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/dismiss_error_leg", methods=["POST"])
+def api_straddle_dismiss_error_leg():
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        leg_id = data.get("leg_id")
+        leg_idx = data.get("leg_index")
+        mgr = get_straddle_manager()
+        res = mgr.dismiss_error_leg(
+            strategy_id=sid,
+            leg_id=leg_id,
+            leg_index=leg_idx
+        )
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_dismiss_error_leg: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/update_running_position", methods=["POST"])
 def api_straddle_update_running_position():
     try:

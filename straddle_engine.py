@@ -4305,6 +4305,13 @@ class StraddleManager:
         elif "Pts" in tgt_type:
             target_price = round_to_tick(entry_price - tgt_val if side == "SELL" else entry_price + tgt_val, 0.05)
 
+        # Enforce minimum tick separation for target
+        if target_price > 0 and entry_price > 0:
+            if side == "BUY" and target_price <= entry_price:
+                target_price = round_to_tick(entry_price + 0.05, 0.05)
+            elif side == "SELL" and target_price >= entry_price:
+                target_price = round_to_tick(entry_price - 0.05, 0.05)
+
         sl_price = 0.0
         if "SL: %" in sl_type or "%" in sl_type:
             if side == "SELL":
@@ -4313,6 +4320,13 @@ class StraddleManager:
                 sl_price = round_to_tick(entry_price * (1.0 - sl_val / 100.0), 0.05)
         elif "Pts" in sl_type:
             sl_price = round_to_tick(entry_price + sl_val if side == "SELL" else entry_price - sl_val, 0.05)
+
+        # Enforce minimum tick separation for stoploss
+        if sl_price > 0 and entry_price > 0:
+            if side == "BUY" and sl_price >= entry_price:
+                sl_price = round_to_tick(entry_price - 0.05, 0.05)
+            elif side == "SELL" and sl_price <= entry_price:
+                sl_price = round_to_tick(entry_price + 0.05, 0.05)
 
         orig_sl_label = f"ORIGINAL SL: -{sl_val:.0f}%" if ("%" in sl_type or "SL: %" in sl_type) else (f"ORIGINAL SL: {sl_price:.2f}" if sl_price > 0 else "")
         order_id = str(order_res.get("order_id") or "")
@@ -4674,6 +4688,60 @@ class StraddleManager:
                 "strategy": strat,
                 "retry_result": retry_res
             }
+
+    def dismiss_error_leg(
+        self,
+        strategy_id: Optional[str] = None,
+        leg_id: Optional[str] = None,
+        leg_index: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Dismiss / remove a failed error leg from strategy positions."""
+        with _ENGINE_LOCK:
+            sid = strategy_id or self._active_strategy_id
+            strat = self.get_strategy(sid)
+            if not strat:
+                return {"success": False, "error": f"Strategy {sid} not found."}
+
+            positions = strat.get("positions", [])
+            target_idx = None
+            if leg_id:
+                for idx, p in enumerate(positions):
+                    if p.get("id") == leg_id:
+                        target_idx = idx
+                        break
+            if target_idx is None and leg_index is not None and 0 <= int(leg_index) < len(positions):
+                target_idx = int(leg_index)
+
+            if target_idx is not None:
+                pos = positions[target_idx]
+                is_unfilled = (pos.get("status") == "ERROR") or (int(pos.get("entry_qty") or 0) == 0 and int(pos.get("quantity") or 0) == 0)
+                if is_unfilled:
+                    positions.pop(target_idx)
+                else:
+                    pos.pop("error_message", None)
+                    pos.pop("error", None)
+                    if pos.get("status") == "ERROR":
+                        pos["status"] = "COMPLETE" if (pos.get("avg_exit_price") and float(pos.get("avg_exit_price") or 0) > 0) else "OPEN"
+
+                has_error_left = any(p.get("status") == "ERROR" for p in positions)
+                if not has_error_left:
+                    strat["entry_error"] = "-"
+                    strat["last_error"] = None
+                    strat["repair_needed"] = False
+                    if strat.get("status") == "ENTRY_FAILED":
+                        strat["status"] = "TRADE_ACTIVE" if any(p.get("status") == "OPEN" for p in positions) else "READY"
+
+                strat["positions"] = positions
+                if self._active_strategy_id == sid:
+                    self._state["positions"] = positions
+                    self._state["status"] = strat["status"]
+
+                self._save_strategies()
+                self._save_state()
+                self._log_event(f"Dismissed error for leg index {target_idx} in strategy '{strat.get('name')}'")
+                return {"success": True, "message": "Error dismissed successfully", "has_error_left": has_error_left}
+
+            return {"success": False, "error": "Target leg not found"}
 
     def update_running_position(
         self,
@@ -5332,12 +5400,26 @@ class StraddleManager:
                 if broker_pos is not None:
                     b_net_qty = int(broker_pos.get("net_qty") or broker_pos.get("quantity") or 0)
                     if b_net_qty == 0:
-                        self._log_event(f"Position {sym_to_match} is already closed on broker (net quantity 0). Marking leg COMPLETE without duplicate order.", level="INFO")
+                        exit_p = float(broker_pos.get("sell_avg") if pos.get("side") == "BUY" else (broker_pos.get("buy_avg") or ltp))
+                        ent_p = float(pos.get("avg_ent_price", 0.0))
+                        side = (pos.get("side") or "SELL").upper()
+                        pnl = float(broker_pos.get("pnl") or broker_pos.get("realized_pnl") or 0.0)
+
+                        is_loss = (side == "BUY" and exit_p < ent_p) or (side == "SELL" and exit_p > ent_p) or (pnl < 0)
+                        is_profit = (side == "BUY" and exit_p > ent_p) or (side == "SELL" and exit_p < ent_p) or (pnl > 0)
+                        if is_loss:
+                            real_reason = f"STOPLOSS HIT (₹{exit_p:.2f}) (Broker Exit)"
+                        elif is_profit:
+                            real_reason = f"TARGET HIT (₹{exit_p:.2f}) (Broker Exit)"
+                        else:
+                            real_reason = f"{reason} (Already closed on broker)"
+
+                        self._log_event(f"Position {sym_to_match} is already closed on broker (net quantity 0). Reason: {real_reason}.", level="INFO")
                         pos["status"] = "COMPLETE"
-                        pos["avg_exit_price"] = float(broker_pos.get("sell_avg") if pos.get("side") == "BUY" else (broker_pos.get("buy_avg") or ltp))
+                        pos["avg_exit_price"] = exit_p
                         pos["exit_time"] = now_ist_str()
-                        pos["exit_reason"] = f"{reason} (Already closed on broker)"
-                        pos["mtm"] = float(broker_pos.get("pnl") or pos.get("mtm", 0.0))
+                        pos["exit_reason"] = real_reason
+                        pos["mtm"] = pnl if pnl != 0.0 else float(pos.get("mtm", 0.0))
                         pos["_exit_in_progress"] = False
                         return {"success": True, "order_id": "", "filled": True, "price": pos["avg_exit_price"], "pos": pos}
             except Exception as e:
@@ -8229,10 +8311,10 @@ class StraddleManager:
                 p for p in raw_positions 
                 if int(p.get("net_qty") or p.get("quantity") or 0) != 0
             ]
-            if not open_broker_positions:
-                return
 
             changes_made = False
+
+            # Part 1: Reconcile OPEN positions from broker
             for bp in open_broker_positions:
                 bp_sym = bp.get("trading_symbol") or bp.get("symbol") or ""
                 bp_ikey = bp.get("instrument_key") or bp.get("instrument_token") or ""
@@ -8252,7 +8334,7 @@ class StraddleManager:
 
                 leg_mtm = round((ltp - avg_price) * net_qty if side == "BUY" else (avg_price - ltp) * abs(net_qty), 2)
 
-                # 1. Check if already present in any strategy using robust instrument matcher
+                # Check if already present in any strategy using robust instrument matcher
                 matched_strat = None
                 matched_leg_pos = None
 
@@ -8266,10 +8348,8 @@ class StraddleManager:
                         break
 
                 if matched_strat and matched_leg_pos:
-                    # Never revert or overwrite a position that is currently exiting or already complete/error
                     if matched_leg_pos.get("_exit_in_progress") or matched_leg_pos.get("status") in ("COMPLETE", "EXIT_PENDING", "ERROR", "TERMINATED"):
                         continue
-                    # Update live price and MTM on the existing leg position
                     matched_leg_pos["status"] = "OPEN"
                     matched_leg_pos["quantity"] = abs(net_qty)
                     matched_leg_pos["entry_qty"] = abs(net_qty)
@@ -8291,10 +8371,57 @@ class StraddleManager:
                             matched_strat["status"] = "TERMINATED"
                     matched_strat["repair_needed"] = False
                     changes_made = True
-                else:
-                    # External / manual position on Kotak Neo not yet adopted into any strategy.
-                    # Never auto-inject phantom duplicates. Kept available for explicit adoption via modal.
-                    continue
+
+            # Part 2: CRITICAL - Reconcile positions that were OPEN in strategy but CLOSED on broker
+            for s in self._strategies:
+                for p in s.get("positions", []):
+                    if p.get("status") == "OPEN" and not p.get("_exit_in_progress"):
+                        matched_bp = None
+                        for bp in raw_positions:
+                            bp_sym = bp.get("trading_symbol") or bp.get("symbol") or ""
+                            bp_ikey = bp.get("instrument_key") or bp.get("instrument_token") or ""
+                            if _is_same_instrument(p.get("symbol"), p.get("instrument_key"), bp_sym, bp_ikey):
+                                matched_bp = bp
+                                break
+
+                        if matched_bp is not None:
+                            net_qty = int(matched_bp.get("net_qty") or matched_bp.get("quantity") or 0)
+                            if net_qty == 0:
+                                side = (p.get("side") or "SELL").upper()
+                                buy_avg = float(matched_bp.get("buy_avg") or matched_bp.get("day_buy_price") or matched_bp.get("buy_price") or 0.0)
+                                sell_avg = float(matched_bp.get("sell_avg") or matched_bp.get("day_sell_price") or matched_bp.get("sell_price") or 0.0)
+                                exit_price = sell_avg if side == "BUY" else buy_avg
+                                if exit_price <= 0:
+                                    exit_price = float(matched_bp.get("avg_price") or matched_bp.get("close_price") or p.get("ltp") or p.get("avg_ent_price") or 0.0)
+
+                                ent_price = float(p.get("avg_ent_price") or (buy_avg if side == "BUY" else sell_avg) or 0.0)
+                                pnl = float(matched_bp.get("pnl") or matched_bp.get("realized_pnl") or 0.0)
+                                if pnl == 0.0 and ent_price > 0 and exit_price > 0:
+                                    pnl = round((exit_price - ent_price) * abs(int(p.get("quantity") or 1)) if side == "BUY" else (ent_price - exit_price) * abs(int(p.get("quantity") or 1)), 2)
+
+                                is_loss = (side == "BUY" and exit_price < ent_price) or (side == "SELL" and exit_price > ent_price) or (pnl < 0)
+                                is_profit = (side == "BUY" and exit_price > ent_price) or (side == "SELL" and exit_price < ent_price) or (pnl > 0)
+
+                                if is_loss:
+                                    reason = f"STOPLOSS HIT (₹{exit_price:.2f}) (Broker Exit)"
+                                    trigger = "STOPLOSS"
+                                elif is_profit:
+                                    reason = f"TARGET HIT (₹{exit_price:.2f}) (Broker Exit)"
+                                    trigger = "TARGET"
+                                else:
+                                    reason = f"CLOSED AT COST (₹{exit_price:.2f}) (Broker Exit)"
+                                    trigger = "MANUAL"
+
+                                self._log_event(f"Detected broker closed position for {p.get('symbol')} ({reason}). P&L: ₹{pnl:.2f}", level="INFO")
+                                p["status"] = "COMPLETE"
+                                p["avg_exit_price"] = exit_price
+                                p["exit_time"] = now_ist_str()
+                                p["exit_reason"] = reason
+                                p["mtm"] = pnl
+                                p["_exit_in_progress"] = False
+                                changes_made = True
+
+                                self._handle_leg_re_entry(s, p, trigger=trigger)
 
             if changes_made:
                 self._save_strategies()
@@ -8388,9 +8515,9 @@ class StraddleManager:
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
-            # Reconcile any open positions from Kotak Neo broker with active strategies (throttled to 3s)
+            # Reconcile any open & closed positions from Kotak Neo broker with active strategies (throttled to 1s)
             now_ts = time.time()
-            if mode == "LIVE_BROKER" and (now_ts - getattr(self, "_last_reconcile_ts", 0)) > 3.0:
+            if mode == "LIVE_BROKER" and (now_ts - getattr(self, "_last_reconcile_ts", 0)) > 1.0:
                 self._last_reconcile_ts = now_ts
                 self._reconcile_broker_positions(broker)
 
@@ -8695,10 +8822,11 @@ class StraddleManager:
                         self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS", exit_order_id=str(adv_sl_oid))
                         continue
 
-                    # Check Target Hit
+                    # Check Target Hit (Guaranteed profit direction check)
                     tgt_price = float(pos.get("target_price", 0.0))
                     if tgt_price > 0 and not pos.get("_exit_in_progress"):
-                        if (side == "SELL" and ltp <= tgt_price) or (side == "BUY" and ltp >= tgt_price):
+                        is_tgt_triggered = (side == "SELL" and ltp <= tgt_price and (entry_price <= 0 or ltp < entry_price)) or (side == "BUY" and ltp >= tgt_price and (entry_price <= 0 or ltp > entry_price))
+                        if is_tgt_triggered:
                             pos["_exit_in_progress"] = True
                             pos["status"] = "EXIT_PENDING"
                             self._log_event(f"Target Hit for {pos['symbol']} @ ₹{ltp:.2f} (Target was ₹{tgt_price:.2f})")
@@ -8710,10 +8838,11 @@ class StraddleManager:
                                 self._log_event(f"Target exit order failed for {pos.get('symbol')}. Re-entry aborted.", level="ERROR")
                             continue
 
-                    # Check Stoploss Hit
+                    # Check Stoploss Hit (Guaranteed loss direction check)
                     sl_price = float(pos.get("sl_price", 0.0))
                     if sl_price > 0 and not pos.get("_exit_in_progress"):
-                        if (side == "SELL" and ltp >= sl_price) or (side == "BUY" and ltp <= sl_price):
+                        is_sl_triggered = (side == "SELL" and ltp >= sl_price and (entry_price <= 0 or ltp > entry_price)) or (side == "BUY" and ltp <= sl_price and (entry_price <= 0 or ltp < entry_price))
+                        if is_sl_triggered:
                             pos["_exit_in_progress"] = True
                             pos["status"] = "EXIT_PENDING"
                             reason_desc = f"STOPLOSS HIT (₹{sl_price:.2f})"
