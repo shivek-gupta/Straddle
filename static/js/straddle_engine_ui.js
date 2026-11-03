@@ -176,12 +176,15 @@ async function initStraddlePlatform() {
     if (pnlStart && !pnlStart.value) pnlStart.value = todayStr;
     if (pnlEnd && !pnlEnd.value) pnlEnd.value = todayStr;
 
+    // Restore saved active underlying from storage or default to NIFTY
+    const savedActiveUnd = localStorage.getItem("straddle_active_underlying") || "NIFTY";
+    window._activeGlobalUnderlying = savedActiveUnd;
+    selectGlobalUnderlying(savedActiveUnd);
+
     // Initialize local storage & fast ticker pollers immediately without blocking
     loadActiveBasketFromStorage();
     fetchLiveSpotTick();
-    updateAllCommodityPillsLtp();
     window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 300);
-    window._straddleState.spotsAllTimer = setInterval(updateAllCommodityPillsLtp, 1200);
     window._straddleState.pollTimer = setInterval(pollStraddleCycle, 500);
 
     // Fetch initial state asynchronously without blocking spot tickers
@@ -202,11 +205,9 @@ async function initStraddlePlatform() {
         if (document.hidden) {
             // Tab is in background: slow pollers to gentle maintenance heartbeat
             if (window._straddleState.spotTimer) clearInterval(window._straddleState.spotTimer);
-            if (window._straddleState.spotsAllTimer) clearInterval(window._straddleState.spotsAllTimer);
             if (window._straddleState.pollTimer) clearInterval(window._straddleState.pollTimer);
 
             window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 5000);
-            window._straddleState.spotsAllTimer = setInterval(updateAllCommodityPillsLtp, 8000);
             window._straddleState.pollTimer = setInterval(pollStraddleCycle, 10000);
 
             if (typeof stopOptionChainTicker === "function") {
@@ -215,15 +216,12 @@ async function initStraddlePlatform() {
         } else {
             // Tab restored to focus: immediately restore lightning-fast polling and trigger fresh ticks
             if (window._straddleState.spotTimer) clearInterval(window._straddleState.spotTimer);
-            if (window._straddleState.spotsAllTimer) clearInterval(window._straddleState.spotsAllTimer);
             if (window._straddleState.pollTimer) clearInterval(window._straddleState.pollTimer);
 
             window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 300);
-            window._straddleState.spotsAllTimer = setInterval(updateAllCommodityPillsLtp, 1200);
             window._straddleState.pollTimer = setInterval(pollStraddleCycle, 500);
 
             fetchLiveSpotTick();
-            updateAllCommodityPillsLtp();
             pollStraddleCycle();
 
             const modal = document.getElementById("straddleOptionChainModal");
@@ -285,7 +283,29 @@ function updateSpotPriceDisplay(spot, atm, und) {
             }
         }
 
-        // Live update active asset's pill LTP
+        // Live update focused asset hero card LTP and ATM
+        const heroLtpEl = document.getElementById("activeUndLtp");
+        if (heroLtpEl) {
+            heroLtpEl.textContent = "₹ " + fmtPrice;
+            if (prev > 0 && Math.abs(numSpot - prev) > 0.01) {
+                const isUp = numSpot > prev;
+                heroLtpEl.classList.remove("tick-flash-up", "tick-flash-down");
+                heroLtpEl.classList.add(isUp ? "tick-flash-up" : "tick-flash-down");
+                setTimeout(() => {
+                    if (heroLtpEl) heroLtpEl.classList.remove("tick-flash-up", "tick-flash-down");
+                }, 300);
+            }
+        }
+
+        const heroAtmEl = document.getElementById("activeUndAtm");
+        if (heroAtmEl && atm && Number(atm) > 0) {
+            const numAtm = Number(atm);
+            heroAtmEl.textContent = (numAtm >= 1000) ?
+                numAtm.toLocaleString("en-IN", { maximumFractionDigits: 0 }) :
+                numAtm.toString();
+        }
+
+        // Live update active asset's legacy pill LTP
         const pillLtpEl = document.getElementById(`pillLtp_${clean}`);
         if (pillLtpEl) {
             pillLtpEl.textContent = "₹" + fmtPrice;
@@ -296,22 +316,7 @@ function updateSpotPriceDisplay(spot, atm, und) {
 }
 
 async function updateAllCommodityPillsLtp() {
-    try {
-        const resp = await fetch("/api/straddle/spots");
-        const data = await resp.json();
-        if (data && data.success && data.spots) {
-            Object.entries(data.spots).forEach(([und, price]) => {
-                const el = document.getElementById(`pillLtp_${und}`);
-                if (el && price && Number(price) > 0) {
-                    const numP = Number(price);
-                    const fmtPrice = (numP >= 1000) ? 
-                        numP.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 
-                        numP.toFixed(2);
-                    el.textContent = "₹" + fmtPrice;
-                }
-            });
-        }
-    } catch (_) {}
+    // Single active asset mode: Handled directly and continuously by fetchLiveSpotTick (<300ms)
 }
 window.updateAllCommodityPillsLtp = updateAllCommodityPillsLtp;
 
@@ -536,6 +541,13 @@ function switchStraddleSubView(view) {
     } else if (view === "algos") {
         renderStraddleAlgosTable(true);
     } else if (view === "terminal") {
+        // Stop background chart, basket, and option chain tickers for maximum responsiveness & 0ms CPU waste
+        if (typeof stopChartTickStream === "function") stopChartTickStream();
+        if (typeof stopBasketQuoteTicker === "function") stopBasketQuoteTicker();
+        if (typeof stopBasketSearchQuoteTicker === "function") stopBasketSearchQuoteTicker();
+        if (typeof stopOptionChainTicker === "function") stopOptionChainTicker();
+        if (typeof closeMarketDepthModal === "function") closeMarketDepthModal();
+
         // Ensure settings & builder panel is open and visible
         const settingsPanel = document.getElementById("straddleSettingsPanel");
         if (settingsPanel) settingsPanel.style.display = "block";
@@ -1065,13 +1077,17 @@ function renderStraddleAlgosTable(forceRebuild = false) {
     const strategies = window._straddleState.allStrategies || [];
     const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
 
-    // Filter strategies
+    const activeUnd = String(window._activeGlobalUnderlying || "NIFTY").toUpperCase().replace(/\s+/g, '');
+    const showAll = window._showAllUnderlyingsAlgos === true;
+
+    // Filter strategies focused on active underlying
     let filtered = strategies.filter(s => {
+        const und = String(s.underlying || "NIFTY").toUpperCase().replace(/\s+/g, '');
+        if (!showAll && und !== activeUnd) return false;
         if (searchVal) {
             const name = (s.name || s.strategy_id).toLowerCase();
-            const und = (s.underlying || "NIFTY").toLowerCase();
             const status = (s.status || "Ready").toLowerCase();
-            if (!name.includes(searchVal) && !und.includes(searchVal) && !status.includes(searchVal)) return false;
+            if (!name.includes(searchVal) && !und.toLowerCase().includes(searchVal) && !status.includes(searchVal)) return false;
         }
         return true;
     });
@@ -1089,11 +1105,12 @@ function renderStraddleAlgosTable(forceRebuild = false) {
     updateBulkActionsBar();
 
     if (filtered.length === 0) {
+        const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
         tbody.innerHTML = `
             <tr>
-                <td colspan="11" style="text-align:center; padding:36px 14px; color:#64748b;">
-                    <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Algorithmic Strategies Found</div>
-                    <div style="font-size:12px;">Click <b>+ Add Algo</b> above to instantiate a Straddle / Strangle strategy.</div>
+                <td colspan="12" style="text-align:center; padding:36px 14px; color:#64748b;">
+                    <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Algorithmic Strategies Found for ${dispName}</div>
+                    <div style="font-size:12px;">Click <b>+ Add Algo</b> above to instantiate a strategy for ${dispName}, or click <b>Show All Assets</b> to view all algos.</div>
                 </td>
             </tr>
         `;
@@ -1162,6 +1179,15 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 const switchInput = document.querySelector(`input[data-enable-sid="${sid}"]`);
                 if (switchInput && switchInput !== document.activeElement) {
                     switchInput.checked = isEnabled;
+                }
+
+                const advSwitchInput = document.querySelector(`input[data-adv-sl-sid="${sid}"]`);
+                if (advSwitchInput && advSwitchInput !== document.activeElement) {
+                    const adv = s.advanced || s.advanced_settings || {};
+                    const isAdv = (adv.sl_order_placement === "Place in advance");
+                    advSwitchInput.checked = isAdv;
+                    const slider = advSwitchInput.nextElementSibling;
+                    if (slider) slider.style.background = isAdv ? "#10b981" : "";
                 }
 
                 const mtm = s.mtm || 0.0;
@@ -1282,6 +1308,8 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         const endTime = s.end_time || "15:29:50";
         const schedDays = s.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
         const entryErr = s.entry_error || "-";
+        const adv = s.advanced || s.advanced_settings || {};
+        const isAdvSl = (adv.sl_order_placement === "Place in advance");
         const isErrActive = (entryErr !== "-" && !entryErr.toLowerCase().includes("waiting"));
 
         // Build interactive day selector badges
@@ -1308,6 +1336,12 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                     <label class="quantiply-switch" title="Toggle Auto Execution">
                         <input type="checkbox" data-enable-sid="${s.strategy_id}" ${isEnabled ? "checked" : ""} onchange="onToggleAlgoEnable('${s.strategy_id}', this.checked)">
                         <span class="quantiply-slider"></span>
+                    </label>
+                </td>
+                <td style="text-align:center;">
+                    <label class="quantiply-switch" title="Place Stoploss order directly on Exchange matching engine (<1ms fill)">
+                        <input type="checkbox" data-adv-sl-sid="${s.strategy_id}" ${isAdvSl ? "checked" : ""} onchange="toggleAlgoAdvanceSl('${s.strategy_id}', this.checked)">
+                        <span class="quantiply-slider" style="${isAdvSl ? 'background:#10b981;' : ''}"></span>
                     </label>
                 </td>
                 <td>
@@ -1461,6 +1495,51 @@ function toggleDropdownMenu(id, evt) {
         target.classList.add("show");
     }
 }
+
+async function toggleAlgoAdvanceSl(strategyId, isChecked) {
+    const strat = (window._straddleState.allStrategies || []).find(s => s.strategy_id === strategyId);
+    if (strat) {
+        if (!strat.advanced) strat.advanced = {};
+        strat.advanced.sl_order_placement = isChecked ? "Place in advance" : "Keep with self";
+        if (strat.advanced_settings) strat.advanced_settings.sl_order_placement = strat.advanced.sl_order_placement;
+        renderStraddleAlgosTable(false);
+    }
+    const name = strat ? strat.name : strategyId;
+    showStraddleToast(
+        isChecked ? `Strategy '${name}': Advance Exchange SL Activated (0ms Fill)` : `Strategy '${name}': Software SL Activated`,
+        isChecked ? "success" : "info",
+        2000
+    );
+
+    try {
+        const resp = await fetch("/api/straddle/strategy/toggle_advance_sl", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ strategy_id: strategyId, enabled: isChecked })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            await fetchStraddleState();
+        } else {
+            showStraddleToast("Advance SL update failed: " + (res.error || "Unknown error"), "error", 3000);
+        }
+    } catch (e) {
+        showStraddleToast("Advance SL error: " + e.message, "error", 3000);
+    }
+}
+window.toggleAlgoAdvanceSl = toggleAlgoAdvanceSl;
+
+function toggleShowAllUnderlyingsAlgos() {
+    window._showAllUnderlyingsAlgos = !window._showAllUnderlyingsAlgos;
+    const btn = document.getElementById("btnToggleShowAllAlgos");
+    if (btn) {
+        btn.textContent = window._showAllUnderlyingsAlgos ? "Show Focused Asset Only" : "Show All Assets";
+        btn.classList.toggle("btn-primary", window._showAllUnderlyingsAlgos);
+        btn.classList.toggle("btn-outline", !window._showAllUnderlyingsAlgos);
+    }
+    renderStraddleAlgosTable(true);
+}
+window.toggleShowAllUnderlyingsAlgos = toggleShowAllUnderlyingsAlgos;
 
 async function onToggleAlgoEnable(strategyId, isChecked) {
     const strat = (window._straddleState.allStrategies || []).find(s => s.strategy_id === strategyId);
@@ -10820,12 +10899,17 @@ window._chartTickTimer = null;
 
 const COMMODITY_DISPLAY_NAMES = {
     "NIFTY": "NIFTY 50",
+    "BANKNIFTY": "BANKNIFTY",
+    "FINNIFTY": "FINNIFTY",
+    "MIDCPNIFTY": "MIDCPNIFTY",
+    "SENSEX": "SENSEX",
+    "BANKEX": "BANKEX",
     "CRUDEOIL": "Crude Oil",
     "NATURALGAS": "Natural Gas",
     "GOLD": "Gold",
     "SILVER": "Silver",
     "CRUDEOILM": "Crude Oil Mini",
-    "NATGASMINI": "Natural Gas Mini",
+    "NATGASMINI": "Nat Gas Mini",
     "GOLDM": "Gold Mini",
     "SILVERM": "Silver Mini",
     "COPPER": "Copper"
@@ -10833,6 +10917,11 @@ const COMMODITY_DISPLAY_NAMES = {
 
 const COMMODITY_COLOR_MAP = {
     "NIFTY": "#38bdf8",
+    "BANKNIFTY": "#818cf8",
+    "FINNIFTY": "#a78bfa",
+    "MIDCPNIFTY": "#2dd4bf",
+    "SENSEX": "#f43f5e",
+    "BANKEX": "#fb7185",
     "CRUDEOIL": "#f43f5e",
     "NATURALGAS": "#f59e0b",
     "GOLD": "#eab308",
@@ -10848,20 +10937,47 @@ function selectGlobalUnderlying(undKey) {
     if (!undKey) return;
     const cleanKey = undKey.toUpperCase().replace(/\s+/g, '');
     window._activeGlobalUnderlying = cleanKey;
+    try {
+        localStorage.setItem("straddle_active_underlying", cleanKey);
+    } catch (_) {}
 
-    // 1. Update UI pill states
+    const dispName = COMMODITY_DISPLAY_NAMES[cleanKey] || cleanKey;
+    const color = COMMODITY_COLOR_MAP[cleanKey] || "#38bdf8";
+
+    // 1. Sync global top bar dropdown
+    const globalSel = document.getElementById("globalUnderlyingSelect");
+    if (globalSel && globalSel.value !== cleanKey) {
+        globalSel.value = cleanKey;
+    }
+
+    // 2. Update Focused Asset Hero Card
+    const nameEl = document.getElementById("activeUndName");
+    if (nameEl) {
+        nameEl.textContent = dispName;
+        nameEl.style.color = color;
+    }
+    const dotEl = document.getElementById("activeUndDot");
+    if (dotEl) {
+        dotEl.style.background = color;
+        dotEl.style.boxShadow = `0 0 10px ${color}`;
+    }
+    const cardEl = document.getElementById("activeUndCard");
+    if (cardEl) {
+        cardEl.style.borderColor = color;
+    }
+
+    // 3. Update legacy pills states if any exist
     const pills = document.querySelectorAll(".commodity-pill");
     pills.forEach(p => {
         const isMatch = (p.getAttribute("data-und") === cleanKey);
         p.classList.toggle("active", isMatch);
     });
 
-    // 2. Update Header Spot Label & Ticker
+    // 4. Update Header Spot Label & Ticker
     const labelEl = document.getElementById("straddleUnderlyingLabel");
     if (labelEl) {
-        const dispName = COMMODITY_DISPLAY_NAMES[cleanKey] || cleanKey;
         labelEl.textContent = `${dispName.toUpperCase()}:`;
-        labelEl.style.color = COMMODITY_COLOR_MAP[cleanKey] || "#38bdf8";
+        labelEl.style.color = color;
     }
 
     const chartBtnLabel = document.getElementById("btnActiveAssetChartLabel");
@@ -10869,7 +10985,12 @@ function selectGlobalUnderlying(undKey) {
         chartBtnLabel.textContent = `Chart (${cleanKey})`;
     }
 
-    // 3. Sync Option Chain underlying selector if modal exists
+    // 5. Sync Option Chain read-only badge & underlying selector
+    const optBadge = document.getElementById("optChainUnderlyingBadge");
+    if (optBadge) {
+        optBadge.textContent = dispName;
+        optBadge.style.color = color;
+    }
     const optUndSel = document.getElementById("optChainUnderlyingSelect");
     if (optUndSel && optUndSel.value !== cleanKey) {
         optUndSel.value = cleanKey;
@@ -10881,11 +11002,12 @@ function selectGlobalUnderlying(undKey) {
         }
     }
 
-    // 4. Sync Algo builder modal default underlying
-    const newAlgoUnd = document.getElementById("newAlgoUnderlying");
-    if (newAlgoUnd) newAlgoUnd.value = cleanKey;
-
-    // 5. Sync Basket underlying selector and empty basket if underlying changed
+    // 6. Sync Basket read-only badge & underlying selector
+    const basketBadge = document.getElementById("basketUnderlyingBadge");
+    if (basketBadge) {
+        basketBadge.textContent = dispName;
+        basketBadge.style.color = color;
+    }
     const basketUndSel = document.getElementById("basketUnderlyingSelect");
     if (basketUndSel && basketUndSel.value !== cleanKey) {
         basketUndSel.value = cleanKey;
@@ -10894,16 +11016,37 @@ function selectGlobalUnderlying(undKey) {
         }
     }
 
-    // 6. If Live Chart modal is currently open, switch chart immediately
+    // 7. Sync Algos table focused asset badge
+    const algosBadge = document.getElementById("algosFocusedUnderlyingBadge");
+    if (algosBadge) {
+        algosBadge.textContent = `Focused: ${dispName}`;
+        algosBadge.style.color = color;
+    }
+
+    // 8. Sync Algo builder modal default underlying
+    const newAlgoUnd = document.getElementById("newAlgoUnderlying");
+    if (newAlgoUnd) newAlgoUnd.value = cleanKey;
+
+    // 9. If Live Chart modal is currently open, switch chart immediately
     const chartModal = document.getElementById("modalLiveChart");
     if (chartModal && chartModal.style.display === "flex") {
         openActiveAssetChartModal(cleanKey);
     }
 
-    // 7. Fetch live tick immediately
+    // 10. Filter Algos table for this active underlying
+    renderStraddleAlgosTable(true);
+
+    // 11. Notify Backend of focused active underlying (zero API contention)
+    fetch("/api/straddle/set_active_underlying", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ underlying: cleanKey })
+    }).catch(() => {});
+
+    // 12. Fetch live tick immediately
     fetchLiveSpotTick();
 
-    showStraddleToast(`Active Asset: ${COMMODITY_DISPLAY_NAMES[cleanKey] || cleanKey}`, "info", 1500);
+    showStraddleToast(`Active Asset: ${dispName}`, "info", 1500);
 }
 window.selectGlobalUnderlying = selectGlobalUnderlying;
 

@@ -161,19 +161,39 @@ def api_straddle_spot():
 
 @app.route("/api/straddle/spots", methods=["GET"])
 def api_straddle_spots():
-    """Return cached live spot LTP for all tracked commodity & equity underlyings."""
+    """Return cached live spot LTP for focused active underlying."""
     try:
         mgr = get_straddle_manager()
-        tracked = [
-            "NIFTY", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER",
-            "CRUDEOILM", "NATGASMINI", "GOLDM", "SILVERM", "COPPER"
-        ]
-        spots = {}
-        for und in tracked:
-            spots[und] = mgr.get_cached_spot_price(und)
+        active_und = mgr.get_active_underlying()
+        spots = {active_und: mgr.get_cached_spot_price(active_und)}
         resp = jsonify({
             "success": True,
+            "active_underlying": active_und,
             "spots": spots,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        })
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/set_active_underlying", methods=["POST"])
+def api_straddle_set_active_underlying():
+    """Set the focused active underlying across the entire platform."""
+    try:
+        data = request.get_json(silent=True) or {}
+        und = data.get("underlying") or request.args.get("underlying") or "NIFTY"
+        mgr = get_straddle_manager()
+        clean = mgr.set_active_underlying(und)
+        spot = mgr.get_cached_spot_price(clean)
+        step = float(getattr(config, "STRIKE_STEPS", {}).get(clean, 50))
+        atm = round(spot / step) * step if (spot > 0 and step > 0) else 0
+        resp = jsonify({
+            "success": True,
+            "underlying": clean,
+            "spot": spot,
+            "atm": atm,
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -618,6 +638,22 @@ def api_straddle_strategy_toggle_enable():
             return jsonify({"success": False, "error": "No strategy ID provided"}), 400
         mgr = get_straddle_manager()
         res = mgr.toggle_strategy_enable(sid, enabled)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/strategy/toggle_advance_sl", methods=["POST"])
+def api_straddle_strategy_toggle_advance_sl():
+    """Toggle Advance Stoploss order placement directly with broker (<1ms exchange fill)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id") or data.get("id") or ""
+        enabled = bool(data.get("enabled", True))
+        if not sid:
+            return jsonify({"success": False, "error": "No strategy ID provided"}), 400
+        mgr = get_straddle_manager()
+        res = mgr.toggle_strategy_advance_sl(sid, enabled)
         return jsonify(res)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

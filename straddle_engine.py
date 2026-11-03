@@ -632,6 +632,9 @@ class StraddleManager:
         self._cached_margin_ts: float = 0.0
         self._last_ob_sync_ts: float = 0.0
         self._ob_cache: Dict[str, Dict[str, Any]] = {}
+        self._last_inst_stat_ts: float = 0.0
+        self._fast_resolved_contract_cache: Dict[Any, Dict[str, Any]] = {}
+        self._active_underlying: str = "NIFTY"
 
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -640,12 +643,14 @@ class StraddleManager:
         self._init_storage()
         self._load_strategies()
         self._load_state()
+        self._active_underlying = str(self._state.get("underlying_symbol") or "NIFTY").upper().replace(" ", "")
         self._load_logs()
         self._load_pnl_history()
         self._load_orderbook()
         self._load_order_registry()
         try:
             self._load_instruments_data()
+            self._preindex_active_underlying_strikes(self._active_underlying)
         except Exception as e:
             logger.warning(f"Note loading instruments on init: {e}")
         self._start_runner()
@@ -929,6 +934,11 @@ class StraddleManager:
             else:
                 return []
 
+        now_ts = time.time()
+        if self._instruments_cache is not None and (now_ts - getattr(self, "_last_inst_stat_ts", 0.0)) < 60.0:
+            return self._instruments_cache
+        self._last_inst_stat_ts = now_ts
+
         mtime = instrument_path.stat().st_mtime
         if self._instruments_cache is not None and mtime == self._instruments_mtime:
             return self._instruments_cache
@@ -939,6 +949,8 @@ class StraddleManager:
                     data = json.load(handle)
                     self._instruments_cache = data
                     self._instruments_mtime = mtime
+                    if hasattr(self, "_fast_resolved_contract_cache"):
+                        self._fast_resolved_contract_cache.clear()
 
                     # Build ultra-fast O(1) indexed options lookup by (segment, clean_und) and exact key
                     indexed: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
@@ -2248,7 +2260,20 @@ class StraddleManager:
 
         step = STRIKE_STEPS.get(clean_und, 50)
         spot_price = self._get_underlying_spot_price(clean_und)
-        atm_strike = round(spot_price / step) * step
+        atm_strike = round(spot_price / step) * step if spot_price > 0 else 0.0
+
+        # Ultra-low latency memory cache (<0.01ms resolution without disk or network)
+        cache_k = (
+            clean_und,
+            float(atm_strike),
+            str(strike_selection).upper().strip(),
+            str(option_type).upper().strip(),
+            str(expiry_type).lower().strip(),
+            custom_expiry_ms,
+            str(multiple_strike_selection).lower().strip(),
+        )
+        if hasattr(self, "_fast_resolved_contract_cache") and cache_k in self._fast_resolved_contract_cache:
+            return dict(self._fast_resolved_contract_cache[cache_k])
 
         target_strike = atm_strike
         s_sel = strike_selection.upper().replace("_", " ").strip()
@@ -2325,7 +2350,7 @@ class StraddleManager:
             if hasattr(self, "_exact_contract_index") and exact_k in self._exact_contract_index:
                 best_match = self._exact_contract_index[exact_k]
                 resolved_lot_size = int(best_match.get("lot_size") or get_lot_size_for_symbol(best_match.get("trading_symbol", clean_und), best_match.get("instrument_key", "")))
-                return {
+                res_item = {
                     "instrument_key": best_match["instrument_key"],
                     "trading_symbol": best_match["trading_symbol"],
                     "strike_price": float(best_match["strike_price"]),
@@ -2335,6 +2360,9 @@ class StraddleManager:
                     "underlying": clean_und,
                     "segment": target_seg.lower(),
                 }
+                if hasattr(self, "_fast_resolved_contract_cache"):
+                    self._fast_resolved_contract_cache[cache_k] = dict(res_item)
+                return res_item
 
         # Fast fallback pool filtered by (segment, underlying) ~200 items instead of 100,000
         und_pool = getattr(self, "_options_by_und", {}).get((target_seg, clean_und)) or getattr(self, "_options_by_und", {}).get((target_seg.upper(), clean_und))
@@ -2391,7 +2419,7 @@ class StraddleManager:
 
         best_match = min(candidates, key=lambda c: abs(float(c.get("strike_price", 0.0)) - target_strike))
         resolved_lot_size = int(best_match.get("lot_size") or get_lot_size_for_symbol(best_match.get("trading_symbol", clean_und), best_match.get("instrument_key", "")))
-        return {
+        fallback_res = {
             "instrument_key": best_match["instrument_key"],
             "trading_symbol": best_match["trading_symbol"],
             "strike_price": float(best_match["strike_price"]),
@@ -2401,6 +2429,116 @@ class StraddleManager:
             "underlying": clean_und,
             "segment": target_seg.lower(),
         }
+        if hasattr(self, "_fast_resolved_contract_cache"):
+            self._fast_resolved_contract_cache[cache_k] = dict(fallback_res)
+        return fallback_res
+
+    def _preindex_active_underlying_strikes(self, underlying: str = "NIFTY"):
+        """Pre-indexes ATM and nearby strike contracts directly in memory for <5ms zero-latency re-entries."""
+        clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
+        step = STRIKE_STEPS.get(clean_und, 50)
+        spot = self.get_cached_spot_price(clean_und)
+        if spot <= 0:
+            spot = 23200.0 if clean_und == "NIFTY" else (50000.0 if clean_und == "BANKNIFTY" else 10000.0)
+        atm_strike = round(spot / step) * step if spot > 0 else 0.0
+
+        expiries = ["Weekly", "Monthly"]
+        opt_types = ["CE", "PE"]
+        rel_selections = ["ATM"] + [f"OTM {i}" for i in range(1, 11)] + [f"ITM {i}" for i in range(1, 6)]
+        
+        pre_count = 0
+        for exp in expiries:
+            for ot in opt_types:
+                for s_sel in rel_selections:
+                    try:
+                        c = self.resolve_strike_and_contract(
+                            underlying=clean_und,
+                            strike_selection=s_sel,
+                            option_type=ot,
+                            expiry_type=exp
+                        )
+                        if c:
+                            pre_count += 1
+                    except Exception:
+                        pass
+                if atm_strike > 0:
+                    for i in range(-15, 16):
+                        strk_val = str(int(atm_strike + i * step))
+                        try:
+                            c = self.resolve_strike_and_contract(
+                                underlying=clean_und,
+                                strike_selection=strk_val,
+                                option_type=ot,
+                                expiry_type=exp
+                            )
+                            if c:
+                                pre_count += 1
+                        except Exception:
+                            pass
+        logger.info(f"Pre-cached strike contracts in memory for {clean_und} (ATM {atm_strike}) -> {pre_count} contracts hot in RAM.")
+
+    def get_active_underlying(self) -> str:
+        """Returns the single focused active underlying symbol."""
+        with _ENGINE_LOCK:
+            return str(getattr(self, "_active_underlying", None) or self._state.get("underlying_symbol") or "NIFTY").upper().replace(" ", "")
+
+    def set_active_underlying(self, underlying: str) -> str:
+        """Sets the single focused active underlying across the entire platform."""
+        clean = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
+        with _ENGINE_LOCK:
+            self._active_underlying = clean
+            self._state["underlying_symbol"] = clean
+            step = STRIKE_STEPS.get(clean, 50)
+            spot = self.get_cached_spot_price(clean)
+            if spot > 0:
+                self._state["underlying_spot"] = spot
+                self._state["underlying_atm_strike"] = round(spot / step) * step
+                self._state["last_tick_time"] = now_ist_str()
+        
+        try:
+            self._preindex_active_underlying_strikes(clean)
+        except Exception as e_pre:
+            logger.debug(f"Pre-indexing strikes error: {e_pre}")
+
+        self._save_state(force=True)
+        self._log_event(f"Focused Underlying switched to: {clean}")
+        return clean
+
+    def toggle_strategy_advance_sl(self, strategy_id: str, enabled: bool) -> Dict[str, Any]:
+        """Toggles placing advance Stoploss orders on Exchange matching engine (<1ms) vs keeping in software."""
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy {strategy_id} not found"}
+            adv = strat.setdefault("advanced", {})
+            val = "Place in advance" if enabled else "Keep with self"
+            adv["sl_order_placement"] = val
+            if "advanced_settings" in strat and isinstance(strat["advanced_settings"], dict):
+                strat["advanced_settings"]["sl_order_placement"] = val
+
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+
+            # If enabled, place advance SL for open positions without an active broker SL order
+            if enabled and mode == "LIVE_BROKER":
+                for pos in strat.get("positions", []):
+                    if pos.get("status") == "OPEN" and not pos.get("sl_broker_order_id") and float(pos.get("sl_price", 0)) > 0:
+                        threading.Thread(target=self._place_advance_sl_order, args=(broker, pos, 0), daemon=True).start()
+            elif not enabled and mode == "LIVE_BROKER":
+                # If disabled, cancel existing advance SL orders on broker to revert to software trigger
+                for pos in strat.get("positions", []):
+                    adv_sl_oid = pos.get("sl_broker_order_id")
+                    if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                        try:
+                            broker.cancel_order(str(adv_sl_oid))
+                        except Exception:
+                            pass
+                        pos["sl_broker_order_id"] = None
+
+            self._save_strategies()
+            self._save_state(force=True)
+            self._log_event(f"Strategy '{strat.get('name')}' Advance Broker SL set to: {val}")
+            return {"success": True, "strategy_id": strategy_id, "sl_order_placement": val, "enabled": enabled}
 
     # ==========================================================
     # Strategy CRUD & Multi-Algo Management
@@ -8588,15 +8726,21 @@ class StraddleManager:
             self._spot_thread.start()
 
     def _spot_feed_loop(self):
-        logger.info("Straddle Engine background spot ticker loop started (continuous multi-asset daemon).")
-        tracked_assets = [
-            "NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY",
-            "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "CRUDEOILM", "NATGASMINI", "GOLDM", "SILVERM", "COPPER"
-        ]
+        logger.info("Straddle Engine background spot ticker loop started (single-asset focused daemon).")
         while not self._stop_event.is_set():
             try:
                 now_ts = time.time()
-                # 1. Single batch quote fetch from Kotak Neo for all tracked assets
+                active_und = self.get_active_underlying()
+                needed_assets = {active_und}
+                for s in self._strategies:
+                    if s.get("enabled", False) or any(p.get("status") == "OPEN" for p in s.get("positions", [])):
+                        u = s.get("underlying")
+                        if u:
+                            needed_assets.add(u.upper().replace(" ", ""))
+
+                tracked_assets = list(needed_assets)
+
+                # 1. Single batch quote fetch from Kotak Neo for focused assets only (zero quota contention)
                 try:
                     adapter = get_broker_adapter()
                     batch_keys = []
@@ -8619,41 +8763,44 @@ class StraddleManager:
                                         _LAST_SPOT_FETCH_TS[und] = now_ts
                                     break
                 except Exception as ex_b:
-                    logger.debug(f"Batch spot loop broker note: {ex_b}")
+                    logger.debug(f"Focused spot loop broker note: {ex_b}")
 
-                # 2. For equity indices, if broker didn't return fresh quote, check network index feed
-                for und in ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"]:
-                    with _SPOT_FETCH_LOCK:
-                        has_fresh = (und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(und, 0)) < 3.0)
-                    if not has_fresh:
-                        p = _fetch_live_index_spot_network(und)
-                        if p > 0:
-                            with _SPOT_FETCH_LOCK:
-                                _SPOT_CACHE[und] = p
-                                _LAST_SPOT_FETCH_TS[und] = now_ts
+                # 2. For equity indices, if broker didn't return fresh quote, check network index feed ONLY if in tracked_assets
+                for und in tracked_assets:
+                    if und in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"):
+                        with _SPOT_FETCH_LOCK:
+                            has_fresh = (und in _SPOT_CACHE and (now_ts - _LAST_SPOT_FETCH_TS.get(und, 0)) < 3.0)
+                        if not has_fresh:
+                            p = _fetch_live_index_spot_network(und)
+                            if p > 0:
+                                with _SPOT_FETCH_LOCK:
+                                    _SPOT_CACHE[und] = p
+                                    _LAST_SPOT_FETCH_TS[und] = now_ts
 
                 # Sync active underlying spot into state
-                cur_und = self._state.get("underlying_symbol", "NIFTY")
+                cur_und = active_und
                 with _SPOT_FETCH_LOCK:
                     cur_spot = _SPOT_CACHE.get(cur_und, 0.0)
                 if cur_spot > 0:
                     with _ENGINE_LOCK:
                         self._state["underlying_spot"] = cur_spot
+                        self._state["underlying_symbol"] = cur_und
                         step = STRIKE_STEPS.get(cur_und.upper(), 50)
                         self._state["underlying_atm_strike"] = round(cur_spot / step) * step
                         self._state["last_tick_time"] = now_ist_str()
             except Exception as e:
                 logger.debug(f"Spot tick note: {e}")
-            time.sleep(1.2)
+            time.sleep(1.0)
 
     def _runner_loop(self):
-        logger.info("Straddle Engine background evaluation loop started.")
+        logger.info("Straddle Engine background evaluation loop started (ultra-low latency).")
+        cycle_interval = getattr(config, "EXECUTION_CYCLE_INTERVAL_SEC", 0.025)
         while not self._stop_event.is_set():
             try:
                 self._evaluate_cycle()
             except Exception as e:
                 logger.error(f"Error in straddle evaluation cycle: {e}")
-            time.sleep(0.3)
+            time.sleep(cycle_interval)
 
     def _evaluate_cycle(self):
         with _ENGINE_LOCK:
@@ -8667,7 +8814,7 @@ class StraddleManager:
                 self._reconcile_broker_positions(broker)
 
             active_strat = self.get_strategy(self._active_strategy_id)
-            und = active_strat.get("underlying", "NIFTY") if active_strat else "NIFTY"
+            und = self.get_active_underlying()
             spot_price = self._get_underlying_spot_price(und)
             step = STRIKE_STEPS.get(und.upper(), 50)
             atm_strike = round(spot_price / step) * step if spot_price > 0 else 0.0

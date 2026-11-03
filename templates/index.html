@@ -274,137 +274,84 @@
             }
         </style>
 
-        <div class="commodity-bar-container" id="commodityTopBar">
-            <div class="commodity-pills-strip" id="commodityPillsStrip">
-                <!-- 1. NIFTY (Sky Blue) -->
-                <div class="commodity-pill active" data-und="NIFTY" id="pill_NIFTY" onclick="selectGlobalUnderlying('NIFTY')"
-                    style="--pill-color:#38bdf8; --pill-bg:rgba(56,189,248,0.12); --pill-border:rgba(56,189,248,0.5); --pill-glow:rgba(56,189,248,0.45); --pill-name-color:#38bdf8; --pill-active-bg:rgba(12,28,56,0.95);"
-                    title="NIFTY - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('NIFTY')" title="📈 Click to open NIFTY Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">NIFTY</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('NIFTY')" title="⛓️ Click to open NIFTY Option Chain">
-                        <span class="pill-ltp" id="pillLtp_NIFTY">--</span>
-                    </div>
+        <div class="commodity-bar-container" id="commodityTopBar" style="padding:10px 16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+            <!-- Left: Dropdown menu for Single Focused Underlying -->
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <div style="display:inline-flex; align-items:center; gap:8px; background:linear-gradient(135deg, #090d16 0%, #111827 100%); border:1px solid rgba(56,189,248,0.35); padding:5px 12px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.4);">
+                    <span style="font-size:12px;">🎯</span>
+                    <label for="globalUnderlyingSelect" style="font-size:11.5px; font-weight:800; color:#94a3b8; letter-spacing:0.5px; text-transform:uppercase;">FOCUS ASSET:</label>
+                    <select id="globalUnderlyingSelect" onchange="selectGlobalUnderlying(this.value)" style="background:#030712; color:#38bdf8; font-weight:800; font-size:13px; border:1px solid #2563eb; border-radius:6px; padding:4px 10px; cursor:pointer; outline:none;" title="Select single focused underlying asset (switches whole dashboard uniformly)">
+                        <optgroup label="Index F&O (NSE / BSE)">
+                            <option value="NIFTY" selected>NIFTY 50 (NSE)</option>
+                            <option value="BANKNIFTY">BANKNIFTY (NSE)</option>
+                            <option value="FINNIFTY">FINNIFTY (NSE)</option>
+                            <option value="MIDCPNIFTY">MIDCPNIFTY (NSE)</option>
+                            <option value="SENSEX">SENSEX (BSE)</option>
+                            <option value="BANKEX">BANKEX (BSE)</option>
+                        </optgroup>
+                        <optgroup label="Commodities F&O (MCX)">
+                            <option value="GOLD">Gold (MCX)</option>
+                            <option value="GOLDM">Gold Mini (MCX)</option>
+                            <option value="SILVER">Silver (MCX)</option>
+                            <option value="SILVERM">Silver Mini (MCX)</option>
+                            <option value="CRUDEOIL">Crude Oil (MCX)</option>
+                            <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
+                            <option value="NATURALGAS">Natural Gas (MCX)</option>
+                            <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
+                            <option value="COPPER">Copper (MCX)</option>
+                        </optgroup>
+                    </select>
                 </div>
 
-                <!-- 2. Crude Oil (Crimson Rose) -->
-                <div class="commodity-pill" data-und="CRUDEOIL" id="pill_CRUDEOIL" onclick="selectGlobalUnderlying('CRUDEOIL')"
-                    style="--pill-color:#f43f5e; --pill-bg:rgba(244,63,94,0.12); --pill-border:rgba(244,63,94,0.5); --pill-glow:rgba(244,63,94,0.45); --pill-name-color:#fb7185; --pill-active-bg:rgba(45,12,24,0.95);"
-                    title="Crude Oil - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('CRUDEOIL')" title="📈 Click to open Crude Oil Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Crude Oil</span>
+                <!-- Center Hero Card: Focused Asset Live Quote & ATM -->
+                <div class="commodity-pill active" id="activeUndCard" style="display:inline-flex; align-items:center; gap:12px; padding:4px 14px; margin:0; border-radius:8px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.5); box-shadow:0 0 12px rgba(56,189,248,0.25);" title="Focused Active Underlying Quote & Execution Status">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span class="pill-dot" id="activeUndDot" style="background:#38bdf8; box-shadow:0 0 8px #38bdf8; width:8px; height:8px; border-radius:50%;"></span>
+                        <span id="activeUndName" style="font-weight:800; font-size:13.5px; color:#38bdf8; letter-spacing:0.5px;">NIFTY</span>
                     </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('CRUDEOIL')" title="⛓️ Click to open Crude Oil Option Chain">
-                        <span class="pill-ltp" id="pillLtp_CRUDEOIL">--</span>
+                    <span style="color:rgba(255,255,255,0.2);">|</span>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">SPOT:</span>
+                        <span id="activeUndLtp" style="font-family:var(--font-mono); font-weight:800; font-size:14px; color:#ffffff;">₹ --</span>
+                    </div>
+                    <span style="color:rgba(255,255,255,0.2);">|</span>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">ATM:</span>
+                        <span id="activeUndAtm" style="font-family:var(--font-mono); font-weight:800; font-size:13px; color:#60a5fa;">--</span>
+                    </div>
+                    <span style="color:rgba(255,255,255,0.2);">|</span>
+                    <div style="display:inline-flex; align-items:center; gap:5px;">
+                        <span class="live-tick-pulse" style="width:7px; height:7px;"></span>
+                        <span style="font-size:10px; font-weight:800; color:#10b981; letter-spacing:0.5px;">LIVE FEED</span>
                     </div>
                 </div>
+            </div>
 
-                <!-- 3. Natural Gas (Amber Flame) -->
-                <div class="commodity-pill" data-und="NATURALGAS" id="pill_NATURALGAS" onclick="selectGlobalUnderlying('NATURALGAS')"
-                    style="--pill-color:#f59e0b; --pill-bg:rgba(245,158,11,0.12); --pill-border:rgba(245,158,11,0.5); --pill-glow:rgba(245,158,11,0.45); --pill-name-color:#fbbf24; --pill-active-bg:rgba(45,28,10,0.95);"
-                    title="Natural Gas - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('NATURALGAS')" title="📈 Click to open Natural Gas Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Natural Gas</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('NATURALGAS')" title="⛓️ Click to open Natural Gas Option Chain">
-                        <span class="pill-ltp" id="pillLtp_NATURALGAS">--</span>
-                    </div>
-                </div>
+            <!-- Right: Quick Navigation Actions for Focused Underlying -->
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="straddle-btn" onclick="openActiveAssetChartModal()" style="background:#0f172a; border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Open Real-time Candlestick Chart for active asset">
+                    <span>📊</span><span id="btnActiveAssetChartLabel">Chart (NIFTY)</span>
+                </button>
+                <button type="button" class="straddle-btn" onclick="openStraddleOptionChainModal()" style="background:#0f172a; border:1px solid rgba(139,92,246,0.4); color:#a78bfa; padding:5px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Open Option Chain Matrix for active asset">
+                    <span>⛓️</span><span>Option Chain</span>
+                </button>
+                <button type="button" class="straddle-btn" onclick="openBasketOrdersModal()" style="background:#0f172a; border:1px solid rgba(16,185,129,0.4); color:#34d399; padding:5px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Open Basket Orders for active asset">
+                    <span>🛒</span><span>Basket</span>
+                </button>
+            </div>
 
-                <!-- 4. Gold (Yellow Gold) -->
-                <div class="commodity-pill" data-und="GOLD" id="pill_GOLD" onclick="selectGlobalUnderlying('GOLD')"
-                    style="--pill-color:#eab308; --pill-bg:rgba(234,179,8,0.14); --pill-border:rgba(234,179,8,0.55); --pill-glow:rgba(234,179,8,0.45); --pill-name-color:#facc15; --pill-active-bg:rgba(42,32,8,0.95);"
-                    title="Gold - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('GOLD')" title="📈 Click to open Gold Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Gold</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('GOLD')" title="⛓️ Click to open Gold Option Chain">
-                        <span class="pill-ltp" id="pillLtp_GOLD">--</span>
-                    </div>
-                </div>
-
-                <!-- 5. Silver (Platinum Silver) -->
-                <div class="commodity-pill" data-und="SILVER" id="pill_SILVER" onclick="selectGlobalUnderlying('SILVER')"
-                    style="--pill-color:#94a3b8; --pill-bg:rgba(148,163,184,0.14); --pill-border:rgba(148,163,184,0.5); --pill-glow:rgba(148,163,184,0.4); --pill-name-color:#cbd5e1; --pill-active-bg:rgba(30,41,59,0.95);"
-                    title="Silver - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('SILVER')" title="📈 Click to open Silver Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Silver</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('SILVER')" title="⛓️ Click to open Silver Option Chain">
-                        <span class="pill-ltp" id="pillLtp_SILVER">--</span>
-                    </div>
-                </div>
-
-                <!-- 6. Crude Oil Mini (Neon Emerald) -->
-                <div class="commodity-pill" data-und="CRUDEOILM" id="pill_CRUDEOILM" onclick="selectGlobalUnderlying('CRUDEOILM')"
-                    style="--pill-color:#10b981; --pill-bg:rgba(16,185,129,0.12); --pill-border:rgba(16,185,129,0.5); --pill-glow:rgba(16,185,129,0.4); --pill-name-color:#34d399; --pill-active-bg:rgba(8,36,24,0.95);"
-                    title="Crude Oil Mini - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('CRUDEOILM')" title="📈 Click to open Crude Oil Mini Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Crude Oil Mini</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('CRUDEOILM')" title="⛓️ Click to open Crude Oil Mini Option Chain">
-                        <span class="pill-ltp" id="pillLtp_CRUDEOILM">--</span>
-                    </div>
-                </div>
-
-                <!-- 7. Natural Gas Mini (Deep Orange) -->
-                <div class="commodity-pill" data-und="NATGASMINI" id="pill_NATGASMINI" onclick="selectGlobalUnderlying('NATGASMINI')"
-                    style="--pill-color:#ea580c; --pill-bg:rgba(234,88,12,0.12); --pill-border:rgba(234,88,12,0.5); --pill-glow:rgba(234,88,12,0.4); --pill-name-color:#fb923c; --pill-active-bg:rgba(45,18,8,0.95);"
-                    title="Natural Gas Mini - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('NATGASMINI')" title="📈 Click to open Natural Gas Mini Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Nat Gas Mini</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('NATGASMINI')" title="⛓️ Click to open Natural Gas Mini Option Chain">
-                        <span class="pill-ltp" id="pillLtp_NATGASMINI">--</span>
-                    </div>
-                </div>
-
-                <!-- 8. Gold Mini (Lime Chartreuse) -->
-                <div class="commodity-pill" data-und="GOLDM" id="pill_GOLDM" onclick="selectGlobalUnderlying('GOLDM')"
-                    style="--pill-color:#84cc16; --pill-bg:rgba(132,204,22,0.12); --pill-border:rgba(132,204,22,0.5); --pill-glow:rgba(132,204,22,0.4); --pill-name-color:#a3e635; --pill-active-bg:rgba(28,38,8,0.95);"
-                    title="Gold Mini - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('GOLDM')" title="📈 Click to open Gold Mini Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Gold Mini</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('GOLDM')" title="⛓️ Click to open Gold Mini Option Chain">
-                        <span class="pill-ltp" id="pillLtp_GOLDM">--</span>
-                    </div>
-                </div>
-
-                <!-- 9. Silver Mini (Royal Violet) -->
-                <div class="commodity-pill" data-und="SILVERM" id="pill_SILVERM" onclick="selectGlobalUnderlying('SILVERM')"
-                    style="--pill-color:#8b5cf6; --pill-bg:rgba(139,92,246,0.12); --pill-border:rgba(139,92,246,0.5); --pill-glow:rgba(139,92,246,0.4); --pill-name-color:#a78bfa; --pill-active-bg:rgba(28,18,54,0.95);"
-                    title="Silver Mini - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('SILVERM')" title="📈 Click to open Silver Mini Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Silver Mini</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('SILVERM')" title="⛓️ Click to open Silver Mini Option Chain">
-                        <span class="pill-ltp" id="pillLtp_SILVERM">--</span>
-                    </div>
-                </div>
-
-                <!-- 10. Copper (Metallic Bronze) -->
-                <div class="commodity-pill" data-und="COPPER" id="pill_COPPER" onclick="selectGlobalUnderlying('COPPER')"
-                    style="--pill-color:#f97316; --pill-bg:rgba(249,115,22,0.13); --pill-border:rgba(249,115,22,0.55); --pill-glow:rgba(249,115,22,0.45); --pill-name-color:#ff8a4c; --pill-active-bg:rgba(46,18,8,0.95);"
-                    title="Copper - Click top to open Candlestick Chart, bottom to open Option Chain">
-                    <div class="pill-name-row" onclick="event.stopPropagation(); onPillNameClick('COPPER')" title="📈 Click to open Copper Candlestick Chart (Kronos AI)">
-                        <span class="pill-dot"></span>
-                        <span class="pill-name">Copper</span>
-                    </div>
-                    <div class="pill-price-row" onclick="event.stopPropagation(); onPillPriceClick('COPPER')" title="⛓️ Click to open Copper Option Chain">
-                        <span class="pill-ltp" id="pillLtp_COPPER">--</span>
-                    </div>
-                </div>
+            <!-- Hidden legacy elements container for complete backward-compatibility -->
+            <div id="commodityPillsStrip" style="display:none !important;">
+                <div class="commodity-pill" data-und="NIFTY" id="pill_NIFTY"><span class="pill-ltp" id="pillLtp_NIFTY">--</span></div>
+                <div class="commodity-pill" data-und="CRUDEOIL" id="pill_CRUDEOIL"><span class="pill-ltp" id="pillLtp_CRUDEOIL">--</span></div>
+                <div class="commodity-pill" data-und="NATURALGAS" id="pill_NATURALGAS"><span class="pill-ltp" id="pillLtp_NATURALGAS">--</span></div>
+                <div class="commodity-pill" data-und="GOLD" id="pill_GOLD"><span class="pill-ltp" id="pillLtp_GOLD">--</span></div>
+                <div class="commodity-pill" data-und="SILVER" id="pill_SILVER"><span class="pill-ltp" id="pillLtp_SILVER">--</span></div>
+                <div class="commodity-pill" data-und="CRUDEOILM" id="pill_CRUDEOILM"><span class="pill-ltp" id="pillLtp_CRUDEOILM">--</span></div>
+                <div class="commodity-pill" data-und="NATGASMINI" id="pill_NATGASMINI"><span class="pill-ltp" id="pillLtp_NATGASMINI">--</span></div>
+                <div class="commodity-pill" data-und="GOLDM" id="pill_GOLDM"><span class="pill-ltp" id="pillLtp_GOLDM">--</span></div>
+                <div class="commodity-pill" data-und="SILVERM" id="pill_SILVERM"><span class="pill-ltp" id="pillLtp_SILVERM">--</span></div>
+                <div class="commodity-pill" data-und="COPPER" id="pill_COPPER"><span class="pill-ltp" id="pillLtp_COPPER">--</span></div>
             </div>
         </div>
 
@@ -621,7 +568,11 @@
                     </div>
                 </div>
                 <div style="display:flex; align-items:center; gap:12px;">
-                    <input type="text" id="straddleAlgosSearch" class="straddle-input" placeholder="Search by Algo name, Status..." style="width:260px;" oninput="renderStraddleAlgosTable()">
+                    <div style="display:inline-flex; align-items:center; gap:8px;">
+                        <span id="algosFocusedUnderlyingBadge" style="font-size:12px; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 12px; border-radius:6px;">Focused: NIFTY</span>
+                        <button type="button" id="btnToggleShowAllAlgos" class="straddle-btn btn-outline" style="padding:5px 10px; font-size:11.5px; font-weight:700;" onclick="toggleShowAllUnderlyingsAlgos()">Show All Assets</button>
+                    </div>
+                    <input type="text" id="straddleAlgosSearch" class="straddle-input" placeholder="Search by Algo name, Status..." style="width:240px;" oninput="renderStraddleAlgosTable()">
                     <button type="button" class="straddle-btn btn-primary" onclick="openAddStraddleAlgoModal()">+ Add Algo</button>
                 </div>
             </div>
@@ -652,6 +603,7 @@
                                     <input type="checkbox" id="straddleSelectAllAlgos" onchange="toggleSelectAllStraddleAlgos(this)">
                                 </th>
                                 <th>Enable</th>
+                                <th style="text-align:center;" title="Place Stoploss order directly on Exchange matching engine (<1ms fill)">Advance SL (0ms)</th>
                                 <th>Status</th>
                                 <th>Working Days</th>
                                 <th style="text-align:center;">Multiplier</th>
@@ -1294,8 +1246,8 @@
                             <div class="straddle-form-group">
                                 <label>SL order placement (individual leg):</label>
                                 <select id="cfgSlOrderPlacement" class="straddle-select">
-                                    <option value="Place in advance">Place in advance (Broker SL-M - OCO)</option>
-                                    <option value="Keep with self" selected>Keep with self (Send to broker upon trigger)</option>
+                                    <option value="Place in advance" selected>Place in advance with broker (0ms Exchange SL - Fastest)</option>
+                                    <option value="Keep with self">Keep with self (Software trigger)</option>
                                 </select>
                             </div>
                             <div class="straddle-form-group">
@@ -1819,8 +1771,12 @@
                             <span class="tradeable-toggle-switch"><span class="toggle-circle"></span></span>
                         </label>
 
-                        <!-- Underlying Selector -->
-                        <select id="optChainUnderlyingSelect" class="straddle-select" style="min-width:120px; font-weight:700; color:#60a5fa; border-radius:9999px;" onchange="onChangeOptChainUnderlying(this.value)">
+                        <!-- Focused Underlying Read-only Badge (Switch via top bar) -->
+                        <div class="straddle-badge" style="display:inline-flex; align-items:center; gap:6px; background:#0f172a; border:1px solid #2563eb; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:800;" title="Focused Underlying (Change via Top Bar dropdown)">
+                            <span style="color:#94a3b8; font-size:11px;">Asset:</span>
+                            <span id="optChainUnderlyingBadge" style="color:#60a5fa; font-weight:800;">NIFTY</span>
+                        </div>
+                        <select id="optChainUnderlyingSelect" class="straddle-select" style="display:none;" onchange="onChangeOptChainUnderlying(this.value)">
                             <option value="NIFTY" selected>NIFTY 50</option>
                             <option value="BANKNIFTY">BANKNIFTY</option>
                             <option value="FINNIFTY">FINNIFTY</option>
@@ -2344,10 +2300,13 @@
             <!-- Header Row 2: Underlying Selector (Nifty vs Commodities), Presets, and Dedicated Search -->
             <div style="padding:10px 20px; background:#0c101a; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                    <!-- Underlying Selector (Nifty vs Commodities) -->
+                    <!-- Focused Basket Underlying Read-only Badge (Switch via top bar) -->
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:12px; color:#94a3b8; font-weight:700;">Underlying:</span>
-                        <select id="basketUnderlyingSelect" onchange="onBasketUnderlyingChange(this.value)" class="straddle-select" style="min-width:145px; font-weight:800; border-radius:9999px; font-size:12px; padding:4px 12px; background:#0f172a; border-color:#2563eb; color:#60a5fa;" title="Choose underlying for this basket (Nifty vs Commodities)">
+                        <div class="straddle-badge" style="display:inline-flex; align-items:center; gap:6px; background:#0f172a; border:1px solid #2563eb; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:800;" title="Basket Underlying (Change via Top Bar dropdown)">
+                            <span id="basketUnderlyingBadge" style="color:#60a5fa; font-weight:800;">NIFTY</span>
+                        </div>
+                        <select id="basketUnderlyingSelect" onchange="onBasketUnderlyingChange(this.value)" class="straddle-select" style="display:none;" title="Choose underlying for this basket">
                             <optgroup label="Index F&O">
                                 <option value="NIFTY" selected>NIFTY 50</option>
                                 <option value="BANKNIFTY">BANKNIFTY</option>

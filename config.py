@@ -20,6 +20,10 @@ WEB_HOST = os.environ.get("WEB_HOST", "0.0.0.0")
 WEB_PORT = int(os.environ.get("PORT", os.environ.get("WEB_PORT", "5001")))
 SECRET_KEY = os.environ.get("SECRET_KEY", "kotak-straddle-secret-key-2026")
 
+# Ultra-Low Latency Execution Cycle Interval (seconds)
+# Tuned down from 0.3s (300ms) to 0.025s (25ms) for 12x faster trigger evaluation and exit execution
+EXECUTION_CYCLE_INTERVAL_SEC = float(os.environ.get("EXECUTION_CYCLE_INTERVAL_SEC", "0.025"))
+
 # Straddle File Paths
 STRADDLE_DIR = DATA_DIR
 STRADDLE_STRATEGIES_FILE = STRADDLE_DIR / "straddle_strategies.json"

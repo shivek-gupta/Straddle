@@ -6837,7 +6837,7 @@ table .flag-cell {
     display: flex;
     flex-direction: row !important;
     align-items: center !important;
-    justify-content: flex-start !important;
+    justify-content: space-between !important;
     gap: 8px !important;
     background: rgba(13, 19, 34, 0.92) !important;
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
