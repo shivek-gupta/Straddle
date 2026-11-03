@@ -872,6 +872,7 @@
                                     <th>Strike Selection</th>
                                     <th>Type</th>
                                     <th>Lots</th>
+                                    <th title="Dynamic Associated Hedge for Margin Reduction &amp; Auto-Roll">Hedge 🛡️</th>
                                     <th>Target</th>
                                     <th>TGT Re-Exec</th>
                                     <th>Stoploss</th>
@@ -912,6 +913,9 @@
                         </label>
                         <label class="straddle-checkbox-label">
                             <input type="checkbox" id="cfgToggleRangeBreakout"> Range Breakout 🔗
+                        </label>
+                        <label class="straddle-checkbox-label" title="Enable dynamic associated hedges with auto-roll on Target and auto square-off on exhaustion">
+                            <input type="checkbox" id="cfgToggleDynamicHedges" checked> Dynamic Associated Hedges 🛡️
                         </label>
                     </div>
 
@@ -1738,6 +1742,47 @@
                             <option value="None">None</option>
                             <option value="500/100 multiple">500/100 multiple</option>
                         </select>
+                    </div>
+
+                    <!-- Associated Dynamic Hedge Settings Section -->
+                    <div id="legSettingsHedgeCard" style="background:#0c111d; border:1px solid #1e293b; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <label style="color:#38bdf8; font-size:12px; font-weight:800; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                <input type="checkbox" id="legSettingsHedgeEnabled" onchange="toggleLegModalHedgeFields(this.checked)"> Associated Dynamic Hedge 🛡️
+                            </label>
+                            <span style="font-size:10px; color:#10b981; font-weight:700; font-family:var(--font-mono); background:rgba(16,185,129,0.12); padding:1px 6px; border-radius:4px;">Margin Saver</span>
+                        </div>
+                        
+                        <div id="legModalHedgeParams" style="display:flex; flex-direction:column; gap:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <label style="color:#cbd5e1; font-size:11.5px; font-weight:600;" title="Initial OTM strike distance to buy when strategy enters">Initial Hedge Strike:</label>
+                                <select id="legSettingsHedgeInitialOtm" class="straddle-select" style="width:130px; font-size:11.5px; background:#181d29;">
+                                    <option value="15">OTM 15</option>
+                                    <option value="18">OTM 18</option>
+                                    <option value="20" selected>OTM 20</option>
+                                    <option value="22">OTM 22</option>
+                                    <option value="25">OTM 25</option>
+                                    <option value="30">OTM 30</option>
+                                </select>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <label style="color:#cbd5e1; font-size:11.5px; font-weight:600;" title="Threshold: if hedge distance becomes greater than this on re-entry, shift hedge">Shift if Distance &gt;:</label>
+                                <div style="display:flex; align-items:center; gap:4px;">
+                                    <input type="number" id="legSettingsHedgeMaxThresh" class="straddle-input" style="width:55px; text-align:center; font-weight:700; background:#181d29;" value="22" min="5" max="50">
+                                    <span style="font-size:11px; color:#94a3b8;">strikes</span>
+                                </div>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <label style="color:#cbd5e1; font-size:11.5px; font-weight:600;" title="Target distance when shifting hedge">Shift Reset Target:</label>
+                                <select id="legSettingsHedgeResetOtm" class="straddle-select" style="width:130px; font-size:11.5px; background:#181d29;">
+                                    <option value="15">OTM 15</option>
+                                    <option value="18">OTM 18</option>
+                                    <option value="20" selected>OTM 20</option>
+                                    <option value="22">OTM 22</option>
+                                    <option value="25">OTM 25</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Callout Note matching Quantiply Screenshot 1 -->

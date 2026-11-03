@@ -3730,11 +3730,20 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 // Symbol HTML (With shift strike option and step arrows for OPEN and editable legs)
                 let symHtml = "";
                 const curStrikeMatch = pending ? pending.strike : (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]);
+                let hedgeTagHtml = "";
+                if (pos.is_associated_hedge) {
+                    const pType = pos.hedge_parent_type || "MAIN";
+                    hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:4px; padding:1px 5px;">🛡️ HEDGE (${pType})</span></div>`;
+                } else if (pos.has_associated_hedge || pos.associated_hedge_id) {
+                    hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:1px 4px;" title="Protected with Dynamic Associated Hedge">🛡️ HEDGED</span></div>`;
+                }
+
                 if (isInteractiveRow) {
                     symHtml = `
                         <div class="straddle-sym-card ${symAccentClass}">
                             <div class="straddle-sym-title">${sym}</div>
                             <div class="straddle-sym-sub">${expiryText}</div>
+                            ${hedgeTagHtml}
                             <div style="display:flex; align-items:center; gap:4px; margin-top:4px;">
                                 <span style="font-size:9.5px; color:#94a3b8; font-weight:700;">Shift:</span>
                                 <div class="straddle-stepper-box" style="height:28px;">
@@ -3752,6 +3761,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         <div class="straddle-sym-card ${symAccentClass}">
                             <div class="straddle-sym-title">${sym}</div>
                             <div class="straddle-sym-sub">${expiryText}</div>
+                            ${hedgeTagHtml}
                         </div>
                     `;
                 }
@@ -4789,13 +4799,13 @@ function openLegSettingsModal(rowId) {
     const curStrike = tr.querySelector(".leg-strike")?.value || "ATM";
     const curMult = tr.querySelector(".leg-multiple-strike")?.value || "None";
 
-    const subtitleEl = document.getElementById("modalLegSettingsSubtitle");
+    const subtitleEl = document.getElementById("modalLegSettingsSubtitle") || document.getElementById("legSettingsSubTitle");
     if (subtitleEl) {
         subtitleEl.textContent = `(${und} ${side.toUpperCase()} ${prod.toUpperCase()} ${type.toUpperCase()})`;
     }
 
     // Populate strike select in modal with ATM, OTM 1-20, ITM 1-20
-    const strikeSel = document.getElementById("modalLegStrikeSelect");
+    const strikeSel = document.getElementById("modalLegStrikeSelect") || document.getElementById("legSettingsStrikeSelect");
     if (strikeSel) {
         strikeSel.innerHTML = "";
         const normStrike = curStrike.toUpperCase().replace("_", " ").trim();
@@ -4824,9 +4834,32 @@ function openLegSettingsModal(rowId) {
         }
     }
 
-    const multSel = document.getElementById("modalLegMultipleStrikeSelect");
+    const multSel = document.getElementById("modalLegMultipleStrikeSelect") || document.getElementById("legSettingsMultipleSelect");
     if (multSel) {
         multSel.value = (curMult === "500/100 multiple" || curMult === "500_100_multiple") ? "500/100 multiple" : "None";
+    }
+
+    // Associated Dynamic Hedge Settings in Modal
+    const isSell = (side.toUpperCase() === "SELL");
+    const hCard = document.getElementById("legSettingsHedgeCard");
+    if (hCard) {
+        hCard.style.display = isSell ? "flex" : "none";
+        const hEnabled = tr.querySelector(".leg-hedge-enabled") ? tr.querySelector(".leg-hedge-enabled").checked : false;
+        const hInit = tr.querySelector(".leg-hedge-initial-otm")?.value || "20";
+        const hThresh = tr.querySelector(".leg-hedge-max-thresh")?.value || "22";
+        const hReset = tr.querySelector(".leg-hedge-reset-otm")?.value || "20";
+
+        const chkHedge = document.getElementById("legSettingsHedgeEnabled");
+        if (chkHedge) {
+            chkHedge.checked = hEnabled;
+            toggleLegModalHedgeFields(hEnabled);
+        }
+        const selInit = document.getElementById("legSettingsHedgeInitialOtm");
+        if (selInit) selInit.value = hInit;
+        const inpThresh = document.getElementById("legSettingsHedgeMaxThresh");
+        if (inpThresh) inpThresh.value = hThresh;
+        const selReset = document.getElementById("legSettingsHedgeResetOtm");
+        if (selReset) selReset.value = hReset;
     }
 
     const modal = document.getElementById("modalLegSettings");
@@ -4841,6 +4874,14 @@ function closeLegSettingsModal() {
     window._activeLegSettingsRowId = null;
 }
 
+function toggleLegModalHedgeFields(isChecked) {
+    const params = document.getElementById("legModalHedgeParams");
+    if (params) {
+        params.style.opacity = isChecked ? "1" : "0.5";
+        params.style.pointerEvents = isChecked ? "auto" : "none";
+    }
+}
+
 function saveLegSettingsModal() {
     const rowId = window._activeLegSettingsRowId;
     if (!rowId) {
@@ -4850,8 +4891,8 @@ function saveLegSettingsModal() {
 
     const tr = document.getElementById(rowId);
     if (tr) {
-        const strikeSel = document.getElementById("modalLegStrikeSelect");
-        const multSel = document.getElementById("modalLegMultipleStrikeSelect");
+        const strikeSel = document.getElementById("modalLegStrikeSelect") || document.getElementById("legSettingsStrikeSelect");
+        const multSel = document.getElementById("modalLegMultipleStrikeSelect") || document.getElementById("legSettingsMultipleSelect");
 
         const legStrikeEl = tr.querySelector(".leg-strike");
         if (legStrikeEl && strikeSel) {
@@ -4867,6 +4908,32 @@ function saveLegSettingsModal() {
         if (badgeEl) {
             const isMult = (multSel && multSel.value === "500/100 multiple");
             badgeEl.style.display = isMult ? "inline-block" : "none";
+        }
+
+        // Save Associated Hedge settings into leg row
+        const chkHedge = document.getElementById("legSettingsHedgeEnabled");
+        const selInit = document.getElementById("legSettingsHedgeInitialOtm");
+        const inpThresh = document.getElementById("legSettingsHedgeMaxThresh");
+        const selReset = document.getElementById("legSettingsHedgeResetOtm");
+
+        const legHedgeChk = tr.querySelector(".leg-hedge-enabled");
+        if (legHedgeChk && chkHedge) legHedgeChk.checked = chkHedge.checked;
+        const legHedgeInit = tr.querySelector(".leg-hedge-initial-otm");
+        if (legHedgeInit && selInit) legHedgeInit.value = selInit.value;
+        const legHedgeThresh = tr.querySelector(".leg-hedge-max-thresh");
+        if (legHedgeThresh && inpThresh) legHedgeThresh.value = inpThresh.value;
+        const legHedgeReset = tr.querySelector(".leg-hedge-reset-otm");
+        if (legHedgeReset && selReset) legHedgeReset.value = selReset.value;
+
+        const btnHedge = tr.querySelector(".leg-hedge-btn");
+        if (btnHedge && chkHedge) {
+            const isH = chkHedge.checked;
+            const initV = selInit ? selInit.value : "20";
+            const thrV = inpThresh ? inpThresh.value : "22";
+            btnHedge.style.color = isH ? "#38bdf8" : "#64748b";
+            btnHedge.style.borderColor = isH ? "#38bdf8" : "#334155";
+            btnHedge.style.background = isH ? "rgba(56,189,248,0.1)" : "transparent";
+            btnHedge.textContent = isH ? `OTM ${initV} (≤${thrV})` : "Hedge Off";
         }
     }
 
@@ -4927,6 +4994,10 @@ function populateStraddleSettingsForm(s) {
     document.getElementById("cfgToggleWaitAndTrade").checked = !!s.wait_and_trade;
     document.getElementById("cfgToggleReEntry").checked = s.re_entry_enabled !== false;
     document.getElementById("cfgToggleRangeBreakout").checked = !!s.range_breakout;
+    const dynHedgeEl = document.getElementById("cfgToggleDynamicHedges");
+    if (dynHedgeEl) {
+        dynHedgeEl.checked = s.toggles ? (s.toggles.dynamic_hedging !== false) : (s.dynamic_hedging !== false);
+    }
 
     setUnderlyingPriceSource(s.underlying_price_source || "Spot");
     setStraddleTradeType(s.trade_type || "Intraday");
@@ -5174,12 +5245,19 @@ function addStraddleLegRow(leg = null) {
 
     const hasMult = (l.multiple_strike_selection === "500/100 multiple" || l.multiple_strike_selection === "500_100_multiple");
 
+    const isSell = (String(l.side || "Sell").toLowerCase() === "sell");
+    const hCfg = l.associated_hedge || {};
+    const hEnabled = (hCfg.enabled !== undefined) ? !!hCfg.enabled : isSell;
+    const hInit = parseInt(hCfg.initial_otm, 10) || 20;
+    const hThresh = parseInt(hCfg.max_distance_threshold, 10) || 22;
+    const hReset = parseInt(hCfg.reset_otm, 10) || 20;
+
     const tr = document.createElement("tr");
     tr.id = rowId;
     tr.innerHTML = `
         <td style="text-align:center; cursor:grab; color:#64748b;">☰</td>
         <td>
-            <select class="straddle-select leg-side">
+            <select class="straddle-select leg-side" onchange="onLegSideChanged('${rowId}', this.value)">
                 <option value="Buy" ${l.side === "Buy" ? "selected" : ""}>Buy</option>
                 <option value="Sell" ${l.side === "Sell" ? "selected" : ""}>Sell</option>
             </select>
@@ -5220,6 +5298,18 @@ function addStraddleLegRow(leg = null) {
                     <button type="button" class="lot-step-btn" onclick="stepLegLotsInput('${rowId}', -1)" title="Lots -">▼</button>
                 </div>
             </div>
+        </td>
+        <td>
+            <div class="leg-hedge-container" style="display:${isSell ? 'flex' : 'none'}; align-items:center; gap:3px;">
+                <input type="checkbox" class="leg-hedge-enabled" ${hEnabled ? 'checked' : ''} onchange="toggleLegHedgeRow('${rowId}', this.checked)" title="Enable Associated Dynamic Hedge for margin reduction">
+                <button type="button" class="straddle-btn btn-outline leg-hedge-btn" style="padding:2px 5px; font-size:10px; font-weight:700; color:${hEnabled ? '#38bdf8' : '#64748b'}; border-color:${hEnabled ? '#38bdf8' : '#334155'}; background:${hEnabled ? 'rgba(56,189,248,0.1)' : 'transparent'}; white-space:nowrap;" onclick="openLegSettingsModal('${rowId}')" title="Configure Initial OTM, Shift Threshold and Reset OTM">
+                    ${hEnabled ? `OTM ${hInit} (≤${hThresh})` : 'Hedge Off'}
+                </button>
+                <input type="hidden" class="leg-hedge-initial-otm" value="${hInit}">
+                <input type="hidden" class="leg-hedge-max-thresh" value="${hThresh}">
+                <input type="hidden" class="leg-hedge-reset-otm" value="${hReset}">
+            </div>
+            <div class="leg-hedge-na" style="display:${isSell ? 'none' : 'block'}; text-align:center; color:#475569; font-size:11px; font-weight:600;">—</div>
         </td>
         <td>
             <div style="display:flex; gap:2px;">
@@ -5900,6 +5990,14 @@ function serializeCurrentStrategySettings() {
         wait_and_trade: document.getElementById("cfgToggleWaitAndTrade")?.checked,
         re_entry_enabled: document.getElementById("cfgToggleReEntry")?.checked,
         range_breakout: document.getElementById("cfgToggleRangeBreakout")?.checked,
+        dynamic_hedging: document.getElementById("cfgToggleDynamicHedges") ? document.getElementById("cfgToggleDynamicHedges").checked : true,
+        toggles: {
+            move_sl_to_cost: !!document.getElementById("cfgToggleMoveSlToCost")?.checked,
+            wait_and_trade: !!document.getElementById("cfgToggleWaitAndTrade")?.checked,
+            re_entry_active: !!document.getElementById("cfgToggleReEntry")?.checked,
+            range_breakout: !!document.getElementById("cfgToggleRangeBreakout")?.checked,
+            dynamic_hedging: document.getElementById("cfgToggleDynamicHedges") ? !!document.getElementById("cfgToggleDynamicHedges").checked : true
+        },
         underlying_price_source: undSource,
         trade_type: document.getElementById("btnTradePositional")?.classList.contains("active-toggle") ? "Positional" : "Intraday",
         schedule_days: active.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
@@ -5968,6 +6066,12 @@ function serializeCurrentStrategySettings() {
 
     const trs = document.querySelectorAll("#straddleLegsBuilderBody tr");
     trs.forEach(tr => {
+        const hChk = tr.querySelector(".leg-hedge-enabled");
+        const isHedgeOn = hChk ? hChk.checked : false;
+        const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
+        const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
+        const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
+
         strategy.legs.push({
             id: tr.id,
             side: tr.querySelector(".leg-side")?.value,
@@ -5976,6 +6080,13 @@ function serializeCurrentStrategySettings() {
             multiple_strike_selection: tr.querySelector(".leg-multiple-strike")?.value || "None",
             option_type: tr.querySelector(".leg-type")?.value,
             lots: parseInt(tr.querySelector(".leg-lots")?.value) || 1,
+            associated_hedge: {
+                enabled: isHedgeOn,
+                initial_otm: hInitVal,
+                max_distance_threshold: hThreshVal,
+                reset_otm: hResetVal,
+                exit_with_parent: true
+            },
             target_type: tr.querySelector(".leg-tgt-type")?.value,
             target_value: parseFloat(tr.querySelector(".leg-tgt-val")?.value) || 45.0,
             target_re_execute_type: tr.querySelector(".leg-tgt-re-type")?.value,
@@ -8000,6 +8111,9 @@ window.resetCurrentStraddleAlgo = resetCurrentStraddleAlgo;
 window.openLegSettingsModal = openLegSettingsModal;
 window.closeLegSettingsModal = closeLegSettingsModal;
 window.saveLegSettingsModal = saveLegSettingsModal;
+window.toggleLegModalHedgeFields = toggleLegModalHedgeFields;
+window.onLegSideChanged = onLegSideChanged;
+window.toggleLegHedgeRow = toggleLegHedgeRow;
 window.showStraddleRejectedToast = showStraddleRejectedToast;
 window.showStraddleSuccessToast = showStraddleSuccessToast;
 window.restartOrRetryStraddleAlgo = restartOrRetryStraddleAlgo;

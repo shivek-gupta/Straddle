@@ -393,6 +393,13 @@ DEFAULT_STRATEGIES = [
                 "action": "Square off leg",
                 "underlying": "NIFTY",
                 "expiry": "Weekly",
+                "associated_hedge": {
+                    "enabled": True,
+                    "initial_otm": 20,
+                    "max_distance_threshold": 22,
+                    "reset_otm": 20,
+                    "exit_with_parent": True,
+                },
                 "journey": {},
             },
             {
@@ -416,6 +423,13 @@ DEFAULT_STRATEGIES = [
                 "action": "Square off leg",
                 "underlying": "NIFTY",
                 "expiry": "Weekly",
+                "associated_hedge": {
+                    "enabled": True,
+                    "initial_otm": 20,
+                    "max_distance_threshold": 22,
+                    "reset_otm": 20,
+                    "exit_with_parent": True,
+                },
                 "journey": {},
             },
             {
@@ -470,6 +484,7 @@ DEFAULT_STRATEGIES = [
             "wait_and_trade": False,
             "re_entry_active": True,
             "range_breakout": False,
+            "dynamic_hedging": True,
         },
         "mtm_target": {
             "type": "MTM in total amount",
@@ -649,6 +664,7 @@ class StraddleManager:
         self._instruments_cache: Optional[List[Dict[str, Any]]] = None
         self._instruments_mtime: float = 0.0
         self._options_by_und: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        self._exact_contract_index: Dict[Tuple[str, str, int, str, float], Dict[str, Any]] = {}
         self._expiries_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
         self._chain_snapshot_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._option_last_ltp: Dict[str, float] = {}
@@ -956,8 +972,9 @@ class StraddleManager:
                     self._instruments_cache = data
                     self._instruments_mtime = mtime
 
-                    # Build ultra-fast O(1) indexed options lookup by (segment, clean_und)
+                    # Build ultra-fast O(1) indexed options lookup by (segment, clean_und) and exact key
                     indexed: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+                    exact_idx: Dict[Tuple[str, str, int, str, float], Dict[str, Any]] = {}
                     known_unds_set = {
                         "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
                         "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM",
@@ -981,7 +998,13 @@ class StraddleManager:
                             if k not in indexed:
                                 indexed[k] = []
                             indexed[k].append(r)
+                            exp_ms = r.get("expiry")
+                            sp = float(r.get("strike_price") or 0.0)
+                            if exp_ms and sp > 0:
+                                exact_k = (str(seg).upper(), target_und, int(exp_ms), itype, sp)
+                                exact_idx[exact_k] = r
                     self._options_by_und = indexed
+                    self._exact_contract_index = exact_idx
                     self._expiries_cache.clear()
                     self._chain_snapshot_cache.clear()
 
@@ -2328,9 +2351,30 @@ class StraddleManager:
         is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
         target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
 
+        # Ultra-fast O(1) exact index lookup (sub-millisecond resolution)
+        if target_expiry_ms:
+            exact_k = (target_seg.upper(), clean_und, int(target_expiry_ms), option_type.upper(), float(target_strike))
+            if hasattr(self, "_exact_contract_index") and exact_k in self._exact_contract_index:
+                best_match = self._exact_contract_index[exact_k]
+                resolved_lot_size = int(best_match.get("lot_size") or get_lot_size_for_symbol(best_match.get("trading_symbol", clean_und), best_match.get("instrument_key", "")))
+                return {
+                    "instrument_key": best_match["instrument_key"],
+                    "trading_symbol": best_match["trading_symbol"],
+                    "strike_price": float(best_match["strike_price"]),
+                    "lot_size": resolved_lot_size,
+                    "expiry_ms": best_match.get("expiry"),
+                    "option_type": option_type.upper(),
+                    "underlying": clean_und,
+                    "segment": target_seg.lower(),
+                }
+
+        # Fast fallback pool filtered by (segment, underlying) ~200 items instead of 100,000
+        und_pool = getattr(self, "_options_by_und", {}).get((target_seg, clean_und)) or getattr(self, "_options_by_und", {}).get((target_seg.upper(), clean_und))
+        candidates_source = und_pool if und_pool else instruments
+
         if target_seg == "MCX_FO":
             candidates = [
-                r for r in instruments
+                r for r in candidates_source
                 if r.get("segment") == "MCX_FO"
                 and r.get("instrument_type") == option_type.upper()
                 and str(r.get("trading_symbol", "")).upper().startswith(clean_und + " ")
@@ -2338,14 +2382,14 @@ class StraddleManager:
             ]
             if not candidates and target_expiry_ms is not None:
                 candidates = [
-                    r for r in instruments
+                    r for r in candidates_source
                     if r.get("segment") == "MCX_FO"
                     and r.get("instrument_type") == option_type.upper()
                     and str(r.get("trading_symbol", "")).upper().startswith(clean_und + " ")
                 ]
         elif target_seg == "BSE_FO":
             candidates = [
-                r for r in instruments
+                r for r in candidates_source
                 if r.get("segment") == "BSE_FO"
                 and r.get("instrument_type") == option_type.upper()
                 and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
@@ -2353,14 +2397,14 @@ class StraddleManager:
             ]
             if not candidates and target_expiry_ms is not None:
                 candidates = [
-                    r for r in instruments
+                    r for r in candidates_source
                     if r.get("segment") == "BSE_FO"
                     and r.get("instrument_type") == option_type.upper()
                     and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
                 ]
         else:
             candidates = [
-                r for r in instruments
+                r for r in candidates_source
                 if r.get("segment") == "NSE_FO"
                 and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
                 and r.get("instrument_type") == option_type.upper()
@@ -2368,7 +2412,7 @@ class StraddleManager:
             ]
             if not candidates and target_expiry_ms is not None:
                 candidates = [
-                    r for r in instruments
+                    r for r in candidates_source
                     if r.get("segment") == "NSE_FO"
                     and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
                     and r.get("instrument_type") == option_type.upper()
@@ -3822,6 +3866,46 @@ class StraddleManager:
                 if leg.get("side", "Sell").upper() == "BUY":
                     buy_legs.append({"cfg": leg, "contract": contract})
                 else:
+                    # Check for Associated Dynamic Hedge (Auto Margin Saver)
+                    h_cfg = leg.get("associated_hedge") or {}
+                    if h_cfg.get("enabled"):
+                        init_otm = int(h_cfg.get("initial_otm", 20))
+                        h_opt_type = leg.get("option_type", "CE")
+                        h_contract = self.resolve_strike_and_contract(
+                            underlying=und,
+                            strike_selection=f"OTM {init_otm}",
+                            option_type=h_opt_type,
+                            expiry_type=leg.get("expiry", "Weekly"),
+                        )
+                        if h_contract:
+                            all_leg_keys.append(h_contract["instrument_key"])
+                            h_leg_cfg = {
+                                "id": f"hedge_{leg.get('id', 'leg')}",
+                                "side": "Buy",
+                                "product": leg.get("product", "NRML"),
+                                "strike_selection": f"OTM {init_otm}",
+                                "option_type": h_opt_type,
+                                "lots": leg.get("lots", 1),
+                                "target_type": "None",
+                                "target_value": 0.0,
+                                "target_re_execute_count": 0,
+                                "sl_type": "None",
+                                "sl_value": 0.0,
+                                "sl_re_execute_count": 0,
+                                "tsl_type": "None",
+                                "action": "Square off leg",
+                                "underlying": und,
+                                "expiry": leg.get("expiry", "Weekly"),
+                                "is_associated_hedge": True,
+                                "parent_leg_id": leg.get("id"),
+                                "hedge_parent_type": h_opt_type,
+                            }
+                            buy_legs.append({"cfg": h_leg_cfg, "contract": h_contract})
+                            leg["associated_hedge_id"] = f"hedge_{leg.get('id', 'leg')}"
+                            leg["has_associated_hedge"] = True
+                            self._log_event(
+                                f"[{strat.get('name')}] Associated Hedge configured for {leg.get('id')} ({h_opt_type}): Buying OTM {init_otm} ({h_contract['trading_symbol']}) first for SPAN margin reduction."
+                            )
                     sell_legs.append({"cfg": leg, "contract": contract})
 
             # Batch 2: Pre-fetch quotes for all legs in a single high-speed call
@@ -4344,6 +4428,16 @@ class StraddleManager:
             "strategy_name": strat_name,
             "date": today_ist_str(),
         }
+
+        if leg_cfg.get("is_associated_hedge"):
+            pos_record["is_associated_hedge"] = True
+            pos_record["parent_leg_id"] = leg_cfg.get("parent_leg_id")
+            pos_record["hedge_parent_type"] = leg_cfg.get("hedge_parent_type")
+        if leg_cfg.get("has_associated_hedge") or leg_cfg.get("associated_hedge_id"):
+            pos_record["has_associated_hedge"] = True
+            pos_record["associated_hedge_id"] = leg_cfg.get("associated_hedge_id")
+        if leg_cfg.get("associated_hedge"):
+            pos_record["associated_hedge"] = leg_cfg.get("associated_hedge")
 
         # Quantiply-parity: timeout conversion to market
         # If N = 0: Timeout conversion disabled (Order stays as Limit order in exchange orderbook)
@@ -5614,20 +5708,28 @@ class StraddleManager:
                 # Re-entry MUST ONLY execute after the previous leg's exit order is confirmed FILLED by the broker.
                 # Holding both positions concurrently causes severe margin issues and potential broker rejections.
                 if target_exit_order_id and not str(target_exit_order_id).startswith("PAPER_"):
-                    self._log_event(
-                        f"[Re-Entry #{new_count}] Verifying previous exit order {target_exit_order_id} ({pos.get('symbol')}) is FILLED before placing re-entry..."
+                    # Ultra-fast verification: check if exit order is already verified filled
+                    is_already_confirmed = (
+                        pos.get("status") in ("COMPLETE", "CLOSED")
+                        or str(pos.get("exit_reason", "")).startswith("TARGET HIT")
+                        or str(pos.get("exit_reason", "")).startswith("STOPLOSS HIT")
                     )
-                    fill_res = broker.wait_for_order_fill(target_exit_order_id, timeout_sec=20.0, poll_interval_sec=0.1)
-                    if not fill_res.get("filled"):
-                        err_st = fill_res.get("error") or fill_res.get("status") or "Timeout waiting for fill"
+                    if is_already_confirmed:
                         self._log_event(
-                            f"[Re-Entry #{new_count} ABORTED] Exit order {target_exit_order_id} is NOT filled ({err_st}). Re-entry cancelled to prevent margin breach.",
-                            level="ERROR"
+                            f"[Re-Entry #{new_count}] Previous exit order {target_exit_order_id} ({pos.get('symbol')}) already confirmed FILLED. Zero-latency re-entry proceeding."
                         )
-                        return
-                    self._log_event(
-                        f"[Re-Entry #{new_count}] Exit order {target_exit_order_id} verified FILLED @ ₹{fill_res.get('price', 0):.2f}. Placing Re-Entry immediately without delay."
-                    )
+                    else:
+                        fill_res = broker.wait_for_order_fill(target_exit_order_id, timeout_sec=15.0, poll_interval_sec=0.005)
+                        if not fill_res.get("filled"):
+                            err_st = fill_res.get("error") or fill_res.get("status") or "Timeout waiting for fill"
+                            self._log_event(
+                                f"[Re-Entry #{new_count} ABORTED] Exit order {target_exit_order_id} is NOT filled ({err_st}). Re-entry cancelled to prevent margin breach.",
+                                level="ERROR"
+                            )
+                            return
+                        self._log_event(
+                            f"[Re-Entry #{new_count}] Exit order {target_exit_order_id} verified FILLED @ ₹{fill_res.get('price', 0):.2f}. Placing Re-Entry immediately."
+                        )
 
                 adv = strat.get("advanced") or strat.get("advanced_settings", {})
                 delay_sec = int(adv.get("re_execute_order_delay_sec", 0) or 0)
@@ -5657,6 +5759,110 @@ class StraddleManager:
                     self._log_event(f"Re-Execute contract resolution failed for {und} {opt_type}")
                     return
 
+                # -----------------------------------------------------------------
+                # Associated Dynamic Hedge Logic (Ultra-Low Latency & Margin Guard)
+                # -----------------------------------------------------------------
+                h_cfg = leg_cfg.get("associated_hedge") or pos.get("associated_hedge") or {}
+                hedge_enabled = bool(h_cfg.get("enabled", False)) or bool(pos.get("has_associated_hedge"))
+                parent_id = pos.get("id") or leg_cfg.get("id")
+
+                active_hedge = None
+                with _ENGINE_LOCK:
+                    active_hedge = next(
+                        (p for p in strat.get("positions", []) 
+                         if (p.get("parent_leg_id") == parent_id or p.get("id") == pos.get("associated_hedge_id"))
+                         and p.get("status") == "OPEN" 
+                         and p.get("is_associated_hedge")), 
+                        None
+                    )
+
+                if active_hedge and hedge_enabled:
+                    step = STRIKE_STEPS.get(und, 50)
+                    new_short_strike = float(contract.get("strike_price"))
+                    curr_hedge_strike = float(active_hedge.get("strike_price", 0.0))
+                    strike_dist = abs(new_short_strike - curr_hedge_strike) / step
+                    max_thresh = int(h_cfg.get("max_distance_threshold", 22))
+                    reset_otm = int(h_cfg.get("reset_otm", 20))
+
+                    if strike_dist <= max_thresh:
+                        # Distance is within threshold: keep hedge as-is with 0ms latency!
+                        self._log_event(
+                            f"[Hedge Retained] ⚡ Existing hedge '{active_hedge.get('symbol')}' is {strike_dist:.0f} strikes away (<= threshold {max_thresh}). Retaining hedge with 0ms slippage overhead."
+                        )
+                    else:
+                        # Distance exceeded threshold: execute ultra-fast concurrent shift
+                        self._log_event(
+                            f"[Hedge Shift] ⚠️ Existing hedge '{active_hedge.get('symbol')}' is {strike_dist:.0f} strikes away (> threshold {max_thresh}). Executing concurrent shift to OTM {reset_otm}..."
+                        )
+                        if opt_type == "PE":
+                            new_h_strike = new_short_strike - (reset_otm * step)
+                        else:
+                            new_h_strike = new_short_strike + (reset_otm * step)
+
+                        new_h_contract = self.resolve_strike_and_contract(
+                            underlying=und,
+                            strike_selection=str(int(new_h_strike)),
+                            option_type=opt_type,
+                            expiry_type=leg_cfg.get("expiry", "Weekly")
+                        )
+
+                        if new_h_contract:
+                            old_h_pos = active_hedge
+                            def _exit_old_h():
+                                return self._square_off_single_position(old_h_pos, broker, reason=f"SHIFT HEDGE TO OTM {reset_otm}")
+
+                            def _buy_new_h():
+                                dummy_h_cfg = {
+                                    "id": f"hedge_{parent_id}_{new_count}",
+                                    "side": "Buy",
+                                    "product": leg_cfg.get("product", "NRML"),
+                                    "strike_selection": f"OTM {reset_otm}",
+                                    "option_type": opt_type,
+                                    "lots": leg_cfg.get("lots", 1),
+                                    "target_type": "None",
+                                    "target_value": 0.0,
+                                    "sl_type": "None",
+                                    "sl_value": 0.0,
+                                    "action": "Square off leg",
+                                    "underlying": und,
+                                    "expiry": leg_cfg.get("expiry", "Weekly"),
+                                    "is_associated_hedge": True,
+                                    "parent_leg_id": parent_id,
+                                    "hedge_parent_type": opt_type,
+                                }
+                                return self._place_leg_entry_order(
+                                    dummy_h_cfg,
+                                    new_h_contract,
+                                    mult,
+                                    broker,
+                                    adv,
+                                    strategy=strat,
+                                    is_re_entry=False
+                                )
+
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as h_exec:
+                                f_buy = h_exec.submit(_buy_new_h)
+                                f_exit = h_exec.submit(_exit_old_h)
+                                new_h_pos = f_buy.result()
+                                _ = f_exit.result()
+
+                            if new_h_pos and new_h_pos.get("status") == "OPEN":
+                                with _ENGINE_LOCK:
+                                    strat.setdefault("positions", []).append(new_h_pos)
+                                    if self._active_strategy_id == strat.get("strategy_id"):
+                                        self._state["positions"] = strat.get("positions", [])
+                                active_hedge = new_h_pos
+                                self._log_event(
+                                    f"[Hedge Shifted] ⚡ New hedge {new_h_pos.get('symbol')} (OTM {reset_otm}) active. Placing short re-entry...",
+                                    level="SUCCESS"
+                                )
+                            else:
+                                err_h = new_h_pos.get("error") if new_h_pos else "Order failed"
+                                self._log_event(
+                                    f"[Hedge Shift Warning] Failed to place new hedge ({err_h}). Proceeding with short re-entry.",
+                                    level="WARNING"
+                                )
+
                 new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat, is_re_entry=True)
                 if new_pos:
                     new_pos["re_execute_count"] = new_count
@@ -5666,6 +5872,10 @@ class StraddleManager:
                     new_pos["sl_re_execute_count"] = int(leg_cfg.get("sl_re_execute_count") or pos.get("sl_re_execute_count", 0))
                     new_pos["target_re_execute_type"] = leg_cfg.get("target_re_execute_type") or pos.get("target_re_execute_type", "NONE")
                     new_pos["target_re_execute_count"] = int(leg_cfg.get("target_re_execute_count") or pos.get("target_re_execute_count", 0))
+                    if active_hedge:
+                        new_pos["has_associated_hedge"] = True
+                        new_pos["associated_hedge_id"] = active_hedge.get("id")
+                        new_pos["associated_hedge"] = h_cfg
 
                     if new_pos.get("status") == "OPEN":
                         with _ENGINE_LOCK:
@@ -5686,6 +5896,26 @@ class StraddleManager:
                         self._log_event(f"Re-Execute #{new_count} order rejected for {new_pos['symbol']}: {err_msg}", level="ERROR")
 
             threading.Thread(target=_re_entry_worker, daemon=True).start()
+        else:
+            # Re-entries for this parent leg are EXHAUSTED (or re-entry is disabled)!
+            self._log_event(f"Re-entries exhausted for leg '{pos.get('symbol')}' ({cur_count}/{re_max}). Checking associated hedge...")
+            parent_id = pos.get("id")
+            active_hedge = None
+            with _ENGINE_LOCK:
+                active_hedge = next(
+                    (p for p in strat.get("positions", []) 
+                     if (p.get("parent_leg_id") == parent_id or p.get("id") == pos.get("associated_hedge_id"))
+                     and p.get("status") == "OPEN" 
+                     and p.get("is_associated_hedge")), 
+                    None
+                )
+            if active_hedge:
+                self._log_event(
+                    f"[Hedge Auto Square-Off] Squaring off associated hedge '{active_hedge.get('symbol')}' as parent leg has no re-entries left."
+                )
+                mode = self._state.get("execution_mode", "LIVE_BROKER")
+                broker = get_broker_adapter(mode)
+                self._square_off_single_position(active_hedge, broker, reason=f"PARENT COMPLETED ({pos.get('symbol')})")
 
     # ==========================================================
     # Orderbook Logging & P&L Recording
@@ -8372,6 +8602,10 @@ class StraddleManager:
                         leg_mtm = (ltp - entry_price) * qty
                     pos["mtm"] = round(leg_mtm, 2)
                     strat_mtm += pos["mtm"]
+
+                    # Associated Dynamic Hedge: never trigger SL or Target on hedges!
+                    if pos.get("is_associated_hedge"):
+                        continue
 
                     # Trailing Stoploss (TSL) Evaluation
                     tsl_profit = float(pos.get("tsl_profit_pts") or 0.0)

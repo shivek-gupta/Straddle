@@ -35,6 +35,14 @@ KOTAK_CREDENTIALS_FILE = DATA_DIR / "kotak_credentials.json"
 KOTAK_SESSION_FILE = DATA_DIR / "kotak_session.json"
 
 # Default strike steps per underlying (Equities + MCX Commodities)
+DEFAULT_HEDGE_CONFIG = {
+    "enabled": True,
+    "initial_otm": 20,              # Initial strike distance in OTM steps (e.g. OTM 20 = 1000 pts for Nifty)
+    "max_distance_threshold": 22,   # Max allowed distance before shifting hedge (e.g. 22 strikes = 1100 pts)
+    "reset_otm": 20,                # Target OTM distance to shift hedge when threshold exceeded
+    "exit_with_parent": True        # Automatically square off hedge when parent short leg has no re-entries left
+}
+
 STRIKE_STEPS = {
     "NIFTY": 50,
     "BANKNIFTY": 100,
