@@ -487,20 +487,8 @@ function renderStraddleHeader(state) {
     if (bFeed) bFeed.className = "straddle-running-badge " + (state.live_feed_running ? "" : "badge-off");
     if (bAlgo) bAlgo.className = "straddle-running-badge " + (state.algo_running ? "" : "badge-off");
 
-    // Start / Enable button visibility
-    const btnStart = document.getElementById("btnStraddleStartAlgo");
-    if (btnStart) {
-        const hasOpen = activeStrat && Array.isArray(activeStrat.positions) && activeStrat.positions.some(p => p.status === "OPEN");
-        if (hasOpen) {
-            btnStart.textContent = "Algo Active (Running)";
-            btnStart.style.opacity = "0.65";
-            btnStart.disabled = true;
-        } else {
-            btnStart.textContent = "▶ Start / Enable Algo";
-            btnStart.style.opacity = "1";
-            btnStart.disabled = false;
-        }
-    }
+    // Update terminal action bar with clean, contextual states
+    updateTerminalActionBar(activeStrat);
 }
 
 
@@ -3579,6 +3567,91 @@ async function dismissErrorLeg(stratId, legId, idx) {
 }
 window.dismissErrorLeg = dismissErrorLeg;
 
+function updateTerminalActionBar(strat = null, positions = null) {
+    const btnRetry = document.getElementById("btnStraddleRetryErrors");
+    const btnReset = document.getElementById("btnStraddleResetAlgo");
+    const btnClearClosed = document.getElementById("btnStraddleClearClosed");
+    const btnStart = document.getElementById("btnStraddleStartAlgo");
+    const btnStop = document.getElementById("btnStraddleStopAlgo");
+    const btnSqAll = document.getElementById("btnStraddleSquareOffAll");
+    const btnToggleSettings = document.getElementById("btnStraddleToggleSettings");
+
+    const active = strat || window._straddleState?.activeStrategy;
+    const posList = positions || (active ? active.positions : []) || window._straddleState?.positions || [];
+    const hasOpen = posList.some(p => String(p.status || "").toUpperCase() === "OPEN");
+    const hasErrors = posList.some(p => String(p.status || "").toUpperCase() === "ERROR");
+    const hasClosed = posList.some(p => {
+        const st = String(p.status || "").toUpperCase();
+        return st === "COMPLETE" || st === "CLOSED" || (p.avg_exit_price && Number(p.avg_exit_price) > 0);
+    });
+
+    const rawStatus = active ? String(active.status || "").toUpperCase() : "READY";
+    const isRunning = hasOpen || rawStatus === "TRADE_ACTIVE" || (active && active.enabled !== false && active.status !== "STOPPED" && active.status !== "TERMINATED" && active.status !== "ENTRY_FAILED");
+    const isFailedOrTerminated = rawStatus === "ENTRY_FAILED" || rawStatus === "TERMINATED" || (active && active._manual_reset);
+
+    // 1. Contextual Start / Stop Algo (Only show the valid one)
+    if (btnStart && btnStop) {
+        if (isRunning) {
+            btnStart.style.display = "none";
+            btnStop.style.display = "inline-flex";
+        } else {
+            btnStart.style.display = "inline-flex";
+            btnStop.style.display = "none";
+        }
+    }
+
+    // 2. Square Off All - prominent when open positions exist, dimmed when no open positions
+    if (btnSqAll) {
+        if (hasOpen) {
+            btnSqAll.style.opacity = "1";
+            btnSqAll.style.cursor = "pointer";
+        } else {
+            btnSqAll.style.opacity = "0.5";
+        }
+    }
+
+    // 3. Reset Algo - show ONLY when algo is stopped, terminated, failed, or has errors
+    if (btnReset) {
+        if (isFailedOrTerminated || hasErrors) {
+            btnReset.style.display = "inline-flex";
+            btnReset.style.background = "#7c3aed";
+            btnReset.style.borderColor = "#8b5cf6";
+            btnReset.style.color = "#ffffff";
+        } else {
+            btnReset.style.display = "none";
+        }
+    }
+
+    // 4. Clear Closed Trades - show ONLY when closed trades actually exist in table
+    if (btnClearClosed) {
+        if (hasClosed) {
+            btnClearClosed.style.display = "inline-flex";
+            const closedCount = posList.filter(p => {
+                const st = String(p.status || "").toUpperCase();
+                return st === "COMPLETE" || st === "CLOSED" || (p.avg_exit_price && Number(p.avg_exit_price) > 0);
+            }).length;
+            btnClearClosed.innerHTML = `<span>🧹 Clear Closed (${closedCount})</span>`;
+        } else {
+            btnClearClosed.style.display = "none";
+        }
+    }
+
+    // 5. Settings Panel Button text & style sync
+    if (btnToggleSettings) {
+        const panel = document.getElementById("straddleSettingsPanel");
+        const isOpen = panel && panel.style.display === "block";
+        btnToggleSettings.innerHTML = isOpen ? "✕ Close Settings" : "⚙️ Settings";
+        if (isOpen) {
+            btnToggleSettings.style.background = "#1e293b";
+            btnToggleSettings.style.borderColor = "#64748b";
+        } else {
+            btnToggleSettings.style.background = "#2563eb";
+            btnToggleSettings.style.borderColor = "#3b82f6";
+        }
+    }
+}
+window.updateTerminalActionBar = updateTerminalActionBar;
+
 function renderStraddleMarginAutoExitAlert(strat) {
     const container = document.getElementById("straddleMarginAutoExitAlertContainer");
     if (!container) return;
@@ -4276,28 +4349,19 @@ function onStraddlePositionCheckboxChange(inputEl = null, idx = null, legId = nu
         }
     }
 
-    if (btnReset) {
-        btnReset.style.display = "inline-flex";
-        if (totalErrorsInStrat > 0 || errorCount > 0) {
-            btnReset.style.background = "#7c3aed";
-            btnReset.style.borderColor = "#8b5cf6";
-            btnReset.style.color = "#ffffff";
+    if (btnSquareOffSel) {
+        if (openCount > 0) {
+            btnSquareOffSel.style.display = "inline-flex";
+            btnSquareOffSel.innerHTML = `<span>🚨 Square off selected (${openCount})</span>`;
+            btnSquareOffSel.style.borderColor = "#f43f5e";
+            btnSquareOffSel.style.color = "#f43f5e";
+            btnSquareOffSel.style.fontWeight = "800";
+        } else {
+            btnSquareOffSel.style.display = "none";
         }
     }
 
-    if (btnSquareOffSel) {
-        if (openCount > 0) {
-            btnSquareOffSel.innerHTML = `<span>Square off selected (${openCount})</span>`;
-            btnSquareOffSel.style.borderColor = "#f43f5e";
-            btnSquareOffSel.style.color = "#f43f5e";
-            btnSquareOffSel.style.fontWeight = "700";
-        } else {
-            btnSquareOffSel.innerHTML = `<span>Square off selected legs</span>`;
-            btnSquareOffSel.style.borderColor = "rgba(255,255,255,0.15)";
-            btnSquareOffSel.style.color = "#94a3b8";
-            btnSquareOffSel.style.fontWeight = "600";
-        }
-    }
+    updateTerminalActionBar();
 }
 
 function toggleSelectAllStraddleLegs(masterCb) {
@@ -5143,6 +5207,18 @@ function toggleStraddleSettingsPanel(forceState = null) {
     const isCurrentlyVisible = panel.style.display === "block";
     const nextState = (forceState !== null) ? !!forceState : !isCurrentlyVisible;
     panel.style.display = nextState ? "block" : "none";
+
+    const btnToggle = document.getElementById("btnStraddleToggleSettings");
+    if (btnToggle) {
+        btnToggle.innerHTML = nextState ? "✕ Close Settings" : "⚙️ Settings";
+        if (nextState) {
+            btnToggle.style.background = "#1e293b";
+            btnToggle.style.borderColor = "#64748b";
+        } else {
+            btnToggle.style.background = "#2563eb";
+            btnToggle.style.borderColor = "#3b82f6";
+        }
+    }
 
     if (nextState && window._straddleState.activeStrategy) {
         populateStraddleSettingsForm(window._straddleState.activeStrategy);

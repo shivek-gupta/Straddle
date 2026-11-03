@@ -741,16 +741,11 @@
                 </div>
             </div>
 
-            <!-- 3. MTM Banner Strip (Screenshot 1) -->
+            <!-- 3. MTM Banner Strip (Financial Totals) -->
             <div class="straddle-mtm-strip">
                 <div class="straddle-tgt-strip-left">
                     <span>MTM TARGET (Total amount):</span>
                     <span class="straddle-tgt-strip-val" id="straddleMtmTargetDisplay">₹ 4000.00</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <button type="button" class="straddle-btn" onclick="clearStraddleClosedAndExpiredPositions()" title="Wipe stale and completed closed trades from this view" style="background:rgba(255,255,255,0.06); border:1px solid #475569; color:#cbd5e1; font-weight:700; font-size:11.5px; padding:3px 10px; border-radius:4px; display:inline-flex; align-items:center; gap:5px; cursor:pointer;">
-                        🧹 Clear Closed Trades
-                    </button>
                 </div>
                 <div class="straddle-mtm-strip-right">
                     <div>
@@ -764,17 +759,17 @@
                 </div>
             </div>
 
-            <!-- 4. Action Control Buttons (Quantiply Multi-Strategy Action Terminal) -->
+            <!-- 4. Action Control Buttons (Clutter-Free, Dynamic Quantiply Standard) -->
             <div class="straddle-action-bar" id="straddleTerminalActionBar" style="margin-bottom:14px; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
                 <button type="button" class="straddle-btn btn-success" id="btnStraddleRetryErrors" onclick="retrySelectedStraddleLegs()" style="background:#15803d; border-color:#16a34a; font-weight:800; display:none;">🔄 Retry (1)</button>
-                <button type="button" class="straddle-btn" id="btnStraddleResetAlgo" onclick="resetCurrentStraddleAlgo()" title="Clear failed order errors and reset strategy to clean Ready state" style="background:#7c3aed; border-color:#8b5cf6; color:#ffffff; font-weight:800;">🔄 Reset Algo</button>
-                <button type="button" class="straddle-btn" onclick="clearStraddleClosedAndExpiredPositions()" title="Clear closed/expired trades and keep only active positions" style="background:#334155; border-color:#475569; color:#f1f5f9; font-weight:700;">🧹 Clear Closed Trades</button>
-                <button type="button" class="straddle-btn btn-primary" onclick="toggleStraddleSettingsPanel()" title="Open strategy parameters, execution rules & leg builder" style="background:#2563eb; border-color:#3b82f6; font-weight:800;">⚙️ Configure Settings</button>
-                <button type="button" class="straddle-btn btn-success" id="btnStraddleStartAlgo" onclick="straddleStartAlgo()" title="Start algorithm and execute strategy orders" style="font-weight:800;">▶ Start / Enable Algo</button>
-                <button type="button" class="straddle-btn btn-warning" onclick="straddleTerminateAlgo()" title="Halt strategy algorithm execution without squaring off broker positions" style="background:#b45309; border-color:#d97706; font-weight:800;">⏹ Stop Algo</button>
-                <button type="button" class="straddle-btn btn-danger" onclick="straddleSquareOffAllAndTerminate()" title="Emergency: Square off all open broker positions immediately and stop algorithm" style="background:#ea580c; border-color:#f97316; font-weight:800;">🚨 Square Off All & Terminate</button>
-                <button type="button" class="straddle-btn btn-outline" onclick="openStraddleOptionChainModal()" title="View live option chain matrix">📊 Option Chain</button>
-                <button type="button" class="straddle-btn btn-outline" id="btnStraddleSquareOffSelected" style="margin-left:auto;" onclick="straddleSquareOffSelectedLegs()" title="Square off only the selected open leg positions">Square off selected legs</button>
+                <button type="button" class="straddle-btn" id="btnStraddleResetAlgo" onclick="resetCurrentStraddleAlgo()" title="Clear failed order errors and reset strategy to clean Ready state" style="background:#7c3aed; border-color:#8b5cf6; color:#ffffff; font-weight:800; display:none;">🔄 Reset Algo</button>
+                <button type="button" class="straddle-btn" id="btnStraddleClearClosed" onclick="clearStraddleClosedAndExpiredPositions()" title="Clear closed/expired trades and keep only active positions" style="background:#334155; border-color:#475569; color:#f1f5f9; font-weight:700; display:none;">🧹 Clear Closed</button>
+                <button type="button" class="straddle-btn btn-success" id="btnStraddleStartAlgo" onclick="straddleStartAlgo()" title="Start algorithm and execute strategy orders" style="font-weight:800;">▶ Start Algo</button>
+                <button type="button" class="straddle-btn btn-warning" id="btnStraddleStopAlgo" onclick="straddleTerminateAlgo()" title="Halt strategy algorithm execution without squaring off broker positions" style="background:#b45309; border-color:#d97706; font-weight:800; display:none;">⏹ Stop Algo</button>
+                <button type="button" class="straddle-btn btn-danger" id="btnStraddleSquareOffAll" onclick="straddleSquareOffAllAndTerminate()" title="Emergency: Square off all open broker positions immediately and stop algorithm" style="background:#ea580c; border-color:#f97316; font-weight:800;">🚨 Square Off All</button>
+                <button type="button" class="straddle-btn btn-primary" id="btnStraddleToggleSettings" onclick="toggleStraddleSettingsPanel()" title="Open strategy parameters, execution rules & leg builder" style="background:#2563eb; border-color:#3b82f6; font-weight:800;">⚙️ Settings</button>
+                <button type="button" class="straddle-btn btn-outline" id="btnStraddleOptionChain" onclick="openStraddleOptionChainModal()" title="View live option chain matrix">📊 Option Chain</button>
+                <button type="button" class="straddle-btn btn-outline" id="btnStraddleSquareOffSelected" style="margin-left:auto; display:none;" onclick="straddleSquareOffSelectedLegs()" title="Square off only the selected open leg positions">Square off selected legs</button>
             </div>
 
             <!-- 5. Strategy Settings & Builder Panel (Screenshots 2, 3, 4) -->
@@ -813,7 +808,6 @@
                         </div>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                        <button type="button" class="straddle-btn btn-outline" id="btnStraddleAdoptPosition" onclick="openAdoptBrokerPositionModal()" title="View and adopt manual or external broker positions into this algo" style="border-color:#38bdf8; color:#38bdf8; font-size:11.5px; font-weight:700;">📥 Adopt Positions</button>
                         <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save strategy settings without placing orders">💾 Save Changes</button>
                         <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings Drawer">✕ Close</button>
                     </div>
@@ -2945,7 +2939,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261103_quantiply_guards"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261103_clutter_free"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
