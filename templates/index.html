@@ -53,8 +53,152 @@
 
     <!-- TOPBAR NAVIGATION -->
     <header class="straddle-topbar">
-        <div class="straddle-brand">
-            <span>⚡ STRADDLE PRO</span>
+                <div class="straddle-topbar-left" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div class="straddle-brand" style="margin-right:2px;">
+                <span>⚡ STRADDLE PRO</span>
+            </div>
+
+            <!-- Focused Asset Pill Selector & Quick Actions adjacent to STRADDLE PRO -->
+            <div class="topbar-pills-cluster" style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <!-- 1. Pill shaped button to choose underlying -->
+                <div class="topbar-asset-selector-wrap" style="position:relative; display:inline-block;" id="topbarAssetSelectorWrap">
+                    <button type="button" class="topbar-pill-btn topbar-asset-pill" id="btnTopbarAssetSelect" onclick="toggleTopbarAssetMenu(event)" title="Select active focused underlying">
+                        <span class="pill-dot" id="topbarAssetDot" style="width:7px; height:7px; border-radius:50%; background:#38bdf8; box-shadow:0 0 8px #38bdf8; flex-shrink:0;"></span>
+                        <span id="topbarAssetName" style="font-weight:800; font-size:12px; color:#f8fafc; letter-spacing:0.3px;">NIFTY 50</span>
+                        <span id="topbarAssetSpot" style="font-family:var(--font-mono); font-weight:700; font-size:11.5px; color:#38bdf8; margin-left:2px;">₹ --</span>
+                        <span style="font-size:9px; color:#94a3b8; margin-left:3px;">▼</span>
+                    </button>
+                    <div id="topbarAssetDropdown" class="topbar-asset-dropdown" style="display:none;">
+                        <div class="asset-dropdown-header">INDEX F&O (NSE / BSE)</div>
+                        <div class="asset-dropdown-item active" data-und="NIFTY" onclick="selectGlobalUnderlying('NIFTY'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#38bdf8;"></span>
+                                <span class="asset-name">NIFTY 50</span>
+                            </div>
+                            <span class="asset-exchange">NSE</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="BANKNIFTY" onclick="selectGlobalUnderlying('BANKNIFTY'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#60a5fa;"></span>
+                                <span class="asset-name">BANKNIFTY</span>
+                            </div>
+                            <span class="asset-exchange">NSE</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="FINNIFTY" onclick="selectGlobalUnderlying('FINNIFTY'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#a78bfa;"></span>
+                                <span class="asset-name">FINNIFTY</span>
+                            </div>
+                            <span class="asset-exchange">NSE</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="MIDCPNIFTY" onclick="selectGlobalUnderlying('MIDCPNIFTY'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#c084fc;"></span>
+                                <span class="asset-name">MIDCPNIFTY</span>
+                            </div>
+                            <span class="asset-exchange">NSE</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="SENSEX" onclick="selectGlobalUnderlying('SENSEX'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#f43f5e;"></span>
+                                <span class="asset-name">SENSEX</span>
+                            </div>
+                            <span class="asset-exchange">BSE</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="BANKEX" onclick="selectGlobalUnderlying('BANKEX'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#fb7185;"></span>
+                                <span class="asset-name">BANKEX</span>
+                            </div>
+                            <span class="asset-exchange">BSE</span>
+                        </div>
+
+                        <div class="asset-dropdown-header" style="border-top:1px solid rgba(255,255,255,0.06); margin-top:4px; padding-top:8px;">COMMODITIES F&O (MCX)</div>
+                        <div class="asset-dropdown-item" data-und="GOLD" onclick="selectGlobalUnderlying('GOLD'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#eab308;"></span>
+                                <span class="asset-name">Gold</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="GOLDM" onclick="selectGlobalUnderlying('GOLDM'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#84cc16;"></span>
+                                <span class="asset-name">Gold Mini</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="SILVER" onclick="selectGlobalUnderlying('SILVER'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#94a3b8;"></span>
+                                <span class="asset-name">Silver</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="SILVERM" onclick="selectGlobalUnderlying('SILVERM'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#8b5cf6;"></span>
+                                <span class="asset-name">Silver Mini</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="CRUDEOIL" onclick="selectGlobalUnderlying('CRUDEOIL'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#f43f5e;"></span>
+                                <span class="asset-name">Crude Oil</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="CRUDEOILM" onclick="selectGlobalUnderlying('CRUDEOILM'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#10b981;"></span>
+                                <span class="asset-name">Crude Oil Mini</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="NATURALGAS" onclick="selectGlobalUnderlying('NATURALGAS'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#f59e0b;"></span>
+                                <span class="asset-name">Natural Gas</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="NATGASMINI" onclick="selectGlobalUnderlying('NATGASMINI'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#ea580c;"></span>
+                                <span class="asset-name">Nat Gas Mini</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                        <div class="asset-dropdown-item" data-und="COPPER" onclick="selectGlobalUnderlying('COPPER'); closeTopbarAssetMenu();">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="asset-dot" style="background:#f97316;"></span>
+                                <span class="asset-name">Copper</span>
+                            </div>
+                            <span class="asset-exchange">MCX</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Pill button to open Chart -->
+                <button type="button" class="topbar-pill-btn topbar-chart-pill" id="btnTopbarChart" onclick="openActiveAssetChartModal()" title="Open Candlestick Chart for active asset">
+                    <span>📊</span>
+                    <span id="btnTopbarChartLabel">Chart</span>
+                </button>
+
+                <!-- 3. Pill button to open Option Chain -->
+                <button type="button" class="topbar-pill-btn topbar-optchain-pill" id="btnTopbarOptChain" onclick="openStraddleOptionChainModal()" title="Open Option Chain for active asset">
+                    <span>⛓️</span>
+                    <span>Option Chain</span>
+                </button>
+
+                <!-- 4. Pill button for Basket -->
+                <button type="button" class="topbar-pill-btn topbar-basket-pill" id="btnTopbarBasket" onclick="openBasketOrderModal()" title="Open Basket Orders for active asset">
+                    <span>🛒</span>
+                    <span>Basket</span>
+                    <span id="topbarBasketCountBadge" style="background:#2563eb; color:#fff; border-radius:10px; padding:0 5px; font-size:9.5px; font-weight:800; display:none;">0</span>
+                </button>
+            </div>
         </div>
 
         <div class="straddle-header-controls">
@@ -274,74 +418,33 @@
             }
         </style>
 
-        <div class="commodity-bar-container" id="commodityTopBar" style="padding:10px 16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
-            <!-- Left: Dropdown menu for Single Focused Underlying -->
-            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <div style="display:inline-flex; align-items:center; gap:8px; background:linear-gradient(135deg, #090d16 0%, #111827 100%); border:1px solid rgba(56,189,248,0.35); padding:5px 12px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.4);">
-                    <span style="font-size:12px;">🎯</span>
-                    <label for="globalUnderlyingSelect" style="font-size:11.5px; font-weight:800; color:#94a3b8; letter-spacing:0.5px; text-transform:uppercase;">FOCUS ASSET:</label>
-                    <select id="globalUnderlyingSelect" onchange="selectGlobalUnderlying(this.value)" style="background:#030712; color:#38bdf8; font-weight:800; font-size:13px; border:1px solid #2563eb; border-radius:6px; padding:4px 10px; cursor:pointer; outline:none;" title="Select single focused underlying asset (switches whole dashboard uniformly)">
-                        <optgroup label="Index F&O (NSE / BSE)">
-                            <option value="NIFTY" selected>NIFTY 50 (NSE)</option>
-                            <option value="BANKNIFTY">BANKNIFTY (NSE)</option>
-                            <option value="FINNIFTY">FINNIFTY (NSE)</option>
-                            <option value="MIDCPNIFTY">MIDCPNIFTY (NSE)</option>
-                            <option value="SENSEX">SENSEX (BSE)</option>
-                            <option value="BANKEX">BANKEX (BSE)</option>
-                        </optgroup>
-                        <optgroup label="Commodities F&O (MCX)">
-                            <option value="GOLD">Gold (MCX)</option>
-                            <option value="GOLDM">Gold Mini (MCX)</option>
-                            <option value="SILVER">Silver (MCX)</option>
-                            <option value="SILVERM">Silver Mini (MCX)</option>
-                            <option value="CRUDEOIL">Crude Oil (MCX)</option>
-                            <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
-                            <option value="NATURALGAS">Natural Gas (MCX)</option>
-                            <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
-                            <option value="COPPER">Copper (MCX)</option>
-                        </optgroup>
-                    </select>
-                </div>
-
-                <!-- Center Hero Card: Focused Asset Live Quote & ATM -->
-                <div class="commodity-pill active" id="activeUndCard" style="display:inline-flex; align-items:center; gap:12px; padding:4px 14px; margin:0; border-radius:8px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.5); box-shadow:0 0 12px rgba(56,189,248,0.25);" title="Focused Active Underlying Quote & Execution Status">
-                    <div style="display:flex; align-items:center; gap:6px;">
-                        <span class="pill-dot" id="activeUndDot" style="background:#38bdf8; box-shadow:0 0 8px #38bdf8; width:8px; height:8px; border-radius:50%;"></span>
-                        <span id="activeUndName" style="font-weight:800; font-size:13.5px; color:#38bdf8; letter-spacing:0.5px;">NIFTY</span>
-                    </div>
-                    <span style="color:rgba(255,255,255,0.2);">|</span>
-                    <div style="display:flex; align-items:center; gap:6px;">
-                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">SPOT:</span>
-                        <span id="activeUndLtp" style="font-family:var(--font-mono); font-weight:800; font-size:14px; color:#ffffff;">₹ --</span>
-                    </div>
-                    <span style="color:rgba(255,255,255,0.2);">|</span>
-                    <div style="display:flex; align-items:center; gap:6px;">
-                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">ATM:</span>
-                        <span id="activeUndAtm" style="font-family:var(--font-mono); font-weight:800; font-size:13px; color:#60a5fa;">--</span>
-                    </div>
-                    <span style="color:rgba(255,255,255,0.2);">|</span>
-                    <div style="display:inline-flex; align-items:center; gap:5px;">
-                        <span class="live-tick-pulse" style="width:7px; height:7px;"></span>
-                        <span style="font-size:10px; font-weight:800; color:#10b981; letter-spacing:0.5px;">LIVE FEED</span>
-                    </div>
-                </div>
+                <!-- Backward-compatibility container: visually hidden -->
+        <div id="commodityTopBar" style="display:none !important;">
+            <select id="globalUnderlyingSelect" onchange="selectGlobalUnderlying(this.value)">
+                <option value="NIFTY" selected>NIFTY 50 (NSE)</option>
+                <option value="BANKNIFTY">BANKNIFTY (NSE)</option>
+                <option value="FINNIFTY">FINNIFTY (NSE)</option>
+                <option value="MIDCPNIFTY">MIDCPNIFTY (NSE)</option>
+                <option value="SENSEX">SENSEX (BSE)</option>
+                <option value="BANKEX">BANKEX (BSE)</option>
+                <option value="GOLD">Gold (MCX)</option>
+                <option value="GOLDM">Gold Mini (MCX)</option>
+                <option value="SILVER">Silver (MCX)</option>
+                <option value="SILVERM">Silver Mini (MCX)</option>
+                <option value="CRUDEOIL">Crude Oil (MCX)</option>
+                <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
+                <option value="NATURALGAS">Natural Gas (MCX)</option>
+                <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
+                <option value="COPPER">Copper (MCX)</option>
+            </select>
+            <div id="activeUndCard">
+                <span id="activeUndDot"></span>
+                <span id="activeUndName">NIFTY</span>
+                <span id="activeUndLtp">₹ --</span>
+                <span id="activeUndAtm">--</span>
             </div>
-
-            <!-- Right: Quick Navigation Actions for Focused Underlying -->
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <button type="button" class="straddle-btn" onclick="openActiveAssetChartModal()" style="background:#0f172a; border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Open Real-time Candlestick Chart for active asset">
-                    <span>📊</span><span id="btnActiveAssetChartLabel">Chart (NIFTY)</span>
-                </button>
-                <button type="button" class="straddle-btn" onclick="openStraddleOptionChainModal()" style="background:#0f172a; border:1px solid rgba(139,92,246,0.4); color:#a78bfa; padding:5px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Open Option Chain Matrix for active asset">
-                    <span>⛓️</span><span>Option Chain</span>
-                </button>
-                <button type="button" class="straddle-btn" onclick="openBasketOrdersModal()" style="background:#0f172a; border:1px solid rgba(16,185,129,0.4); color:#34d399; padding:5px 12px; font-size:11.5px; font-weight:700; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Open Basket Orders for active asset">
-                    <span>🛒</span><span>Basket</span>
-                </button>
-            </div>
-
-            <!-- Hidden legacy elements container for complete backward-compatibility -->
-            <div id="commodityPillsStrip" style="display:none !important;">
+            <span id="btnActiveAssetChartLabel">Chart (NIFTY)</span>
+            <div id="commodityPillsStrip">
                 <div class="commodity-pill" data-und="NIFTY" id="pill_NIFTY"><span class="pill-ltp" id="pillLtp_NIFTY">--</span></div>
                 <div class="commodity-pill" data-und="CRUDEOIL" id="pill_CRUDEOIL"><span class="pill-ltp" id="pillLtp_CRUDEOIL">--</span></div>
                 <div class="commodity-pill" data-und="NATURALGAS" id="pill_NATURALGAS"><span class="pill-ltp" id="pillLtp_NATURALGAS">--</span></div>
@@ -355,7 +458,7 @@
             </div>
         </div>
 
-        <!-- Master Sub-Navigation Bar -->
+<!-- Master Sub-Navigation Bar -->
         <div class="straddle-sub-nav">
             <div class="straddle-sub-tabs-left">
                 <button type="button" class="straddle-sub-tab" id="straddleSubTab_open_positions" onclick="switchStraddleSubView('open_positions')">
@@ -367,9 +470,7 @@
                 <button type="button" class="straddle-sub-tab" id="straddleSubTab_pnl" onclick="switchStraddleSubView('pnl')">
                     <span>📈</span> P&L Chart
                 </button>
-                <button type="button" class="straddle-sub-tab" id="straddleSubTab_basket" onclick="openBasketOrderModal()" title="Quick Compile & Execute Basket Orders" style="display:inline-flex; align-items:center; gap:6px;">
-                    <span>🧺</span> Basket Orders <span id="navBasketCountBadge" style="background:#2563eb; color:#fff; border-radius:10px; padding:0 6px; font-size:10px; font-weight:800; display:none;">0</span>
-                </button>
+                <!-- Basket button moved to topbar adjacent to STRADDLE PRO --><span id="navBasketCountBadge" style="display:none;">0</span>
             </div>
 
             <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">

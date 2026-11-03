@@ -283,6 +283,20 @@ function updateSpotPriceDisplay(spot, atm, und) {
             }
         }
 
+        // Live update topbar pill asset spot price
+        const topbarSpot = document.getElementById("topbarAssetSpot");
+        if (topbarSpot) {
+            topbarSpot.textContent = "₹" + fmtPrice;
+            if (prev > 0 && Math.abs(numSpot - prev) > 0.01) {
+                const isUp = numSpot > prev;
+                topbarSpot.classList.remove("tick-flash-up", "tick-flash-down");
+                topbarSpot.classList.add(isUp ? "tick-flash-up" : "tick-flash-down");
+                setTimeout(() => {
+                    if (topbarSpot) topbarSpot.classList.remove("tick-flash-up", "tick-flash-down");
+                }, 300);
+            }
+        }
+
         // Live update focused asset hero card LTP and ATM
         const heroLtpEl = document.getElementById("activeUndLtp");
         if (heroLtpEl) {
@@ -9148,6 +9162,11 @@ function updateBasketBadges() {
     if (badge) badge.textContent = count;
     const navBadge = document.getElementById("navBasketCountBadge");
     if (navBadge) navBadge.textContent = count;
+    const topbarBasketBadge = document.getElementById("topbarBasketCountBadge");
+    if (topbarBasketBadge) {
+        topbarBasketBadge.textContent = count;
+        topbarBasketBadge.style.display = count > 0 ? "inline-block" : "none";
+    }
     const chainBadge = document.getElementById("chainBasketTotalCountBadge");
     if (chainBadge) chainBadge.textContent = count;
     const countBadge = document.getElementById("basketOrderCountBadge");
@@ -10944,6 +10963,30 @@ function selectGlobalUnderlying(undKey) {
     const dispName = COMMODITY_DISPLAY_NAMES[cleanKey] || cleanKey;
     const color = COMMODITY_COLOR_MAP[cleanKey] || "#38bdf8";
 
+    // 0. Sync Topbar Asset Pill Button & Dropdown Items
+    const topName = document.getElementById("topbarAssetName");
+    if (topName) {
+        topName.textContent = dispName;
+        topName.style.color = color;
+    }
+    const topDot = document.getElementById("topbarAssetDot");
+    if (topDot) {
+        topDot.style.background = color;
+        topDot.style.boxShadow = `0 0 10px ${color}`;
+    }
+    const topPillBtn = document.getElementById("btnTopbarAssetSelect");
+    if (topPillBtn) {
+        topPillBtn.style.borderColor = color;
+    }
+    const topChartLabel = document.getElementById("btnTopbarChartLabel");
+    if (topChartLabel) {
+        topChartLabel.textContent = `Chart (${cleanKey})`;
+    }
+    document.querySelectorAll(".asset-dropdown-item").forEach(item => {
+        const isMatch = (item.getAttribute("data-und") === cleanKey);
+        item.classList.toggle("active", isMatch);
+    });
+
     // 1. Sync global top bar dropdown
     const globalSel = document.getElementById("globalUnderlyingSelect");
     if (globalSel && globalSel.value !== cleanKey) {
@@ -12534,3 +12577,32 @@ function applyChartHeaderCollapseState() {
     }
 }
 window.applyChartHeaderCollapseState = applyChartHeaderCollapseState;
+
+// Topbar Underlying Selector Dropdown Handlers
+function toggleTopbarAssetMenu(event) {
+    if (event) event.stopPropagation();
+    const dd = document.getElementById("topbarAssetDropdown");
+    const btn = document.getElementById("btnTopbarAssetSelect");
+    if (!dd) return;
+    const isShown = dd.style.display === "block";
+    dd.style.display = isShown ? "none" : "block";
+    if (btn) btn.classList.toggle("open", !isShown);
+}
+window.toggleTopbarAssetMenu = toggleTopbarAssetMenu;
+
+function closeTopbarAssetMenu() {
+    const dd = document.getElementById("topbarAssetDropdown");
+    const btn = document.getElementById("btnTopbarAssetSelect");
+    if (dd) dd.style.display = "none";
+    if (btn) btn.classList.remove("open");
+}
+window.closeTopbarAssetMenu = closeTopbarAssetMenu;
+
+window.openBasketOrdersModal = openBasketOrderModal;
+
+document.addEventListener("click", function(e) {
+    const wrap = document.getElementById("topbarAssetSelectorWrap");
+    if (wrap && !wrap.contains(e.target)) {
+        closeTopbarAssetMenu();
+    }
+});
