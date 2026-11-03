@@ -8972,8 +8972,9 @@ function onBasketUnderlyingChange(newUnd) {
 
     const searchInput = document.getElementById("basketSearchInput");
     if (searchInput) {
-        searchInput.placeholder = `Search ${cleanUnd} strikes (e.g. 23500, CE, PE)...`;
+        searchInput.placeholder = `Search ${cleanUnd} strikes (e.g. 23800, 17 Nov)...`;
     }
+    loadBasketExpiryFilterOptions(cleanUnd);
     clearBasketSearch();
     renderBasketOrdersTable();
     updateBasketBadges();
@@ -9267,6 +9268,7 @@ function openBasketOrderModal() {
     updateBasketBadges();
     renderBasketOrdersTable();
     updateBasketMarginCalculation();
+    loadBasketExpiryFilterOptions();
     startBasketQuoteTicker();
 }
 
@@ -10353,7 +10355,10 @@ async function handleBasketSearchInput(query) {
 
     _basketSearchDebounceTimer = setTimeout(async () => {
         try {
-            const resp = await fetch(`/api/straddle/search_contracts?query=${encodeURIComponent(q)}&underlying=${encodeURIComponent(und)}&limit=24`);
+            const expSel = document.getElementById("basketExpiryFilterSelect");
+            const expVal = expSel ? expSel.value : "ALL";
+            const expParam = (expVal && expVal !== "ALL") ? `&expiry=${encodeURIComponent(expVal)}` : "";
+            const resp = await fetch(`/api/straddle/search_contracts?query=${encodeURIComponent(q)}&underlying=${encodeURIComponent(und)}&limit=40${expParam}`);
             const data = await resp.json();
 
             if (!data.success || !data.results || data.results.length === 0) {
@@ -10379,7 +10384,7 @@ async function handleBasketSearchInput(query) {
                             <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                                 <span style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${r.strike}</span>
                                 <span style="font-size:11px; font-weight:900; color:${typeColor} !important; background:${typeBg} !important; border:1px solid ${typeColor} !important; border-radius:4px; padding:2px 7px;">${r.opt_type}</span>
-                                <span style="font-size:11px; color:#cbd5e1; font-family:var(--font-mono);">${r.expiry_date || ''}</span>
+                                <span style="font-size:11px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); border-radius:4px; padding:1px 6px; font-family:var(--font-mono);">${r.expiry_date || ''}</span>
                                 ${expTag}
                             </div>
                             <div style="font-size:10.5px; color:#94a3b8; margin-top:3px; font-family:var(--font-mono);">
@@ -12606,3 +12611,42 @@ document.addEventListener("click", function(e) {
         closeTopbarAssetMenu();
     }
 });
+
+// =========================================================================
+// BASKET EXPIRY FILTER CONTROLLER
+// =========================================================================
+
+async function loadBasketExpiryFilterOptions(undParam) {
+    const und = undParam || window._activeGlobalUnderlying || "NIFTY";
+    const sel = document.getElementById("basketExpiryFilterSelect");
+    if (!sel) return;
+    try {
+        const resp = await fetch(`/api/straddle/expiries?underlying=${encodeURIComponent(und)}`);
+        const data = await resp.json();
+        const currentVal = sel.value;
+        sel.innerHTML = '<option value="ALL">All Expiries</option>';
+        if (data.success && data.expiries && data.expiries.length > 0) {
+            data.expiries.forEach(e => {
+                const opt = document.createElement("option");
+                opt.value = e.expiry_ms;
+                opt.textContent = `${e.formatted_label} (${e.tag})`;
+                sel.appendChild(opt);
+            });
+            if (currentVal && Array.from(sel.options).some(o => o.value === currentVal)) {
+                sel.value = currentVal;
+            }
+        }
+    } catch (e) {
+        console.error("Error loading basket expiries:", e);
+    }
+}
+window.loadBasketExpiryFilterOptions = loadBasketExpiryFilterOptions;
+
+function onBasketExpiryFilterChange(val) {
+    const input = document.getElementById("basketSearchInput");
+    if (input) {
+        const q = input.value.trim();
+        handleBasketSearchInput(q || "ATM");
+    }
+}
+window.onBasketExpiryFilterChange = onBasketExpiryFilterChange;

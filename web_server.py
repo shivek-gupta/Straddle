@@ -553,12 +553,32 @@ def api_straddle_search_contracts():
     try:
         q = request.args.get("query") or request.args.get("q") or ""
         und = request.args.get("underlying") or ""
-        limit = int(request.args.get("limit", 24))
+        exp = request.args.get("expiry") or request.args.get("expiry_date") or None
+        limit = int(request.args.get("limit", 40))
         mgr = get_straddle_manager()
-        results = mgr.search_contracts(query=q, underlying=und if und else None, limit=limit)
+        results = mgr.search_contracts(query=q, underlying=und if und else None, limit=limit, expiry=exp)
         return jsonify({"success": True, "results": results, "count": len(results)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e), "results": []}), 500
+
+
+@app.route("/api/straddle/sync_instruments", methods=["POST"])
+def api_straddle_sync_instruments():
+    try:
+        from instrument_sync import sync_instruments_from_kotak
+        res = sync_instruments_from_kotak(force=True)
+        mgr = get_straddle_manager()
+        mgr._instruments_cache = None
+        mgr._instruments_mtime = 0.0
+        mgr._options_by_und.clear()
+        mgr._exact_contract_index.clear()
+        if hasattr(mgr, "_fast_resolved_contract_cache"):
+            mgr._fast_resolved_contract_cache.clear()
+        mgr._expiries_cache.clear()
+        mgr._load_instruments_data()
+        return jsonify({"success": True, "data": res})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/straddle/contract_quote", methods=["GET"])

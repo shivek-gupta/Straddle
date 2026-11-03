@@ -922,10 +922,10 @@ class StraddleManager:
         instrument_path = getattr(config, "DATA_DIR", Path("data")) / "instruments.json.gz"
         if not instrument_path.exists():
             try:
-                import universe
-                universe.ensure_instruments_file_fresh()
-            except Exception:
-                pass
+                from instrument_sync import sync_instruments_from_kotak
+                sync_instruments_from_kotak(force=True, target_file=instrument_path)
+            except Exception as e_sync:
+                logger.warning(f"Initial instrument sync warning: {e_sync}")
 
         if not instrument_path.exists():
             alt_path = Path("data/instruments.json.gz")
@@ -933,6 +933,20 @@ class StraddleManager:
                 instrument_path = alt_path
             else:
                 return []
+
+        # Background refresh if instruments file is older than 24 hours
+        if instrument_path.exists() and (time.time() - instrument_path.stat().st_mtime) > 86400.0:
+            if not getattr(self, "_is_syncing_instruments", False):
+                self._is_syncing_instruments = True
+                def _bg_sync():
+                    try:
+                        from instrument_sync import sync_instruments_from_kotak
+                        sync_instruments_from_kotak(force=True, target_file=instrument_path)
+                    except Exception as e_bg:
+                        logger.warning(f"Background instrument sync warning: {e_bg}")
+                    finally:
+                        self._is_syncing_instruments = False
+                threading.Thread(target=_bg_sync, daemon=True).start()
 
         now_ts = time.time()
         if self._instruments_cache is not None and (now_ts - getattr(self, "_last_inst_stat_ts", 0.0)) < 60.0:
@@ -1083,15 +1097,16 @@ class StraddleManager:
         self,
         query: str,
         underlying: Optional[str] = None,
-        limit: int = 24
+        limit: int = 40,
+        expiry: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Searches option contracts across available expiries matching query.
         E.g. query='23100' returns 23100 CE & 23100 PE across multiple upcoming expiries.
-        Supports query terms like '23100', '23100 CE', 'NIFTY 23100', 'BANKNIFTY 50000', etc.
+        Supports query terms like '23100', '23100 CE', '17 NOV', '23100 17 NOV', 'NIFTY 23100', etc.
         """
         raw_q = str(query or "").strip().upper()
-        if not raw_q:
+        if not raw_q and not expiry:
             return []
 
         # Detect underlying
@@ -1111,22 +1126,72 @@ class StraddleManager:
         if spot_price <= 0:
             spot_price = 23146.0 if clean_und == "NIFTY" else 51200.0
 
-        # Extract strike numbers if present (support 2 to 6 digits, e.g. NatGas 180, Crude 6100, Nifty 22600)
-        strike_matches = re.findall(r"\b(\d{2,6})\b", raw_q)
-        target_strike = float(strike_matches[0]) if strike_matches else None
+        MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 
         # Detect option type preference if any
         opt_type_pref = None
-        if " CE" in raw_q or raw_q.endswith("CE") or "CALL" in raw_q:
+        if re.search(r"\b(CE|CALL)\b", raw_q) or raw_q.endswith("CE"):
             opt_type_pref = "CE"
-        elif " PE" in raw_q or raw_q.endswith("PE") or "PUT" in raw_q:
+        elif re.search(r"\b(PE|PUT)\b", raw_q) or raw_q.endswith("PE"):
             opt_type_pref = "PE"
+
+        # Detect expiry text from query if present e.g. "17 NOV", "09 NOV", "17NOV", "NOV", "DEC"
+        query_exp_filter = None
+        q_clean = raw_q
+        m_day_month = re.search(r"\b(\d{1,2})\s*(" + "|".join(MONTHS) + r")(?:\s*(\d{2,4}))?\b", raw_q)
+        if m_day_month:
+            day_str = m_day_month.group(1).zfill(2)
+            month_str = m_day_month.group(2)
+            query_exp_filter = f"{day_str} {month_str}"
+            q_clean = q_clean.replace(m_day_month.group(0), " ")
+        else:
+            m_month = re.search(r"\b(" + "|".join(MONTHS) + r")\b", raw_q)
+            if m_month:
+                query_exp_filter = m_month.group(1)
+                q_clean = q_clean.replace(m_month.group(0), " ")
+
+        # Extract strike numbers from q_clean (safely avoiding day number)
+        min_expected_strike = 50.0 if clean_und in ("NATURALGAS", "NATGASMINI", "COPPER") else 500.0
+        num_matches = re.findall(r"\b(\d+(?:\.\d+)?)\b", q_clean)
+        target_strike = None
+        for n in num_matches:
+            val = float(n)
+            if val >= min_expected_strike:
+                target_strike = val
+                break
 
         # Load instruments
         instruments = self._load_instruments_data()
         expiries = self.get_expiries_for_underlying(clean_und)
         expiry_map = {e["expiry_ms"]: e for e in expiries}
         valid_expiries = set(e["expiry_ms"] for e in expiries)
+
+        # Apply expiry parameter from UI dropdown if specified
+        if expiry and str(expiry).upper() != "ALL":
+            exp_str = str(expiry).strip()
+            if exp_str.isdigit() and int(exp_str) in expiry_map:
+                valid_expiries = {int(exp_str)}
+            else:
+                clean_target = re.sub(r"[^A-Za-z0-9]", "", exp_str).upper()
+                filtered_exp = set()
+                for e in expiries:
+                    d_clean = re.sub(r"[^A-Za-z0-9]", "", e.get("date_str", "")).upper()
+                    l_clean = re.sub(r"[^A-Za-z0-9]", "", e.get("formatted_label", "")).upper()
+                    if clean_target in d_clean or clean_target in l_clean or l_clean in clean_target:
+                        filtered_exp.add(e["expiry_ms"])
+                if filtered_exp:
+                    valid_expiries = filtered_exp
+        elif query_exp_filter:
+            # Apply query-extracted expiry filter
+            clean_q = re.sub(r"[^A-Za-z0-9]", "", query_exp_filter).upper()
+            filtered_exp = set()
+            for e in expiries:
+                d_clean = re.sub(r"[^A-Za-z0-9]", "", e.get("date_str", "")).upper()
+                l_clean = re.sub(r"[^A-Za-z0-9]", "", e.get("formatted_label", "")).upper()
+                if clean_q in d_clean or clean_q in l_clean:
+                    filtered_exp.add(e["expiry_ms"])
+            if filtered_exp:
+                valid_expiries = filtered_exp
 
         # Resolve exchange segment for underlying (MCX for commodities, BSE for Sensex, NSE for Nifty)
         is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
@@ -1159,19 +1224,19 @@ class StraddleManager:
                 else:
                     # If no number specified, check symbol match or near ATM
                     sym = str(r.get("trading_symbol", "")).upper()
-                    if raw_q not in sym and abs(stk - spot_price) > (step * 5):
+                    q_term = q_clean.strip()
+                    if q_term and q_term not in sym and abs(stk - spot_price) > (step * 5):
                         continue
 
                 matches.append(r)
 
-        # Sort matches by expiry ascending, then strike, then option type (CE first, then PE)
+        # Sort matches by expiry ascending, then distance to target_strike (or spot_price), then option type
+        ref_strike = target_strike if target_strike is not None else spot_price
         matches.sort(key=lambda m: (
             m.get("expiry", 0),
-            abs(float(m.get("strike_price", 0)) - spot_price),
+            abs(float(m.get("strike_price", 0)) - ref_strike),
             0 if m.get("instrument_type") == "CE" else 1
         ))
-
-        # Format output list & resolve live broker quotes
         results = []
         lot_size = DEFAULT_LOT_SIZES.get(clean_und, 65)
         candidate_matches = matches[:limit]

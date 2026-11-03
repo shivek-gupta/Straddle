@@ -67,6 +67,13 @@ def _init_kotak_symbol_maps():
                         if seg in ("NSE_FO", "BSE_FO", "MCX_FO") and r.get("exchange_token"):
                             tok = str(r["exchange_token"]).strip()
                             tsym = str(r.get("trading_symbol", "")).strip()
+                            if r.get("kotak_trading_symbol"):
+                                canon = str(r["kotak_trading_symbol"]).strip()
+                                _KOTAK_TOKEN_MAP[tok] = canon
+                                _KOTAK_DISPLAY_MAP[tsym.upper()] = canon
+                                _KOTAK_DISPLAY_MAP[tsym.upper().replace(" ", "")] = canon
+                                _KOTAK_DISPLAY_MAP[canon.upper()] = canon
+                                continue
                             parts = tsym.split()
                             if len(parts) >= 6:
                                 und = parts[0].upper()
