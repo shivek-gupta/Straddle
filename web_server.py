@@ -142,7 +142,8 @@ def api_straddle_spot():
         und = request.args.get("underlying", "NIFTY").upper()
         mgr = get_straddle_manager()
         spot = mgr.get_cached_spot_price(und)
-        step = float(STRIKE_STEPS.get(und, 50))
+        strike_steps = getattr(config, "STRIKE_STEPS", {})
+        step = float(strike_steps.get(und, 50))
         atm = round(spot / step) * step if (spot > 0 and step > 0) else 0
         resp = jsonify({
             "success": True,

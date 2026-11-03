@@ -1,5 +1,175 @@
 [
   {
+    "strategy_id": "straddle_nifty_920",
+    "name": "NIFTY 9:20 Short Straddle (45% TGT / 66% SL)",
+    "enabled": true,
+    "execution_mode": "LIVE_BROKER",
+    "client_id": "Kotak Neo Live",
+    "schedule_days": [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday"
+    ],
+    "underlying": "NIFTY",
+    "underlying_price_type": "Spot",
+    "trade_type": "Intraday",
+    "multiplier": 1,
+    "start_time": "09:15:56",
+    "end_time": "15:29:50",
+    "legs": [
+      {
+        "id": "leg_1",
+        "side": "Sell",
+        "product": "NRML",
+        "strike_selection": "ATM",
+        "option_type": "CE",
+        "lots": 1,
+        "target_type": "TGT: %",
+        "target_value": 45.0,
+        "target_re_execute_type": "RE EXECUTE",
+        "target_re_execute_count": 6,
+        "sl_type": "SL: %",
+        "sl_value": 66.0,
+        "tsl_type": "None",
+        "tsl_profit_pts": 0.0,
+        "tsl_trail_pts": 0.0,
+        "sl_re_execute_type": "RE EXECUTE",
+        "sl_re_execute_count": 1,
+        "action": "Square off leg",
+        "underlying": "NIFTY",
+        "expiry": "Weekly",
+        "associated_hedge": {
+          "enabled": true,
+          "initial_otm": 20,
+          "max_distance_threshold": 22,
+          "reset_otm": 20,
+          "exit_with_parent": true
+        },
+        "journey": {},
+        "associated_hedge_id": "hedge_leg_1",
+        "has_associated_hedge": true
+      },
+      {
+        "id": "leg_2",
+        "side": "Sell",
+        "product": "NRML",
+        "strike_selection": "ATM",
+        "option_type": "PE",
+        "lots": 1,
+        "target_type": "TGT: %",
+        "target_value": 45.0,
+        "target_re_execute_type": "RE EXECUTE",
+        "target_re_execute_count": 6,
+        "sl_type": "SL: %",
+        "sl_value": 66.0,
+        "tsl_type": "None",
+        "tsl_profit_pts": 0.0,
+        "tsl_trail_pts": 0.0,
+        "sl_re_execute_type": "RE EXECUTE",
+        "sl_re_execute_count": 1,
+        "action": "Square off leg",
+        "underlying": "NIFTY",
+        "expiry": "Weekly",
+        "associated_hedge": {
+          "enabled": true,
+          "initial_otm": 20,
+          "max_distance_threshold": 22,
+          "reset_otm": 20,
+          "exit_with_parent": true
+        },
+        "journey": {},
+        "associated_hedge_id": "hedge_leg_2",
+        "has_associated_hedge": true
+      }
+    ],
+    "toggles": {
+      "move_sl_to_cost": false,
+      "wait_and_trade": false,
+      "re_entry_active": true,
+      "range_breakout": false,
+      "dynamic_hedging": true
+    },
+    "mtm_target": {
+      "type": "MTM in total amount",
+      "value": 10000.0,
+      "re_entry": "None",
+      "max_re_entries": 0,
+      "action": "Square off all positions"
+    },
+    "mtm_stoploss": {
+      "type": "None",
+      "value": 0.0,
+      "profit_lock_trail": {
+        "threshold": 0.0,
+        "lock_profit": 0.0,
+        "trail_step": 0.0,
+        "trail_profit": 0.0
+      },
+      "re_entry": "None",
+      "max_re_entries": 0,
+      "action": "Square off all positions"
+    },
+    "premium_matching": {
+      "mode": "No matching of premiums",
+      "max_difference": 0.0,
+      "close_to": 0.0,
+      "range_min": 0.0,
+      "range_max": 0.0,
+      "combined_premium_type": "None",
+      "combined_premium_value": 0.0,
+      "condition_frequency": "LTP (Continuous Monitoring)"
+    },
+    "advanced": {
+      "entry_order_type": "Limit (L) / Stoploss Limit (SL-L)",
+      "entry_buffer_type": "Percentage",
+      "entry_buffer_value": 5.0,
+      "entry_market_timeout_sec": 0,
+      "exit_order_type": "Limit (L) / Stoploss Limit (SL-L)",
+      "exit_buffer_type": "Percentage",
+      "exit_buffer_value": 0.1,
+      "exit_market_timeout_sec": 0,
+      "sl_order_placement": "Place in advance",
+      "sl_placement_delay_sec": 0,
+      "mtm_sl_delay_sec": 0,
+      "entry_order_delay_side": "Delay entry of Sell positions",
+      "entry_order_delay_sec": 3,
+      "exit_order_delay_side": "Delay exit of Buy positions",
+      "exit_order_delay_sec": 3,
+      "calc_base": "Average Entry Price",
+      "trail_freq_interval": 1,
+      "trail_freq_unit": "Minutes",
+      "re_execute_method": "Immediate",
+      "re_entry_after_time": "",
+      "re_entry_before_time": "",
+      "re_entry_max_count_legs": "Individual",
+      "re_entry_max_count_mtm": "Individual",
+      "re_execute_order_delay_sec": 0,
+      "re_entry_placement": "Place in advance",
+      "re_cost_activation": "Immediate",
+      "auto_handling_sl_cancellation": true,
+      "auto_exit_on_margin_error": false
+    },
+    "status": "Ready",
+    "last_trade_date": "2026-11-03",
+    "_last_entry_attempt_ts": 1793695336.3508172,
+    "mtm": 0.0,
+    "_pnl_history": [
+      {
+        "time": "14:12",
+        "date": "2026-11-03",
+        "pnl": 0.0
+      }
+    ],
+    "_entry_in_progress": false,
+    "_manual_reset": false,
+    "entry_error": null,
+    "last_error": null,
+    "repair_needed": false,
+    "positions": []
+  },
+  {
     "strategy_id": "test_strat_update",
     "name": "Test Strategy",
     "underlying": "NIFTY",
@@ -60,6 +230,11 @@
       {
         "time": "15:26",
         "date": "2026-10-18",
+        "pnl": 0.0
+      },
+      {
+        "time": "14:12",
+        "date": "2026-11-03",
         "pnl": 0.0
       }
     ],

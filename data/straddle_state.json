@@ -3,40 +3,80 @@
   "algo_running": true,
   "live_feed_running": true,
   "order_api_running": true,
-  "active_strategy_id": null,
-  "positions": [
-    {
-      "id": "leg_1",
-      "symbol": "NIFTY 22550 PE 19 OCT 26",
-      "trading_symbol": "NIFTY26OCT22550PE",
-      "strike_price": 22550,
-      "option_type": "PE",
-      "side": "BUY",
-      "quantity": 65,
-      "lots": 1,
-      "lot_size": 65,
-      "avg_ent_price": 25.15,
-      "status": "OPEN",
-      "target_value": 10.0,
-      "target_type": "TGT: Pts",
-      "target_price": 35.15,
-      "sl_value": 5.0,
-      "sl_type": "SL: -Pts",
-      "sl_price": 20.15,
-      "target_type_label": "TGT: \u20b910.00",
-      "sl_type_label": "SL: -\u20b95.00"
-    }
-  ],
+  "active_strategy_id": "straddle_nifty_920",
+  "positions": [],
   "group_mtm": 0.0,
   "total_mtm": 0.0,
   "max_mtm": 0.0,
   "min_mtm": 0.0,
   "execution_mode": "LIVE_BROKER",
-  "underlying_spot": 23120.2,
+  "underlying_spot": 23706.05,
   "underlying_symbol": "NIFTY",
-  "underlying_atm_strike": 23100,
-  "last_tick_time": "12:19:20",
+  "underlying_atm_strike": 23700,
+  "last_tick_time": "14:12:20",
   "logs": [
+    {
+      "timestamp": "14:12:20",
+      "date": "2026-11-03",
+      "level": "ERROR",
+      "message": "[NIFTY 9:20 Short Straddle (45% TGT / 66% SL)] Cancelled Sell entry: Buy hedge order failed ([HEDGE ORDER] unauthorized)",
+      "details": {}
+    },
+    {
+      "timestamp": "14:12:19",
+      "date": "2026-11-03",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 24700 CE 03 NOV 26: unauthorized",
+      "details": {
+        "success": false,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "timestamp": "14:12:19",
+      "date": "2026-11-03",
+      "level": "ERROR",
+      "message": "Order REJECTED on broker for NIFTY 22700 PE 03 NOV 26: unauthorized",
+      "details": {
+        "success": false,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "timestamp": "14:12:18",
+      "date": "2026-11-03",
+      "level": "INFO",
+      "message": "[NIFTY 9:20 Short Straddle (45% TGT / 66% SL)] Associated Hedge configured for leg_2 (PE): Buying OTM 20 (NIFTY 22700 PE 03 NOV 26) first for SPAN margin reduction.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:12:16",
+      "date": "2026-11-03",
+      "level": "INFO",
+      "message": "[NIFTY 9:20 Short Straddle (45% TGT / 66% SL)] Associated Hedge configured for leg_1 (CE): Buying OTM 20 (NIFTY 24700 CE 03 NOV 26) first for SPAN margin reduction.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:12:16",
+      "date": "2026-11-03",
+      "level": "INFO",
+      "message": "Executing Strategy Entry for 'NIFTY 9:20 Short Straddle (45% TGT / 66% SL)'...",
+      "details": {}
+    },
+    {
+      "timestamp": "14:12:14",
+      "date": "2026-11-03",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'NIFTY 9:20 Short Straddle (45% TGT / 66% SL)' for Tuesday.",
+      "details": {}
+    },
+    {
+      "timestamp": "14:11:08",
+      "date": "2026-11-03",
+      "level": "INFO",
+      "message": "Auto Starting Strategy 'NIFTY 9:20 Short Straddle (45% TGT / 66% SL)' for Tuesday.",
+      "details": {}
+    },
     {
       "timestamp": "12:19:20",
       "date": "2026-10-16",

@@ -432,52 +432,6 @@ DEFAULT_STRATEGIES = [
                 },
                 "journey": {},
             },
-            {
-                "id": "leg_3",
-                "side": "Buy",
-                "product": "NRML",
-                "strike_selection": "OTM 22",
-                "option_type": "CE",
-                "lots": 1,
-                "target_type": "None",
-                "target_value": 0.0,
-                "target_re_execute_type": "NONE",
-                "target_re_execute_count": 0,
-                "sl_type": "None",
-                "sl_value": 0.0,
-                "tsl_type": "None",
-                "tsl_profit_pts": 0.0,
-                "tsl_trail_pts": 0.0,
-                "sl_re_execute_type": "NONE",
-                "sl_re_execute_count": 0,
-                "action": "Square off leg",
-                "underlying": "NIFTY",
-                "expiry": "Weekly",
-                "journey": {},
-            },
-            {
-                "id": "leg_4",
-                "side": "Buy",
-                "product": "NRML",
-                "strike_selection": "OTM 22",
-                "option_type": "PE",
-                "lots": 1,
-                "target_type": "None",
-                "target_value": 0.0,
-                "target_re_execute_type": "NONE",
-                "target_re_execute_count": 0,
-                "sl_type": "None",
-                "sl_value": 0.0,
-                "tsl_type": "None",
-                "tsl_profit_pts": 0.0,
-                "tsl_trail_pts": 0.0,
-                "sl_re_execute_type": "NONE",
-                "sl_re_execute_count": 0,
-                "action": "Square off leg",
-                "underlying": "NIFTY",
-                "expiry": "Weekly",
-                "journey": {},
-            },
         ],
         "toggles": {
             "move_sl_to_cost": False,
@@ -708,15 +662,27 @@ class StraddleManager:
                 try:
                     with open(STRADDLE_STRATEGIES_FILE, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        if isinstance(data, list):
+                        if isinstance(data, list) and len(data) > 0:
                             self._strategies = data
                         else:
-                            self._strategies = []
+                            import copy
+                            self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
+                            self._save_strategies()
                 except Exception as e:
                     logger.error(f"Failed to load straddle strategies: {e}")
-                    self._strategies = []
+                    import copy
+                    self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
+                    self._save_strategies()
             else:
-                self._strategies = []
+                import copy
+                self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
+                self._save_strategies()
+
+            # Ensure default NIFTY 9:20 Short Straddle with Associated Hedge is present
+            strat_ids = [s.get("strategy_id") for s in self._strategies if isinstance(s, dict)]
+            if "straddle_nifty_920" not in strat_ids:
+                import copy
+                self._strategies.insert(0, copy.deepcopy(DEFAULT_STRATEGIES[0]))
                 self._save_strategies()
 
             # Ensure unique names and valid default timings across all strategies

@@ -4940,6 +4940,48 @@ function saveLegSettingsModal() {
     closeLegSettingsModal();
 }
 
+function onLegSideChanged(rowId, sideVal) {
+    const tr = document.getElementById(rowId);
+    if (!tr) return;
+    const isSell = (String(sideVal).toUpperCase() === "SELL");
+    const hedgeBox = tr.querySelector(".leg-hedge-container");
+    const hedgeNa = tr.querySelector(".leg-hedge-na");
+    if (hedgeBox) hedgeBox.style.display = isSell ? "flex" : "none";
+    if (hedgeNa) hedgeNa.style.display = isSell ? "none" : "block";
+
+    if (!isSell) {
+        const chk = tr.querySelector(".leg-hedge-enabled");
+        if (chk) chk.checked = false;
+        const btn = tr.querySelector(".leg-hedge-btn");
+        if (btn) {
+            btn.style.color = "#64748b";
+            btn.style.borderColor = "#334155";
+            btn.style.background = "transparent";
+            btn.textContent = "Hedge Off";
+        }
+    }
+    if (typeof syncStrategyLegChange === "function") {
+        syncStrategyLegChange(rowId);
+    }
+}
+
+function toggleLegHedgeRow(rowId, isChecked) {
+    const tr = document.getElementById(rowId);
+    if (!tr) return;
+    const btn = tr.querySelector(".leg-hedge-btn");
+    const initV = tr.querySelector(".leg-hedge-initial-otm")?.value || "20";
+    const thrV = tr.querySelector(".leg-hedge-max-thresh")?.value || "22";
+    if (btn) {
+        btn.style.color = isChecked ? "#38bdf8" : "#64748b";
+        btn.style.borderColor = isChecked ? "#38bdf8" : "#334155";
+        btn.style.background = isChecked ? "rgba(56,189,248,0.1)" : "transparent";
+        btn.textContent = isChecked ? `OTM ${initV} (≤${thrV})` : "Hedge Off";
+    }
+    if (typeof syncStrategyLegChange === "function") {
+        syncStrategyLegChange(rowId);
+    }
+}
+
 function toggleStraddleSettingsPanel(forceState = null) {
     const panel = document.getElementById("straddleSettingsPanel");
     if (!panel) return;
