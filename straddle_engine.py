@@ -484,9 +484,9 @@ DEFAULT_STRATEGIES = [
             "sl_placement_delay_sec": 0,
             "mtm_sl_delay_sec": 0,
             "entry_order_delay_side": "Delay entry of Sell positions",
-            "entry_order_delay_sec": 3,
+            "entry_order_delay_sec": 0,
             "exit_order_delay_side": "Delay exit of Buy positions",
-            "exit_order_delay_sec": 3,
+            "exit_order_delay_sec": 0,
             "calc_base": "Average Entry Price",
             "trail_freq_interval": 1,
             "trail_freq_unit": "Minutes",
@@ -3983,8 +3983,8 @@ class StraddleManager:
             th = threading.Thread(target=self._execute_strategy_entry, args=(strat,), daemon=True)
             th.start()
 
-            # Wait briefly (up to 3.5s) for entry execution so response includes authoritative order outcome
-            th.join(timeout=3.5)
+            # Wait briefly (up to 1.0s) for entry execution so response includes immediate order outcome without blocking
+            th.join(timeout=1.0)
 
             # Refresh strategy reference
             strat = self.get_strategy(sid)
@@ -4574,13 +4574,22 @@ class StraddleManager:
             all_succeeded = (failed_lots == 0) and (len(successful_slices) == len(sliced_lots))
             first_success = next((r for r in slice_results if r.get("success")), None)
 
+            # Calculate volume-weighted average traded price across all executed slices
+            weighted_prc_sum = sum(
+                float(r.get("price") or ltp) * (sliced_lots[i] * lot_size)
+                for i, r in enumerate(slice_results) if r.get("success")
+            )
+            total_filled_slice_qty = filled_lots * lot_size
+            avg_slice_price = round(weighted_prc_sum / max(1, total_filled_slice_qty), 2) if total_filled_slice_qty > 0 else ltp
+
             if all_succeeded:
-                order_res = first_success or slice_results[0]
+                order_res = dict(first_success or slice_results[0])
                 order_res["child_order_ids"] = child_order_ids
                 order_res["success"] = True
                 order_res["quantity"] = total_qty
                 order_res["lots"] = total_lots
                 order_res["remaining_lots"] = 0
+                order_res["price"] = avg_slice_price
             elif filled_lots > 0:
                 # PARTIAL FILL: Some slices filled on broker, remaining failed due to margin/limits
                 err_slice = failed_slices[0]
@@ -4594,8 +4603,9 @@ class StraddleManager:
                 order_res["remaining_lots"] = failed_lots
                 order_res["failed_lots"] = failed_lots
                 order_res["partial_error"] = p_err
+                order_res["price"] = avg_slice_price
                 self._log_event(
-                    f"⚠️ [PARTIAL FILL] {contract['trading_symbol']}: {filled_lots} of {total_lots} lots filled ({filled_qty} qty) on broker (Order IDs: {child_order_ids}). {failed_lots} lots failed due to: {p_err}. Retrying will only punch the pending {failed_lots} lots.",
+                    f"⚠️ [PARTIAL FILL] {contract['trading_symbol']}: {filled_lots} of {total_lots} lots filled ({filled_qty} qty @ ₹{avg_slice_price:.2f}) on broker (Order IDs: {child_order_ids}). {failed_lots} lots failed due to: {p_err}. Retrying will only punch the pending {failed_lots} lots.",
                     level="WARNING"
                 )
             else:
@@ -4863,8 +4873,12 @@ class StraddleManager:
                     daemon=True
                 ).start()
 
-        # Quantiply-parity: place Stoploss with broker in advance
-        if adv.get("sl_order_placement") == "Place in advance" and sl_price > 0:
+        # Leg-level & Strategy-level Stoploss Order Placement (With Broker vs With Self)
+        leg_sl_placement = leg_cfg.get("sl_order_placement") or adv.get("sl_order_placement") or "Keep with self"
+        pos_record["sl_order_placement"] = leg_sl_placement
+        pos_record["trading_symbol"] = contract.get("trading_symbol", "")
+
+        if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and sl_price > 0:
             sl_delay = int(adv.get("sl_placement_delay_sec", 0))
             threading.Thread(
                 target=self._place_advance_sl_order,
@@ -4872,8 +4886,11 @@ class StraddleManager:
                 daemon=True
             ).start()
 
-        # Place Target with broker in advance (Broker OCO)
-        if adv.get("target_order_placement") == "Place in advance" and target_price > 0:
+        # Leg-level & Strategy-level Target Order Placement (With Broker vs With Self)
+        leg_tgt_placement = leg_cfg.get("target_order_placement") or adv.get("target_order_placement") or "Keep with self"
+        pos_record["target_order_placement"] = leg_tgt_placement
+
+        if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and target_price > 0:
             tgt_delay = int(adv.get("sl_placement_delay_sec", 0))
             threading.Thread(
                 target=self._place_advance_target_order,
@@ -5569,6 +5586,8 @@ class StraddleManager:
             if res.get("success") and res.get("order_id"):
                 pos["sl_broker_order_id"] = str(res.get("order_id"))
                 logger.info(f"[Advance SL] Order placed with broker ID: {pos['sl_broker_order_id']}")
+                self._save_strategies()
+                self._save_state()
         except Exception as e:
             logger.error(f"[Advance SL] Exception placing SL order: {e}")
 
@@ -5600,6 +5619,8 @@ class StraddleManager:
             if res.get("success") and res.get("order_id"):
                 pos["target_broker_order_id"] = str(res.get("order_id"))
                 logger.info(f"[Advance Target] Order placed with broker ID: {pos['target_broker_order_id']}")
+                self._save_strategies()
+                self._save_state()
         except Exception as e:
             logger.error(f"[Advance Target] Exception placing Target order: {e}")
 

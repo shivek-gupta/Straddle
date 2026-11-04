@@ -822,6 +822,7 @@
                 <button type="button" class="straddle-btn btn-danger" id="btnStraddleSquareOffAll" onclick="straddleSquareOffAllAndTerminate()" title="Emergency: Square off all open broker positions immediately and stop algorithm" style="background:#ea580c; border-color:#f97316; font-weight:800;">🚨 Square Off All</button>
                 <button type="button" class="straddle-btn btn-primary" id="btnStraddleToggleSettings" onclick="toggleStraddleSettingsPanel()" title="Open strategy parameters, execution rules & leg builder" style="background:#2563eb; border-color:#3b82f6; font-weight:800;">⚙️ Settings</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleOptionChain" onclick="openStraddleOptionChainModal()" title="View live option chain matrix">📊 Option Chain</button>
+                <button type="button" class="straddle-btn btn-outline" id="btnStraddleAdoptPosition" onclick="openAdoptBrokerPositionModal()" title="Adopt existing manual or broker positions into this algo for automated SL/Target management" style="border-color:#38bdf8; color:#38bdf8; font-weight:700;">📥 Adopt Trade</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleSquareOffSelected" style="margin-left:auto; display:none;" onclick="straddleSquareOffSelectedLegs()" title="Square off only the selected open leg positions">Square off selected legs</button>
             </div>
 
@@ -861,6 +862,7 @@
                         </div>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <button type="button" class="straddle-btn btn-outline" onclick="openAdoptBrokerPositionModal()" title="View and adopt manual or external broker positions into this algo" style="border-color:#38bdf8; color:#38bdf8; font-size:11.5px; font-weight:700;">📥 Adopt Trade</button>
                         <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save strategy settings without placing orders">💾 Save Changes</button>
                         <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings Drawer">✕ Close</button>
                     </div>
@@ -907,6 +909,10 @@
                             <label>Bulk edit:</label>
                             <select id="cfgBulkEdit" class="straddle-select" onchange="applyStraddleBulkEdit(this.value)">
                                 <option value="" disabled selected>Bulk edit ▾</option>
+                                <option value="SL_BROKER">Set All SL to With Broker (SL-L)</option>
+                                <option value="SL_SELF">Set All SL to With Self</option>
+                                <option value="TGT_BROKER">Set All Targets to With Broker (Limit)</option>
+                                <option value="TGT_SELF">Set All Targets to With Self</option>
                                 <option value="TGT_45">Set All Targets to 45%</option>
                                 <option value="SL_66">Set All Stoploss to 66%</option>
                                 <option value="EXP_WEEKLY">Set All to Weekly Expiry</option>
@@ -3009,7 +3015,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261103_clutter_free"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261104_fast_broker_orders_adopt"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

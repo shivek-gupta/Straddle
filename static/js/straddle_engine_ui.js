@@ -3850,7 +3850,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             <tr>
                 <td colspan="13" style="text-align:center; padding:36px 14px; color:#64748b;">
                     <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Active Positions</div>
-                    <div style="font-size:11.5px;">Click <b>Modify Settings</b> to configure legs and start trading, or hit <b>Start / Enable Algo</b>.</div>
+                    <div style="font-size:11.5px; margin-bottom:8px;">Click <b>Settings</b> to configure legs and start trading, or hit <b>Start Algo</b>.</div>
+                    <div>
+                        <button type="button" class="straddle-btn btn-outline" onclick="openAdoptBrokerPositionModal()" style="border-color:#38bdf8; color:#38bdf8; font-size:11px; font-weight:700; padding:3px 10px;">📥 Adopt Existing Broker Position</button>
+                    </div>
                 </td>
             </tr>
         `;
@@ -4113,6 +4116,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const entryTime = pos.entry_time || '-';
 
                 // Per Leg Target (Interactive ONLY for live filled/partially filled trades)
+                const tgtPlacementBadge = pos.target_broker_order_id ?
+                    `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Order #${pos.target_broker_order_id}">🏦 Broker</span>` :
+                    `<span style="font-size:9px; color:#64748b;" title="Monitored by Straddle Engine software">💻 Self</span>`;
+
                 let targetHtml = "-";
                 if (isInteractiveRow) {
                     const isPts = pending ? (pending.target_mode === "₹" || pending.target_mode.includes("Pts")) : (pos.target_type && (pos.target_type.includes("Pts") || pos.target_type.includes("₹")));
@@ -4125,20 +4132,27 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             </select>
                             <input type="number" id="live_tgt_val_${idx}" class="straddle-input" style="width:54px; padding:2px 4px; font-size:11px; font-weight:700;" value="${tVal}" step="0.5" oninput="markRunningLegChanged(${idx})" title="Change Target (% or ₹ points)">
                         </div>
-                        <div id="live_tgt_sub_${idx}" style="font-size:10px; color:#38bdf8; font-weight:700; margin-top:2px;">TGT: ₹${pos.target_price ? Number(pos.target_price).toFixed(2) : '-'}</div>
+                        <div id="live_tgt_sub_${idx}" style="font-size:10px; color:#38bdf8; font-weight:700; margin-top:2px; display:flex; align-items:center; justify-content:space-between; gap:4px;">
+                            <span>TGT: ₹${pos.target_price ? Number(pos.target_price).toFixed(2) : '-'}</span>
+                            ${tgtPlacementBadge}
+                        </div>
                     `;
                 } else if (isError) {
                     const tgtValLabel = pos.target_value ? `${pos.target_value}${pos.target_type && pos.target_type.includes("Pts") ? " Pts" : "%"}` : "-";
                     targetHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="tgt-label-badge" style="opacity:0.8;">TGT: ${tgtValLabel}</span></div>`;
                 } else if (pos.target_price && pos.target_price > 0) {
                     const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
-                    targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span></div>`;
+                    targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span> ${tgtPlacementBadge}</div>`;
                 } else if (pos.target_value && pos.target_value > 0) {
                     const tgtLabel = `TGT: ${pos.target_value}%`;
                     targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>`;
                 }
 
                 // Per Leg Stoploss (Interactive ONLY for live filled/partially filled trades)
+                const slPlacementBadge = pos.sl_broker_order_id ?
+                    `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Order #${pos.sl_broker_order_id}">🏦 Broker</span>` :
+                    `<span style="font-size:9px; color:#64748b;" title="Monitored by Straddle Engine software">💻 Self</span>`;
+
                 let slHtml = "-";
                 if (isInteractiveRow) {
                     const isPts = pending ? (pending.sl_mode === "₹" || pending.sl_mode.includes("Pts")) : (pos.sl_type && (pos.sl_type.includes("Pts") || pos.sl_type.includes("₹")));
@@ -4151,7 +4165,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             </select>
                             <input type="number" id="live_sl_val_${idx}" class="straddle-input" style="width:54px; padding:2px 4px; font-size:11px; font-weight:700;" value="${sVal}" step="0.5" oninput="markRunningLegChanged(${idx})" title="Change Stoploss (% or ₹ points)">
                         </div>
-                        <div id="live_sl_sub_${idx}" style="font-size:10px; color:#f87171; font-weight:700; margin-top:2px;">SL: ₹${pos.sl_price ? Number(pos.sl_price).toFixed(2) : '-'}</div>
+                        <div id="live_sl_sub_${idx}" style="font-size:10px; color:#f87171; font-weight:700; margin-top:2px; display:flex; align-items:center; justify-content:space-between; gap:4px;">
+                            <span>SL: ₹${pos.sl_price ? Number(pos.sl_price).toFixed(2) : '-'}</span>
+                            ${slPlacementBadge}
+                        </div>
                     `;
                 } else if (isError) {
                     const slValLabel = pos.sl_value ? `-${pos.sl_value}${pos.sl_type && pos.sl_type.includes("Pts") ? " Pts" : "%"}` : "-";
@@ -4159,7 +4176,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 } else if (pos.sl_price && pos.sl_price > 0) {
                     const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
                     const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
-                    slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span></div>
+                    slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span> ${slPlacementBadge}</div>
                               <div class="orig-sl-sub">${origSlLabel}</div>`;
                 } else if (pos.sl_value && pos.sl_value > 0) {
                     const slLabel = `SL: -${pos.sl_value}%`;
@@ -5681,11 +5698,17 @@ function addStraddleLegRow(leg = null) {
             <div class="leg-hedge-na" style="display:${isSell ? 'none' : 'block'}; text-align:center; color:#475569; font-size:11px; font-weight:600;">—</div>
         </td>
         <td>
-            <div style="display:flex; gap:2px;">
-                <select class="straddle-select leg-tgt-type" style="width:85px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
-                    ${tgtOptionsHtml}
+            <div style="display:flex; flex-direction:column; gap:3px;">
+                <div style="display:flex; gap:2px;">
+                    <select class="straddle-select leg-tgt-type" style="width:85px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
+                        ${tgtOptionsHtml}
+                    </select>
+                    <input type="number" class="straddle-input leg-tgt-val" style="width:50px;" value="${l.target_value !== undefined ? l.target_value : 45}">
+                </div>
+                <select class="straddle-select leg-tgt-placement" style="font-size:10px; padding:1px 3px; background:#0b1120; border-color:#334155; color:${l.target_order_placement === 'Place in advance' ? '#10b981' : '#94a3b8'}; font-weight:700;" onchange="this.style.color = (this.value === 'Place in advance' ? '#10b981' : '#94a3b8'); syncStrategyLegChange('${rowId}');" title="Target Order Placement: Keep with self (monitored by software) vs Place with broker (advance LIMIT order on exchange)">
+                    <option value="Keep with self" ${l.target_order_placement !== "Place in advance" ? "selected" : ""}>💻 With Self</option>
+                    <option value="Place in advance" ${l.target_order_placement === "Place in advance" ? "selected" : ""}>🏦 With Broker (Limit)</option>
                 </select>
-                <input type="number" class="straddle-input leg-tgt-val" style="width:50px;" value="${l.target_value !== undefined ? l.target_value : 45}">
             </div>
         </td>
         <td>
@@ -5697,11 +5720,17 @@ function addStraddleLegRow(leg = null) {
             </div>
         </td>
         <td>
-            <div style="display:flex; gap:2px;">
-                <select class="straddle-select leg-sl-type" style="width:80px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
-                    ${slOptionsHtml}
+            <div style="display:flex; flex-direction:column; gap:3px;">
+                <div style="display:flex; gap:2px;">
+                    <select class="straddle-select leg-sl-type" style="width:80px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
+                        ${slOptionsHtml}
+                    </select>
+                    <input type="number" class="straddle-input leg-sl-val" style="width:50px;" value="${l.sl_value !== undefined ? l.sl_value : 66}">
+                </div>
+                <select class="straddle-select leg-sl-placement" style="font-size:10px; padding:1px 3px; background:#0b1120; border-color:#334155; color:${l.sl_order_placement === 'Place in advance' ? '#10b981' : '#94a3b8'}; font-weight:700;" onchange="this.style.color = (this.value === 'Place in advance' ? '#10b981' : '#94a3b8'); syncStrategyLegChange('${rowId}');" title="Stoploss Order Placement: Keep with self (monitored by software) vs Place with broker (advance SL-L order on exchange)">
+                    <option value="Keep with self" ${l.sl_order_placement !== "Place in advance" ? "selected" : ""}>💻 With Self</option>
+                    <option value="Place in advance" ${l.sl_order_placement === "Place in advance" ? "selected" : ""}>🏦 With Broker (SL-L)</option>
                 </select>
-                <input type="number" class="straddle-input leg-sl-val" style="width:50px;" value="${l.sl_value !== undefined ? l.sl_value : 66}">
             </div>
         </td>
         <td>
@@ -6117,7 +6146,15 @@ function setStraddleTradeType(type) {
 
 function applyStraddleBulkEdit(action) {
     if (!action) return;
-    if (action === "TGT_45") {
+    if (action === "SL_BROKER") {
+        document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Place in advance"; el.style.color = "#10b981"; });
+    } else if (action === "SL_SELF") {
+        document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
+    } else if (action === "TGT_BROKER") {
+        document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Place in advance"; el.style.color = "#10b981"; });
+    } else if (action === "TGT_SELF") {
+        document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
+    } else if (action === "TGT_45") {
         document.querySelectorAll(".leg-tgt-type").forEach(el => el.value = "TGT: %");
         document.querySelectorAll(".leg-tgt-val").forEach(el => el.value = 45);
     } else if (action === "SL_66") {
@@ -6458,10 +6495,12 @@ function serializeCurrentStrategySettings() {
             },
             target_type: tr.querySelector(".leg-tgt-type")?.value,
             target_value: parseFloat(tr.querySelector(".leg-tgt-val")?.value) || 45.0,
+            target_order_placement: tr.querySelector(".leg-tgt-placement")?.value || "Keep with self",
             target_re_execute_type: tr.querySelector(".leg-tgt-re-type")?.value,
             target_re_execute_count: parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value) || 6,
             sl_type: tr.querySelector(".leg-sl-type")?.value,
             sl_value: parseFloat(tr.querySelector(".leg-sl-val")?.value) || 66.0,
+            sl_order_placement: tr.querySelector(".leg-sl-placement")?.value || "Keep with self",
             tsl_type: tr.querySelector(".leg-tsl-type")?.value,
             sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
             sl_re_execute_count: parseInt(tr.querySelector(".leg-sl-re-cnt")?.value) || 1,
@@ -6579,8 +6618,7 @@ async function saveAndStartStraddleTrade() {
         });
         const startRes = await startResp.json();
 
-        await fetchStraddleState();
-        await loadStraddleOpenPositions();
+        await Promise.all([fetchStraddleState(), loadStraddleOpenPositions()]);
         renderStraddleAlgosTable(true);
 
         if (startRes.success) {
@@ -6648,8 +6686,7 @@ async function straddleStartAlgo() {
             body: JSON.stringify({ strategy_id: stratId, force_fresh: true })
         });
         const res = await resp.json();
-        await fetchStraddleState();
-        await loadStraddleOpenPositions();
+        await Promise.all([fetchStraddleState(), loadStraddleOpenPositions()]);
         renderStraddleAlgosTable(true);
 
         if (res.success) {
@@ -6662,7 +6699,7 @@ async function straddleStartAlgo() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = "▶ Start / Enable Algo";
+            btn.innerHTML = "▶ Start Algo";
         }
     }
 }
