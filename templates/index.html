@@ -909,6 +909,8 @@
                             <label>Bulk edit:</label>
                             <select id="cfgBulkEdit" class="straddle-select" onchange="applyStraddleBulkEdit(this.value)">
                                 <option value="" disabled selected>Bulk edit ▾</option>
+                                <option value="BOTH_BROKER">⚡ Set Both Target & SL to With Broker 🏦</option>
+                                <option value="BOTH_SELF">⚡ Set Both Target & SL to With Platform 💻</option>
                                 <option value="SL_BROKER">Set All SL to With Broker (SL-L)</option>
                                 <option value="SL_SELF">Set All SL to With Self</option>
                                 <option value="TGT_BROKER">Set All Targets to With Broker (Limit)</option>
@@ -3015,7 +3017,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261104_fast_broker_orders_adopt"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261104_broker_sl_tgt_reconcile"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

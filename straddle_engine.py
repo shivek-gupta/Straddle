@@ -2611,19 +2611,19 @@ class StraddleManager:
             if "advanced_settings" in strat and isinstance(strat["advanced_settings"], dict):
                 strat["advanced_settings"]["sl_order_placement"] = val
 
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
             # If enabled, place advance SL for open positions without an active broker SL order
-            if enabled and mode == "LIVE_BROKER":
+            if enabled:
                 for pos in strat.get("positions", []):
                     if pos.get("status") == "OPEN" and not pos.get("sl_broker_order_id") and float(pos.get("sl_price", 0)) > 0:
                         threading.Thread(target=self._place_advance_sl_order, args=(broker, pos, 0), daemon=True).start()
-            elif not enabled and mode == "LIVE_BROKER":
+            else:
                 # If disabled, cancel existing advance SL orders on broker to revert to software trigger
                 for pos in strat.get("positions", []):
                     adv_sl_oid = pos.get("sl_broker_order_id")
-                    if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                    if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_"):
                         try:
                             broker.cancel_order(str(adv_sl_oid))
                         except Exception:
@@ -2634,6 +2634,42 @@ class StraddleManager:
             self._save_state(force=True)
             self._log_event(f"Strategy '{strat.get('name')}' Advance Broker SL set to: {val}")
             return {"success": True, "strategy_id": strategy_id, "sl_order_placement": val, "enabled": enabled}
+
+    def toggle_strategy_advance_target(self, strategy_id: str, enabled: bool) -> Dict[str, Any]:
+        """Toggles placing advance Target orders on Exchange matching engine vs keeping in software."""
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy {strategy_id} not found"}
+            adv = strat.setdefault("advanced", {})
+            val = "Place in advance" if enabled else "Keep with self"
+            adv["target_order_placement"] = val
+            if "advanced_settings" in strat and isinstance(strat["advanced_settings"], dict):
+                strat["advanced_settings"]["target_order_placement"] = val
+
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+
+            # If enabled, place advance Target for open positions without an active broker Target order
+            if enabled:
+                for pos in strat.get("positions", []):
+                    if pos.get("status") == "OPEN" and not pos.get("target_broker_order_id") and float(pos.get("target_price", 0)) > 0:
+                        threading.Thread(target=self._place_advance_target_order, args=(broker, pos, 0), daemon=True).start()
+            else:
+                # If disabled, cancel existing advance Target orders on broker to revert to software trigger
+                for pos in strat.get("positions", []):
+                    adv_tgt_oid = pos.get("target_broker_order_id")
+                    if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_"):
+                        try:
+                            broker.cancel_order(str(adv_tgt_oid))
+                        except Exception:
+                            pass
+                        pos["target_broker_order_id"] = None
+
+            self._save_strategies()
+            self._save_state(force=True)
+            self._log_event(f"Strategy '{strat.get('name')}' Advance Broker Target set to: {val}")
+            return {"success": True, "strategy_id": strategy_id, "target_order_placement": val, "enabled": enabled}
 
     # ==========================================================
     # Strategy CRUD & Multi-Algo Management
@@ -3053,7 +3089,7 @@ class StraddleManager:
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
 
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
             self._square_off_strategy_positions(strat, broker, reason="MANUAL SQUARE OFF")
 
@@ -4226,7 +4262,7 @@ class StraddleManager:
             mult = self.get_effective_multiplier(strat)
             und = strat.get("underlying", "NIFTY")
             adv = strat.get("advanced") or strat.get("advanced_settings", {})
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
             legs_cfg = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
@@ -4874,29 +4910,40 @@ class StraddleManager:
                 ).start()
 
         # Leg-level & Strategy-level Stoploss Order Placement (With Broker vs With Self)
-        leg_sl_placement = leg_cfg.get("sl_order_placement") or adv.get("sl_order_placement") or "Keep with self"
-        pos_record["sl_order_placement"] = leg_sl_placement
-        pos_record["trading_symbol"] = contract.get("trading_symbol", "")
-
-        if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and sl_price > 0:
-            sl_delay = int(adv.get("sl_placement_delay_sec", 0))
-            threading.Thread(
-                target=self._place_advance_sl_order,
-                args=(broker, pos_record, sl_delay),
-                daemon=True
-            ).start()
+        adv_sl_placement = adv.get("sl_order_placement")
+        leg_sl_placement = leg_cfg.get("sl_order_placement")
+        if adv_sl_placement in ("Place in advance", "With Broker", "BROKER"):
+            if not leg_sl_placement or leg_sl_placement in ("Keep with self", "With Platform"):
+                leg_sl_placement = adv_sl_placement
+        if not leg_sl_placement:
+            leg_sl_placement = adv_sl_placement or "Keep with self"
 
         # Leg-level & Strategy-level Target Order Placement (With Broker vs With Self)
-        leg_tgt_placement = leg_cfg.get("target_order_placement") or adv.get("target_order_placement") or "Keep with self"
-        pos_record["target_order_placement"] = leg_tgt_placement
+        adv_tgt_placement = adv.get("target_order_placement")
+        leg_tgt_placement = leg_cfg.get("target_order_placement")
+        if adv_tgt_placement in ("Place in advance", "With Broker", "BROKER"):
+            if not leg_tgt_placement or leg_tgt_placement in ("Keep with self", "With Platform"):
+                leg_tgt_placement = adv_tgt_placement
+        if not leg_tgt_placement:
+            leg_tgt_placement = adv_tgt_placement or "Keep with self"
 
-        if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and target_price > 0:
-            tgt_delay = int(adv.get("sl_placement_delay_sec", 0))
-            threading.Thread(
-                target=self._place_advance_target_order,
-                args=(broker, pos_record, tgt_delay),
-                daemon=True
-            ).start()
+        pos_record["sl_order_placement"] = leg_sl_placement
+        pos_record["target_order_placement"] = leg_tgt_placement
+        pos_record["trading_symbol"] = contract.get("trading_symbol", "")
+
+        def _dispatch_advance_orders():
+            sl_delay = int(adv.get("sl_placement_delay_sec", 0))
+            if sl_delay > 0:
+                time.sleep(sl_delay)
+            # 1. Place Stoploss with broker if selected
+            if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and sl_price > 0:
+                self._place_advance_sl_order(broker, pos_record, delay_sec=0)
+                time.sleep(0.15)  # Safe broker sequence buffer
+            # 2. Place Target with broker if selected
+            if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and target_price > 0:
+                self._place_advance_target_order(broker, pos_record, delay_sec=0)
+
+        threading.Thread(target=_dispatch_advance_orders, daemon=True).start()
 
         self._log_event(
             f"Entered {side} {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty}, TGT: ₹{target_price}, SL: ₹{sl_price})",
@@ -4922,7 +4969,7 @@ class StraddleManager:
             has_filter = bool(leg_ids and len(leg_ids) > 0) or (leg_indices is not None and len(leg_indices) > 0)
             error_targets = []
             for idx, p in enumerate(positions):
-                is_err = (p.get("status") == "ERROR") or bool(p.get("sl_cancelled_unexpectedly")) or bool(p.get("remaining_lots", 0) > 0)
+                is_err = (p.get("status") == "ERROR") or bool(p.get("sl_cancelled_unexpectedly")) or bool(p.get("target_cancelled_unexpectedly")) or bool(p.get("remaining_lots", 0) > 0)
                 if has_filter:
                     match_id = bool(leg_ids and p.get("id") in leg_ids)
                     match_idx = bool(leg_indices is not None and idx in leg_indices)
@@ -4951,7 +4998,7 @@ class StraddleManager:
                     # If no existing error records and no specific leg filter, trigger fresh entry
                     return self.start_algo(sid, force_fresh=False)
 
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
             adv = strat.get("advanced") or strat.get("advanced_settings", {})
             mult = self.get_effective_multiplier(strat)
@@ -4962,18 +5009,44 @@ class StraddleManager:
             retried_failed = []
 
             for idx, pos in error_targets:
-                # 1. If it is an OPEN position whose advance SL order was cancelled, re-place advance SL on broker!
-                if pos.get("status") == "OPEN" and (pos.get("sl_cancelled_unexpectedly") or not pos.get("sl_broker_order_id")):
-                    try:
-                        self._place_advance_sl_order(broker, pos, delay_sec=0)
-                        pos["sl_cancelled_unexpectedly"] = False
-                        pos["error_message"] = None
-                        pos["error_subtext"] = None
-                        pos["_sl_cancel_notified"] = False
-                        retried_success.append(f"{pos.get('symbol')} SL Order Placed")
-                        self._log_event(f"[RETRY SUCCESS] Re-placed broker advance Stoploss order for {pos.get('symbol')}.")
-                    except Exception as e:
-                        retried_failed.append((pos.get("symbol", "Leg"), f"Failed to place SL: {e}"))
+                # 1. If it is an OPEN position whose advance order (SL or Target) was cancelled or missing:
+                if pos.get("status") == "OPEN" and (
+                    pos.get("sl_cancelled_unexpectedly") or
+                    pos.get("target_cancelled_unexpectedly") or
+                    (pos.get("sl_order_placement") in ("Place in advance", "With Broker", "BROKER") and not pos.get("sl_broker_order_id")) or
+                    (pos.get("target_order_placement") in ("Place in advance", "With Broker", "BROKER") and not pos.get("target_broker_order_id"))
+                ):
+                    placed_any = False
+                    if pos.get("sl_cancelled_unexpectedly") or (pos.get("sl_order_placement") in ("Place in advance", "With Broker", "BROKER") and not pos.get("sl_broker_order_id")):
+                        try:
+                            self._place_advance_sl_order(broker, pos, delay_sec=0)
+                            if pos.get("sl_broker_order_id"):
+                                pos["sl_cancelled_unexpectedly"] = False
+                                pos["error_message"] = None
+                                pos["error_subtext"] = None
+                                pos["_sl_cancel_notified"] = False
+                                pos.pop("sl_cancel_notice", None)
+                                retried_success.append(f"{pos.get('symbol')} SL Order Placed (#{pos['sl_broker_order_id']})")
+                                self._log_event(f"[RETRY SUCCESS] Re-placed broker advance Stoploss order for {pos.get('symbol')}.")
+                                placed_any = True
+                        except Exception as e:
+                            retried_failed.append((pos.get("symbol", "Leg"), f"Failed to place SL: {e}"))
+
+                    if pos.get("target_cancelled_unexpectedly") or (pos.get("target_order_placement") in ("Place in advance", "With Broker", "BROKER") and not pos.get("target_broker_order_id")):
+                        try:
+                            if placed_any:
+                                time.sleep(0.15)
+                            self._place_advance_target_order(broker, pos, delay_sec=0)
+                            if pos.get("target_broker_order_id"):
+                                pos["target_cancelled_unexpectedly"] = False
+                                pos["error_message"] = None
+                                pos["error_subtext"] = None
+                                pos["_tgt_cancel_notified"] = False
+                                pos.pop("target_cancel_notice", None)
+                                retried_success.append(f"{pos.get('symbol')} Target Order Placed (#{pos['target_broker_order_id']})")
+                                self._log_event(f"[RETRY SUCCESS] Re-placed broker advance Target order for {pos.get('symbol')}.")
+                        except Exception as e:
+                            retried_failed.append((pos.get("symbol", "Leg"), f"Failed to place Target: {e}"))
                     continue
 
                 # 2. If it had an entry price > 0, it failed on exit -> Retry Exit!
@@ -5208,6 +5281,8 @@ class StraddleManager:
         sl_val: Optional[float] = None,
         new_lots: Optional[int] = None,
         new_strike: Optional[str] = None,
+        target_order_placement: Optional[str] = None,
+        sl_order_placement: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Dynamically update live running trade parameters:
@@ -5244,7 +5319,7 @@ class StraddleManager:
             if not leg_cfg and pos_idx is not None and 0 <= pos_idx < len(legs_cfg):
                 leg_cfg = legs_cfg[pos_idx]
 
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
             adv = strat.get("advanced") or strat.get("advanced_settings") or {}
             diff_lots = 0
@@ -5439,17 +5514,64 @@ class StraddleManager:
                 adv_sl_oid = pos.get("sl_broker_order_id")
                 if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_") and pos.get("sl_price"):
                     try:
+                        sl_side = "BUY" if side == "SELL" else "SELL"
+                        if sl_side == "BUY":
+                            lim_p = round_to_tick(max(pos["sl_price"] + 0.05, pos["sl_price"] * 1.05), 0.05)
+                        else:
+                            lim_p = round_to_tick(min(max(0.05, pos["sl_price"] - 0.05), pos["sl_price"] * 0.95), 0.05)
                         broker.modify_order(
                             order_id=str(adv_sl_oid),
                             trigger_price=pos["sl_price"],
                             quantity=pos.get("quantity"),
-                            price=0.0
+                            price=lim_p,
+                            order_type="SL"
                         )
-                        logger.info(f"Updated broker advance SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f} (qty={pos.get('quantity')})")
+                        logger.info(f"Updated broker advance SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}, limit to ₹{lim_p:.2f} (qty={pos.get('quantity')})")
                     except Exception as e:
                         logger.warning(f"Could not modify broker advance SL order: {e}")
-                elif adv.get("sl_order_placement") == "Place in advance" and pos.get("sl_price"):
+                elif (pos.get("sl_order_placement") in ("Place in advance", "With Broker", "BROKER") or adv.get("sl_order_placement") == "Place in advance") and pos.get("sl_price"):
                     threading.Thread(target=self._place_advance_sl_order, args=(broker, pos, 0), daemon=True).start()
+
+            # 4. ORDER PLACEMENT SWITCHING (Target & SL between Broker vs Platform)
+            if target_order_placement:
+                is_broker = target_order_placement in ("Place in advance", "With Broker", "BROKER")
+                norm_tgt = "Place in advance" if is_broker else "Keep with self"
+                pos["target_order_placement"] = norm_tgt
+                if leg_cfg:
+                    leg_cfg["target_order_placement"] = norm_tgt
+                if is_broker:
+                    pos["target_cancelled_unexpectedly"] = False
+                    pos.pop("target_cancel_notice", None)
+                    if not pos.get("target_broker_order_id") and float(pos.get("target_price", 0)) > 0:
+                        threading.Thread(target=self._place_advance_target_order, args=(broker, pos, 0), daemon=True).start()
+                else:
+                    adv_tgt_oid = pos.get("target_broker_order_id")
+                    if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                        try:
+                            broker.cancel_order(str(adv_tgt_oid))
+                        except Exception as e:
+                            logger.warning(f"Error cancelling Target order {adv_tgt_oid}: {e}")
+                    pos["target_broker_order_id"] = None
+
+            if sl_order_placement:
+                is_broker = sl_order_placement in ("Place in advance", "With Broker", "BROKER")
+                norm_sl = "Place in advance" if is_broker else "Keep with self"
+                pos["sl_order_placement"] = norm_sl
+                if leg_cfg:
+                    leg_cfg["sl_order_placement"] = norm_sl
+                if is_broker:
+                    pos["sl_cancelled_unexpectedly"] = False
+                    pos.pop("sl_cancel_notice", None)
+                    if not pos.get("sl_broker_order_id") and float(pos.get("sl_price", 0)) > 0:
+                        threading.Thread(target=self._place_advance_sl_order, args=(broker, pos, 0), daemon=True).start()
+                else:
+                    adv_sl_oid = pos.get("sl_broker_order_id")
+                    if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                        try:
+                            broker.cancel_order(str(adv_sl_oid))
+                        except Exception as e:
+                            logger.warning(f"Error cancelling SL order {adv_sl_oid}: {e}")
+                    pos["sl_broker_order_id"] = None
 
             # If lots changed but neither target_val nor sl_val changed, still ensure quantities on active broker orders match
             if diff_lots != 0:
@@ -5549,12 +5671,12 @@ class StraddleManager:
             sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
 
             # In Indian markets (NSE F&O), SL-Limit is preferred because NSE restricted SL-M on options.
-            # For a Buy SL (closing a short), limit price is placed with a 5% buffer above trigger.
-            # For a Sell SL (closing a long), limit price is placed with a 5% buffer below trigger.
+            # For a Buy SL (closing a short), limit price is placed with a buffer above trigger.
+            # For a Sell SL (closing a long), limit price is placed with a buffer below trigger.
             if sl_side == "BUY":
-                limit_sl_p = round_to_tick(sl_price * 1.05, 0.05)
+                limit_sl_p = round_to_tick(max(sl_price + 0.05, sl_price * 1.05), 0.05)
             else:
-                limit_sl_p = round_to_tick(max(0.05, sl_price * 0.95), 0.05)
+                limit_sl_p = round_to_tick(min(max(0.05, sl_price - 0.05), sl_price * 0.95), 0.05)
 
             logger.info(f"[Advance SL] Placing advance SL-Limit order on broker for {sym} @ trigger ₹{sl_price:.2f}, limit ₹{limit_sl_p:.2f} (qty={qty})...")
             res = broker.place_order(
@@ -5568,7 +5690,7 @@ class StraddleManager:
                 trigger_price=sl_price,
                 tag="adv_sl"
             )
-            # If broker rejects SL-Limit, fallback to SL-M
+            # If broker rejects SL-Limit, fallback to SL-M (if supported)
             if not res.get("success"):
                 logger.info(f"[Advance SL] SL-Limit rejected ({res.get('error')}). Trying SL-M...")
                 res = broker.place_order(
@@ -5585,11 +5707,28 @@ class StraddleManager:
 
             if res.get("success") and res.get("order_id"):
                 pos["sl_broker_order_id"] = str(res.get("order_id"))
+                pos["sl_order_placement"] = "Place in advance"
+                pos["sl_cancelled_unexpectedly"] = False
+                pos.pop("sl_cancel_notice", None)
+                pos.pop("sl_placement_error", None)
                 logger.info(f"[Advance SL] Order placed with broker ID: {pos['sl_broker_order_id']}")
+                self._save_strategies()
+                self._save_state()
+            else:
+                err_msg = res.get("error") or "Order rejected by broker"
+                pos["sl_placement_error"] = err_msg
+                logger.warning(f"[Advance SL] Broker failed to place SL for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
+                self._log_event(
+                    f"⚠️ [Broker SL Placement Notice] Failed to place Stoploss order with broker for {sym}: {err_msg}. Algo active protection: monitoring live price on platform to exit on SL trigger.",
+                    level="WARNING"
+                )
                 self._save_strategies()
                 self._save_state()
         except Exception as e:
             logger.error(f"[Advance SL] Exception placing SL order: {e}")
+            pos["sl_placement_error"] = str(e)
+            self._save_strategies()
+            self._save_state()
 
     def _place_advance_target_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0):
         """Quantiply/Broker-parity: place Target (LIMIT) order with broker in advance after delay_sec."""
@@ -5618,11 +5757,195 @@ class StraddleManager:
             )
             if res.get("success") and res.get("order_id"):
                 pos["target_broker_order_id"] = str(res.get("order_id"))
+                pos["target_order_placement"] = "Place in advance"
+                pos["target_cancelled_unexpectedly"] = False
+                pos.pop("target_cancel_notice", None)
+                pos.pop("target_placement_error", None)
                 logger.info(f"[Advance Target] Order placed with broker ID: {pos['target_broker_order_id']}")
+                self._save_strategies()
+                self._save_state()
+            else:
+                err_msg = res.get("error") or "Order rejected by broker"
+                pos["target_placement_error"] = err_msg
+                logger.warning(f"[Advance Target] Broker failed to place Target for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
+                self._log_event(
+                    f"⚠️ [Broker Target Placement Notice] Failed to place Target order with broker for {sym}: {err_msg}. Algo active protection: monitoring live price on platform to exit on Target trigger.",
+                    level="WARNING"
+                )
                 self._save_strategies()
                 self._save_state()
         except Exception as e:
             logger.error(f"[Advance Target] Exception placing Target order: {e}")
+            pos["target_placement_error"] = str(e)
+            self._save_strategies()
+            self._save_state()
+
+    def set_leg_order_placement(
+        self,
+        strategy_id: Optional[str] = None,
+        leg_id: Optional[str] = None,
+        leg_index: Optional[int] = None,
+        target_order_placement: Optional[str] = None,
+        sl_order_placement: Optional[str] = None,
+        combined_placement: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Dynamically change where Target / Stoploss orders are kept: Broker, Platform, or Both."""
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy {strategy_id} not found"}
+            positions = strat.get("positions", [])
+            pos = None
+            pos_idx = None
+            if leg_id:
+                for idx, p in enumerate(positions):
+                    if p.get("id") == leg_id:
+                        pos = p
+                        pos_idx = idx
+                        break
+            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
+                pos = positions[int(leg_index)]
+                pos_idx = int(leg_index)
+            if not pos:
+                return {"success": False, "error": "Position not found in strategy"}
+
+            legs_cfg = strat.get("legs", [])
+            leg_cfg = None
+            if leg_id:
+                leg_cfg = next((l for l in legs_cfg if l.get("id") == leg_id), None)
+            if not leg_cfg and pos_idx is not None and 0 <= pos_idx < len(legs_cfg):
+                leg_cfg = legs_cfg[pos_idx]
+
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+
+            # Combined placement shorthand handler
+            comb = (combined_placement or "").upper()
+            if comb == "BOTH_BROKER":
+                target_order_placement = "Place in advance"
+                sl_order_placement = "Place in advance"
+            elif comb == "BOTH_PLATFORM":
+                target_order_placement = "Keep with self"
+                sl_order_placement = "Keep with self"
+            elif comb == "SL_BROKER_TGT_PLATFORM":
+                sl_order_placement = "Place in advance"
+                target_order_placement = "Keep with self"
+            elif comb == "TGT_BROKER_SL_PLATFORM":
+                target_order_placement = "Place in advance"
+                sl_order_placement = "Keep with self"
+
+            changes = []
+
+            # 1. Target placement
+            if target_order_placement:
+                is_broker = target_order_placement in ("Place in advance", "With Broker", "BROKER")
+                norm_tgt = "Place in advance" if is_broker else "Keep with self"
+                pos["target_order_placement"] = norm_tgt
+                if leg_cfg:
+                    leg_cfg["target_order_placement"] = norm_tgt
+
+                if is_broker:
+                    pos["target_cancelled_unexpectedly"] = False
+                    pos.pop("target_cancel_notice", None)
+                    if not pos.get("target_broker_order_id") and float(pos.get("target_price", 0)) > 0:
+                        threading.Thread(target=self._place_advance_target_order, args=(broker, pos, 0), daemon=True).start()
+                        changes.append("Target -> Broker")
+                else:
+                    adv_tgt_oid = pos.get("target_broker_order_id")
+                    if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                        try:
+                            broker.cancel_order(str(adv_tgt_oid))
+                        except Exception as e:
+                            logger.warning(f"Error cancelling target order {adv_tgt_oid}: {e}")
+                    pos["target_broker_order_id"] = None
+                    changes.append("Target -> Platform")
+
+            # 2. Stoploss placement
+            if sl_order_placement:
+                is_broker = sl_order_placement in ("Place in advance", "With Broker", "BROKER")
+                norm_sl = "Place in advance" if is_broker else "Keep with self"
+                pos["sl_order_placement"] = norm_sl
+                if leg_cfg:
+                    leg_cfg["sl_order_placement"] = norm_sl
+
+                if is_broker:
+                    pos["sl_cancelled_unexpectedly"] = False
+                    pos.pop("sl_cancel_notice", None)
+                    if not pos.get("sl_broker_order_id") and float(pos.get("sl_price", 0)) > 0:
+                        threading.Thread(target=self._place_advance_sl_order, args=(broker, pos, 0), daemon=True).start()
+                        changes.append("SL -> Broker")
+                else:
+                    adv_sl_oid = pos.get("sl_broker_order_id")
+                    if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                        try:
+                            broker.cancel_order(str(adv_sl_oid))
+                        except Exception as e:
+                            logger.warning(f"Error cancelling SL order {adv_sl_oid}: {e}")
+                    pos["sl_broker_order_id"] = None
+                    changes.append("SL -> Platform")
+
+            self._save_strategies()
+            self._save_state(force=True)
+            msg = f"Updated order placement for {pos.get('symbol')}: {', '.join(changes) if changes else 'Saved'}"
+            self._log_event(msg)
+            return {"success": True, "message": msg, "target_order_placement": pos.get("target_order_placement"), "sl_order_placement": pos.get("sl_order_placement")}
+
+    def resend_advance_order_to_broker(
+        self,
+        strategy_id: Optional[str] = None,
+        leg_id: Optional[str] = None,
+        leg_index: Optional[int] = None,
+        order_type: str = "BOTH"
+    ) -> Dict[str, Any]:
+        """Re-send an advance order (SL, Target, or Both) to the broker matching engine."""
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy {strategy_id} not found"}
+            positions = strat.get("positions", [])
+            pos = None
+            if leg_id:
+                pos = next((p for p in positions if p.get("id") == leg_id), None)
+            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
+                pos = positions[int(leg_index)]
+            if not pos:
+                return {"success": False, "error": "Position not found in strategy"}
+
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            placed_orders = []
+            ot = (order_type or "BOTH").upper()
+
+            if ot in ("SL", "BOTH"):
+                pos["sl_order_placement"] = "Place in advance"
+                pos["sl_cancelled_unexpectedly"] = False
+                pos.pop("sl_cancel_notice", None)
+                pos.pop("sl_placement_error", None)
+                pos["sl_broker_order_id"] = None
+                self._place_advance_sl_order(broker, pos, delay_sec=0)
+                if pos.get("sl_broker_order_id"):
+                    placed_orders.append(f"SL #{pos['sl_broker_order_id']}")
+
+            if ot in ("TARGET", "TGT", "BOTH"):
+                if ot == "BOTH":
+                    time.sleep(0.15)
+                pos["target_order_placement"] = "Place in advance"
+                pos["target_cancelled_unexpectedly"] = False
+                pos.pop("target_cancel_notice", None)
+                pos.pop("target_placement_error", None)
+                pos["target_broker_order_id"] = None
+                self._place_advance_target_order(broker, pos, delay_sec=0)
+                if pos.get("target_broker_order_id"):
+                    placed_orders.append(f"Target #{pos['target_broker_order_id']}")
+
+            self._save_strategies()
+            self._save_state(force=True)
+
+            if placed_orders:
+                return {"success": True, "message": f"Placed on broker: {', '.join(placed_orders)}", "order_id": ', '.join(placed_orders)}
+            else:
+                err = pos.get("sl_placement_error") or pos.get("target_placement_error") or "Broker rejected order placement"
+                return {"success": False, "error": err}
 
     def detach_position(self, strategy_id: str, leg_id: Optional[str] = None, leg_index: Optional[int] = None) -> Dict[str, Any]:
         """Remove a running position from algorithm monitoring WITHOUT squaring it off on Kotak Neo broker."""
@@ -5648,7 +5971,7 @@ class StraddleManager:
             if not target_pos:
                 return {"success": False, "error": "Position not found in strategy."}
 
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
             # Cancel any advance SL / Target trigger orders placed by algo on broker so orphaned triggers aren't left behind
@@ -5891,7 +6214,7 @@ class StraddleManager:
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
 
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
             strat["_margin_auto_exit_pending"] = False
@@ -7145,6 +7468,10 @@ class StraddleManager:
             tgt_label = f"TGT: {t_val:.0f}%" if "%" in t_mode else f"TGT: ₹{t_val:.2f}"
             sl_label = f"SL: -{sl_val:.0f}%" if "%" in sl_mode else f"SL: -₹{sl_val:.2f}"
 
+            adv = strat.get("advanced") or strat.get("advanced_settings") or {}
+            leg_sl_placement = pos.get("sl_order_placement") or adv.get("sl_order_placement") or "Keep with self"
+            leg_tgt_placement = pos.get("target_order_placement") or adv.get("target_order_placement") or "Keep with self"
+
             adopted_id = f"leg_adopted_{int(time.time()*1000)%1000000}"
             opt_type = pos.get("option_type") or ("CE" if "CE" in sym.upper() else "PE")
             strike_price_val = float(pos.get("strike_price") or 0.0)
@@ -7176,6 +7503,8 @@ class StraddleManager:
                 "sl_type_label": sl_label,
                 "sl_value": sl_val,
                 "sl_price": round(max(0.05, sl_p), 2),
+                "sl_order_placement": leg_sl_placement,
+                "target_order_placement": leg_tgt_placement,
                 "target_re_execute_type": tgt_re_type,
                 "target_re_execute_count": tgt_re_count,
                 "sl_re_execute_type": sl_re_type,
@@ -7207,10 +7536,12 @@ class StraddleManager:
                 "strike_selection": str(int(strike_price_val)) if strike_price_val > 0 else "ATM",
                 "target_type": tgt_type,
                 "target_value": t_val,
+                "target_order_placement": leg_tgt_placement,
                 "target_re_execute_type": tgt_re_type,
                 "target_re_execute_count": tgt_re_count,
                 "sl_type": sl_type,
                 "sl_value": sl_val,
+                "sl_order_placement": leg_sl_placement,
                 "sl_re_execute_type": sl_re_type,
                 "sl_re_execute_count": sl_re_count,
                 "tsl_profit_pts": tsl_profit,
@@ -7233,6 +7564,17 @@ class StraddleManager:
                     ]
 
             strat.setdefault("positions", []).append(adopted_leg)
+
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            def _dispatch_adopted_advance_orders():
+                if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and adopted_leg.get("sl_price", 0) > 0:
+                    self._place_advance_sl_order(broker, adopted_leg, delay_sec=0)
+                    time.sleep(0.15)
+                if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and adopted_leg.get("target_price", 0) > 0:
+                    self._place_advance_target_order(broker, adopted_leg, delay_sec=0)
+
+            threading.Thread(target=_dispatch_adopted_advance_orders, daemon=True).start()
             strat["status"] = "TRADE_ACTIVE"
             strat["has_traded_today"] = True
             strat["enabled"] = True
@@ -9408,22 +9750,77 @@ class StraddleManager:
 
                     if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
                         t_ord = ob_lookup.get(str(adv_tgt_oid))
+                        if not t_ord:
+                            try:
+                                t_ord = broker.get_order_status(str(adv_tgt_oid))
+                            except Exception:
+                                t_ord = None
+
                         if t_ord:
                             t_st = str(t_ord.get("status", "")).upper()
                             if any(w in t_st for w in ("TRAD", "COMP")):
                                 tgt_filled = True
                                 pos["avg_exit_price"] = t_ord.get("price") or pos.get("target_price") or ltp
+                            elif any(w in t_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN":
+                                # Broker Target order was unexpectedly cancelled!
+                                pos["target_broker_order_id"] = None
+                                pos["target_cancelled_unexpectedly"] = True
+                                pos["target_order_placement"] = "Keep with self"
+                                pos["target_cancel_notice"] = "Target order cancelled on broker. Algo active protection: monitoring live price on platform."
+                                if not pos.get("_tgt_cancel_notified"):
+                                    pos["_tgt_cancel_notified"] = True
+                                    self._log_event(
+                                        f"[AUTO HANDLING] Unexpected Target order cancellation detected for {pos.get('symbol')} on broker. "
+                                        f"Algo active protection: monitoring live price (Target ₹{pos.get('target_price', 0):.2f}) on platform.",
+                                        level="WARNING"
+                                    )
+                                    self._send_telegram_alert(
+                                        f"⚠️ *[ALGO ALERT] Unexpected Target Order Cancellation!*\n"
+                                        f"• Strategy: `{strat.get('name')}`\n"
+                                        f"• Leg: `{pos.get('symbol')}`\n"
+                                        f"• Status: Target order cancelled on broker.\n"
+                                        f"• Auto-Handling: *ACTIVE*\n"
+                                        f"• Protection: Algo transitioned to Platform monitoring (Target: ₹{pos.get('target_price', 0):.2f}) & will auto-exit on hit."
+                                    )
+                                    self._save_state(force=True)
                         else:
                             try:
                                 t_stat = broker.wait_for_order_fill(str(adv_tgt_oid), timeout_sec=0.01)
                                 if t_stat.get("filled"):
                                     tgt_filled = True
                                     pos["avg_exit_price"] = t_stat.get("price") or pos.get("target_price") or ltp
+                                elif str(t_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN":
+                                    pos["target_broker_order_id"] = None
+                                    pos["target_cancelled_unexpectedly"] = True
+                                    pos["target_order_placement"] = "Keep with self"
+                                    pos["target_cancel_notice"] = "Target order cancelled on broker. Algo active protection: monitoring live price on platform."
+                                    if not pos.get("_tgt_cancel_notified"):
+                                        pos["_tgt_cancel_notified"] = True
+                                        self._log_event(
+                                            f"[AUTO HANDLING] Unexpected Target order cancellation detected for {pos.get('symbol')} on broker. "
+                                            f"Algo active protection: monitoring live price (Target ₹{pos.get('target_price', 0):.2f}) on platform.",
+                                            level="WARNING"
+                                        )
+                                        self._send_telegram_alert(
+                                            f"⚠️ *[ALGO ALERT] Unexpected Target Order Cancellation!*\n"
+                                            f"• Strategy: `{strat.get('name')}`\n"
+                                            f"• Leg: `{pos.get('symbol')}`\n"
+                                            f"• Status: Target order cancelled on broker.\n"
+                                            f"• Auto-Handling: *ACTIVE*\n"
+                                            f"• Protection: Algo transitioned to Platform monitoring (Target: ₹{pos.get('target_price', 0):.2f}) & will auto-exit on hit."
+                                        )
+                                        self._save_state(force=True)
                             except Exception:
                                 pass
 
                     if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
                         s_ord = ob_lookup.get(str(adv_sl_oid))
+                        if not s_ord:
+                            try:
+                                s_ord = broker.get_order_status(str(adv_sl_oid))
+                            except Exception:
+                                s_ord = None
+
                         if s_ord:
                             s_st = str(s_ord.get("status", "")).upper()
                             if any(w in s_st for w in ("TRAD", "COMP")):
@@ -9436,13 +9833,13 @@ class StraddleManager:
                                 if auto_handle:
                                     pos["sl_broker_order_id"] = None
                                     pos["sl_cancelled_unexpectedly"] = True
-                                    pos["error_message"] = "Stoploss order cancelled by the Client or Broker. Cancellation reason not received from the Broker"
-                                    pos["error_subtext"] = "You can use the Individual leg RETRY functionality to place the SL order again. If not, the algo will handle this unexpected Cancellation by monitoring the price & exiting this position when Stoploss or Target is hit."
+                                    pos["sl_order_placement"] = "Keep with self"
+                                    pos["sl_cancel_notice"] = "Stoploss order cancelled on broker. Algo active protection: monitoring live price on platform."
                                     if not pos.get("_sl_cancel_notified"):
                                         pos["_sl_cancel_notified"] = True
                                         self._log_event(
                                             f"[AUTO HANDLING] Unexpected Stoploss cancellation detected for {pos.get('symbol')} on broker. "
-                                            f"Algo active protection: monitoring live price (SL ₹{pos.get('sl_price', 0):.2f}, TG ₹{pos.get('target_price', 0):.2f}) to exit automatically on trigger.",
+                                            f"Algo active protection: monitoring live price (SL ₹{pos.get('sl_price', 0):.2f}, TG ₹{pos.get('target_price', 0):.2f}) on platform.",
                                             level="WARNING"
                                         )
                                         self._send_telegram_alert(
@@ -9451,8 +9848,9 @@ class StraddleManager:
                                             f"• Leg: `{pos.get('symbol')}`\n"
                                             f"• Status: Stoploss order cancelled by Client or Broker.\n"
                                             f"• Auto-Handling: *ACTIVE*\n"
-                                            f"• Protection: Algo is actively monitoring live price (SL: ₹{pos.get('sl_price', 0):.2f}) & will auto-exit on trigger breach."
+                                            f"• Protection: Algo transitioned to Platform monitoring (SL: ₹{pos.get('sl_price', 0):.2f}) & will auto-exit on trigger breach."
                                         )
+                                        self._save_state(force=True)
                         else:
                             try:
                                 s_stat = broker.wait_for_order_fill(str(adv_sl_oid), timeout_sec=0.01)
@@ -9465,13 +9863,13 @@ class StraddleManager:
                                     if auto_handle:
                                         pos["sl_broker_order_id"] = None
                                         pos["sl_cancelled_unexpectedly"] = True
-                                        pos["error_message"] = "Stoploss order cancelled by the Client or Broker. Cancellation reason not received from the Broker"
-                                        pos["error_subtext"] = "You can use the Individual leg RETRY functionality to place the SL order again. If not, the algo will handle this unexpected Cancellation by monitoring the price & exiting this position when Stoploss or Target is hit."
+                                        pos["sl_order_placement"] = "Keep with self"
+                                        pos["sl_cancel_notice"] = "Stoploss order cancelled on broker. Algo active protection: monitoring live price on platform."
                                         if not pos.get("_sl_cancel_notified"):
                                             pos["_sl_cancel_notified"] = True
                                             self._log_event(
                                                 f"[AUTO HANDLING] Unexpected Stoploss cancellation detected for {pos.get('symbol')} on broker. "
-                                                f"Algo active protection: monitoring live price (SL ₹{pos.get('sl_price', 0):.2f}, TG ₹{pos.get('target_price', 0):.2f}) to exit automatically on trigger.",
+                                                f"Algo active protection: monitoring live price (SL ₹{pos.get('sl_price', 0):.2f}, TG ₹{pos.get('target_price', 0):.2f}) on platform.",
                                                 level="WARNING"
                                             )
                                             self._send_telegram_alert(
@@ -9480,8 +9878,9 @@ class StraddleManager:
                                                 f"• Leg: `{pos.get('symbol')}`\n"
                                                 f"• Status: Stoploss order cancelled by Client or Broker.\n"
                                                 f"• Auto-Handling: *ACTIVE*\n"
-                                                f"• Protection: Algo is actively monitoring live price (SL: ₹{pos.get('sl_price', 0):.2f}) & will auto-exit on trigger breach."
+                                                f"• Protection: Algo transitioned to Platform monitoring (SL: ₹{pos.get('sl_price', 0):.2f}) & will auto-exit on trigger breach."
                                             )
+                                            self._save_state(force=True)
                             except Exception:
                                 pass
 

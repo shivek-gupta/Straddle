@@ -396,6 +396,8 @@ def api_straddle_update_running_position():
         sl_val = data.get("sl_val")
         new_lots = data.get("new_lots")
         new_strike = data.get("new_strike")
+        t_placement = data.get("target_order_placement")
+        sl_placement = data.get("sl_order_placement")
         mgr = get_straddle_manager()
         res = mgr.update_running_position(
             strategy_id=sid,
@@ -407,10 +409,58 @@ def api_straddle_update_running_position():
             sl_val=sl_val,
             new_lots=new_lots,
             new_strike=new_strike,
+            target_order_placement=t_placement,
+            sl_order_placement=sl_placement,
         )
         return jsonify(res)
     except Exception as e:
         logger.error(f"Error in api_straddle_update_running_position: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/set_leg_placement", methods=["POST"])
+def api_straddle_set_leg_placement():
+    """Dynamically set order placement (With Broker vs With Platform) for a live running leg."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        leg_id = data.get("leg_id")
+        leg_idx = data.get("leg_index")
+        target_placement = data.get("target_order_placement")
+        sl_placement = data.get("sl_order_placement")
+        mgr = get_straddle_manager()
+        res = mgr.set_leg_order_placement(
+            strategy_id=sid,
+            leg_id=leg_id,
+            leg_index=leg_idx,
+            target_order_placement=target_placement,
+            sl_order_placement=sl_placement
+        )
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_set_leg_placement: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/position/resend_to_broker", methods=["POST"])
+def api_straddle_position_resend_to_broker():
+    """Re-send an advance order (SL, Target, or Both) to the broker matching engine."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        leg_id = data.get("leg_id")
+        leg_idx = data.get("leg_index")
+        order_type = data.get("order_type", "BOTH")
+        mgr = get_straddle_manager()
+        res = mgr.resend_advance_order_to_broker(
+            strategy_id=sid,
+            leg_id=leg_id,
+            leg_index=leg_idx,
+            order_type=order_type
+        )
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_position_resend_to_broker: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -682,6 +732,22 @@ def api_straddle_strategy_toggle_advance_sl():
             return jsonify({"success": False, "error": "No strategy ID provided"}), 400
         mgr = get_straddle_manager()
         res = mgr.toggle_strategy_advance_sl(sid, enabled)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/strategy/toggle_advance_target", methods=["POST"])
+def api_straddle_strategy_toggle_advance_target():
+    """Toggle Advance Target order placement directly with broker (Limit order on exchange)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id") or data.get("id") or ""
+        enabled = bool(data.get("enabled", True))
+        if not sid:
+            return jsonify({"success": False, "error": "No strategy ID provided"}), 400
+        mgr = get_straddle_manager()
+        res = mgr.toggle_strategy_advance_target(sid, enabled)
         return jsonify(res)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

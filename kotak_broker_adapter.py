@@ -278,6 +278,9 @@ class BaseBrokerAdapter:
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
         raise NotImplementedError
 
+    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        return {"status": "UNKNOWN", "order_id": order_id}
+
     def get_order_book(self) -> List[Dict[str, Any]]:
         return []
 
@@ -584,15 +587,26 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             return {"success": False, "error": "Kotak Neo client not authenticated."}
 
         try:
-            clean_ot = "L" if order_type and order_type.upper() in ("LIMIT", "LMT", "L") else ("MKT" if order_type and order_type.upper() in ("MARKET", "MKT") else "L")
+            ot_raw = (order_type or "").upper()
+            if "SL-M" in ot_raw or "SLM" in ot_raw:
+                clean_ot = "SL-M"
+            elif "SL" in ot_raw:
+                clean_ot = "SL"
+            elif "MKT" in ot_raw or "MARKET" in ot_raw:
+                clean_ot = "MKT"
+            else:
+                clean_ot = "L"
+
             clean_price = str(round_to_tick(price)) if (price is not None and clean_ot != "MKT") else "0"
-            clean_trig = str(round_to_tick(trigger_price)) if (trigger_price is not None and clean_ot not in ("MKT", "L")) else "0"
+            clean_trig = str(round_to_tick(trigger_price)) if (trigger_price is not None and clean_ot in ("SL", "SL-M")) else "0"
 
             # If quantity not provided, fetch existing quantity from order history so Kotak RMS doesn't reject with Invalid Quantity
             if not quantity or int(quantity) <= 0:
                 try:
                     hist = client.order_history(order_id=str(order_id))
                     items = hist.get("data") if isinstance(hist, dict) else hist
+                    if isinstance(items, dict):
+                        items = items.get("data")
                     if isinstance(items, list) and items:
                         quantity = int(items[0].get("qty") or items[0].get("fldQty") or 65)
                 except Exception:
@@ -624,6 +638,67 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         except Exception as e:
             logger.error(f"[Kotak Neo] Exception cancelling order {order_id}: {e}")
             return {"success": False, "error": str(e)}
+
+    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        """Directly query Kotak Neo OMS/RMS for status of a specific order."""
+        client = self._get_client()
+        oid_str = str(order_id).strip()
+        if not client or not oid_str:
+            return {"status": "UNKNOWN", "order_id": oid_str}
+
+        # 1. Quick check against order_report by ID
+        try:
+            res = client.order_report(order_id=oid_str)
+            d = res.get("data") if isinstance(res, dict) else res
+            items = d.get("data") if isinstance(d, dict) else (d if isinstance(d, list) else [d] if isinstance(d, dict) else [])
+            if items and isinstance(items, list):
+                item = items[0]
+                st = str(item.get("ordSt") or item.get("status") or "").upper()
+                if any(w in st for w in ("TRAD", "COMP", "FILL")):
+                    return {
+                        "filled": True,
+                        "status": "COMPLETE",
+                        "price": float(item.get("avgPrc") or item.get("prc") or 0.0),
+                        "order_id": oid_str
+                    }
+                if any(w in st for w in ("CANC", "CAN")):
+                    return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
+                if any(w in st for w in ("REJ")):
+                    return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": item.get("rejRsn")}
+                if any(w in st for w in ("TRIG")):
+                    return {"filled": False, "status": "TRIGGER PENDING", "order_id": oid_str}
+                if any(w in st for w in ("OPEN")):
+                    return {"filled": False, "status": "OPEN", "order_id": oid_str}
+        except Exception as e_or:
+            logger.debug(f"[Kotak Neo] order_report by id {oid_str} notice: {e_or}")
+
+        # 2. Check via order history
+        try:
+            hist = client.order_history(order_id=oid_str)
+            d = hist.get("data") if isinstance(hist, dict) else hist
+            items = d.get("data") if isinstance(d, dict) else (d if isinstance(d, list) else [])
+            if items and isinstance(items, list):
+                item = items[0]
+                st = str(item.get("ordSt") or item.get("status") or "").upper()
+                if any(w in st for w in ("TRAD", "COMP", "FILL")):
+                    return {
+                        "filled": True,
+                        "status": "COMPLETE",
+                        "price": float(item.get("avgPrc") or item.get("prc") or 0.0),
+                        "order_id": oid_str
+                    }
+                if any(w in st for w in ("CANC", "CAN")):
+                    return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
+                if any(w in st for w in ("REJ")):
+                    return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": item.get("rejRsn")}
+                if any(w in st for w in ("TRIG")):
+                    return {"filled": False, "status": "TRIGGER PENDING", "order_id": oid_str}
+                if any(w in st for w in ("OPEN")):
+                    return {"filled": False, "status": "OPEN", "order_id": oid_str}
+        except Exception as e_h:
+            logger.debug(f"[Kotak Neo] order_history for {oid_str} notice: {e_h}")
+
+        return {"status": "UNKNOWN", "order_id": oid_str}
 
     def wait_for_order_fill(
         self,
@@ -1284,10 +1359,14 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             orders = self._read_json(self._orderbook_file)
             now_str = time.strftime("%H:%M:%S")
 
+            is_adv = tag in ("adv_tgt", "adv_sl") or ("SL" in order_type.upper())
+            init_status = ("TRIGGER PENDING" if "SL" in order_type.upper() else "OPEN") if is_adv else "COMPLETE"
+
             for s_idx, slice_qty in enumerate(slices):
                 order_id = f"PAPER_{int(time.time()*1000)}_{s_idx+1}"
                 order_ids.append(order_id)
                 slice_label = f" [Slice {s_idx+1}/{len(slices)}]" if len(slices) > 1 else ""
+                init_msg = f"Resting on Paper Orderbook ({slice_qty} qty{slice_label})" if is_adv else f"Filled in Paper Simulation ({slice_qty} qty{slice_label})"
                 order_entry = {
                     "order_id": order_id,
                     "trading_symbol": symbol,
@@ -1295,51 +1374,54 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                     "instrument_key": instrument_key,
                     "transaction_type": transaction_type.upper(),
                     "quantity": int(slice_qty),
-                    "filled_quantity": int(slice_qty),
+                    "filled_quantity": 0 if is_adv else int(slice_qty),
                     "price": exec_price,
-                    "average_price": exec_price,
-                    "status": "COMPLETE",
+                    "trigger_price": trigger_price or 0.0,
+                    "average_price": 0.0 if is_adv else exec_price,
+                    "status": init_status,
                     "order_timestamp": now_str,
                     "product": product,
                     "tag": f"{tag}_{s_idx+1}" if len(slices) > 1 else tag,
                     "client_id": "PAPER TRADING",
-                    "status_message": f"Filled in Paper Simulation ({slice_qty} qty{slice_label})"
+                    "status_message": init_msg
                 }
                 orders.insert(0, order_entry)
 
             self._write_json(self._orderbook_file, orders[:500])
 
-            # Update paper positions
-            positions = self._read_json(self._positions_file)
-            found = False
-            for p in positions:
-                if p.get("trading_symbol") == symbol:
-                    curr_qty = int(p.get("quantity", 0))
-                    change_qty = total_qty if transaction_type.upper() == "BUY" else -total_qty
-                    new_qty = curr_qty + change_qty
-                    p["quantity"] = new_qty
-                    p["last_price"] = exec_price
-                    found = True
-                    break
+            # Update paper positions ONLY for non-advance orders (entry/exit)
+            if not is_adv:
+                positions = self._read_json(self._positions_file)
+                found = False
+                for p in positions:
+                    if p.get("trading_symbol") == symbol:
+                        curr_qty = int(p.get("quantity", 0))
+                        change_qty = total_qty if transaction_type.upper() == "BUY" else -total_qty
+                        new_qty = curr_qty + change_qty
+                        p["quantity"] = new_qty
+                        p["last_price"] = exec_price
+                        found = True
+                        break
 
-            if not found:
-                positions.append({
-                    "trading_symbol": symbol,
-                    "quantity": total_qty if transaction_type.upper() == "BUY" else -total_qty,
-                    "average_price": exec_price,
-                    "last_price": exec_price,
-                    "pnl": 0.0,
-                    "product": product,
-                    "client_id": "PAPER TRADING"
-                })
+                if not found:
+                    positions.append({
+                        "trading_symbol": symbol,
+                        "quantity": total_qty if transaction_type.upper() == "BUY" else -total_qty,
+                        "average_price": exec_price,
+                        "last_price": exec_price,
+                        "pnl": 0.0,
+                        "product": product,
+                        "client_id": "PAPER TRADING"
+                    })
 
-            self._write_json(self._positions_file, positions)
+                self._write_json(self._positions_file, positions)
+
             return {
                 "success": True,
                 "order_id": order_ids[0] if len(order_ids) == 1 else ",".join(order_ids),
                 "sliced": len(slices) > 1,
-                "status": "COMPLETE",
-                "data": {"order_id": order_ids[0], "filled_quantity": total_qty, "price": exec_price}
+                "status": init_status,
+                "data": {"order_id": order_ids[0], "filled_quantity": 0 if is_adv else total_qty, "price": exec_price}
             }
 
     def modify_order(
@@ -1350,10 +1432,46 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         trigger_price: Optional[float] = None,
         order_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return {"success": True, "order_id": order_id, "message": "Paper order updated"}
+        with self._lock:
+            orders = self._read_json(self._orderbook_file)
+            for o in orders:
+                if str(o.get("order_id")) == str(order_id):
+                    if price is not None:
+                        o["price"] = float(price)
+                    if trigger_price is not None:
+                        o["trigger_price"] = float(trigger_price)
+                    if quantity is not None and int(quantity) > 0:
+                        o["quantity"] = int(quantity)
+                    break
+            self._write_json(self._orderbook_file, orders)
+            return {"success": True, "order_id": order_id, "message": "Paper order updated"}
 
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
-        return {"success": True, "order_id": order_id, "message": "Paper order cancelled"}
+        with self._lock:
+            orders = self._read_json(self._orderbook_file)
+            for o in orders:
+                if str(o.get("order_id")) == str(order_id):
+                    o["status"] = "CANCELLED"
+                    o["status_message"] = "Cancelled by client/algo in Paper simulation"
+                    break
+            self._write_json(self._orderbook_file, orders)
+            return {"success": True, "order_id": order_id, "message": "Paper order cancelled"}
+
+    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        with self._lock:
+            orders = self._read_json(self._orderbook_file)
+            for o in orders:
+                if str(o.get("order_id")) == str(order_id):
+                    st = str(o.get("status", "OPEN")).upper()
+                    return {
+                        "status": st,
+                        "filled": "COMP" in st or "TRAD" in st,
+                        "price": float(o.get("average_price") or o.get("price") or 0.0),
+                        "trigger_price": float(o.get("trigger_price") or 0.0),
+                        "quantity": int(o.get("quantity") or 0),
+                        "order_id": str(order_id)
+                    }
+            return {"status": "UNKNOWN", "order_id": str(order_id)}
 
     def get_order_book(self) -> List[Dict[str, Any]]:
         return self._read_json(self._orderbook_file)
@@ -1408,9 +1526,10 @@ _PAPER_ADAPTER = PaperBrokerAdapter()
 
 def get_broker_adapter(mode: str = "AUTO") -> BaseBrokerAdapter:
     """Return appropriate adapter based on requested mode or active engine settings."""
-    if mode.upper() == "PAPER":
+    m = (mode or "").strip().upper()
+    if m in ("PAPER", "PAPER_TRADING", "SIMULATION", "VIRTUAL"):
         return _PAPER_ADAPTER
-    elif mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
+    elif m in ("LIVE", "LIVE_BROKER", "KOTAK", "KOTAK_NEO"):
         return _LIVE_ADAPTER
 
     # Auto mode: check state or session

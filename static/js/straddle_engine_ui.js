@@ -3469,6 +3469,8 @@ async function saveRunningPositionChanges(stratId, legId, legIndex) {
     const tgtModeSelect = document.getElementById(`live_tgt_mode_${legIndex}`);
     const slValInput = document.getElementById(`live_sl_val_${legIndex}`);
     const slModeSelect = document.getElementById(`live_sl_mode_${legIndex}`);
+    const tgtPlacementSelect = document.getElementById(`live_tgt_placement_${legIndex}`);
+    const slPlacementSelect = document.getElementById(`live_sl_placement_${legIndex}`);
 
     const newLots = lotsInput ? parseInt(lotsInput.value) || 1 : null;
     const newStrike = strikeInput ? strikeInput.value.trim() : null;
@@ -3476,6 +3478,8 @@ async function saveRunningPositionChanges(stratId, legId, legIndex) {
     const targetMode = tgtModeSelect ? tgtModeSelect.value : "%";
     const slVal = slValInput ? parseFloat(slValInput.value) : null;
     const slMode = slModeSelect ? slModeSelect.value : "%";
+    const targetPlacement = tgtPlacementSelect ? tgtPlacementSelect.value : null;
+    const slPlacement = slPlacementSelect ? slPlacementSelect.value : null;
 
     showStraddleToast(`Saving updates for leg ${legIndex + 1}...`, "info", 2000);
     try {
@@ -3488,7 +3492,9 @@ async function saveRunningPositionChanges(stratId, legId, legIndex) {
             target_val: targetVal,
             target_mode: targetMode,
             sl_val: slVal,
-            sl_mode: slMode
+            sl_mode: slMode,
+            target_order_placement: targetPlacement,
+            sl_order_placement: slPlacement
         };
 
         const resp = await fetch("/api/straddle/update_running_position", {
@@ -3519,6 +3525,114 @@ async function saveRunningPositionChanges(stratId, legId, legIndex) {
         showStraddleToast("Error updating position: " + e.message, "error", 3000);
     }
 }
+
+async function changeLiveLegPlacement(stratId, legId, legIndex, type, placement) {
+    const isBroker = (placement === "Place in advance");
+    const name = type === "TARGET" ? "Target" : "Stoploss";
+    showStraddleToast(`Updating ${name} placement to ${isBroker ? 'Broker 🏦' : 'Platform 💻'}...`, "info", 1500);
+    try {
+        const payload = {
+            strategy_id: stratId || window._straddleState?.activeStrategy?.strategy_id,
+            leg_id: legId || null,
+            leg_index: legIndex
+        };
+        if (type === "TARGET") payload.target_order_placement = placement;
+        else payload.sl_order_placement = placement;
+
+        const resp = await fetch("/api/straddle/set_leg_placement", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showStraddleToast(res.message || `${name} placement updated!`, "success", 2500);
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(res.error || `Failed to update ${name} placement`, "error", 4000);
+            await fetchStraddleState();
+        }
+    } catch (e) {
+        showStraddleToast(`Error updating placement: ${e.message}`, "error", 3000);
+    }
+}
+window.changeLiveLegPlacement = changeLiveLegPlacement;
+
+async function changeLiveLegPlacementCombined(stratId, legId, legIndex, choice) {
+    if (!choice) return;
+    showStraddleToast(`Updating order placement for leg ${legIndex + 1}...`, "info", 1500);
+    try {
+        let tgtPlacement = "Keep with self";
+        let slPlacement = "Keep with self";
+        if (choice === "BOTH_BROKER") {
+            tgtPlacement = "Place in advance";
+            slPlacement = "Place in advance";
+        } else if (choice === "SL_BROKER_TGT_SELF") {
+            tgtPlacement = "Keep with self";
+            slPlacement = "Place in advance";
+        } else if (choice === "TGT_BROKER_SL_SELF") {
+            tgtPlacement = "Place in advance";
+            slPlacement = "Keep with self";
+        }
+
+        const payload = {
+            strategy_id: stratId || window._straddleState?.activeStrategy?.strategy_id,
+            leg_id: legId || null,
+            leg_index: legIndex,
+            target_order_placement: tgtPlacement,
+            sl_order_placement: slPlacement
+        };
+
+        const resp = await fetch("/api/straddle/set_leg_placement", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showStraddleToast(res.message || "Order placement updated successfully!", "success", 2500);
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(res.error || "Failed to update placement", "error", 4000);
+            await fetchStraddleState();
+        }
+    } catch (e) {
+        showStraddleToast(`Error updating placement: ${e.message}`, "error", 3000);
+    }
+}
+window.changeLiveLegPlacementCombined = changeLiveLegPlacementCombined;
+
+async function resendLegOrderToBroker(stratId, legId, legIndex, orderType) {
+    const ot = (orderType || "BOTH").toUpperCase();
+    showStraddleToast(`Placing ${ot} order on Broker...`, "info", 2000);
+    try {
+        const payload = {
+            strategy_id: stratId || window._straddleState?.activeStrategy?.strategy_id,
+            leg_id: legId || null,
+            leg_index: legIndex,
+            order_type: ot
+        };
+        const resp = await fetch("/api/straddle/position/resend_to_broker", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showStraddleToast(res.message || `Order placed on broker successfully!`, "success", 3000);
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(res.error || `Failed to place ${ot} order on broker`, "error", 4500);
+            await fetchStraddleState();
+        }
+    } catch (e) {
+        showStraddleToast(`Error placing order: ${e.message}`, "error", 3000);
+    }
+}
+window.resendLegOrderToBroker = resendLegOrderToBroker;
 
 async function detachRunningPosition(stratId, legId, legIndex) {
     if (!confirm("Detach this running position from the algo?\n\nNOTE: The open position will NOT be squared off on Kotak Neo broker. It will simply be removed from this algo's monitoring.")) {
@@ -3879,7 +3993,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         // Check if we can perform smooth in-place DOM update instead of destroying innerHTML
         const existingRows = tbody.querySelectorAll("tr[data-leg-index]:not(.straddle-error-banner-row)");
         const existingErrorBanners = tbody.querySelectorAll("tr.straddle-error-banner-row");
-        const numErrorsExpected = positions.filter(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message || !!p.sl_cancelled_unexpectedly)).length;
+        const numErrorsExpected = positions.filter(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message || !!p.sl_cancelled_unexpectedly || !!p.target_cancelled_unexpectedly)).length;
 
         // Active focus check - NEVER destroy DOM if user is actively interacting inside the table!
         const activeEl = document.activeElement;
@@ -3897,10 +4011,22 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const rowStatus = row.getAttribute("data-status");
                 const rowReason = row.getAttribute("data-exit-reason");
                 const rowSym = row.getAttribute("data-symbol");
+                const rowSlOid = row.getAttribute("data-sl-broker-oid") || "";
+                const rowTgtOid = row.getAttribute("data-tgt-broker-oid") || "";
+                const rowSlCanc = row.getAttribute("data-sl-cancelled") === "true";
+                const rowTgtCanc = row.getAttribute("data-tgt-cancelled") === "true";
+
                 const posStatus = String(pos.status || "OPEN").toUpperCase();
                 const posReason = String(pos.exit_reason || "");
                 const sym = pos.symbol || pos.trading_symbol || '';
-                if (rowStatus !== posStatus || rowReason !== posReason || rowSym !== sym) {
+                const posSlOid = String(pos.sl_broker_order_id || "");
+                const posTgtOid = String(pos.target_broker_order_id || "");
+                const posSlCanc = !!pos.sl_cancelled_unexpectedly;
+                const posTgtCanc = !!pos.target_cancelled_unexpectedly;
+
+                if (rowStatus !== posStatus || rowReason !== posReason || rowSym !== sym ||
+                    rowSlOid !== posSlOid || rowTgtOid !== posTgtOid ||
+                    rowSlCanc !== posSlCanc || rowTgtCanc !== posTgtCanc) {
                     anyStateMismatch = true;
                     break;
                 }
@@ -4116,9 +4242,20 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const entryTime = pos.entry_time || '-';
 
                 // Per Leg Target (Interactive ONLY for live filled/partially filled trades)
-                const tgtPlacementBadge = pos.target_broker_order_id ?
-                    `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Order #${pos.target_broker_order_id}">🏦 Broker</span>` :
-                    `<span style="font-size:9px; color:#64748b;" title="Monitored by Straddle Engine software">💻 Self</span>`;
+                const isTgtBroker = (pos.target_order_placement === "Place in advance" || pos.target_order_placement === "With Broker" || !!pos.target_broker_order_id);
+                let tgtStatusHtml = "";
+                if (pos.target_cancelled_unexpectedly) {
+                    tgtStatusHtml = `
+                        <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
+                            <span style="font-size:9px; color:#f87171; font-weight:800; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target order was cancelled on broker! Algo has taken over and is monitoring on platform.">⚠️ CANCELLED ON BROKER</span>
+                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET')">🏦 Re-send to Broker</button>
+                        </div>
+                    `;
+                } else if (pos.target_broker_order_id) {
+                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Order #${pos.target_broker_order_id}">🏦 #${pos.target_broker_order_id}</span>`;
+                } else {
+                    tgtStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
+                }
 
                 let targetHtml = "-";
                 if (isInteractiveRow) {
@@ -4134,24 +4271,39 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </div>
                         <div id="live_tgt_sub_${idx}" style="font-size:10px; color:#38bdf8; font-weight:700; margin-top:2px; display:flex; align-items:center; justify-content:space-between; gap:4px;">
                             <span>TGT: ₹${pos.target_price ? Number(pos.target_price).toFixed(2) : '-'}</span>
-                            ${tgtPlacementBadge}
+                            <select id="live_tgt_placement_${idx}" class="straddle-select" style="padding:1px 2px; font-size:9px; font-weight:700; border-radius:3px; color:${isTgtBroker ? '#10b981' : '#94a3b8'}; background:#0b1120; border-color:${isTgtBroker ? '#059669' : '#334155'}; cursor:pointer;" onchange="changeLiveLegPlacement('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET', this.value)" title="Choose Target placement: Broker (advance Limit order) or Platform (continuous monitoring)">
+                                <option value="Place in advance" ${isTgtBroker ? 'selected' : ''}>🏦 Broker</option>
+                                <option value="Keep with self" ${!isTgtBroker ? 'selected' : ''}>💻 Platform</option>
+                            </select>
                         </div>
+                        ${tgtStatusHtml}
                     `;
                 } else if (isError) {
                     const tgtValLabel = pos.target_value ? `${pos.target_value}${pos.target_type && pos.target_type.includes("Pts") ? " Pts" : "%"}` : "-";
                     targetHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="tgt-label-badge" style="opacity:0.8;">TGT: ${tgtValLabel}</span></div>`;
                 } else if (pos.target_price && pos.target_price > 0) {
                     const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
-                    targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span> ${tgtPlacementBadge}</div>`;
+                    targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span> ${tgtStatusHtml}</div>`;
                 } else if (pos.target_value && pos.target_value > 0) {
                     const tgtLabel = `TGT: ${pos.target_value}%`;
                     targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>`;
                 }
 
                 // Per Leg Stoploss (Interactive ONLY for live filled/partially filled trades)
-                const slPlacementBadge = pos.sl_broker_order_id ?
-                    `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Order #${pos.sl_broker_order_id}">🏦 Broker</span>` :
-                    `<span style="font-size:9px; color:#64748b;" title="Monitored by Straddle Engine software">💻 Self</span>`;
+                const isSlBroker = (pos.sl_order_placement === "Place in advance" || pos.sl_order_placement === "With Broker" || !!pos.sl_broker_order_id);
+                let slStatusHtml = "";
+                if (pos.sl_cancelled_unexpectedly) {
+                    slStatusHtml = `
+                        <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
+                            <span style="font-size:9px; color:#f87171; font-weight:800; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="Stoploss order was cancelled on broker! Algo has taken over and is monitoring on platform.">⚠️ CANCELLED ON BROKER</span>
+                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL')">🏦 Re-send to Broker</button>
+                        </div>
+                    `;
+                } else if (pos.sl_broker_order_id) {
+                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Order #${pos.sl_broker_order_id}">🏦 #${pos.sl_broker_order_id}</span>`;
+                } else {
+                    slStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
+                }
 
                 let slHtml = "-";
                 if (isInteractiveRow) {
@@ -4167,8 +4319,12 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </div>
                         <div id="live_sl_sub_${idx}" style="font-size:10px; color:#f87171; font-weight:700; margin-top:2px; display:flex; align-items:center; justify-content:space-between; gap:4px;">
                             <span>SL: ₹${pos.sl_price ? Number(pos.sl_price).toFixed(2) : '-'}</span>
-                            ${slPlacementBadge}
+                            <select id="live_sl_placement_${idx}" class="straddle-select" style="padding:1px 2px; font-size:9px; font-weight:700; border-radius:3px; color:${isSlBroker ? '#10b981' : '#94a3b8'}; background:#0b1120; border-color:${isSlBroker ? '#059669' : '#334155'}; cursor:pointer;" onchange="changeLiveLegPlacement('${stratId}', '${pos.id || ''}', ${idx}, 'SL', this.value)" title="Choose Stoploss placement: Broker (advance SL order) or Platform (continuous monitoring)">
+                                <option value="Place in advance" ${isSlBroker ? 'selected' : ''}>🏦 Broker</option>
+                                <option value="Keep with self" ${!isSlBroker ? 'selected' : ''}>💻 Platform</option>
+                            </select>
                         </div>
+                        ${slStatusHtml}
                     `;
                 } else if (isError) {
                     const slValLabel = pos.sl_value ? `-${pos.sl_value}${pos.sl_type && pos.sl_type.includes("Pts") ? " Pts" : "%"}` : "-";
@@ -4176,7 +4332,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 } else if (pos.sl_price && pos.sl_price > 0) {
                     const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
                     const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
-                    slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span> ${slPlacementBadge}</div>
+                    slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span> ${slStatusHtml}</div>
                               <div class="orig-sl-sub">${origSlLabel}</div>`;
                 } else if (pos.sl_value && pos.sl_value > 0) {
                     const slLabel = `SL: -${pos.sl_value}%`;
@@ -4202,7 +4358,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     }
                 }
 
-                // Action buttons (Save on live change + Exit + Detach)
+                // Action buttons (Save on live change + Exit + Detach + Combined Placement)
                 let actionHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
                 if (isInteractiveRow) {
                     actionHtml = `
@@ -4217,6 +4373,15 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                 <button type="button" class="btn-detach" onclick="detachRunningPosition('${stratId}', '${pos.id || ''}', ${idx})" title="Detach from algo WITHOUT squaring off on broker">
                                     🔓 Detach
                                 </button>
+                            </div>
+                            <div style="margin-top:2px; width:100%;">
+                                <select class="straddle-select" style="padding:1px 2px; font-size:9px; font-weight:700; width:100%; border-radius:3px; color:#38bdf8; background:#0f172a; border-color:#0284c7; cursor:pointer;" onchange="changeLiveLegPlacementCombined('${stratId}', '${pos.id || ''}', ${idx}, this.value)" title="Fast combined placement: Broker vs Platform for Target and Stoploss">
+                                    <option value="" disabled selected>⚡ Placement ▾</option>
+                                    <option value="BOTH_BROKER">Both Broker 🏦</option>
+                                    <option value="BOTH_SELF">Both Platform 💻</option>
+                                    <option value="SL_BROKER_TGT_SELF">SL Broker + TG Plat</option>
+                                    <option value="TGT_BROKER_SL_SELF">TG Broker + SL Plat</option>
+                                </select>
                             </div>
                         </div>
                     `;
@@ -4255,10 +4420,21 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     }
                 }
 
+                // Check if cancellation toast needs to be shown
+                if (pos.target_cancelled_unexpectedly || pos.sl_cancelled_unexpectedly) {
+                    if (!window._straddleToastedCancellations) window._straddleToastedCancellations = new Set();
+                    const cKey = `${sym}_${pos.target_cancelled_unexpectedly ? 'TGT' : ''}_${pos.sl_cancelled_unexpectedly ? 'SL' : ''}_${pos.entry_time || ''}`;
+                    if (!window._straddleToastedCancellations.has(cKey)) {
+                        window._straddleToastedCancellations.add(cKey);
+                        const orderName = (pos.target_cancelled_unexpectedly && pos.sl_cancelled_unexpectedly) ? "Target & Stoploss" : (pos.target_cancelled_unexpectedly ? "Target" : "Stoploss");
+                        showStraddleToast(`⚠️ ${sym}: ${orderName} order cancelled on broker! Algo actively monitoring on platform.`, "warning", 6000);
+                    }
+                }
+
                 const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
 
                 html += `
-                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}">
+                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}">
                         <td style="text-align:center;">
                             <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
                         </td>
@@ -4287,9 +4463,21 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     </tr>
                 `;
 
-                // Quantiply Unexpected SL Cancellation Warning Banner (for OPEN legs)
-                if (pos.sl_cancelled_unexpectedly && !isError) {
+                // Quantiply Unexpected Order Cancellation Warning Banner (for OPEN legs)
+                if ((pos.sl_cancelled_unexpectedly || pos.target_cancelled_unexpectedly) && !isError) {
                     const legId = pos.id || '';
+                    const isBothCancelled = pos.sl_cancelled_unexpectedly && pos.target_cancelled_unexpectedly;
+                    const isSlCancelled = pos.sl_cancelled_unexpectedly;
+                    const isTgtCancelled = pos.target_cancelled_unexpectedly;
+                    const titleText = isBothCancelled ?
+                        "Target & Stoploss orders cancelled on Broker" :
+                        (isTgtCancelled ? "Target order cancelled on Broker" : "Stoploss order cancelled on Broker");
+                    const subText = isBothCancelled ?
+                        `Both Target and Stoploss orders were cancelled on Broker. The algo is actively monitoring live prices on the platform (SL ₹${pos.sl_price || 0}, TG ₹${pos.target_price || 0}) and will auto-exit when breached. You can re-send orders to the broker matching engine anytime.` :
+                        (isTgtCancelled ?
+                            `Target order was cancelled on Broker. The algo is actively monitoring live price on the platform (TG ₹${pos.target_price || 0}) and will auto-exit on hit. You can re-send the Target order to the broker matching engine anytime.` :
+                            `Stoploss order was cancelled on Broker. The algo is actively monitoring live price on the platform (SL ₹${pos.sl_price || 0}) and will auto-exit on hit. You can re-send the Stoploss order to the broker matching engine anytime.`);
+
                     html += `
                         <tr class="straddle-error-banner-row">
                             <td colspan="13">
@@ -4297,16 +4485,28 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                     <div style="flex:1; min-width:280px;">
                                         <div style="display:flex; align-items:center; gap:8px;">
                                             <span style="font-size:16px;">⚠️</span>
-                                            <span style="color:#f87171; font-weight:800; font-size:12px;">Stoploss order cancelled by the Client or Broker. Cancellation reason not received from the Broker</span>
+                                            <span style="color:#f87171; font-weight:800; font-size:12px;">${titleText} (Client or Broker Cancellation)</span>
                                         </div>
                                         <div style="color:#fbbf24; font-size:11px; margin-top:4px; font-style:italic; line-height:1.4;">
-                                            You can use the Individual leg RETRY functionality to place the SL order again. If not, the algo will handle this unexpected Cancellation by monitoring the price & exiting this position when Stoploss or Target is hit.
+                                            ${subText}
                                         </div>
                                     </div>
                                     <div style="display:flex; align-items:center; gap:8px;">
-                                        <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #0284c7, #0ea5e9); color:#ffffff; font-weight:700; font-size:11px; padding:6px 14px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(14,165,233,0.4);" onclick="retrySingleStraddleLeg('${stratId}', '${legId}', ${idx})" title="Place a fresh Stoploss order on broker for this leg">
-                                            🔄 RETRY SL ORDER
-                                        </button>
+                                        ${isBothCancelled || isSlCancelled ? `
+                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #0284c7, #0ea5e9); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(14,165,233,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'SL')" title="Place a fresh Stoploss order on broker for this leg">
+                                                🔄 RE-SEND SL ORDER
+                                            </button>
+                                        ` : ''}
+                                        ${isBothCancelled || isTgtCancelled ? `
+                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #059669, #10b981); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(16,185,129,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'TARGET')" title="Place a fresh Target order on broker for this leg">
+                                                🔄 RE-SEND TARGET ORDER
+                                            </button>
+                                        ` : ''}
+                                        ${isBothCancelled ? `
+                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #7c3aed, #8b5cf6); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(139,92,246,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'BOTH')" title="Place fresh Target and Stoploss orders on broker">
+                                                🔄 RE-SEND BOTH
+                                            </button>
+                                        ` : ''}
                                     </div>
                                 </div>
                             </td>
@@ -5486,6 +5686,29 @@ function populateStraddleSettingsForm(s) {
     document.getElementById("cfgSlOrderPlacement").value = adv.sl_order_placement || "Keep with self";
     const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
     if (tgtOrderEl) tgtOrderEl.value = adv.target_order_placement || "Keep with self";
+
+    const slEl = document.getElementById("cfgSlOrderPlacement");
+    if (slEl && !slEl._syncAttached) {
+        slEl._syncAttached = true;
+        slEl.addEventListener("change", (e) => {
+            const val = e.target.value;
+            document.querySelectorAll(".leg-sl-placement").forEach(el => {
+                el.value = val;
+                el.style.color = (val === "Place in advance" ? "#10b981" : "#94a3b8");
+            });
+        });
+    }
+    const tgtEl = document.getElementById("cfgTargetOrderPlacement");
+    if (tgtEl && !tgtEl._syncAttached) {
+        tgtEl._syncAttached = true;
+        tgtEl.addEventListener("change", (e) => {
+            const val = e.target.value;
+            document.querySelectorAll(".leg-tgt-placement").forEach(el => {
+                el.value = val;
+                el.style.color = (val === "Place in advance" ? "#10b981" : "#94a3b8");
+            });
+        });
+    }
     document.getElementById("cfgSlPlacementDelaySec").value = adv.sl_placement_delay_sec !== undefined ? adv.sl_placement_delay_sec : 0;
     document.getElementById("cfgMtmSlDelaySec").value = adv.mtm_sl_delay_sec !== undefined ? adv.mtm_sl_delay_sec : 0;
 
@@ -5520,6 +5743,8 @@ function addStraddleLegRow(leg = null) {
         target_re_execute_count: 6,
         sl_type: "SL: %",
         sl_value: 66.0,
+        sl_order_placement: document.getElementById("cfgSlOrderPlacement")?.value || "Keep with self",
+        target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Keep with self",
         tsl_type: "None",
         sl_re_execute_type: "RE EXECUTE",
         sl_re_execute_count: 1,
@@ -5638,6 +5863,11 @@ function addStraddleLegRow(leg = null) {
     const hThresh = parseInt(hCfg.max_distance_threshold, 10) || 22;
     const hReset = parseInt(hCfg.reset_otm, 10) || 20;
 
+    const effectiveTgtPlacement = l.target_order_placement || document.getElementById("cfgTargetOrderPlacement")?.value || "Keep with self";
+    const isTgtAdv = (effectiveTgtPlacement === "Place in advance");
+    const effectiveSlPlacement = l.sl_order_placement || document.getElementById("cfgSlOrderPlacement")?.value || "Keep with self";
+    const isSlAdv = (effectiveSlPlacement === "Place in advance");
+
     const tr = document.createElement("tr");
     tr.id = rowId;
     tr.innerHTML = `
@@ -5705,9 +5935,9 @@ function addStraddleLegRow(leg = null) {
                     </select>
                     <input type="number" class="straddle-input leg-tgt-val" style="width:50px;" value="${l.target_value !== undefined ? l.target_value : 45}">
                 </div>
-                <select class="straddle-select leg-tgt-placement" style="font-size:10px; padding:1px 3px; background:#0b1120; border-color:#334155; color:${l.target_order_placement === 'Place in advance' ? '#10b981' : '#94a3b8'}; font-weight:700;" onchange="this.style.color = (this.value === 'Place in advance' ? '#10b981' : '#94a3b8'); syncStrategyLegChange('${rowId}');" title="Target Order Placement: Keep with self (monitored by software) vs Place with broker (advance LIMIT order on exchange)">
-                    <option value="Keep with self" ${l.target_order_placement !== "Place in advance" ? "selected" : ""}>💻 With Self</option>
-                    <option value="Place in advance" ${l.target_order_placement === "Place in advance" ? "selected" : ""}>🏦 With Broker (Limit)</option>
+                <select class="straddle-select leg-tgt-placement" style="font-size:10px; padding:1px 3px; background:#0b1120; border-color:#334155; color:${isTgtAdv ? '#10b981' : '#94a3b8'}; font-weight:700;" onchange="this.style.color = (this.value === 'Place in advance' ? '#10b981' : '#94a3b8'); syncStrategyLegChange('${rowId}');" title="Target Order Placement: Keep with self (monitored by software) vs Place with broker (advance LIMIT order on exchange)">
+                    <option value="Keep with self" ${!isTgtAdv ? "selected" : ""}>💻 With Self</option>
+                    <option value="Place in advance" ${isTgtAdv ? "selected" : ""}>🏦 With Broker (Limit)</option>
                 </select>
             </div>
         </td>
@@ -5727,9 +5957,9 @@ function addStraddleLegRow(leg = null) {
                     </select>
                     <input type="number" class="straddle-input leg-sl-val" style="width:50px;" value="${l.sl_value !== undefined ? l.sl_value : 66}">
                 </div>
-                <select class="straddle-select leg-sl-placement" style="font-size:10px; padding:1px 3px; background:#0b1120; border-color:#334155; color:${l.sl_order_placement === 'Place in advance' ? '#10b981' : '#94a3b8'}; font-weight:700;" onchange="this.style.color = (this.value === 'Place in advance' ? '#10b981' : '#94a3b8'); syncStrategyLegChange('${rowId}');" title="Stoploss Order Placement: Keep with self (monitored by software) vs Place with broker (advance SL-L order on exchange)">
-                    <option value="Keep with self" ${l.sl_order_placement !== "Place in advance" ? "selected" : ""}>💻 With Self</option>
-                    <option value="Place in advance" ${l.sl_order_placement === "Place in advance" ? "selected" : ""}>🏦 With Broker (SL-L)</option>
+                <select class="straddle-select leg-sl-placement" style="font-size:10px; padding:1px 3px; background:#0b1120; border-color:#334155; color:${isSlAdv ? '#10b981' : '#94a3b8'}; font-weight:700;" onchange="this.style.color = (this.value === 'Place in advance' ? '#10b981' : '#94a3b8'); syncStrategyLegChange('${rowId}');" title="Stoploss Order Placement: Keep with self (monitored by software) vs Place with broker (advance SL-L order on exchange)">
+                    <option value="Keep with self" ${!isSlAdv ? "selected" : ""}>💻 With Self</option>
+                    <option value="Place in advance" ${isSlAdv ? "selected" : ""}>🏦 With Broker (SL-L)</option>
                 </select>
             </div>
         </td>
@@ -6146,7 +6376,21 @@ function setStraddleTradeType(type) {
 
 function applyStraddleBulkEdit(action) {
     if (!action) return;
-    if (action === "SL_BROKER") {
+    if (action === "BOTH_BROKER") {
+        document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Place in advance"; el.style.color = "#10b981"; });
+        document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Place in advance"; el.style.color = "#10b981"; });
+        const slOrderEl = document.getElementById("cfgSlOrderPlacement");
+        if (slOrderEl) slOrderEl.value = "Place in advance";
+        const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
+        if (tgtOrderEl) tgtOrderEl.value = "Place in advance";
+    } else if (action === "BOTH_SELF") {
+        document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
+        document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
+        const slOrderEl = document.getElementById("cfgSlOrderPlacement");
+        if (slOrderEl) slOrderEl.value = "Keep with self";
+        const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
+        if (tgtOrderEl) tgtOrderEl.value = "Keep with self";
+    } else if (action === "SL_BROKER") {
         document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Place in advance"; el.style.color = "#10b981"; });
     } else if (action === "SL_SELF") {
         document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
@@ -6495,12 +6739,12 @@ function serializeCurrentStrategySettings() {
             },
             target_type: tr.querySelector(".leg-tgt-type")?.value,
             target_value: parseFloat(tr.querySelector(".leg-tgt-val")?.value) || 45.0,
-            target_order_placement: tr.querySelector(".leg-tgt-placement")?.value || "Keep with self",
+            target_order_placement: tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Keep with self",
             target_re_execute_type: tr.querySelector(".leg-tgt-re-type")?.value,
             target_re_execute_count: parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value) || 6,
             sl_type: tr.querySelector(".leg-sl-type")?.value,
             sl_value: parseFloat(tr.querySelector(".leg-sl-val")?.value) || 66.0,
-            sl_order_placement: tr.querySelector(".leg-sl-placement")?.value || "Keep with self",
+            sl_order_placement: tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Keep with self",
             tsl_type: tr.querySelector(".leg-tsl-type")?.value,
             sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
             sl_re_execute_count: parseInt(tr.querySelector(".leg-sl-re-cnt")?.value) || 1,
