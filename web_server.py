@@ -653,7 +653,15 @@ def api_straddle_strategy_toggle_enable():
     try:
         data = request.get_json(silent=True) or {}
         sid = data.get("strategy_id") or data.get("id") or ""
-        enabled = bool(data.get("enabled", True))
+        raw_en = data.get("enabled")
+        if raw_en is None:
+            enabled = True
+        elif isinstance(raw_en, bool):
+            enabled = raw_en
+        elif str(raw_en).lower() in ("false", "0", "off", "no"):
+            enabled = False
+        else:
+            enabled = bool(raw_en)
         if not sid:
             return jsonify({"success": False, "error": "No strategy ID provided"}), 400
         mgr = get_straddle_manager()
@@ -745,7 +753,15 @@ def api_straddle_strategy_batch_toggle_enable():
     try:
         data = request.get_json(silent=True) or {}
         ids = data.get("strategy_ids", [])
-        enabled = bool(data.get("enabled", True))
+        raw_en = data.get("enabled")
+        if raw_en is None:
+            enabled = True
+        elif isinstance(raw_en, bool):
+            enabled = raw_en
+        elif str(raw_en).lower() in ("false", "0", "off", "no"):
+            enabled = False
+        else:
+            enabled = bool(raw_en)
         if not ids:
             return jsonify({"success": False, "error": "No strategy IDs provided"}), 400
         mgr = get_straddle_manager()

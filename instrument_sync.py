@@ -260,3 +260,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     res = sync_instruments_from_kotak(force=True)
     print("Sync Result:", res)
+

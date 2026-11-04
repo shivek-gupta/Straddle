@@ -27,6 +27,7 @@ jobs:
             cp -p data/straddle_strategies.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
             cp -p data/straddle_state.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
             cp -p data/straddle_pnl_history.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
+            cp -p data/straddle_deleted_strategies.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
 
             echo "Step 2: Pulling latest project code..."
             git fetch origin main
@@ -34,6 +35,21 @@ jobs:
 
             echo "Step 3: Restoring persisted data..."
             cp -p /home/ubuntu/straddle_data_persist/* data/ 2>/dev/null || true
+            python3 -c "import json, os; \
+            del_f = 'data/straddle_deleted_strategies.json'; \
+            strat_f = 'data/straddle_strategies.json'; \
+            d_ids = {'straddle_nifty_920', 'nifty 9:20 short straddle (45% tgt / 66% sl)'}; \
+            if os.path.exists(del_f): \
+              try: d_ids.update(x.strip().lower() for x in json.load(open(del_f))); \
+              except Exception: pass; \
+            for pf in (strat_f, '/home/ubuntu/straddle_data_persist/straddle_strategies.json'): \
+              if os.path.exists(pf): \
+                try: \
+                  items = json.load(open(pf)); \
+                  if isinstance(items, list): \
+                    clean = [s for s in items if str(s.get('strategy_id','')).strip().lower() not in d_ids and str(s.get('name','')).strip().lower() not in d_ids]; \
+                    json.dump(clean, open(pf, 'w'), indent=2); \
+                except Exception: pass" 2>/dev/null || true
 
             echo "Step 4: Installing requirements..."
             python3 -m pip install -r requirements.txt --quiet || true

@@ -1001,6 +1001,13 @@ async function bulkDeleteSelectedAlgos() {
     if (ids.length === 0) return;
     if (!confirm(`Are you sure you want to delete ${ids.length} selected algorithm(s) permanently?`)) return;
     try {
+        const idSet = new Set(ids);
+        if (window._straddleState && Array.isArray(window._straddleState.allStrategies)) {
+            window._straddleState.allStrategies = window._straddleState.allStrategies.filter(s => !idSet.has(s.strategy_id));
+        }
+        window._selectedAlgoIds.clear();
+        renderStraddleAlgosTable(true);
+
         const resp = await fetch("/api/straddle/strategy/batch_delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1008,11 +1015,12 @@ async function bulkDeleteSelectedAlgos() {
         });
         const res = await resp.json();
         if (res.success) {
-            window._selectedAlgoIds.clear();
             await fetchStraddleState();
-            renderStraddleAlgosTable();
+            renderStraddleAlgosTable(true);
         } else {
             alert("Error: " + (res.error || "Failed"));
+            await fetchStraddleState();
+            renderStraddleAlgosTable(true);
         }
     } catch (e) {
         alert("Error: " + e.message);
@@ -1153,46 +1161,40 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN");
                 const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.some(p => p.status === "ERROR") : false;
 
-                let isEnabled = s.enabled !== false;
+                const isAlgoEnabled = s.enabled !== false;
                 let displayStatus = "Ready";
                 let statusClass = "straddle-badge-ready";
                 let dotColor = "#38bdf8";
 
-                if (rawStatus === "TERMINATED") {
+                if (!isAlgoEnabled) {
+                    displayStatus = "Stopped";
+                    statusClass = "straddle-badge-terminated";
+                    dotColor = "#64748b";
+                } else if (rawStatus === "TERMINATED") {
                     displayStatus = "Terminated";
                     statusClass = "straddle-badge-terminated";
                     dotColor = "#ef4444";
-                    isEnabled = false;
-                } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && isEnabled && hasError)) {
+                } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
                     displayStatus = "Entry Failed";
                     statusClass = "straddle-badge-terminated";
                     dotColor = "#f43f5e";
-                    isEnabled = false;
                 } else if (hasOpen) {
                     displayStatus = "Trade Active";
                     statusClass = "straddle-badge-active";
                     dotColor = "#10b981";
-                    isEnabled = true;
-                } else if (!isEnabled) {
-                    displayStatus = "Stopped";
-                    statusClass = "straddle-badge-terminated";
-                    dotColor = "#64748b";
-                    isEnabled = false;
                 } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
                     displayStatus = "Waiting Entry";
                     statusClass = "straddle-badge-ready";
                     dotColor = "#38bdf8";
-                    isEnabled = true;
                 } else {
                     displayStatus = "Ready";
                     statusClass = "straddle-badge-ready";
                     dotColor = "#38bdf8";
-                    isEnabled = true;
                 }
 
                 const switchInput = document.querySelector(`input[data-enable-sid="${sid}"]`);
                 if (switchInput && switchInput !== document.activeElement) {
-                    switchInput.checked = isEnabled;
+                    switchInput.checked = isAlgoEnabled;
                 }
 
                 const advSwitchInput = document.querySelector(`input[data-adv-sl-sid="${sid}"]`);
@@ -1269,41 +1271,35 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR") : false;
         const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((s.entry_error && s.entry_error !== "-" && !s.entry_error.toLowerCase().includes("waiting")) ? 1 : 0);
 
-        let isEnabled = s.enabled !== false;
+        const isAlgoEnabled = s.enabled !== false;
         let displayStatus = "Ready";
         let statusClass = "straddle-badge-ready";
         let dotColor = "#38bdf8";
 
-        if (rawStatus === "TERMINATED") {
+        if (!isAlgoEnabled) {
+            displayStatus = "Stopped";
+            statusClass = "straddle-badge-terminated";
+            dotColor = "#64748b";
+        } else if (rawStatus === "TERMINATED") {
             displayStatus = "Terminated";
             statusClass = "straddle-badge-terminated";
             dotColor = "#ef4444";
-            isEnabled = false;
-        } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && isEnabled && hasError)) {
+        } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
             displayStatus = "Entry Failed";
             statusClass = "straddle-badge-terminated";
             dotColor = "#f43f5e";
-            isEnabled = false;
         } else if (hasOpen) {
             displayStatus = "Trade Active";
             statusClass = "straddle-badge-active";
             dotColor = "#10b981";
-            isEnabled = true;
-        } else if (!isEnabled) {
-            displayStatus = "Stopped";
-            statusClass = "straddle-badge-terminated";
-            dotColor = "#64748b";
-            isEnabled = false;
         } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
             displayStatus = "Waiting Entry";
             statusClass = "straddle-badge-ready";
             dotColor = "#38bdf8";
-            isEnabled = true;
         } else {
             displayStatus = "Ready";
             statusClass = "straddle-badge-ready";
             dotColor = "#38bdf8";
-            isEnabled = true;
         }
 
         const multType = (s.multiplier_type || "MANUAL").toUpperCase();
@@ -1348,7 +1344,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 </td>
                 <td>
                     <label class="quantiply-switch" title="Toggle Auto Execution">
-                        <input type="checkbox" data-enable-sid="${s.strategy_id}" ${isEnabled ? "checked" : ""} onchange="onToggleAlgoEnable('${s.strategy_id}', this.checked)">
+                        <input type="checkbox" data-enable-sid="${s.strategy_id}" ${isAlgoEnabled ? "checked" : ""} onchange="onToggleAlgoEnable('${s.strategy_id}', this.checked)">
                         <span class="quantiply-slider"></span>
                     </label>
                 </td>
@@ -1923,6 +1919,12 @@ async function duplicateStraddleAlgo(strategyId) {
 async function deleteStraddleAlgo(strategyId) {
     if (!confirm("Are you sure you want to delete this strategy algorithm permanently?")) return;
     try {
+        if (window._straddleState && Array.isArray(window._straddleState.allStrategies)) {
+            window._straddleState.allStrategies = window._straddleState.allStrategies.filter(s => s.strategy_id !== strategyId);
+        }
+        window._selectedAlgoIds.delete(strategyId);
+        renderStraddleAlgosTable(true);
+
         const resp = await fetch("/api/straddle/strategy/delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1930,11 +1932,12 @@ async function deleteStraddleAlgo(strategyId) {
         });
         const res = await resp.json();
         if (res.success) {
-            window._selectedAlgoIds.delete(strategyId);
             await fetchStraddleState();
-            renderStraddleAlgosTable();
+            renderStraddleAlgosTable(true);
         } else {
             alert("Error deleting: " + (res.error || "Failed"));
+            await fetchStraddleState();
+            renderStraddleAlgosTable(true);
         }
     } catch (e) {
         alert("Error: " + e.message);

@@ -24,7 +24,7 @@ import threading
 import requests
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Set
 import concurrent.futures
 
 import config
@@ -189,6 +189,7 @@ def _is_same_instrument(sym1: str, key1: str = "", sym2: str = "", key2: str = "
 
 STRADDLE_DIR = config.DATA_DIR
 STRADDLE_STRATEGIES_FILE = STRADDLE_DIR / "straddle_strategies.json"
+STRADDLE_DELETED_FILE = STRADDLE_DIR / "straddle_deleted_strategies.json"
 STRADDLE_STATE_FILE = STRADDLE_DIR / "straddle_state.json"
 STRADDLE_LOGS_FILE = STRADDLE_DIR / "straddle_logs.json"
 STRADDLE_PNL_HISTORY_FILE = STRADDLE_DIR / "straddle_pnl_history.json"
@@ -359,9 +360,9 @@ def _calc_bs_greeks(spot: float, strike: float, dte_days: float = 3.0, iv: float
 
 DEFAULT_STRATEGIES = [
     {
-        "strategy_id": "straddle_nifty_920",
-        "name": "NIFTY 9:20 Short Straddle (45% TGT / 66% SL)",
-        "enabled": True,
+        "strategy_id": "preset_nifty_short_straddle",
+        "name": "NIFTY Short Straddle Preset",
+        "enabled": False,
         "execution_mode": "LIVE_BROKER",  # 'LIVE_BROKER' or 'PAPER_TRADING'
         "client_id": "Kotak Neo Live",
         "schedule_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
@@ -597,12 +598,13 @@ class StraddleManager:
     def __init__(self):
         self._strategies: List[Dict[str, Any]] = []
         self._active_strategy_id: Optional[str] = None
+        self._deleted_strategy_ids: Set[str] = set()
         self._state: Dict[str, Any] = {
-            "status": "READY",  # READY, TRADE_ACTIVE, TERMINATED, DISABLED
-            "algo_running": True,
+            "status": "STOPPED",  # READY, TRADE_ACTIVE, TERMINATED, STOPPED
+            "algo_running": False,
             "live_feed_running": True,
             "order_api_running": True,
-            "active_strategy_id": "straddle_nifty_920",
+            "active_strategy_id": None,
             "positions": [],
             "group_mtm": 0.0,
             "total_mtm": 0.0,
@@ -641,6 +643,7 @@ class StraddleManager:
         self._spot_thread: Optional[threading.Thread] = None
 
         self._init_storage()
+        self._load_deleted_strategies()
         self._load_strategies()
         self._load_state()
         self._active_underlying = str(self._state.get("underlying_symbol") or "NIFTY").upper().replace(" ", "")
@@ -663,34 +666,53 @@ class StraddleManager:
         STRADDLE_DIR.mkdir(parents=True, exist_ok=True)
         STRADDLE_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
 
+    def _load_deleted_strategies(self):
+        with _ENGINE_LOCK:
+            self._deleted_strategy_ids = {
+                "straddle_nifty_920",
+                "nifty 9:20 short straddle (45% tgt / 66% sl)"
+            }
+            if STRADDLE_DELETED_FILE.exists():
+                try:
+                    with open(STRADDLE_DELETED_FILE, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            for item in data:
+                                if item:
+                                    self._deleted_strategy_ids.add(str(item).strip().lower())
+                except Exception as e:
+                    logger.warning(f"Error loading deleted strategies: {e}")
+            self._save_deleted_strategies()
+
+    def _save_deleted_strategies(self):
+        try:
+            _safe_write_json(STRADDLE_DELETED_FILE, sorted(list(self._deleted_strategy_ids)))
+        except Exception as e:
+            logger.warning(f"Error saving deleted strategies: {e}")
+
     def _load_strategies(self):
         with _ENGINE_LOCK:
             if STRADDLE_STRATEGIES_FILE.exists():
                 try:
                     with open(STRADDLE_STRATEGIES_FILE, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        if isinstance(data, list) and len(data) > 0:
+                        if isinstance(data, list):
                             self._strategies = data
                         else:
-                            import copy
-                            self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
-                            self._save_strategies()
+                            self._strategies = []
                 except Exception as e:
                     logger.error(f"Failed to load straddle strategies: {e}")
-                    import copy
-                    self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
-                    self._save_strategies()
+                    self._strategies = []
             else:
-                import copy
-                self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
-                self._save_strategies()
+                self._strategies = []
 
-            # Ensure default NIFTY 9:20 Short Straddle with Associated Hedge is present
-            strat_ids = [s.get("strategy_id") for s in self._strategies if isinstance(s, dict)]
-            if "straddle_nifty_920" not in strat_ids:
-                import copy
-                self._strategies.insert(0, copy.deepcopy(DEFAULT_STRATEGIES[0]))
-                self._save_strategies()
+            # Purge any deleted strategies permanently
+            self._strategies = [
+                s for s in self._strategies
+                if isinstance(s, dict)
+                and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
+                and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
+            ]
 
             # Ensure unique names and valid default timings across all strategies
             seen_names = set()
@@ -720,14 +742,15 @@ class StraddleManager:
                     s["end_time"] = normalize_time_str(s["end_time"], "15:29:50")
                 if not s.get("schedule_days"):
                     s["schedule_days"] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-
-            if names_modified:
-                self._save_strategies()
+                if "enabled" not in s:
+                    s["enabled"] = False
 
             if self._strategies:
                 self._active_strategy_id = self._strategies[0].get("strategy_id")
             else:
                 self._active_strategy_id = None
+
+            self._save_strategies()
 
     def _save_strategies(self):
         with _ENGINE_LOCK:
@@ -742,8 +765,15 @@ class StraddleManager:
                         if isinstance(saved, dict):
                             self._state.update(saved)
                             self._state["execution_mode"] = "LIVE_BROKER"
-                            if self._state.get("active_strategy_id"):
-                                self._active_strategy_id = self._state["active_strategy_id"]
+                            sid = self._state.get("active_strategy_id")
+                            if sid and (str(sid).strip().lower() in self._deleted_strategy_ids or not any(s.get("strategy_id") == sid for s in self._strategies)):
+                                self._active_strategy_id = self._strategies[0].get("strategy_id") if self._strategies else None
+                                self._state["active_strategy_id"] = self._active_strategy_id
+                            elif sid:
+                                self._active_strategy_id = sid
+                            elif self._strategies:
+                                self._active_strategy_id = self._strategies[0].get("strategy_id")
+                                self._state["active_strategy_id"] = self._active_strategy_id
                 except Exception as e:
                     logger.error(f"Failed to load straddle state: {e}")
 
@@ -2925,7 +2955,7 @@ class StraddleManager:
             return {"success": True, "strategy_id": strategy_id, "name": strat["name"], "strategy": strat}
 
     def set_strategy_days(self, strategy_id: str, days: List[str]) -> Dict[str, Any]:
-        """Update working days for a strategy."""
+        """Update working days for a strategy and refresh schedule diagnostics."""
         with _ENGINE_LOCK:
             strat = self.get_strategy(strategy_id)
             if not strat:
@@ -2934,50 +2964,86 @@ class StraddleManager:
             valid_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
             clean_days = [d for d in days if d in valid_days]
             strat["schedule_days"] = clean_days
+
+            has_open = any(p.get("status") == "OPEN" for p in strat.get("positions", []))
+            if not has_open:
+                chk = self.get_strategy_schedule_status(strat)
+                if not chk["is_enabled"]:
+                    strat["status"] = "STOPPED"
+                    strat["entry_error"] = "Strategy is disabled"
+                elif not chk["is_day_scheduled"]:
+                    strat["status"] = "READY"
+                    strat["entry_error"] = f"Not scheduled for {chk['today_name']}"
+                elif chk["is_before_start"]:
+                    strat["status"] = "READY"
+                    strat["entry_error"] = f"Waiting for Start Time ({chk['st_str']})"
+                elif chk["is_after_end"]:
+                    strat["status"] = "TERMINATED"
+                    strat["entry_error"] = f"Trading hours ended ({chk['et_str']})"
+                else:
+                    strat["status"] = "READY"
+                    strat["entry_error"] = "-"
+
             self._save_strategies()
+            self._save_state()
             self._log_event(f"Updated schedule days for '{strat.get('name')}' to {clean_days}")
             return {"success": True, "strategy_id": strategy_id, "schedule_days": clean_days, "strategy": strat}
 
     def toggle_strategy_enable(self, strategy_id: str, enabled: bool) -> Dict[str, Any]:
-        """Toggle strategy enabled status."""
+        """Toggle strategy enabled status with strict schedule & timing enforcement."""
         with _ENGINE_LOCK:
             strat = self.get_strategy(strategy_id)
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
+
             strat["enabled"] = bool(enabled)
+            today_s = today_ist_str()
+            has_open = any(p.get("status") == "OPEN" for p in strat.get("positions", []))
+
             if not enabled:
                 strat["_manual_reset"] = True
                 strat["_entry_in_progress"] = False
                 strat["_last_entry_attempt_ts"] = time.time()
-                has_open = any(p.get("status") == "OPEN" for p in strat.get("positions", []))
                 if not has_open:
                     strat["status"] = "STOPPED"
-                if self._active_strategy_id == strategy_id:
-                    if not has_open:
-                        self._state["status"] = "STOPPED"
+                    strat["entry_error"] = "Strategy is disabled"
+                if self._active_strategy_id == strategy_id and not has_open:
+                    self._state["status"] = "STOPPED"
             else:
                 strat["_manual_reset"] = False
                 strat["_last_entry_attempt_ts"] = 0
                 strat["_entry_in_progress"] = False
-                if strat.get("status") in ("STOPPED", "ENTRY_FAILED"):
-                    strat["status"] = "READY"
+
+                chk = self.get_strategy_schedule_status(strat)
+                if not has_open:
+                    if chk["can_enter"]:
+                        if strat.get("last_trade_date") != today_s:
+                            strat["status"] = "TRADE_ACTIVE"
+                            strat["last_trade_date"] = today_s
+                            strat["entry_error"] = "-"
+                            self._log_event(f"Strategy '{strat.get('name')}' enabled and schedule active. Starting entry...")
+                            threading.Thread(target=self._execute_strategy_entry, args=(strat,), daemon=True).start()
+                        else:
+                            strat["status"] = "READY"
+                            strat["entry_error"] = "Already traded today"
+                    else:
+                        strat["status"] = "READY"
+                        strat["entry_error"] = chk["reason"]
+
                 self._state["algo_running"] = True
-                if self._state.get("status") in ("TERMINATED", "STOPPED"):
+                if self._state.get("status") in ("TERMINATED", "STOPPED") and not has_open:
                     self._state["status"] = "READY"
-                has_open = any(p.get("status") == "OPEN" for p in strat.get("positions", []))
-                if not has_open and self._is_within_trading_hours(strat):
-                    strat["status"] = "TRADE_ACTIVE"
-                    threading.Thread(target=self._execute_strategy_entry, args=(strat,), daemon=True).start()
+
             self._save_strategies()
             self._save_state()
-            self._log_event(f"Strategy '{strat.get('name')}' enabled set to {enabled}")
+            self._log_event(f"Strategy '{strat.get('name')}' enabled set to {enabled} (Status: {strat.get('status')})")
             return {"success": True, "strategy_id": strategy_id, "enabled": strat["enabled"], "strategy": strat}
 
     def toggle_strategy_enabled(self, strategy_id: str, enabled: bool) -> Dict[str, Any]:
         return self.toggle_strategy_enable(strategy_id, enabled)
 
     def delete_strategy(self, strategy_id: str) -> Dict[str, Any]:
-        """Delete a single strategy by ID or Name."""
+        """Delete a single strategy permanently by ID or Name."""
         return self.batch_delete_strategies([strategy_id])
 
     def square_off_strategy(self, strategy_id: str) -> Dict[str, Any]:
@@ -3006,24 +3072,46 @@ class StraddleManager:
             return {"success": True, "strategy_id": strategy_id, "strategy": strat}
 
     def batch_delete_strategies(self, strategy_ids: List[str]) -> Dict[str, Any]:
-        """Delete multiple strategies at once by ID or Name."""
+        """Delete multiple strategies permanently by ID or Name and persist to tombstone."""
         with _ENGINE_LOCK:
             id_set = {str(i).strip().lower() for i in strategy_ids if i}
+
+            # Record in persistent tombstone
+            for i in strategy_ids:
+                if i:
+                    self._deleted_strategy_ids.add(str(i).strip().lower())
+            for s in self._strategies:
+                sid_str = str(s.get("strategy_id", "")).strip().lower()
+                sname_str = str(s.get("name", "")).strip().lower()
+                if sid_str in id_set or sname_str in id_set:
+                    self._deleted_strategy_ids.add(sid_str)
+                    self._deleted_strategy_ids.add(sname_str)
+            self._save_deleted_strategies()
+
+            # Filter out permanently
             self._strategies = [
                 s for s in self._strategies 
                 if str(s.get("strategy_id", "")).strip().lower() not in id_set
                 and str(s.get("name", "")).strip().lower() not in id_set
+                and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
+                and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
             ]
-            if not self._strategies:
-                self._strategies = list(DEFAULT_STRATEGIES)
-            if str(self._active_strategy_id).strip().lower() in id_set or not any(s.get("strategy_id") == self._active_strategy_id for s in self._strategies):
-                self._active_strategy_id = self._strategies[0]["strategy_id"]
-                self._state["active_strategy_id"] = self._active_strategy_id
-                self._state["active_strategy"] = self._strategies[0]
-                self._state["positions"] = self._strategies[0].get("positions", [])
+
+            if self._strategies:
+                if str(self._active_strategy_id).strip().lower() in id_set or not any(s.get("strategy_id") == self._active_strategy_id for s in self._strategies):
+                    self._active_strategy_id = self._strategies[0]["strategy_id"]
+                    self._state["active_strategy_id"] = self._active_strategy_id
+                    self._state["active_strategy"] = self._strategies[0]
+                    self._state["positions"] = self._strategies[0].get("positions", [])
+            else:
+                self._active_strategy_id = None
+                self._state["active_strategy_id"] = None
+                self._state["active_strategy"] = None
+                self._state["positions"] = []
+
             self._save_strategies()
             self._save_state()
-            self._log_event(f"Batch deleted {len(id_set)} strategies.")
+            self._log_event(f"Batch deleted {len(id_set)} strategies permanently.")
             return {"success": True, "deleted_count": len(id_set), "active_strategy_id": self._active_strategy_id}
 
     def batch_duplicate_strategies(self, strategy_ids: List[str]) -> Dict[str, Any]:
@@ -3033,6 +3121,10 @@ class StraddleManager:
             for sid in strategy_ids:
                 strat = self.get_strategy(sid)
                 if strat:
+                    import copy
+                    new_strat = copy.deepcopy(strat)
+                    new_id = f"strat_{int(time.time())}_{random.randint(100, 999)}"
+                    new_strat["strategy_id"] = new_id
                     base_name = f"{strat.get('name', 'Strategy')} (Copy)"
                     existing_names = [s.get("name", "").strip().lower() for s in self._strategies] + [d.get("name", "").strip().lower() for d in duplicated]
                     if base_name.lower() in existing_names:
@@ -3047,7 +3139,8 @@ class StraddleManager:
 
                     new_strat["enabled"] = False
                     new_strat["positions"] = []
-                    new_strat["status"] = "READY"
+                    new_strat["status"] = "STOPPED"
+                    new_strat["entry_error"] = "Strategy is disabled"
                     new_strat["mtm"] = 0.0
                     self._strategies.append(new_strat)
                     duplicated.append(new_strat)
@@ -3056,41 +3149,79 @@ class StraddleManager:
             return {"success": True, "duplicated_count": len(duplicated), "strategies": duplicated}
 
     def batch_toggle_strategies_enable(self, strategy_ids: List[str], enabled: bool) -> Dict[str, Any]:
-        """Enable or disable multiple strategies at once."""
+        """Enable or disable multiple strategies at once with strict schedule & timing verification."""
         with _ENGINE_LOCK:
-            id_set = set(strategy_ids)
+            id_set = {str(i).strip().lower() for i in strategy_ids if i}
             count = 0
+            today_s = today_ist_str()
             for s in self._strategies:
-                if s.get("strategy_id") in id_set:
+                sid_str = str(s.get("strategy_id", "")).strip().lower()
+                sname_str = str(s.get("name", "")).strip().lower()
+                if sid_str in id_set or sname_str in id_set:
                     s["enabled"] = bool(enabled)
+                    count += 1
+                    has_open = any(p.get("status") == "OPEN" for p in s.get("positions", []))
                     if not enabled:
-                        s["status"] = "READY"
-                        s["entry_error"] = "-"
+                        s["_manual_reset"] = True
+                        s["_entry_in_progress"] = False
+                        if not has_open:
+                            s["status"] = "STOPPED"
+                            s["entry_error"] = "Strategy is disabled"
                     else:
                         s["_manual_reset"] = False
                         s["_last_entry_attempt_ts"] = 0
                         s["_entry_in_progress"] = False
-                        has_open = any(p.get("status") == "OPEN" for p in s.get("positions", []))
+                        chk = self.get_strategy_schedule_status(s)
                         if not has_open:
-                            s["status"] = "TRADE_ACTIVE"
-                            threading.Thread(target=self._execute_strategy_entry, args=(s,), daemon=True).start()
-                    count += 1
+                            if chk["can_enter"]:
+                                if s.get("last_trade_date") != today_s:
+                                    s["status"] = "TRADE_ACTIVE"
+                                    s["last_trade_date"] = today_s
+                                    s["entry_error"] = "-"
+                                    threading.Thread(target=self._execute_strategy_entry, args=(s,), daemon=True).start()
+                                else:
+                                    s["status"] = "READY"
+                                    s["entry_error"] = "Already traded today"
+                            else:
+                                s["status"] = "READY"
+                                s["entry_error"] = chk["reason"]
             self._save_strategies()
+            self._save_state()
             self._log_event(f"Batch set enabled={enabled} for {count} strategies.")
             return {"success": True, "updated_count": count, "enabled": enabled}
 
     def batch_set_strategies_days(self, strategy_ids: List[str], days: List[str]) -> Dict[str, Any]:
         """Set working days for multiple strategies at once."""
         with _ENGINE_LOCK:
-            id_set = set(strategy_ids)
+            id_set = {str(i).strip().lower() for i in strategy_ids if i}
             valid_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
             clean_days = [d for d in days if d in valid_days]
             count = 0
             for s in self._strategies:
-                if s.get("strategy_id") in id_set:
+                sid_str = str(s.get("strategy_id", "")).strip().lower()
+                sname_str = str(s.get("name", "")).strip().lower()
+                if sid_str in id_set or sname_str in id_set:
                     s["schedule_days"] = list(clean_days)
                     count += 1
+                    has_open = any(p.get("status") == "OPEN" for p in s.get("positions", []))
+                    if not has_open:
+                        chk = self.get_strategy_schedule_status(s)
+                        if not chk["is_enabled"]:
+                            s["status"] = "STOPPED"
+                            s["entry_error"] = "Strategy is disabled"
+                        elif not chk["is_day_scheduled"]:
+                            s["status"] = "READY"
+                            s["entry_error"] = f"Not scheduled for {chk['today_name']}"
+                        elif chk["is_before_start"]:
+                            s["status"] = "READY"
+                            s["entry_error"] = f"Waiting for Start Time ({chk['st_str']})"
+                        elif chk["is_after_end"]:
+                            s["status"] = "TERMINATED"
+                            s["entry_error"] = f"Trading hours ended ({chk['et_str']})"
+                        else:
+                            s["entry_error"] = "-"
             self._save_strategies()
+            self._save_state()
             self._log_event(f"Batch updated working days for {count} strategies to {clean_days}.")
             return {"success": True, "updated_count": count, "schedule_days": clean_days}
 
@@ -3802,12 +3933,27 @@ class StraddleManager:
     # ==========================================================
 
     def start_algo(self, strategy_id: Optional[str] = None, force_fresh: bool = False) -> Dict[str, Any]:
-        """Activate the algorithm for live trading or simulation and punch entry orders immediately."""
+        """Activate the algorithm for live trading or simulation and punch entry orders immediately if allowed."""
         with _ENGINE_LOCK:
             sid = strategy_id or self._active_strategy_id or (self._strategies[0]["strategy_id"] if self._strategies else None)
             strat = self.get_strategy(sid)
             if not strat:
                 return {"success": False, "error": "No strategy selected"}
+
+            # Check working days and timing strictly
+            chk = self.get_strategy_schedule_status(strat)
+            if not chk["is_day_scheduled"]:
+                strat["entry_error"] = f"Not scheduled for {chk['today_name']}"
+                self._save_strategies()
+                return {"success": False, "error": f"Cannot start: Strategy '{strat.get('name')}' is not scheduled for today ({chk['today_name']}). Scheduled days: {strat.get('schedule_days')}"}
+            if chk["is_before_start"]:
+                strat["entry_error"] = f"Waiting for Start Time ({chk['st_str']})"
+                self._save_strategies()
+                return {"success": False, "error": f"Cannot start: Current time ({chk['now_str']}) is before strategy start time ({chk['st_str']})"}
+            if chk["is_after_end"]:
+                strat["entry_error"] = f"Trading hours ended ({chk['et_str']})"
+                self._save_strategies()
+                return {"success": False, "error": f"Cannot start: Trading hours ended for this strategy ({chk['et_str']})"}
 
             # If all positions are complete/closed or force_fresh is requested, reset positions to start a clean new session!
             strat_positions = strat.get("positions", [])
@@ -3968,25 +4114,78 @@ class StraddleManager:
     # Order Dispatch & Leg Lifecycle Machine
     # ==========================================================
 
-    def _is_within_trading_hours(self, strat: Dict[str, Any]) -> bool:
-        now_sec = parse_time_to_seconds(now_ist_str())
+    def get_strategy_schedule_status(self, strat: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Strictly evaluates the 3 essential execution conditions:
+        1. enabled: True/False
+        2. is_day_scheduled: today in schedule_days
+        3. is_within_time_window: start_time <= now_sec < end_time
+        Returns detailed boolean checks, seconds, and status description.
+        """
+        is_enabled = bool(strat.get("enabled", False))
+        sched_days = strat.get("schedule_days") or ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        today_name = current_day_name()
+        is_day_scheduled = (today_name in sched_days)
+
         und = str(strat.get("underlying", "NIFTY")).upper()
         is_comm = und in COMMODITY_SYMBOLS or any(c in und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
-        
-        default_start = "09:00:00" if is_comm else "09:15:00"
-        default_end = "23:30:00" if is_comm else "15:29:50"
-        
-        raw_start = strat.get("start_time")
-        raw_end = strat.get("end_time")
-        
-        if is_comm and (not raw_end or "15:30" in str(raw_end) or "15:29" in str(raw_end)):
-            raw_end = "23:30:00"
-        if is_comm and (not raw_start or "09:15" in str(raw_start)):
-            raw_start = "09:00:00"
+        default_st = "09:00:00" if is_comm else "09:15:56"
+        default_et = "23:30:00" if is_comm else "15:29:50"
 
-        st_sec = parse_time_to_seconds(raw_start or default_start, (9 * 3600) if is_comm else (9 * 3600 + 15 * 60))
-        et_sec = parse_time_to_seconds(raw_end or default_end, (23 * 3600 + 30 * 60) if is_comm else (15 * 3600 + 29 * 60 + 50))
-        return st_sec <= now_sec <= et_sec
+        raw_st = strat.get("start_time")
+        raw_et = strat.get("end_time")
+        if is_comm and (not raw_et or "15:30" in str(raw_et) or "15:29" in str(raw_et)):
+            raw_et = "23:30:00"
+        if is_comm and (not raw_st or "09:15" in str(raw_st)):
+            raw_st = "09:00:00"
+
+        st_str = normalize_time_str(raw_st or default_st, default_st)
+        et_str = normalize_time_str(raw_et or default_et, default_et)
+
+        st_sec = parse_time_to_seconds(st_str, (9 * 3600) if is_comm else (9 * 3600 + 15 * 60 + 56))
+        et_sec = parse_time_to_seconds(et_str, (23 * 3600 + 30 * 60) if is_comm else (15 * 3600 + 29 * 60 + 50))
+
+        ist_now_dt = now_ist()
+        now_sec = ist_now_dt.hour * 3600 + ist_now_dt.minute * 60 + ist_now_dt.second
+        now_str = ist_now_dt.strftime("%H:%M:%S")
+
+        is_before_start = (now_sec < st_sec)
+        is_after_end = (now_sec >= et_sec)
+        is_time_window = (st_sec <= now_sec < et_sec)
+
+        # Can this strategy initiate a new trade right now?
+        can_enter = is_enabled and is_day_scheduled and is_time_window
+
+        reason = "OK"
+        if not is_enabled:
+            reason = "Strategy is disabled"
+        elif not is_day_scheduled:
+            reason = f"Not scheduled for {today_name}"
+        elif is_before_start:
+            reason = f"Waiting for Start Time ({st_str})"
+        elif is_after_end:
+            reason = f"Trading hours ended ({et_str})"
+
+        return {
+            "is_enabled": is_enabled,
+            "is_day_scheduled": is_day_scheduled,
+            "is_time_window": is_time_window,
+            "is_before_start": is_before_start,
+            "is_after_end": is_after_end,
+            "can_enter": can_enter,
+            "reason": reason,
+            "st_sec": st_sec,
+            "et_sec": et_sec,
+            "st_str": st_str,
+            "et_str": et_str,
+            "now_sec": now_sec,
+            "now_str": now_str,
+            "today_name": today_name
+        }
+
+    def _is_within_trading_hours(self, strat: Dict[str, Any]) -> bool:
+        chk = self.get_strategy_schedule_status(strat)
+        return chk["is_time_window"]
 
     def _execute_strategy_entry(self, strat: Dict[str, Any]):
         """Execute entry orders for all configured legs with hedge sequencing, parallel execution, and margin optimization."""
@@ -3998,6 +4197,26 @@ class StraddleManager:
                 open_legs = [p for p in strat_positions if p.get("status") == "OPEN"]
                 if open_legs:
                     return
+
+            chk = self.get_strategy_schedule_status(strat)
+            if not chk["can_enter"]:
+                self._log_event(f"[{strat.get('name')}] Entry aborted: {chk['reason']}", level="WARNING")
+                if not chk["is_enabled"]:
+                    strat["status"] = "STOPPED"
+                    strat["entry_error"] = "Strategy is disabled"
+                elif not chk["is_day_scheduled"]:
+                    strat["status"] = "READY"
+                    strat["entry_error"] = f"Not scheduled for {chk['today_name']}"
+                elif chk["is_before_start"]:
+                    strat["status"] = "READY"
+                    strat["entry_error"] = f"Waiting for Start Time ({chk['st_str']})"
+                elif chk["is_after_end"]:
+                    strat["status"] = "TERMINATED"
+                    strat["entry_error"] = f"Trading hours ended ({chk['et_str']})"
+                strat["_entry_in_progress"] = False
+                self._save_strategies()
+                return
+
             strat["_entry_in_progress"] = True
             strat["_manual_reset"] = False
             entry_generation = strat.get("_reset_generation", 0)
@@ -6088,6 +6307,11 @@ class StraddleManager:
         re_type_u = str(re_type or "").upper()
         is_re_enabled = any(k in re_type_u for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY"))
 
+        chk = self.get_strategy_schedule_status(strat)
+        if not chk["can_enter"]:
+            self._log_event(f"[{strat.get('name')}] Re-entry not triggered: {chk['reason']}", level="INFO")
+            return
+
         if is_re_enabled and cur_count < re_max:
             new_count = cur_count + 1
             self._log_event(f"Triggering {re_type_u} #{new_count}/{re_max} for leg '{pos.get('symbol')}' ({trigger} hit)...")
@@ -6095,6 +6319,11 @@ class StraddleManager:
             target_exit_order_id = exit_order_id or pos.get("exit_order_id")
 
             def _re_entry_worker():
+                chk_w = self.get_strategy_schedule_status(strat)
+                if not chk_w["can_enter"] or not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
+                    self._log_event(f"[{strat.get('name')}] Re-entry worker aborted: {chk_w['reason']}", level="INFO")
+                    return
+
                 mode = self._state.get("execution_mode", "LIVE_BROKER")
                 broker = get_broker_adapter(mode)
 
@@ -6130,7 +6359,9 @@ class StraddleManager:
                 if delay_sec > 0:
                     time.sleep(delay_sec)
 
-                if not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
+                chk_w2 = self.get_strategy_schedule_status(strat)
+                if not chk_w2["can_enter"] or not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
+                    self._log_event(f"[{strat.get('name')}] Re-entry aborted after delay: {chk_w2['reason']}", level="INFO")
                     return
 
                 und = strat.get("underlying", pos.get("underlying", "NIFTY"))
@@ -8711,7 +8942,8 @@ class StraddleManager:
                     now_sec_m = parse_time_to_seconds(now_ist_str())
                     if now_sec_m < et_sec_m:
                         matched_strat["status"] = "TRADE_ACTIVE"
-                        matched_strat["enabled"] = matched_strat.get("enabled", True)
+                        if "enabled" not in matched_strat:
+                            matched_strat["enabled"] = False
                         matched_strat["_manual_reset"] = False
                         matched_strat["entry_error"] = "-"
                     else:
@@ -8927,38 +9159,33 @@ class StraddleManager:
             # Evaluate each individual strategy
             for strat in self._strategies:
                 s_id = strat.get("strategy_id")
-                is_enabled = strat.get("enabled", True)
-                sched_days = strat.get("schedule_days", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
-                is_day_scheduled = (today_name in sched_days)
-
-                und_eval = str(strat.get("underlying", "NIFTY")).upper()
-                is_comm_strat = und_eval in COMMODITY_SYMBOLS or any(c in und_eval for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
-                
-                default_strat_st = "09:00:00" if is_comm_strat else "09:15:56"
-                default_strat_et = "23:30:00" if is_comm_strat else "15:29:50"
-                
-                raw_st = strat.get("start_time")
-                raw_et = strat.get("end_time")
-                if is_comm_strat and (not raw_et or "15:30" in str(raw_et) or "15:29" in str(raw_et)):
-                    raw_et = "23:30:00"
-                if is_comm_strat and (not raw_st or "09:15" in str(raw_st)):
-                    raw_st = "09:00:00"
-
-                st = normalize_time_str(raw_st or default_strat_st, default_strat_st)
-                et = normalize_time_str(raw_et or default_strat_et, default_strat_et)
-                st_sec = parse_time_to_seconds(st, (9 * 3600) if is_comm_strat else (9 * 3600 + 15 * 60 + 56))
-                et_sec = parse_time_to_seconds(et, (23 * 3600 + 30 * 60) if is_comm_strat else (15 * 3600 + 29 * 60 + 50))
-                strat_status = strat.get("status", "READY")
                 strat_positions = strat.get("positions", [])
+                strat_status = strat.get("status", "READY")
+
+                chk = self.get_strategy_schedule_status(strat)
+                is_enabled = chk["is_enabled"]
+                is_day_scheduled = chk["is_day_scheduled"]
+                is_before_start = chk["is_before_start"]
+                is_after_end = chk["is_after_end"]
+                can_enter = chk["can_enter"]
+                st_sec = chk["st_sec"]
+                et_sec = chk["et_sec"]
+                st = chk["st_str"]
+                et = chk["et_str"]
+                today_name = chk["today_name"]
 
                 # Date-awareness: if strategy has positions from a prior date, archive/reset them so it trades fresh today
                 if strat.get("last_trade_date") and strat.get("last_trade_date") != today_s:
                     open_l = [p for p in strat_positions if p.get("status") == "OPEN"]
                     if not open_l:
                         strat["positions"] = []
-                        strat["status"] = "READY"
+                        if is_enabled:
+                            strat["status"] = "READY"
+                            strat["entry_error"] = "-"
+                        else:
+                            strat["status"] = "STOPPED"
+                            strat["entry_error"] = "Strategy is disabled"
                         strat["mtm"] = 0.0
-                        strat["entry_error"] = "-"
                         strat_positions = []
                     strat["last_trade_date"] = today_s
 
@@ -8967,14 +9194,14 @@ class StraddleManager:
 
                 # UNCONDITIONAL SAFETY RULE 1: If Strategy has OPEN positions and End Time is reached (now_sec >= et_sec),
                 # square off immediately without delay, regardless of enable toggle or schedule state!
-                if has_open_positions and now_sec >= et_sec:
+                if has_open_positions and is_after_end:
                     if not strat.get("_exit_in_progress"):
                         strat["_exit_in_progress"] = True
                         strat["status"] = "TERMINATED"
                         strat["entry_error"] = f"Trading hours ended ({et})"
                         self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off.")
                         self._save_strategies()
-                        self._square_off_strategy_positions(strat, broker, reason="AUTO END TIME")
+                        self._square_off_strategy_positions(strat, broker, reason=f"AUTO END TIME ({et})")
                         strat["_exit_in_progress"] = False
                         self._save_strategies()
                     continue
@@ -9013,10 +9240,11 @@ class StraddleManager:
                         )
                         continue
 
-                # Diagnostic feedback for strategy schedule/enable state
+                # Strict Diagnostic Feedback & Entry Logic
                 if not is_enabled:
                     if not has_open_positions and strat_status != "ENTRY_FAILED":
                         strat["status"] = "STOPPED"
+                    strat["entry_error"] = "Strategy is disabled"
                 elif strat.get("_manual_reset"):
                     if not has_open_positions and strat_status != "ENTRY_FAILED":
                         strat["status"] = "READY"
@@ -9028,16 +9256,16 @@ class StraddleManager:
                     if strat_status not in ("READY", "ENTRY_FAILED") and not has_open_positions:
                         strat["status"] = "READY"
                     strat["entry_error"] = f"Not scheduled for {today_name}"
-                elif now_sec < st_sec:
+                elif is_before_start:
                     if strat_status not in ("READY", "ENTRY_FAILED") and not has_open_positions:
                         strat["status"] = "READY"
-                    if not strat.get("entry_error") or strat.get("entry_error") == "-":
-                        strat["entry_error"] = f"Waiting for Start Time ({st})"
-                elif now_sec >= et_sec:
+                    strat["entry_error"] = f"Waiting for Start Time ({st})"
+                elif is_after_end:
                     if not has_open_positions:
-                        if not strat.get("entry_error") or strat.get("entry_error") == "-":
-                            strat["entry_error"] = f"Trading hours ended ({et})"
-                elif is_enabled and is_day_scheduled and st_sec <= now_sec < et_sec:
+                        strat["entry_error"] = f"Trading hours ended ({et})"
+                        if strat_status not in ("TERMINATED", "ENTRY_FAILED"):
+                            strat["status"] = "TERMINATED"
+                elif can_enter:
                     now_ts = time.time()
                     last_attempt = strat.get("_last_entry_attempt_ts", 0)
                     entry_in_prog = strat.get("_entry_in_progress", False)
@@ -9048,7 +9276,7 @@ class StraddleManager:
                             strat["status"] = "TRADE_ACTIVE"
                             strat["last_trade_date"] = today_s
                             strat["_last_entry_attempt_ts"] = now_ts
-                            self._log_event(f"Auto Starting Strategy '{strat.get('name')}' for {today_name}.")
+                            self._log_event(f"Auto Starting Strategy '{strat.get('name')}' for {today_name} ({st} - {et}).")
                             threading.Thread(target=self._execute_strategy_entry, args=(strat,), daemon=True).start()
 
 
