@@ -4253,6 +4253,13 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     `;
                 } else if (pos.target_broker_order_id) {
                     tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Order #${pos.target_broker_order_id}">🏦 #${pos.target_broker_order_id}</span>`;
+                } else if (pos.target_placement_error && isTgtBroker) {
+                    tgtStatusHtml = `
+                        <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
+                            <span style="font-size:9px; color:#f59e0b; font-weight:800; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="${pos.target_placement_error}">⚠️ BROKER PLACEMENT FAILED</span>
+                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET')">🏦 Retry Broker Placement</button>
+                        </div>
+                    `;
                 } else {
                     tgtStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
                 }
@@ -4301,6 +4308,13 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     `;
                 } else if (pos.sl_broker_order_id) {
                     slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Order #${pos.sl_broker_order_id}">🏦 #${pos.sl_broker_order_id}</span>`;
+                } else if (pos.sl_placement_error && isSlBroker) {
+                    slStatusHtml = `
+                        <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
+                            <span style="font-size:9px; color:#f59e0b; font-weight:800; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="${pos.sl_placement_error}">⚠️ BROKER PLACEMENT FAILED</span>
+                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL')">🏦 Retry Broker Placement</button>
+                        </div>
+                    `;
                 } else {
                     slStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
                 }
@@ -6711,8 +6725,10 @@ function serializeCurrentStrategySettings() {
             auto_exit_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
             auto_exit_on_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked
         },
+        advanced: null,
         legs: []
     };
+    strategy.advanced = Object.assign({}, strategy.advanced_settings);
 
     const trs = document.querySelectorAll("#straddleLegsBuilderBody tr");
     trs.forEach(tr => {

@@ -199,6 +199,7 @@ STRADDLE_BACKUPS_DIR = STRADDLE_DIR / "straddle_backups"
 
 _ENGINE_LOCK = threading.RLock()
 _LOOKUP_LOCK = threading.Lock()
+_ADVANCE_ORDER_LOCK = threading.Lock()
 
 
 def _safe_write_json(file_path: Path, data: Any, retries: int = 5):
@@ -2734,6 +2735,12 @@ class StraddleManager:
                     if isinstance(leg, dict):
                         leg["underlying"] = und
 
+            # Ensure advanced and advanced_settings are bidirectional mirrors
+            if "advanced_settings" in strat_dict and isinstance(strat_dict["advanced_settings"], dict):
+                strat_dict["advanced"] = dict(strat_dict["advanced_settings"])
+            elif "advanced" in strat_dict and isinstance(strat_dict["advanced"], dict):
+                strat_dict["advanced_settings"] = dict(strat_dict["advanced"])
+
             idx = next((i for i, s in enumerate(self._strategies) if s.get("strategy_id") == sid), -1)
             if idx >= 0:
                 # Merge existing runtime properties (e.g. positions, status, mtm)
@@ -4261,7 +4268,11 @@ class StraddleManager:
             self._log_event(f"Executing Strategy Entry for '{strat.get('name')}'...")
             mult = self.get_effective_multiplier(strat)
             und = strat.get("underlying", "NIFTY")
-            adv = strat.get("advanced") or strat.get("advanced_settings", {})
+            adv = {}
+            if isinstance(strat.get("advanced"), dict):
+                adv.update(strat["advanced"])
+            if isinstance(strat.get("advanced_settings"), dict):
+                adv.update(strat["advanced_settings"])
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
@@ -5000,7 +5011,11 @@ class StraddleManager:
 
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
-            adv = strat.get("advanced") or strat.get("advanced_settings", {})
+            adv = {}
+            if isinstance(strat.get("advanced"), dict):
+                adv.update(strat["advanced"])
+            if isinstance(strat.get("advanced_settings"), dict):
+                adv.update(strat["advanced_settings"])
             mult = self.get_effective_multiplier(strat)
             und = strat.get("underlying", "NIFTY")
             legs_cfg = strat.get("legs", [])
@@ -5321,7 +5336,11 @@ class StraddleManager:
 
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
-            adv = strat.get("advanced") or strat.get("advanced_settings") or {}
+            adv = {}
+            if isinstance(strat.get("advanced"), dict):
+                adv.update(strat["advanced"])
+            if isinstance(strat.get("advanced_settings"), dict):
+                adv.update(strat["advanced_settings"])
             diff_lots = 0
             und = strat.get("underlying", pos.get("underlying", "NIFTY")).upper()
             lot_size = int(pos.get("lot_size") or (15 if und == "BANKNIFTY" else (25 if und == "FINNIFTY" else (50 if und == "MIDCPNIFTY" else (10 if und == "SENSEX" else 65)))))
@@ -5493,7 +5512,7 @@ class StraddleManager:
                         logger.info(f"Updated broker advance Target order {adv_tgt_oid} price to ₹{pos['target_price']:.2f} (qty={pos.get('quantity')})")
                     except Exception as e:
                         logger.warning(f"Could not modify broker advance Target order: {e}")
-                elif (adv.get("target_order_placement") == "Place in advance" or adv.get("sl_order_placement") == "Place in advance") and pos.get("target_price"):
+                elif (pos.get("target_order_placement") in ("Place in advance", "With Broker", "BROKER") or adv.get("target_order_placement") in ("Place in advance", "With Broker", "BROKER")) and pos.get("target_price"):
                     threading.Thread(target=self._place_advance_target_order, args=(broker, pos, 0), daemon=True).start()
 
             if sl_val is not None:
@@ -5660,124 +5679,129 @@ class StraddleManager:
         """Quantiply-parity: place Stoploss order with broker in advance after delay_sec."""
         if delay_sec > 0:
             time.sleep(delay_sec)
-        if pos.get("status") != "OPEN" or pos.get("sl_broker_order_id"):
-            return
-        sl_price = float(pos.get("sl_price") or 0.0)
-        if sl_price <= 0:
-            return
-        try:
-            sl_side = "BUY" if pos.get("side") == "SELL" else "SELL"
-            qty = int(pos.get("quantity") or 65)
-            sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
+        with _ADVANCE_ORDER_LOCK:
+            time.sleep(0.12)  # Micro-buffer between broker calls
+            if pos.get("status") != "OPEN" or pos.get("sl_broker_order_id"):
+                return
+            sl_price = float(pos.get("sl_price") or 0.0)
+            if sl_price <= 0:
+                return
+            try:
+                sl_side = "BUY" if pos.get("side") == "SELL" else "SELL"
+                qty = int(pos.get("quantity") or 65)
+                sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
 
-            # In Indian markets (NSE F&O), SL-Limit is preferred because NSE restricted SL-M on options.
-            # For a Buy SL (closing a short), limit price is placed with a buffer above trigger.
-            # For a Sell SL (closing a long), limit price is placed with a buffer below trigger.
-            if sl_side == "BUY":
-                limit_sl_p = round_to_tick(max(sl_price + 0.05, sl_price * 1.05), 0.05)
-            else:
-                limit_sl_p = round_to_tick(min(max(0.05, sl_price - 0.05), sl_price * 0.95), 0.05)
+                # In Indian markets (NSE F&O), SL-Limit is preferred because NSE restricted SL-M on options.
+                # For a Buy SL (closing a short), limit price is placed with a buffer above trigger.
+                # For a Sell SL (closing a long), limit price is placed with a buffer below trigger.
+                if sl_side == "BUY":
+                    limit_sl_p = round_to_tick(max(sl_price + 0.05, sl_price * 1.05), 0.05)
+                else:
+                    limit_sl_p = round_to_tick(min(max(0.05, sl_price - 0.05), sl_price * 0.95), 0.05)
 
-            logger.info(f"[Advance SL] Placing advance SL-Limit order on broker for {sym} @ trigger ₹{sl_price:.2f}, limit ₹{limit_sl_p:.2f} (qty={qty})...")
-            res = broker.place_order(
-                symbol=sym,
-                instrument_key=pos.get("instrument_key", ""),
-                transaction_type=sl_side,
-                quantity=qty,
-                product=pos.get("product", "NRML"),
-                order_type="SL",
-                price=limit_sl_p,
-                trigger_price=sl_price,
-                tag="adv_sl"
-            )
-            # If broker rejects SL-Limit, fallback to SL-M (if supported)
-            if not res.get("success"):
-                logger.info(f"[Advance SL] SL-Limit rejected ({res.get('error')}). Trying SL-M...")
+                logger.info(f"[Advance SL] Placing advance SL-Limit order on broker for {sym} @ trigger ₹{sl_price:.2f}, limit ₹{limit_sl_p:.2f} (qty={qty})...")
                 res = broker.place_order(
                     symbol=sym,
                     instrument_key=pos.get("instrument_key", ""),
                     transaction_type=sl_side,
                     quantity=qty,
                     product=pos.get("product", "NRML"),
-                    order_type="SL-M",
-                    price=0.0,
+                    order_type="SL",
+                    price=limit_sl_p,
                     trigger_price=sl_price,
                     tag="adv_sl"
                 )
+                # If broker rejects SL-Limit, fallback to SL-M (if supported)
+                if not res.get("success"):
+                    logger.info(f"[Advance SL] SL-Limit rejected ({res.get('error')}). Trying SL-M...")
+                    res = broker.place_order(
+                        symbol=sym,
+                        instrument_key=pos.get("instrument_key", ""),
+                        transaction_type=sl_side,
+                        quantity=qty,
+                        product=pos.get("product", "NRML"),
+                        order_type="SL-M",
+                        price=0.0,
+                        trigger_price=sl_price,
+                        tag="adv_sl"
+                    )
 
-            if res.get("success") and res.get("order_id"):
-                pos["sl_broker_order_id"] = str(res.get("order_id"))
-                pos["sl_order_placement"] = "Place in advance"
-                pos["sl_cancelled_unexpectedly"] = False
-                pos.pop("sl_cancel_notice", None)
-                pos.pop("sl_placement_error", None)
-                logger.info(f"[Advance SL] Order placed with broker ID: {pos['sl_broker_order_id']}")
+                if res.get("success") and res.get("order_id"):
+                    pos["sl_broker_order_id"] = str(res.get("order_id"))
+                    pos["sl_order_placement"] = "Place in advance"
+                    pos["sl_cancelled_unexpectedly"] = False
+                    pos.pop("sl_cancel_notice", None)
+                    pos.pop("sl_placement_error", None)
+                    logger.info(f"[Advance SL] Order placed with broker ID: {pos['sl_broker_order_id']}")
+                    self._save_strategies()
+                    self._save_state()
+                else:
+                    err_msg = res.get("error") or "Order rejected by broker"
+                    pos["sl_placement_error"] = err_msg
+                    logger.warning(f"[Advance SL] Broker failed to place SL for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
+                    self._log_event(
+                        f"⚠️ [Broker SL Placement Notice] Failed to place Stoploss order with broker for {sym}: {err_msg}. Algo active protection: monitoring live price on platform to exit on SL trigger.",
+                        level="WARNING"
+                    )
+                    self._save_strategies()
+                    self._save_state()
+            except Exception as e:
+                logger.error(f"[Advance SL] Exception placing SL order: {e}")
+                pos["sl_placement_error"] = str(e)
                 self._save_strategies()
                 self._save_state()
-            else:
-                err_msg = res.get("error") or "Order rejected by broker"
-                pos["sl_placement_error"] = err_msg
-                logger.warning(f"[Advance SL] Broker failed to place SL for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
-                self._log_event(
-                    f"⚠️ [Broker SL Placement Notice] Failed to place Stoploss order with broker for {sym}: {err_msg}. Algo active protection: monitoring live price on platform to exit on SL trigger.",
-                    level="WARNING"
-                )
-                self._save_strategies()
-                self._save_state()
-        except Exception as e:
-            logger.error(f"[Advance SL] Exception placing SL order: {e}")
-            pos["sl_placement_error"] = str(e)
-            self._save_strategies()
-            self._save_state()
 
     def _place_advance_target_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0):
-        """Quantiply/Broker-parity: place Target (LIMIT) order with broker in advance after delay_sec."""
+        """Quantiply-parity: place Target (LIMIT) order with broker in advance after delay_sec."""
         if delay_sec > 0:
             time.sleep(delay_sec)
-        if pos.get("status") != "OPEN" or pos.get("target_broker_order_id"):
-            return
-        tgt_price = float(pos.get("target_price") or 0.0)
-        if tgt_price <= 0:
-            return
-        try:
-            tgt_side = "BUY" if pos.get("side") == "SELL" else "SELL"
-            qty = int(pos.get("quantity") or 65)
-            sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
-            logger.info(f"[Advance Target] Placing advance LIMIT order on broker for {sym} @ price ₹{tgt_price:.2f} (qty={qty})...")
-            res = broker.place_order(
-                symbol=sym,
-                instrument_key=pos.get("instrument_key", ""),
-                transaction_type=tgt_side,
-                quantity=qty,
-                product=pos.get("product", "NRML"),
-                order_type="LIMIT",
-                price=tgt_price,
-                trigger_price=0.0,
-                tag="adv_tgt"
-            )
-            if res.get("success") and res.get("order_id"):
-                pos["target_broker_order_id"] = str(res.get("order_id"))
-                pos["target_order_placement"] = "Place in advance"
-                pos["target_cancelled_unexpectedly"] = False
-                pos.pop("target_cancel_notice", None)
-                pos.pop("target_placement_error", None)
-                logger.info(f"[Advance Target] Order placed with broker ID: {pos['target_broker_order_id']}")
-                self._save_strategies()
-                self._save_state()
-            else:
-                err_msg = res.get("error") or "Order rejected by broker"
-                pos["target_placement_error"] = err_msg
-                logger.warning(f"[Advance Target] Broker failed to place Target for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
-                self._log_event(
-                    f"⚠️ [Broker Target Placement Notice] Failed to place Target order with broker for {sym}: {err_msg}. Algo active protection: monitoring live price on platform to exit on Target trigger.",
-                    level="WARNING"
+        with _ADVANCE_ORDER_LOCK:
+            time.sleep(0.12)  # Micro-buffer between broker calls
+            if pos.get("status") != "OPEN" or pos.get("target_broker_order_id"):
+                return
+            tgt_price = float(pos.get("target_price") or 0.0)
+            if tgt_price <= 0:
+                return
+            try:
+                tgt_side = "BUY" if pos.get("side") == "SELL" else "SELL"
+                qty = int(pos.get("quantity") or 65)
+                sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
+                logger.info(f"[Advance Target] Placing advance LIMIT order on broker for {sym} @ price ₹{tgt_price:.2f} (qty={qty})...")
+                res = broker.place_order(
+                    symbol=sym,
+                    instrument_key=pos.get("instrument_key", ""),
+                    transaction_type=tgt_side,
+                    quantity=qty,
+                    product=pos.get("product", "NRML"),
+                    order_type="LIMIT",
+                    price=tgt_price,
+                    trigger_price=0.0,
+                    tag="adv_tgt"
                 )
+                if res.get("success") and res.get("order_id"):
+                    pos["target_broker_order_id"] = str(res.get("order_id"))
+                    pos["target_order_placement"] = "Place in advance"
+                    pos["target_cancelled_unexpectedly"] = False
+                    pos.pop("target_cancel_notice", None)
+                    pos.pop("target_placement_error", None)
+                    logger.info(f"[Advance Target] Order placed with broker ID: {pos['target_broker_order_id']}")
+                    self._save_strategies()
+                    self._save_state()
+                else:
+                    err_msg = res.get("error") or "Order rejected by broker"
+                    pos["target_placement_error"] = err_msg
+                    logger.warning(f"[Advance Target] Broker failed to place Target for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
+                    self._log_event(
+                        f"⚠️ [Broker Target Placement Notice] Failed to place Target order with broker for {sym}: {err_msg}. Algo active protection: monitoring live price on platform to exit on Target trigger.",
+                        level="WARNING"
+                    )
+                    self._save_strategies()
+                    self._save_state()
+            except Exception as e:
+                logger.error(f"[Advance Target] Exception placing Target order: {e}")
+                pos["target_placement_error"] = str(e)
                 self._save_strategies()
                 self._save_state()
-        except Exception as e:
-            logger.error(f"[Advance Target] Exception placing Target order: {e}")
-            pos["target_placement_error"] = str(e)
-            self._save_strategies()
             self._save_state()
 
     def set_leg_order_placement(
@@ -6698,7 +6722,11 @@ class StraddleManager:
                             f"[Re-Entry #{new_count}] Exit order {target_exit_order_id} verified FILLED @ ₹{fill_res.get('price', 0):.2f}. Placing Re-Entry immediately."
                         )
 
-                adv = strat.get("advanced") or strat.get("advanced_settings", {})
+                adv = {}
+                if isinstance(strat.get("advanced"), dict):
+                    adv.update(strat["advanced"])
+                if isinstance(strat.get("advanced_settings"), dict):
+                    adv.update(strat["advanced_settings"])
                 delay_sec = int(adv.get("re_execute_order_delay_sec", 0) or 0)
                 if delay_sec > 0:
                     time.sleep(delay_sec)
