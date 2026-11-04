@@ -3634,6 +3634,53 @@ async function resendLegOrderToBroker(stratId, legId, legIndex, orderType) {
 }
 window.resendLegOrderToBroker = resendLegOrderToBroker;
 
+async function changeLegReferenceBasis(stratId, legId, legIndex, choice) {
+    if (!choice) return;
+    const sId = stratId || window._straddleState?.activeStrategy?.strategy_id;
+    let customPrice = null;
+    let bmTime = null;
+
+    if (choice === "CUSTOM") {
+        const inputVal = prompt("Enter custom reference price to recalculate Target and Stoploss:");
+        if (!inputVal || isNaN(parseFloat(inputVal)) || parseFloat(inputVal) <= 0) {
+            showStraddleToast("Invalid reference price entered.", "warning", 3000);
+            return;
+        }
+        customPrice = parseFloat(inputVal);
+    } else if (choice === "SPECIFIC_TIME") {
+        const inputTime = prompt("Enter benchmark time (HH:MM:SS) for reference price:", "09:16:00");
+        if (!inputTime) return;
+        bmTime = inputTime.trim();
+    }
+
+    showStraddleToast(`Updating reference price basis...`, "info", 1500);
+    try {
+        const resp = await fetch("/api/straddle/set_leg_reference_price", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                strategy_id: sId,
+                leg_id: legId || null,
+                leg_index: legIndex,
+                reference_mode: choice,
+                custom_price: customPrice,
+                benchmark_time: bmTime
+            })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showStraddleToast(res.message || "Reference price updated successfully!", "success", 2500);
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(res.error || "Failed to update reference price", "error", 4000);
+        }
+    } catch (e) {
+        showStraddleToast(`Error updating reference price: ${e.message}`, "error", 3000);
+    }
+}
+window.changeLegReferenceBasis = changeLegReferenceBasis;
+
 async function detachRunningPosition(stratId, legId, legIndex) {
     if (!confirm("Detach this running position from the algo?\n\nNOTE: The open position will NOT be squared off on Kotak Neo broker. It will simply be removed from this algo's monitoring.")) {
         return;
@@ -4241,6 +4288,38 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const avgEntPrice = pos.avg_ent_price ? Number(pos.avg_ent_price).toFixed(2) : '-';
                 const entryTime = pos.entry_time || '-';
 
+                // Reference Price badges and basis selector (AlgoTest Parity)
+                let refPriceBadgeHtml = "";
+                if (pos.benchmark_pending) {
+                    refPriceBadgeHtml = `
+                        <div style="margin-top:2px;">
+                            <span style="font-size:9px; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:1px 4px; font-weight:800; display:inline-block;" title="Interim protection active. Will lock to exact ${pos.benchmark_time || '09:16:00'} market price when clock strikes.">⏳ Ref @ ${pos.benchmark_time || '09:16'}</span>
+                        </div>
+                    `;
+                } else if (pos.reference_price && Math.abs(Number(pos.reference_price) - Number(pos.avg_ent_price || 0)) > 0.01) {
+                    refPriceBadgeHtml = `
+                        <div style="margin-top:2px;">
+                            <span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target and Stoploss calculated from Reference Price ₹${Number(pos.reference_price).toFixed(2)} (${pos.reference_price_mode || 'Benchmark'})">🎯 Ref: ₹${Number(pos.reference_price).toFixed(2)}</span>
+                        </div>
+                    `;
+                }
+
+                let refBasisSelectHtml = "";
+                if (isOpen) {
+                    const curRefLabel = pos.reference_price ? `₹${Number(pos.reference_price).toFixed(1)}` : 'Avg';
+                    refBasisSelectHtml = `
+                        <div style="margin-top:3px;">
+                            <select class="straddle-select" style="padding:1px 2px; font-size:8.5px; height:18px; font-weight:700; color:#38bdf8; background:#0b1120; border-color:#0284c7; border-radius:3px; cursor:pointer;" onchange="changeLegReferenceBasis('${stratId}', '${pos.id || ''}', ${idx}, this.value)" title="Choose basis for Target & Stoploss: Entry Fill Price, Current LTP, Custom Price, or 09:16 Benchmark">
+                                <option value="" disabled selected>Ref: ${curRefLabel} ▾</option>
+                                <option value="AVERAGE_ENTRY">Avg Fill (₹${avgEntPrice})</option>
+                                <option value="CURRENT_LTP">Current LTP (₹${Number(pos.ltp || 0).toFixed(1)})</option>
+                                <option value="CUSTOM">Custom Price...</option>
+                                <option value="SPECIFIC_TIME">09:16 Benchmark</option>
+                            </select>
+                        </div>
+                    `;
+                }
+
                 // Per Leg Target (Interactive ONLY for live filled/partially filled trades)
                 const isTgtBroker = (pos.target_order_placement === "Place in advance" || pos.target_order_placement === "With Broker" || !!pos.target_broker_order_id);
                 let tgtStatusHtml = "";
@@ -4459,6 +4538,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         <td>
                             <div class="straddle-ent-price-val" style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${avgEntPrice}</div>
                             <div class="straddle-subtext">${entryTime}</div>
+                            ${refPriceBadgeHtml}
+                            ${refBasisSelectHtml}
                         </td>
                         <td>${targetHtml}</td>
                         <td>${slHtml}</td>
@@ -5701,6 +5782,13 @@ function populateStraddleSettingsForm(s) {
     const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
     if (tgtOrderEl) tgtOrderEl.value = adv.target_order_placement || "Keep with self";
 
+    const refModeEl = document.getElementById("cfgRefPriceMode");
+    if (refModeEl) refModeEl.value = adv.reference_price_mode || "ENTRY_PRICE";
+    const bmTimeEl = document.getElementById("cfgBenchmarkTime");
+    if (bmTimeEl) bmTimeEl.value = adv.benchmark_time || "09:16:00";
+    const bmInitEl = document.getElementById("cfgBenchmarkInitialOnly");
+    if (bmInitEl) bmInitEl.checked = (adv.benchmark_scope !== "ALL_ENTRIES");
+
     const slEl = document.getElementById("cfgSlOrderPlacement");
     if (slEl && !slEl._syncAttached) {
         slEl._syncAttached = true;
@@ -6723,7 +6811,10 @@ function serializeCurrentStrategySettings() {
             mtm_sl_delay_sec: isNaN(parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10),
             auto_handling_sl_cancellation: document.getElementById("cfgAutoHandlingSl")?.checked !== false,
             auto_exit_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
-            auto_exit_on_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked
+            auto_exit_on_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
+            reference_price_mode: document.getElementById("cfgRefPriceMode")?.value || "ENTRY_PRICE",
+            benchmark_time: document.getElementById("cfgBenchmarkTime")?.value || "09:16:00",
+            benchmark_scope: document.getElementById("cfgBenchmarkInitialOnly")?.checked ? "INITIAL_ONLY" : "ALL_ENTRIES"
         },
         advanced: null,
         legs: []

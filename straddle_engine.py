@@ -4785,37 +4785,60 @@ class StraddleManager:
             }
 
         entry_price = float(order_res.get("price") or ltp)
+
+        # AlgoTest Parity: Benchmark Reference Price determination
+        ref_mode = adv.get("reference_price_mode", "ENTRY_PRICE")
+        bm_time = str(adv.get("benchmark_time") or "09:16:00").strip()
+        bm_scope = str(adv.get("benchmark_scope") or "INITIAL_ONLY").upper()
+
+        if is_re_entry and bm_scope == "INITIAL_ONLY":
+            ref_mode = "ENTRY_PRICE"
+
+        ref_price = entry_price
+        bm_pending = False
+        now_str = time.strftime("%H:%M:%S")
+
+        if ref_mode == "SPECIFIC_TIME":
+            if now_str < bm_time:
+                # Early entry before benchmark (e.g. 09:15:58 vs 09:16:00):
+                # Use actual fill price for interim protection until benchmark tick arrives
+                ref_price = entry_price
+                bm_pending = True
+            else:
+                ref_price = entry_price
+                bm_pending = False
+
         target_price = 0.0
         if "TGT: %" in tgt_type or "%" in tgt_type:
             if side == "SELL":
-                target_price = round_to_tick(entry_price * (1.0 - tgt_val / 100.0), 0.05)
+                target_price = round_to_tick(ref_price * (1.0 - tgt_val / 100.0), 0.05)
             else:
-                target_price = round_to_tick(entry_price * (1.0 + tgt_val / 100.0), 0.05)
+                target_price = round_to_tick(ref_price * (1.0 + tgt_val / 100.0), 0.05)
         elif "Pts" in tgt_type:
-            target_price = round_to_tick(entry_price - tgt_val if side == "SELL" else entry_price + tgt_val, 0.05)
+            target_price = round_to_tick(ref_price - tgt_val if side == "SELL" else ref_price + tgt_val, 0.05)
 
         # Enforce minimum tick separation for target
-        if target_price > 0 and entry_price > 0:
-            if side == "BUY" and target_price <= entry_price:
-                target_price = round_to_tick(entry_price + 0.05, 0.05)
-            elif side == "SELL" and target_price >= entry_price:
-                target_price = round_to_tick(entry_price - 0.05, 0.05)
+        if target_price > 0 and ref_price > 0:
+            if side == "BUY" and target_price <= ref_price:
+                target_price = round_to_tick(ref_price + 0.05, 0.05)
+            elif side == "SELL" and target_price >= ref_price:
+                target_price = round_to_tick(ref_price - 0.05, 0.05)
 
         sl_price = 0.0
         if "SL: %" in sl_type or "%" in sl_type:
             if side == "SELL":
-                sl_price = round_to_tick(entry_price * (1.0 + sl_val / 100.0), 0.05)
+                sl_price = round_to_tick(ref_price * (1.0 + sl_val / 100.0), 0.05)
             else:
-                sl_price = round_to_tick(entry_price * (1.0 - sl_val / 100.0), 0.05)
+                sl_price = round_to_tick(ref_price * (1.0 - sl_val / 100.0), 0.05)
         elif "Pts" in sl_type:
-            sl_price = round_to_tick(entry_price + sl_val if side == "SELL" else entry_price - sl_val, 0.05)
+            sl_price = round_to_tick(ref_price + sl_val if side == "SELL" else ref_price - sl_val, 0.05)
 
         # Enforce minimum tick separation for stoploss
-        if sl_price > 0 and entry_price > 0:
-            if side == "BUY" and sl_price >= entry_price:
-                sl_price = round_to_tick(entry_price - 0.05, 0.05)
-            elif side == "SELL" and sl_price <= entry_price:
-                sl_price = round_to_tick(entry_price + 0.05, 0.05)
+        if sl_price > 0 and ref_price > 0:
+            if side == "BUY" and sl_price >= ref_price:
+                sl_price = round_to_tick(ref_price - 0.05, 0.05)
+            elif side == "SELL" and sl_price <= ref_price:
+                sl_price = round_to_tick(ref_price + 0.05, 0.05)
 
         orig_sl_label = f"ORIGINAL SL: -{sl_val:.0f}%" if ("%" in sl_type or "SL: %" in sl_type) else (f"ORIGINAL SL: {sl_price:.2f}" if sl_price > 0 else "")
         order_id = str(order_res.get("order_id") or "")
@@ -4869,6 +4892,12 @@ class StraddleManager:
             "quantity": total_qty,
             "entry_qty": total_qty,
             "avg_ent_price": entry_price,
+            "reference_price": ref_price,
+            "reference_price_mode": ref_mode,
+            "benchmark_time": bm_time,
+            "benchmark_scope": bm_scope,
+            "benchmark_pending": bm_pending,
+            "interim_protection_active": bm_pending,
             "entry_time": entry_time,
             "target_type": tgt_type,
             "target_type_label": target_type_label,
@@ -5483,7 +5512,7 @@ class StraddleManager:
                         return {"success": False, "error": f"Failed to reduce position: {order_res.get('error')}"}
 
             # 3. TARGET & STOPLOSS RE-CALCULATION
-            ent_p = float(pos.get("avg_ent_price", 0.0) or 0.0)
+            ent_p = float(pos.get("reference_price") or pos.get("avg_ent_price", 0.0) or 0.0)
             side = pos.get("side", "SELL").upper()
 
             if target_val is not None:
@@ -5803,6 +5832,192 @@ class StraddleManager:
                 self._save_strategies()
                 self._save_state()
             self._save_state()
+
+    def _recalculate_pos_sl_target(self, strat: Dict[str, Any], pos: Dict[str, Any], broker: BaseBrokerAdapter, ref_price: float):
+        """Recalculate SL and Target based on ref_price, update resting broker orders, and sync."""
+        side = str(pos.get("side", "SELL")).upper()
+        tgt_val = float(pos.get("target_value", 0.0) or 0.0)
+        tgt_type = str(pos.get("target_type", "%"))
+        sl_val = float(pos.get("sl_value", 0.0) or 0.0)
+        sl_type = str(pos.get("sl_type", "%"))
+
+        # Recalculate Target Price
+        if tgt_val > 0 and ref_price > 0:
+            if "%" in tgt_type:
+                pos["target_price"] = round_to_tick(ref_price * (1.0 - tgt_val / 100.0) if side == "SELL" else ref_price * (1.0 + tgt_val / 100.0), 0.05)
+            else:
+                pos["target_price"] = round_to_tick(ref_price - tgt_val if side == "SELL" else ref_price + tgt_val, 0.05)
+            
+            # Enforce minimum tick separation
+            if side == "BUY" and pos["target_price"] <= ref_price:
+                pos["target_price"] = round_to_tick(ref_price + 0.05, 0.05)
+            elif side == "SELL" and pos["target_price"] >= ref_price:
+                pos["target_price"] = round_to_tick(ref_price - 0.05, 0.05)
+
+        # Recalculate Stoploss Price
+        if sl_val > 0 and ref_price > 0:
+            if "%" in sl_type:
+                pos["sl_price"] = round_to_tick(ref_price * (1.0 + sl_val / 100.0) if side == "SELL" else ref_price * (1.0 - sl_val / 100.0), 0.05)
+            else:
+                pos["sl_price"] = round_to_tick(ref_price + sl_val if side == "SELL" else ref_price - sl_val, 0.05)
+
+            # Enforce minimum tick separation
+            if side == "BUY" and pos["sl_price"] >= ref_price:
+                pos["sl_price"] = round_to_tick(ref_price - 0.05, 0.05)
+            elif side == "SELL" and pos["sl_price"] <= ref_price:
+                pos["sl_price"] = round_to_tick(ref_price + 0.05, 0.05)
+            pos["original_sl_price"] = pos["sl_price"]
+
+        # Modify active broker orders on Kotak Neo matching engine
+        adv_sl_oid = pos.get("sl_broker_order_id")
+        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_") and pos.get("sl_price"):
+            def _modify_sl_bg():
+                with _ADVANCE_ORDER_LOCK:
+                    try:
+                        time.sleep(0.12)
+                        sl_side = "BUY" if side == "SELL" else "SELL"
+                        lim_p = round_to_tick(max(pos["sl_price"] + 0.05, pos["sl_price"] * 1.05) if sl_side == "BUY" else min(max(0.05, pos["sl_price"] - 0.05), pos["sl_price"] * 0.95), 0.05)
+                        broker.modify_order(
+                            order_id=str(adv_sl_oid),
+                            trigger_price=pos["sl_price"],
+                            price=lim_p,
+                            quantity=pos.get("quantity")
+                        )
+                        logger.info(f"[Benchmark Sync] Modified broker SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}")
+                    except Exception as e_m:
+                        logger.warning(f"[Benchmark Sync] Failed to modify broker SL order {adv_sl_oid}: {e_m}")
+            threading.Thread(target=_modify_sl_bg, daemon=True).start()
+
+        adv_tgt_oid = pos.get("target_broker_order_id")
+        if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_") and pos.get("target_price"):
+            def _modify_tgt_bg():
+                with _ADVANCE_ORDER_LOCK:
+                    try:
+                        time.sleep(0.12)
+                        broker.modify_order(
+                            order_id=str(adv_tgt_oid),
+                            price=pos["target_price"],
+                            quantity=pos.get("quantity")
+                        )
+                        logger.info(f"[Benchmark Sync] Modified broker Target order {adv_tgt_oid} price to ₹{pos['target_price']:.2f}")
+                    except Exception as e_m:
+                        logger.warning(f"[Benchmark Sync] Failed to modify broker Target order {adv_tgt_oid}: {e_m}")
+            threading.Thread(target=_modify_tgt_bg, daemon=True).start()
+
+    def _lock_benchmark_reference_price(self, strat: Dict[str, Any], pos: Dict[str, Any], broker: BaseBrokerAdapter, current_ltp: float):
+        """AlgoTest Backtest Parity: Lock in benchmark reference price (e.g. 09:16:00 tick) and update SL/Target."""
+        ref_price = round(float(current_ltp or pos.get("avg_ent_price") or 100.0), 2)
+        pos["reference_price"] = ref_price
+        pos["benchmark_pending"] = False
+        pos["interim_protection_active"] = False
+        pos["benchmark_applied_at"] = time.strftime("%H:%M:%S")
+
+        self._recalculate_pos_sl_target(strat, pos, broker, ref_price)
+
+        sym = pos.get("symbol", "")
+        bm_t = pos.get("benchmark_time", "09:16:00")
+        ent_p = float(pos.get("avg_ent_price", 0.0) or 0.0)
+        self._log_event(
+            f"🎯 [AlgoTest Parity] Benchmark {bm_t} locked @ ₹{ref_price:.2f} for {sym} (Entry fill was ₹{ent_p:.2f}). "
+            f"Updated SL to ₹{pos.get('sl_price', 0):.2f}, Target to ₹{pos.get('target_price', 0):.2f}."
+        )
+        self._send_telegram_alert(
+            f"🎯 *[AlgoTest Parity Locked]*\n"
+            f"• Strategy: `{strat.get('name')}`\n"
+            f"• Leg: `{sym}`\n"
+            f"• Benchmark Time: `{bm_t}`\n"
+            f"• Reference Price: *₹{ref_price:.2f}* (Entry: ₹{ent_p:.2f})\n"
+            f"• New Stoploss: *₹{pos.get('sl_price', 0):.2f}*\n"
+            f"• New Target: *₹{pos.get('target_price', 0):.2f}*"
+        )
+        self._save_strategies()
+        self._save_state(force=True)
+
+    def set_leg_reference_price(
+        self,
+        strategy_id: Optional[str] = None,
+        leg_id: Optional[str] = None,
+        leg_index: Optional[int] = None,
+        reference_mode: str = "AVERAGE_ENTRY",
+        custom_price: Optional[float] = None,
+        benchmark_time: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Dynamically change reference price basis for a live leg and recalculate Target/SL."""
+        with _ENGINE_LOCK:
+            strat = self.get_strategy(strategy_id)
+            if not strat:
+                return {"success": False, "error": f"Strategy {strategy_id} not found"}
+            positions = strat.get("positions", [])
+            pos = None
+            pos_idx = None
+            if leg_id:
+                for idx, p in enumerate(positions):
+                    if p.get("id") == leg_id:
+                        pos = p
+                        pos_idx = idx
+                        break
+            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
+                pos = positions[int(leg_index)]
+                pos_idx = int(leg_index)
+            if not pos:
+                return {"success": False, "error": "Position not found in strategy"}
+
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+
+            ref_m = (reference_mode or "AVERAGE_ENTRY").upper()
+            if ref_m in ("AVERAGE_ENTRY", "ENTRY_PRICE", "AVG"):
+                ref_price = float(pos.get("avg_ent_price") or 0.0)
+                pos["reference_price"] = ref_price
+                pos["reference_price_mode"] = "ENTRY_PRICE"
+                pos["benchmark_pending"] = False
+                pos["interim_protection_active"] = False
+            elif ref_m in ("CURRENT_LTP", "LTP"):
+                ref_price = float(pos.get("ltp") or pos.get("avg_ent_price") or 0.0)
+                pos["reference_price"] = ref_price
+                pos["reference_price_mode"] = "CURRENT_LTP"
+                pos["benchmark_pending"] = False
+                pos["interim_protection_active"] = False
+            elif ref_m == "CUSTOM":
+                if custom_price is None or float(custom_price) <= 0:
+                    return {"success": False, "error": "Invalid custom reference price"}
+                ref_price = round(float(custom_price), 2)
+                pos["reference_price"] = ref_price
+                pos["reference_price_mode"] = "CUSTOM"
+                pos["benchmark_pending"] = False
+                pos["interim_protection_active"] = False
+            elif ref_m in ("SPECIFIC_TIME", "BENCHMARK"):
+                bm_t = str(benchmark_time or pos.get("benchmark_time") or "09:16:00").strip()
+                pos["benchmark_time"] = bm_t
+                pos["reference_price_mode"] = "SPECIFIC_TIME"
+                now_t = time.strftime("%H:%M:%S")
+                if now_t >= bm_t:
+                    ref_price = float(pos.get("ltp") or pos.get("avg_ent_price") or 0.0)
+                    pos["reference_price"] = ref_price
+                    pos["benchmark_pending"] = False
+                    pos["interim_protection_active"] = False
+                else:
+                    ref_price = float(pos.get("reference_price") or pos.get("avg_ent_price") or 0.0)
+                    pos["benchmark_pending"] = True
+                    pos["interim_protection_active"] = True
+            else:
+                return {"success": False, "error": f"Unknown reference mode: {reference_mode}"}
+
+            if not pos.get("benchmark_pending"):
+                self._recalculate_pos_sl_target(strat, pos, broker, ref_price)
+
+            self._save_strategies()
+            self._save_state(force=True)
+
+            return {
+                "success": True,
+                "reference_price": pos.get("reference_price"),
+                "reference_price_mode": pos.get("reference_price_mode"),
+                "target_price": pos.get("target_price"),
+                "sl_price": pos.get("sl_price"),
+                "benchmark_pending": pos.get("benchmark_pending"),
+                "message": f"Reference price updated to ₹{pos.get('reference_price', 0):.2f}"
+            }
 
     def set_leg_order_placement(
         self,
@@ -9710,6 +9925,13 @@ class StraddleManager:
                         or pos.get("ltp", pos.get("avg_ent_price", 100.0))
                     )
                     pos["ltp"] = ltp
+
+                    # AlgoTest Parity: Check if benchmark reference price needs to be locked
+                    if pos.get("status") == "OPEN" and pos.get("benchmark_pending"):
+                        bm_time = str(pos.get("benchmark_time") or "09:16:00").strip()
+                        now_time = time.strftime("%H:%M:%S")
+                        if now_time >= bm_time:
+                            self._lock_benchmark_reference_price(strat, pos, broker, ltp)
 
                     side = pos.get("side", "SELL")
                     entry_price = float(pos.get("avg_ent_price", 100.0))

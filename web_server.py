@@ -442,6 +442,32 @@ def api_straddle_set_leg_placement():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/set_leg_reference_price", methods=["POST"])
+def api_straddle_set_leg_reference_price():
+    """Dynamically set the reference price basis (Avg Entry, Current LTP, Custom, or Specific Time) for a live leg."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        leg_id = data.get("leg_id")
+        leg_idx = data.get("leg_index")
+        ref_mode = data.get("reference_mode", "AVERAGE_ENTRY")
+        custom_pr = data.get("custom_price")
+        bm_time = data.get("benchmark_time")
+        mgr = get_straddle_manager()
+        res = mgr.set_leg_reference_price(
+            strategy_id=sid,
+            leg_id=leg_id,
+            leg_index=leg_idx,
+            reference_mode=ref_mode,
+            custom_price=custom_pr,
+            benchmark_time=bm_time
+        )
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Error in api_straddle_set_leg_reference_price: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/position/resend_to_broker", methods=["POST"])
 def api_straddle_position_resend_to_broker():
     """Re-send an advance order (SL, Target, or Both) to the broker matching engine."""

@@ -1385,6 +1385,32 @@
                         </div>
                     </div>
 
+                    <!-- SL & Target Benchmark Calculation Basis (AlgoTest Backtest Parity) -->
+                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-top:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <div style="font-size:12px; font-weight:700; color:#38bdf8;">🎯 SL & Target Price Basis (AlgoTest Backtest Parity)</div>
+                            <span style="font-size:10px; color:#94a3b8; font-style:italic;">Calculate SL/Target % based on specific time price (e.g. 09:16:00) vs actual fill price</span>
+                        </div>
+                        <div class="straddle-grid-3col" style="display:grid; grid-template-columns: 1.4fr 1fr 1.6fr; gap:12px;">
+                            <div class="straddle-form-group">
+                                <label>Price Calculation Basis:</label>
+                                <select id="cfgRefPriceMode" class="straddle-select">
+                                    <option value="ENTRY_PRICE" selected>Average Entry Price (Standard)</option>
+                                    <option value="SPECIFIC_TIME">Specific Time Price (AlgoTest Parity)</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label>Benchmark Time (HH:MM:SS):</label>
+                                <input type="text" id="cfgBenchmarkTime" class="straddle-input" value="09:16:00" placeholder="09:16:00" style="font-weight:700; color:#38bdf8;">
+                            </div>
+                            <div class="straddle-form-group" style="display:flex; align-items:center; padding-top:18px;">
+                                <label class="straddle-checkbox-label" title="When checked, the 09:16:00 benchmark price applies ONLY to the initial algo entry. Any subsequent Re-entries or Re-cost legs will use their own actual fill price.">
+                                    <input type="checkbox" id="cfgBenchmarkInitialOnly" checked> Apply benchmark only to Initial Entry
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Additional Execution Controls (Quantiply Standard Safety Guards) -->
                     <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px; margin-top:10px;">
                         <label class="straddle-checkbox-label" title="Continuously tracks broker-placed SL orders. If cancelled unexpectedly by client or broker, the algo automatically takes over live price monitoring and triggers exit on SL/Target hit to avoid naked exposure.">
@@ -3017,7 +3043,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261104_broker_sl_tgt_final"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261104_algotest_benchmark_v1"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
