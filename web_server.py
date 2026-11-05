@@ -596,12 +596,25 @@ def api_straddle_cancel_margin_auto_exit():
 
 
 @app.route("/api/straddle/toggle_mode", methods=["POST"])
+@app.route("/api/straddle/toggle_execution_mode", methods=["POST"])
+@app.route("/api/straddle/execution_mode/toggle", methods=["POST"])
 def api_straddle_toggle_mode():
     try:
         data = request.get_json(silent=True) or {}
         mode = data.get("mode", "LIVE_BROKER")
         mgr = get_straddle_manager()
         res = mgr.toggle_execution_mode(mode)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/paper/reset", methods=["POST"])
+@app.route("/api/straddle/reset_paper_account", methods=["POST"])
+def api_straddle_paper_reset():
+    try:
+        mgr = get_straddle_manager()
+        res = mgr.reset_paper_account()
         return jsonify(res)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -714,8 +727,12 @@ def api_straddle_strategy_duplicate():
 def api_straddle_strategy_rename():
     try:
         data = request.get_json(silent=True) or {}
-        sid = data.get("strategy_id", "")
-        new_name = data.get("name", "")
+        sid = (data.get("strategy_id") or data.get("id") or "").strip()
+        new_name = (data.get("new_name") or data.get("name") or "").strip()
+        if not sid:
+            return jsonify({"success": False, "error": "strategy_id is required"}), 400
+        if not new_name:
+            return jsonify({"success": False, "error": "New strategy name cannot be empty"}), 400
         mgr = get_straddle_manager()
         res = mgr.rename_strategy(sid, new_name)
         return jsonify(res)

@@ -765,7 +765,8 @@ class StraddleManager:
                         saved = json.load(f)
                         if isinstance(saved, dict):
                             self._state.update(saved)
-                            self._state["execution_mode"] = "LIVE_BROKER"
+                            saved_mode = saved.get("execution_mode", "LIVE_BROKER")
+                            self._state["execution_mode"] = saved_mode if saved_mode in ("LIVE_BROKER", "PAPER_TRADING") else "LIVE_BROKER"
                             sid = self._state.get("active_strategy_id")
                             if sid and (str(sid).strip().lower() in self._deleted_strategy_ids or not any(s.get("strategy_id") == sid for s in self._strategies)):
                                 self._active_strategy_id = self._strategies[0].get("strategy_id") if self._strategies else None
@@ -2129,7 +2130,9 @@ class StraddleManager:
 
     def _get_underlying_spot_price(self, underlying: str = "NIFTY") -> float:
         """Resolves live continuous spot index price with sub-second caching."""
-        clean_und = underlying.upper().replace(" ", "")
+        clean_und = underlying.upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
+        if clean_und in ("NIFTY50", "NIFTY_50"):
+            clean_und = "NIFTY"
         if clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER")):
             return _get_commodity_live_price(clean_und)
 
@@ -2170,14 +2173,15 @@ class StraddleManager:
                 return _SPOT_CACHE[clean_und]
 
         fallbacks = {
-            "NIFTY": 23340.0,
+            "NIFTY": 24450.0,
+            "NIFTY50": 24450.0,
             "BANKNIFTY": 54900.0,
             "FINNIFTY": 24870.0,
             "MIDCPNIFTY": 13390.0,
             "SENSEX": 75450.0,
             "BANKEX": 61200.0,
         }
-        return fallbacks.get(clean_und, 23300.0)
+        return fallbacks.get(clean_und, 24450.0)
 
     def get_underlying_atm_strike(self, underlying: str = "NIFTY") -> float:
         """Calculate the nearest ATM strike based on live spot price."""
@@ -2349,7 +2353,9 @@ class StraddleManager:
     ) -> Optional[Dict[str, Any]]:
         """Resolves the exact option contract matching strike, 500/100 multiple, and expiry."""
         clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
-        if clean_und == "CRUDE":
+        if clean_und in ("NIFTY50", "NIFTY_50"):
+            clean_und = "NIFTY"
+        elif clean_und == "CRUDE":
             clean_und = "CRUDEOIL"
         elif clean_und == "NATGAS":
             clean_und = "NATURALGAS"
@@ -2985,17 +2991,41 @@ class StraddleManager:
             return {"success": True, "strategy_id": new_id, "strategy": new_strat}
 
     def rename_strategy(self, strategy_id: str, new_name: str) -> Dict[str, Any]:
-        """Rename an existing strategy."""
+        """Rename an existing strategy with complete cascading to positions and state."""
         with _ENGINE_LOCK:
             strat = self.get_strategy(strategy_id)
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
 
+            clean_name = str(new_name or "").strip()
+            if not clean_name:
+                return {"success": False, "error": "Strategy name cannot be empty"}
+
             old_name = strat.get("name")
-            strat["name"] = new_name.strip()
+            strat["name"] = clean_name
+
+            # Cascade name to all open/held positions of this strategy
+            for p in strat.get("positions", []):
+                p["strategy_name"] = clean_name
+
+            # Update active strategy in memory state if currently selected
+            if self._active_strategy_id == strategy_id:
+                if isinstance(self._state.get("active_strategy"), dict):
+                    self._state["active_strategy"]["name"] = clean_name
+                for ap in self._state.get("positions", []):
+                    if ap.get("strategy_id") == strategy_id:
+                        ap["strategy_name"] = clean_name
+
             self._save_strategies()
-            self._log_event(f"Renamed strategy '{old_name}' -> '{strat['name']}'")
-            return {"success": True, "strategy_id": strategy_id, "name": strat["name"], "strategy": strat}
+            self._save_state(force=True)
+            self._log_event(f"Renamed strategy '{old_name}' -> '{clean_name}'")
+            return {
+                "success": True,
+                "strategy_id": strategy_id,
+                "name": clean_name,
+                "new_name": clean_name,
+                "strategy": strat
+            }
 
     def set_strategy_days(self, strategy_id: str, days: List[str]) -> Dict[str, Any]:
         """Update working days for a strategy and refresh schedule diagnostics."""
@@ -4146,12 +4176,35 @@ class StraddleManager:
                 return {"success": False, "error": err, "position": pos}
 
     def toggle_execution_mode(self, mode: str = "LIVE_BROKER") -> Dict[str, Any]:
-        """Live Upstox Broker execution is permanently active across all strategies."""
+        """Toggles execution mode between LIVE_BROKER and PAPER_TRADING."""
         with _ENGINE_LOCK:
-            self._state["execution_mode"] = "LIVE_BROKER"
-            self._save_state()
-            self._log_event("Live Upstox Broker execution is active.")
-            return {"success": True, "execution_mode": "LIVE_BROKER", "mode": "LIVE_BROKER", "message": "Kotak Neo Live Broker is active."}
+            target_mode = "PAPER_TRADING" if "PAPER" in str(mode).upper() else "LIVE_BROKER"
+            self._state["execution_mode"] = target_mode
+            for s in self._strategies:
+                s["execution_mode"] = target_mode
+            self._save_state(force=True)
+            self._save_strategies()
+            label = "🧪 Paper Trading (Simulation)" if target_mode == "PAPER_TRADING" else "🟢 Kotak Neo Live Broker"
+            msg = f"Execution mode switched to {label}."
+            self._log_event(msg, level="INFO")
+            return {"success": True, "execution_mode": target_mode, "mode": target_mode, "message": msg}
+
+    def reset_paper_account(self) -> Dict[str, Any]:
+        """Clears simulated paper trading positions and orderbook."""
+        with _ENGINE_LOCK:
+            from kotak_broker_adapter import get_broker_adapter
+            paper_broker = get_broker_adapter("PAPER_TRADING")
+            if hasattr(paper_broker, "reset_account"):
+                paper_broker.reset_account()
+            if self._state.get("execution_mode") == "PAPER_TRADING":
+                self._state["positions"] = []
+                for s in self._strategies:
+                    if s.get("execution_mode") == "PAPER_TRADING":
+                        s["positions"] = []
+                self._save_state(force=True)
+                self._save_strategies()
+            self._log_event("Paper trading account state and positions reset cleanly.", level="INFO")
+            return {"success": True, "message": "Paper trading account reset successfully."}
 
     # ==========================================================
     # Order Dispatch & Leg Lifecycle Machine
@@ -5391,14 +5444,9 @@ class StraddleManager:
 
             # 1. SHIFT STRIKE (If new strike provided and different from current)
             if clean_new_strike and clean_new_strike != current_strike and clean_new_strike not in curr_sym:
-                self._log_event(f"Shifting trade for {curr_sym} to strike {clean_new_strike}...")
-                # A. Square off current position
-                res_exit = self._square_off_single_position(pos, broker, reason=f"SHIFT STRIKE TO {clean_new_strike}")
-                exit_oid = (res_exit or {}).get("order_id") or pos.get("exit_order_id")
-                if exit_oid and not str(exit_oid).startswith("ORD_") and not str(exit_oid).startswith("PAPER_"):
-                    broker.wait_for_order_fill(str(exit_oid), timeout_sec=20.0, poll_interval_sec=0.1)
+                self._log_event(f"Shifting trade for {curr_sym} to strike {clean_new_strike} (Side: {pos_side})...")
 
-                # B. Resolve new contract
+                # Resolve new contract first
                 opt_type = pos.get("option_type") or ("PE" if "PE" in curr_sym else "CE")
                 new_contract = self.resolve_strike_and_contract(
                     underlying=und,
@@ -5409,7 +5457,6 @@ class StraddleManager:
                 if not new_contract:
                     return {"success": False, "error": f"Could not resolve new contract for strike {clean_new_strike}"}
 
-                # C. Punch entry for new strike
                 target_lots = int(new_lots) if new_lots and int(new_lots) > 0 else int(pos.get("lots", 1))
                 dummy_cfg = dict(leg_cfg or {})
                 dummy_cfg.update({
@@ -5425,31 +5472,77 @@ class StraddleManager:
                     "sl_type": "SL: -%" if "%" in sl_mode else "SL: -Pts",
                     "sl_value": float(sl_val) if sl_val is not None else float(pos.get("sl_value", 15.0)),
                 })
-                new_pos = self._place_leg_entry_order(
-                    dummy_cfg,
-                    new_contract,
-                    mult=self.get_effective_multiplier(strat),
-                    broker=broker,
-                    adv=adv,
-                    strategy=strat,
-                    is_re_entry=True
-                )
-                if new_pos and new_pos.get("status") == "OPEN":
-                    positions[pos_idx] = new_pos
-                    if leg_cfg:
-                        leg_cfg.update(dummy_cfg)
-                        leg_cfg["strike_selection"] = clean_new_strike
-                    self._save_strategies()
-                    self._save_state()
-                    return {
-                        "success": True,
-                        "message": f"Successfully shifted position from {curr_sym} to {new_contract['trading_symbol']}",
-                        "position": new_pos,
-                        "strategy": strat
-                    }
+
+                # INVIOLABLE HEDGE RULE: If this is a BUY (Hedge) leg, BUY new leg FIRST, then SELL old leg!
+                if pos_side == "BUY":
+                    self._log_event(f"[Hedge Shift] Buying new hedge leg {new_contract['trading_symbol']} FIRST before squaring off old hedge {curr_sym}...")
+                    new_pos = self._place_leg_entry_order(
+                        dummy_cfg,
+                        new_contract,
+                        mult=self.get_effective_multiplier(strat),
+                        broker=broker,
+                        adv=adv,
+                        strategy=strat,
+                        is_re_entry=True
+                    )
+                    if new_pos and new_pos.get("status") == "OPEN":
+                        # New hedge is confirmed open and active. Now safely exit the earlier hedge leg
+                        self._log_event(f"[Hedge Shift] New hedge {new_contract['trading_symbol']} active. Now squaring off earlier hedge {curr_sym}...")
+                        res_exit = self._square_off_single_position(pos, broker, reason=f"SHIFT HEDGE EXITED OLD {curr_sym}")
+                        positions[pos_idx] = new_pos
+                        if leg_cfg:
+                            leg_cfg.update(dummy_cfg)
+                            leg_cfg["strike_selection"] = clean_new_strike
+                        # Update any associated hedge links
+                        if pos.get("is_associated_hedge") or pos.get("parent_leg_id"):
+                            p_id = pos.get("parent_leg_id")
+                            new_pos["is_associated_hedge"] = True
+                            new_pos["parent_leg_id"] = p_id
+                            for parent_pos in positions:
+                                if parent_pos.get("id") == p_id or parent_pos.get("associated_hedge_id") == pos.get("id"):
+                                    parent_pos["has_associated_hedge"] = True
+                                    parent_pos["associated_hedge_id"] = new_pos.get("id")
+                                    parent_pos["associated_hedge_symbol"] = new_pos.get("symbol")
+                        self._save_strategies()
+                        self._save_state(force=True)
+                        return {
+                            "success": True,
+                            "message": f"Successfully shifted hedge leg: Bought new {new_contract['trading_symbol']} first, then squared off old {curr_sym}.",
+                            "position": new_pos,
+                            "strategy": strat
+                        }
+                    else:
+                        err = (new_pos or {}).get("error", "Failed to punch entry order for new hedge strike")
+                        return {"success": False, "error": f"Failed to buy new hedge leg: {err}. Old hedge {curr_sym} was NOT exited and remains fully protected."}
+
                 else:
-                    err = (new_pos or {}).get("error", "Order placement failed on new strike")
-                    return {"success": False, "error": f"Exited previous strike, but new strike placement failed: {err}"}
+                    # For SELL legs: Square off current short position first, then punch new strike
+                    res_exit = self._square_off_single_position(pos, broker, reason=f"SHIFT STRIKE TO {clean_new_strike}")
+                    new_pos = self._place_leg_entry_order(
+                        dummy_cfg,
+                        new_contract,
+                        mult=self.get_effective_multiplier(strat),
+                        broker=broker,
+                        adv=adv,
+                        strategy=strat,
+                        is_re_entry=True
+                    )
+                    if new_pos and new_pos.get("status") == "OPEN":
+                        positions[pos_idx] = new_pos
+                        if leg_cfg:
+                            leg_cfg.update(dummy_cfg)
+                            leg_cfg["strike_selection"] = clean_new_strike
+                        self._save_strategies()
+                        self._save_state(force=True)
+                        return {
+                            "success": True,
+                            "message": f"Successfully shifted position from {curr_sym} to {new_contract['trading_symbol']}",
+                            "position": new_pos,
+                            "strategy": strat
+                        }
+                    else:
+                        err = (new_pos or {}).get("error", "Order placement failed on new strike")
+                        return {"success": False, "error": f"Exited previous strike, but new strike placement failed: {err}"}
 
             # 2. LOT SIZE ADJUSTMENT (If lots changed on same strike)
             curr_lots = int(pos.get("lots", 1))
@@ -6729,10 +6822,28 @@ class StraddleManager:
                         daemon=True
                     ).start()
 
-            # Wait briefly (up to 4s) for the broker to confirm fill and get exact traded price
+            # Fast non-blocking order fill confirmation
             fill_res = {}
             if order_id and not order_id.startswith("ORD_") and not order_id.startswith("PAPER_"):
-                fill_res = broker.wait_for_order_fill(order_id, timeout_sec=4.0, poll_interval_sec=0.05)
+                if is_urgent_exit:
+                    # Urgent / manual square-off: quick 0.1s check so UI/API returns instantly without freezing
+                    fill_res = broker.wait_for_order_fill(order_id, timeout_sec=0.1, poll_interval_sec=0.03)
+                    # Background daemon thread reconciles exact traded fill price asynchronously
+                    def _bg_reconcile_fill(b_obj, o_id, p_obj, q_val, side_str):
+                        try:
+                            f = b_obj.wait_for_order_fill(o_id, timeout_sec=5.0, poll_interval_sec=0.1)
+                            if f and float(f.get("price") or 0.0) > 0:
+                                with _ENGINE_LOCK:
+                                    p_obj["avg_exit_price"] = float(f["price"])
+                                    if side_str == "SELL":
+                                        p_obj["mtm"] = round((p_obj.get("avg_ent_price", 0.0) - float(f["price"])) * q_val, 2)
+                                    else:
+                                        p_obj["mtm"] = round((float(f["price"]) - p_obj.get("avg_ent_price", 0.0)) * q_val, 2)
+                        except Exception:
+                            pass
+                    threading.Thread(target=_bg_reconcile_fill, args=(broker, order_id, pos, qty, pos.get("side", "SELL")), daemon=True).start()
+                else:
+                    fill_res = broker.wait_for_order_fill(order_id, timeout_sec=2.0, poll_interval_sec=0.05)
 
             if fill_res and fill_res.get("status") in ("REJECTED", "CANCELLED", "FAILED"):
                 pos["status"] = "ERROR"
@@ -7052,26 +7163,27 @@ class StraddleManager:
                                     is_re_entry=False
                                 )
 
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as h_exec:
-                                f_buy = h_exec.submit(_buy_new_h)
-                                f_exit = h_exec.submit(_exit_old_h)
-                                new_h_pos = f_buy.result()
-                                _ = f_exit.result()
+                            # INVIOLABLE HEDGE DIRECTIVE: Buy new hedge FIRST before squaring off old hedge!
+                            self._log_event(f"[Hedge Shift] Buying new hedge {new_h_contract['trading_symbol']} FIRST before squaring off old hedge '{old_h_pos.get('symbol')}'...")
+                            new_h_pos = _buy_new_h()
 
                             if new_h_pos and new_h_pos.get("status") == "OPEN":
+                                # New hedge is safely secured. Now square off previous hedge
+                                self._log_event(f"[Hedge Shift] New hedge {new_h_pos.get('symbol')} active. Now squaring off earlier hedge '{old_h_pos.get('symbol')}'...")
+                                _ = _exit_old_h()
                                 with _ENGINE_LOCK:
                                     strat.setdefault("positions", []).append(new_h_pos)
                                     if self._active_strategy_id == strat.get("strategy_id"):
                                         self._state["positions"] = strat.get("positions", [])
                                 active_hedge = new_h_pos
                                 self._log_event(
-                                    f"[Hedge Shifted] ⚡ New hedge {new_h_pos.get('symbol')} (OTM {reset_otm}) active. Placing short re-entry...",
+                                    f"[Hedge Shifted] ⚡ New hedge {new_h_pos.get('symbol')} (OTM {reset_otm}) active. Old hedge squared off. Placing short re-entry...",
                                     level="SUCCESS"
                                 )
                             else:
                                 err_h = new_h_pos.get("error") if new_h_pos else "Order failed"
                                 self._log_event(
-                                    f"[Hedge Shift Warning] Failed to place new hedge ({err_h}). Proceeding with short re-entry.",
+                                    f"[Hedge Shift Warning] Failed to place new hedge ({err_h}). Old hedge retained for safety. Proceeding with short re-entry.",
                                     level="WARNING"
                                 )
 
@@ -7684,32 +7796,43 @@ class StraddleManager:
             avg_p = float(pos.get("avg_price") or pos.get("avg_ent_price") or pos.get("ltp") or 0.0)
             ltp = float(pos.get("ltp") or avg_p)
 
-            t_val = float(pos.get("target_val") or 45.0)
+            is_hedge = bool(pos.get("is_hedge") or position_data.get("is_hedge"))
+            parent_leg_id = str(pos.get("parent_leg_id") or position_data.get("parent_leg_id") or "").strip()
+
+            t_val = 0.0 if is_hedge else float(pos.get("target_val") or 45.0)
             t_mode = str(pos.get("target_mode") or "%")
-            sl_val = float(pos.get("sl_val") or 40.0)
+            sl_val = 0.0 if is_hedge else float(pos.get("sl_val") or 40.0)
             sl_mode = str(pos.get("sl_mode") or "%")
-            tgt_re_type = str(pos.get("target_re_execute_type") or "RE EXECUTE")
-            tgt_re_count = int(pos.get("target_re_execute_count") or 0)
-            sl_re_type = str(pos.get("sl_re_execute_type") or "RE EXECUTE")
-            sl_re_count = int(pos.get("sl_re_execute_count") or 0)
-            tsl_profit = float(pos.get("tsl_profit_pts") or 0.0)
-            tsl_trail = float(pos.get("tsl_trail_pts") or 0.0)
+            tgt_re_type = "NONE" if is_hedge else str(pos.get("target_re_execute_type") or "RE EXECUTE")
+            tgt_re_count = 0 if is_hedge else int(pos.get("target_re_execute_count") or 0)
+            sl_re_type = "NONE" if is_hedge else str(pos.get("sl_re_execute_type") or "RE EXECUTE")
+            sl_re_count = 0 if is_hedge else int(pos.get("sl_re_execute_count") or 0)
+            tsl_profit = 0.0 if is_hedge else float(pos.get("tsl_profit_pts") or 0.0)
+            tsl_trail = 0.0 if is_hedge else float(pos.get("tsl_trail_pts") or 0.0)
 
             # Calculate target & stoploss prices
-            if "%" in t_mode:
-                tgt_p = avg_p * (1.0 - t_val / 100.0) if side == "SELL" else avg_p * (1.0 + t_val / 100.0)
+            if is_hedge:
+                tgt_p = 0.0
+                sl_p = 0.0
+                tgt_type = "None"
+                sl_type = "None"
+                tgt_label = "-"
+                sl_label = "-"
             else:
-                tgt_p = avg_p - t_val if side == "SELL" else avg_p + t_val
+                if "%" in t_mode:
+                    tgt_p = avg_p * (1.0 - t_val / 100.0) if side == "SELL" else avg_p * (1.0 + t_val / 100.0)
+                else:
+                    tgt_p = avg_p - t_val if side == "SELL" else avg_p + t_val
 
-            if "%" in sl_mode:
-                sl_p = avg_p * (1.0 + sl_val / 100.0) if side == "SELL" else avg_p * (1.0 - sl_val / 100.0)
-            else:
-                sl_p = avg_p + sl_val if side == "SELL" else avg_p - sl_val
+                if "%" in sl_mode:
+                    sl_p = avg_p * (1.0 + sl_val / 100.0) if side == "SELL" else avg_p * (1.0 - sl_val / 100.0)
+                else:
+                    sl_p = avg_p + sl_val if side == "SELL" else avg_p - sl_val
 
-            tgt_type = "TGT: %" if "%" in t_mode else "TGT: Pts"
-            sl_type = "SL: -%" if "%" in sl_mode else "SL: -Pts"
-            tgt_label = f"TGT: {t_val:.0f}%" if "%" in t_mode else f"TGT: ₹{t_val:.2f}"
-            sl_label = f"SL: -{sl_val:.0f}%" if "%" in sl_mode else f"SL: -₹{sl_val:.2f}"
+                tgt_type = "TGT: %" if "%" in t_mode else "TGT: Pts"
+                sl_type = "SL: -%" if "%" in sl_mode else "SL: -Pts"
+                tgt_label = f"TGT: {t_val:.0f}%" if "%" in t_mode else f"TGT: ₹{t_val:.2f}"
+                sl_label = f"SL: -{sl_val:.0f}%" if "%" in sl_mode else f"SL: -₹{sl_val:.2f}"
 
             adv = strat.get("advanced") or strat.get("advanced_settings") or {}
             leg_sl_placement = pos.get("sl_order_placement") or adv.get("sl_order_placement") or "Keep with self"
@@ -7741,13 +7864,13 @@ class StraddleManager:
                 "target_type": tgt_type,
                 "target_type_label": tgt_label,
                 "target_value": t_val,
-                "target_price": round(max(0.05, tgt_p), 2),
+                "target_price": round(max(0.05, tgt_p), 2) if tgt_p > 0 else 0.0,
                 "sl_type": sl_type,
                 "sl_type_label": sl_label,
                 "sl_value": sl_val,
-                "sl_price": round(max(0.05, sl_p), 2),
-                "sl_order_placement": leg_sl_placement,
-                "target_order_placement": leg_tgt_placement,
+                "sl_price": round(max(0.05, sl_p), 2) if sl_p > 0 else 0.0,
+                "sl_order_placement": "Keep with self" if is_hedge else leg_sl_placement,
+                "target_order_placement": "Keep with self" if is_hedge else leg_tgt_placement,
                 "target_re_execute_type": tgt_re_type,
                 "target_re_execute_count": tgt_re_count,
                 "sl_re_execute_type": sl_re_type,
@@ -7759,6 +7882,10 @@ class StraddleManager:
                 "pnl": float(pos.get("pnl") or 0.0),
                 "mtm": float(pos.get("pnl") or 0.0),
                 "is_adopted": True,
+                "is_associated_hedge": is_hedge,
+                "parent_leg_id": parent_leg_id if is_hedge else "",
+                "hedge_parent_type": opt_type if is_hedge else "",
+                "action": "Square off leg" if is_hedge else pos.get("action", "Square off leg"),
                 "strike_price": strike_price_val,
                 "option_type": opt_type,
                 "expiry_str": pos.get("expiry_date") or "",
@@ -7766,6 +7893,16 @@ class StraddleManager:
                 "strategy_name": strat.get("name"),
                 "date": today_ist_str()
             }
+
+            # Link to parent leg if tagged as hedge
+            if is_hedge and parent_leg_id:
+                for parent_p in strat.get("positions", []):
+                    if parent_p.get("id") == parent_leg_id or parent_p.get("leg_id") == parent_leg_id or parent_p.get("symbol") == parent_leg_id:
+                        parent_p["has_associated_hedge"] = True
+                        parent_p["associated_hedge_id"] = adopted_id
+                        parent_p["associated_hedge_symbol"] = sym
+                        self._log_event(f"Linked adopted hedge leg '{sym}' to short leg '{parent_p.get('symbol')}'.")
+                        break
 
             # Create or update matching leg configuration in strat["legs"] so re-entry works seamlessly
             adopted_leg_cfg = {
@@ -7810,14 +7947,15 @@ class StraddleManager:
 
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
-            def _dispatch_adopted_advance_orders():
-                if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and adopted_leg.get("sl_price", 0) > 0:
-                    self._place_advance_sl_order(broker, adopted_leg, delay_sec=0)
-                    time.sleep(0.15)
-                if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and adopted_leg.get("target_price", 0) > 0:
-                    self._place_advance_target_order(broker, adopted_leg, delay_sec=0)
+            if not is_hedge:
+                def _dispatch_adopted_advance_orders():
+                    if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and adopted_leg.get("sl_price", 0) > 0:
+                        self._place_advance_sl_order(broker, adopted_leg, delay_sec=0)
+                        time.sleep(0.15)
+                    if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and adopted_leg.get("target_price", 0) > 0:
+                        self._place_advance_target_order(broker, adopted_leg, delay_sec=0)
 
-            threading.Thread(target=_dispatch_adopted_advance_orders, daemon=True).start()
+                threading.Thread(target=_dispatch_adopted_advance_orders, daemon=True).start()
             strat["status"] = "TRADE_ACTIVE"
             strat["has_traded_today"] = True
             strat["enabled"] = True
@@ -7882,6 +8020,18 @@ class StraddleManager:
                 lots = raw_lots * mult
                 qty = lots * lot_size
                 prc = float(o.get("price", 0.0) or o.get("ltp", 0.0) or 0.0)
+                if prc <= 0:
+                    sym_tok = str(o.get("token") or o.get("instrument_key") or o.get("symbol") or o.get("trading_symbol") or "")
+                    if sym_tok:
+                        try:
+                            adapter = get_broker_adapter()
+                            q = adapter.get_live_quotes([sym_tok])
+                            if sym_tok in q and float(q[sym_tok].get("ltp", 0)) > 0:
+                                prc = float(q[sym_tok]["ltp"])
+                        except Exception:
+                            pass
+                if prc <= 0:
+                    prc = 100.0  # sensible average option premium fallback so required margin is accurate
                 side = str(o.get("transaction_type") or o.get("side") or "BUY").upper()
                 opt_type = str(o.get("opt_type") or "").upper()
                 if not opt_type:
@@ -8016,12 +8166,24 @@ class StraddleManager:
         sell_turnover = 0.0
         buy_turnover = 0.0
         for o in orders:
-            u_name = str(o.get("underlying") or und or "NIFTY").upper()
+            u_name = str(o.get("underlying") or "NIFTY").upper()
             l_sz = int(o.get("lot_size") or DEFAULT_LOT_SIZES.get(u_name, 65))
             r_lots = int(o.get("lots") or (int(o.get("quantity", l_sz)) // l_sz) or 1)
             r_lots = max(1, r_lots)
             eff_qty = r_lots * mult * l_sz
             p = float(o.get("price", 0.0) or o.get("ltp", 0.0) or 0.0)
+            if p <= 0:
+                sym_tok = str(o.get("token") or o.get("instrument_key") or o.get("symbol") or o.get("trading_symbol") or "")
+                if sym_tok:
+                    try:
+                        adapter = get_broker_adapter()
+                        q = adapter.get_live_quotes([sym_tok])
+                        if sym_tok in q and float(q[sym_tok].get("ltp", 0)) > 0:
+                            p = float(q[sym_tok]["ltp"])
+                    except Exception:
+                        pass
+            if p <= 0:
+                p = 100.0  # sensible fallback so turnover is non-zero
             s = str(o.get("transaction_type") or o.get("side") or "BUY").upper()
             if s.startswith("S"):
                 sell_turnover += p * eff_qty
@@ -8073,6 +8235,7 @@ class StraddleManager:
             "success": True,
             "available_margin": avail_margin,
             "required_margin": round(total_required_margin, 2),
+            "total_required_margin": round(total_required_margin, 2),
             "final_margin": round(total_required_margin, 2),
             "hedge_benefit": round(hedge_savings, 2),
             "total_charges": total_charges,
@@ -9901,6 +10064,8 @@ class StraddleManager:
                 if has_active_adv_orders and (now_ob_ts - getattr(self, "_last_ob_sync_ts", 0.0) >= 1.0):
                     self._last_ob_sync_ts = now_ob_ts
                     try:
+                        if mode == "PAPER_TRADING" and hasattr(broker, "check_order_triggers"):
+                            broker.check_order_triggers(live_q_map)
                         ob = broker.get_order_book()
                         if isinstance(ob, list):
                             self._ob_cache = {str(o.get("order_id")): o for o in ob if o.get("order_id")}
@@ -9998,7 +10163,7 @@ class StraddleManager:
 
                     ob_lookup = getattr(self, "_ob_cache", {})
 
-                    if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                    if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and (mode == "PAPER_TRADING" or not str(adv_tgt_oid).startswith("PAPER_")):
                         t_ord = ob_lookup.get(str(adv_tgt_oid))
                         if not t_ord:
                             try:
@@ -10011,6 +10176,13 @@ class StraddleManager:
                             if any(w in t_st for w in ("TRAD", "COMP")):
                                 tgt_filled = True
                                 pos["avg_exit_price"] = t_ord.get("price") or pos.get("target_price") or ltp
+                            elif any(w in t_st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
+                                if pos.get("target_cancelled_unexpectedly"):
+                                    pos["target_cancelled_unexpectedly"] = False
+                                    pos["target_cancel_notice"] = None
+                                    pos["_tgt_cancel_notified"] = False
+                                    pos["target_order_placement"] = "Advance Broker Target"
+                                    self._log_event(f"Broker Target order {adv_tgt_oid} for {pos.get('symbol')} confirmed active on broker ({t_st}). Active monitoring notice cleared.", level="INFO")
                             elif any(w in t_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN":
                                 # Broker Target order was unexpectedly cancelled!
                                 pos["target_broker_order_id"] = None
@@ -10039,6 +10211,12 @@ class StraddleManager:
                                 if t_stat.get("filled"):
                                     tgt_filled = True
                                     pos["avg_exit_price"] = t_stat.get("price") or pos.get("target_price") or ltp
+                                elif any(w in str(t_stat.get("status", "")).upper() for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
+                                    if pos.get("target_cancelled_unexpectedly"):
+                                        pos["target_cancelled_unexpectedly"] = False
+                                        pos["target_cancel_notice"] = None
+                                        pos["_tgt_cancel_notified"] = False
+                                        pos["target_order_placement"] = "Advance Broker Target"
                                 elif str(t_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN":
                                     pos["target_broker_order_id"] = None
                                     pos["target_cancelled_unexpectedly"] = True
@@ -10063,7 +10241,7 @@ class StraddleManager:
                             except Exception:
                                 pass
 
-                    if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                    if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and (mode == "PAPER_TRADING" or not str(adv_sl_oid).startswith("PAPER_")):
                         s_ord = ob_lookup.get(str(adv_sl_oid))
                         if not s_ord:
                             try:
@@ -10076,6 +10254,13 @@ class StraddleManager:
                             if any(w in s_st for w in ("TRAD", "COMP")):
                                 sl_filled = True
                                 pos["avg_exit_price"] = s_ord.get("price") or pos.get("sl_price") or ltp
+                            elif any(w in s_st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
+                                if pos.get("sl_cancelled_unexpectedly"):
+                                    pos["sl_cancelled_unexpectedly"] = False
+                                    pos["sl_cancel_notice"] = None
+                                    pos["_sl_cancel_notified"] = False
+                                    pos["sl_order_placement"] = "Advance Broker SL"
+                                    self._log_event(f"Broker SL order {adv_sl_oid} for {pos.get('symbol')} confirmed active on broker ({s_st}). Active monitoring notice cleared.", level="INFO")
                             elif any(w in s_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN":
                                 # Broker Stoploss order was unexpectedly cancelled!
                                 adv_cfg = strat.get("advanced") or strat.get("advanced_settings") or {}
@@ -10107,6 +10292,12 @@ class StraddleManager:
                                 if s_stat.get("filled"):
                                     sl_filled = True
                                     pos["avg_exit_price"] = s_stat.get("price") or pos.get("sl_price") or ltp
+                                elif any(w in str(s_stat.get("status", "")).upper() for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
+                                    if pos.get("sl_cancelled_unexpectedly"):
+                                        pos["sl_cancelled_unexpectedly"] = False
+                                        pos["sl_cancel_notice"] = None
+                                        pos["_sl_cancel_notified"] = False
+                                        pos["sl_order_placement"] = "Advance Broker SL"
                                 elif str(s_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN":
                                     adv_cfg = strat.get("advanced") or strat.get("advanced_settings") or {}
                                     auto_handle = adv_cfg.get("auto_handling_sl_cancellation") is not False
@@ -10319,17 +10510,18 @@ class StraddleManager:
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(sells))) as executor:
                 sell_res = list(executor.map(lambda p: self._square_off_single_position(p, broker, reason=reason), sells))
 
-            # Confirm all sell exits are FILLED on broker before exiting hedge buys
+            # Confirm sell exits without blocking user UI
             sell_exit_oids = [str(p.get("exit_order_id")) for p in sells if p.get("exit_order_id") and not str(p.get("exit_order_id")).startswith("ORD_") and not str(p.get("exit_order_id")).startswith("PAPER_")]
-            if sell_exit_oids:
+            is_urgent = any(k in reason.upper() for k in ("MANUAL", "SQUARE OFF", "EMERGENCY"))
+            if sell_exit_oids and not is_urgent:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(sell_exit_oids) + 1)) as v_exec:
-                    v_futs = [v_exec.submit(broker.wait_for_order_fill, oid, 8.0, 0.05) for oid in sell_exit_oids]
+                    v_futs = [v_exec.submit(broker.wait_for_order_fill, oid, 2.0, 0.05) for oid in sell_exit_oids]
                     for fut in concurrent.futures.as_completed(v_futs):
                         pass
 
-            self._log_event(f"[{strat.get('name')}] All Short Sell positions confirmed squared off. Closing Buy hedges...")
+            self._log_event(f"[{strat.get('name')}] All Short Sell positions squared off. Closing Buy hedges...")
 
-            if buys and exit_delay_sec > 0:
+            if buys and exit_delay_sec > 0 and not is_urgent:
                 self._log_event(f"Waiting {exit_delay_sec}s before squaring off Long Buy (Hedge) positions...")
                 time.sleep(exit_delay_sec)
 

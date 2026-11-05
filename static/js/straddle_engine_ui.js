@@ -478,12 +478,8 @@ function renderStraddleHeader(state) {
         titleEl.textContent = activeStrat.name || activeStrat.strategy_id;
     }
 
-    const modeText = document.getElementById("straddleModeText");
-    const modeDot = document.getElementById("straddleModeDot");
-    if (modeText && modeDot) {
-        modeText.textContent = "⚡ Kotak Neo Live Broker";
-        modeDot.style.background = "#10b981";
-        modeDot.style.boxShadow = "0 0 8px #10b981";
+    if (typeof updateExecutionModeUI === "function") {
+        updateExecutionModeUI(state.execution_mode || "LIVE_BROKER");
     }
 
     if (!window._activeGlobalUnderlying || window._activeGlobalUnderlying === state.underlying_symbol) {
@@ -7177,9 +7173,111 @@ function straddleShowBrokerInfo() {
     loadStraddleOpenPositions();
 }
 
-async function straddleToggleExecutionMode() {
-    straddleShowBrokerInfo();
+function updateExecutionModeUI(mode) {
+    const isPaper = (mode === "PAPER_TRADING");
+    
+    // Topbar Pill Button
+    const pillBtn = document.getElementById("topbarModePillBtn");
+    const pillIcon = document.getElementById("topbarModePillIcon");
+    const pillText = document.getElementById("topbarModePillText");
+    const resetBtn = document.getElementById("topbarResetPaperBtn");
+
+    if (pillBtn && pillText && pillIcon) {
+        if (isPaper) {
+            pillIcon.textContent = "🧪";
+            pillText.textContent = "PAPER TRADING";
+            pillBtn.style.background = "rgba(168,85,247,0.15)";
+            pillBtn.style.borderColor = "#a855f7";
+            pillBtn.style.color = "#c084fc";
+            if (resetBtn) resetBtn.style.display = "inline-flex";
+        } else {
+            pillIcon.textContent = "🟢";
+            pillText.textContent = "LIVE BROKER";
+            pillBtn.style.background = "rgba(16,185,129,0.12)";
+            pillBtn.style.borderColor = "#10b981";
+            pillBtn.style.color = "#10b981";
+            if (resetBtn) resetBtn.style.display = "none";
+        }
+    }
+
+    // Settings Dropdown Mode Label
+    const topbarLabel = document.getElementById("topbarModeLabel");
+    if (topbarLabel) {
+        topbarLabel.textContent = isPaper ? "Paper Simulation" : "Live Broker";
+        topbarLabel.style.color = isPaper ? "#c084fc" : "#10b981";
+    }
+
+    // Terminal / Open Positions Mode Badges
+    const brokerText = document.getElementById("openPositionsBrokerText");
+    if (brokerText) {
+        brokerText.textContent = isPaper ? "🧪 Paper Trading (Simulation)" : "🟢 Kotak Neo Live Broker";
+        brokerText.style.color = isPaper ? "#c084fc" : "#38bdf8";
+    }
+    const modeText = document.getElementById("straddleModeText");
+    const modeDot = document.getElementById("straddleModeDot");
+    if (modeText) {
+        modeText.textContent = isPaper ? "🧪 Paper Trading (Simulation)" : "🟢 Kotak Neo Live Broker";
+        modeText.style.color = isPaper ? "#c084fc" : "#38bdf8";
+    }
+    if (modeDot) {
+        modeDot.style.background = isPaper ? "#a855f7" : "#10b981";
+        modeDot.style.boxShadow = isPaper ? "0 0 8px #a855f7" : "0 0 8px #10b981";
+    }
 }
+window.updateExecutionModeUI = updateExecutionModeUI;
+
+async function straddleToggleExecutionMode() {
+    const curMode = window._straddleState?.execution_mode || "LIVE_BROKER";
+    const nextMode = (curMode === "LIVE_BROKER") ? "PAPER_TRADING" : "LIVE_BROKER";
+    const confirmMsg = (nextMode === "PAPER_TRADING")
+        ? "Switch to 🧪 PAPER TRADING mode?\n\n• Live market ticks and quotes will be used for execution.\n• Orders, Stoplosses, and Targets will simulate in high fidelity.\n• Zero real money or broker orders will be placed."
+        : "Switch to 🟢 LIVE BROKER mode?\n\n• Real orders will be routed directly to Kotak Neo Trade API.\n• Actual margin, real capital, and live positions will be affected.";
+    
+    if (!confirm(confirmMsg)) return;
+
+    try {
+        const resp = await fetch("/api/straddle/toggle_mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: nextMode })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showStraddleToast(res.message || `Switched to ${nextMode}`, "success", 3000);
+            if (window._straddleState) window._straddleState.execution_mode = nextMode;
+            updateExecutionModeUI(nextMode);
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(res.error || "Failed to switch mode", "error", 3500);
+        }
+    } catch (e) {
+        showStraddleToast("Error toggling mode: " + e.message, "error", 3000);
+    }
+}
+window.straddleToggleExecutionMode = straddleToggleExecutionMode;
+window.toggleStraddleExecutionMode = straddleToggleExecutionMode;
+
+async function resetPaperTradingAccount() {
+    if (!confirm("Reset Paper Trading account?\n\nThis will clear all simulated paper positions and clear the paper orderbook.")) return;
+    try {
+        const resp = await fetch("/api/straddle/paper/reset", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showStraddleToast("🧪 Paper trading account reset successfully.", "success", 2500);
+            await fetchStraddleState();
+            await loadStraddleOpenPositions();
+        } else {
+            showStraddleToast(res.error || "Failed to reset paper account", "error", 3000);
+        }
+    } catch (e) {
+        showStraddleToast("Error: " + e.message, "error", 3000);
+    }
+}
+window.resetPaperTradingAccount = resetPaperTradingAccount;
 
 
 // =========================================================================
@@ -9006,6 +9104,10 @@ async function openAdoptBrokerPositionModal() {
         }).join("");
     }
 
+    const chk = document.getElementById("adopt_is_hedge_checkbox");
+    if (chk) chk.checked = false;
+    onAdoptIsHedgeToggle(false);
+
     await fetchAdoptablePositionsForStrategy(stratId || "");
 }
 
@@ -9102,9 +9204,50 @@ async function fetchAdoptablePositionsForStrategy(stratId) {
     }
 }
 
+function onAdoptIsHedgeToggle(checked) {
+    const rulesContainer = document.getElementById("adopt_rules_container");
+    const parentContainer = document.getElementById("adopt_hedge_parent_container");
+
+    if (checked) {
+        if (rulesContainer) rulesContainer.style.display = "none";
+        if (parentContainer) parentContainer.style.display = "block";
+        populateAdoptHedgeParentOptions();
+    } else {
+        if (rulesContainer) rulesContainer.style.display = "block";
+        if (parentContainer) parentContainer.style.display = "none";
+    }
+}
+window.onAdoptIsHedgeToggle = onAdoptIsHedgeToggle;
+
+function populateAdoptHedgeParentOptions() {
+    const stratId = document.getElementById("adopt_target_strat_select")?.value ||
+                    window._straddleState?.activeStrategy?.strategy_id || 
+                    window._straddleState?.activeStrategyId;
+    const parentSelect = document.getElementById("adopt_hedge_parent_select");
+    if (!parentSelect) return;
+
+    parentSelect.innerHTML = `<option value="">-- Select Short Leg to Hedge --</option>`;
+    const allStrats = window._straddleState?.allStrategies || [];
+    const strat = allStrats.find(s => s.strategy_id === stratId) || window._straddleState?.activeStrategy;
+    if (strat && Array.isArray(strat.positions)) {
+        const shortLegs = strat.positions.filter(p => p.status === "OPEN" && String(p.side || "").toUpperCase() === "SELL");
+        if (shortLegs.length === 0) {
+            parentSelect.innerHTML += `<option value="" disabled>(No active Short legs found in this strategy)</option>`;
+        } else {
+            shortLegs.forEach(sp => {
+                parentSelect.innerHTML += `<option value="${sp.id || sp.leg_id || sp.symbol}">${sp.symbol} (Short ${sp.quantity} qty @ ₹${Number(sp.avg_ent_price || 0).toFixed(2)})</option>`;
+            });
+        }
+    }
+}
+window.populateAdoptHedgeParentOptions = populateAdoptHedgeParentOptions;
+
 function onAdoptTargetStratChange(targetId) {
     if (targetId) {
         fetchAdoptablePositionsForStrategy(targetId);
+        if (document.getElementById("adopt_is_hedge_checkbox")?.checked) {
+            populateAdoptHedgeParentOptions();
+        }
     }
 }
 window.onAdoptTargetStratChange = onAdoptTargetStratChange;
@@ -9139,6 +9282,9 @@ function closeAdoptBrokerPositionModal() {
     if (modal) modal.style.display = "none";
     _selectedAdoptablePositionIndex = -1;
     _adoptablePositionsList = [];
+    const chk = document.getElementById("adopt_is_hedge_checkbox");
+    if (chk) chk.checked = false;
+    onAdoptIsHedgeToggle(false);
 }
 
 async function submitAdoptBrokerPosition() {
@@ -9158,6 +9304,14 @@ async function submitAdoptBrokerPosition() {
     }
 
     const pos = _adoptablePositionsList[_selectedAdoptablePositionIndex];
+
+    const isHedge = document.getElementById("adopt_is_hedge_checkbox")?.checked || false;
+    const parentLegId = document.getElementById("adopt_hedge_parent_select")?.value || "";
+
+    if (isHedge && !parentLegId) {
+        showStraddleToast("Please select which Short leg this adopted trade will hedge.", "error", 3000);
+        return;
+    }
 
     const tgtMode = document.getElementById("adopt_tgt_mode")?.value || "%";
     const tgtVal = parseFloat(document.getElementById("adopt_tgt_val")?.value) || 25;
@@ -9197,6 +9351,8 @@ async function submitAdoptBrokerPosition() {
                     expiry_date: pos.expiry_date,
                     avg_price: pos.avg_price,
                     ltp: pos.ltp || pos.avg_price,
+                    is_hedge: isHedge,
+                    parent_leg_id: parentLegId,
                     target_mode: tgtMode,
                     target_val: tgtVal,
                     sl_mode: slMode,
@@ -9223,6 +9379,14 @@ async function submitAdoptBrokerPosition() {
                 confirmBtn.textContent = "➕ Add Selected Position to Algo";
             }
         }
+    } catch (e) {
+        showStraddleToast("Error adopting position: " + e.message, "error", 3500);
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "➕ Add Selected Position to Algo";
+        }
+    }
+}
     } catch (e) {
         showStraddleToast("Error adopting position: " + e.message, "error", 3500);
         if (confirmBtn) {

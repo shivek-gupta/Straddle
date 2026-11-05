@@ -327,6 +327,20 @@ class BaseBrokerAdapter:
         """Wait until an order is confirmed filled by broker exchange."""
         return {"filled": True, "status": "COMPLETE", "order_id": str(order_id)}
 
+    def get_margin_required(
+        self,
+        symbol: str,
+        instrument_key: str,
+        transaction_type: str,
+        quantity: int,
+        product: str = "NRML",
+        order_type: str = "MKT",
+        price: float = 0.0,
+        trigger_price: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Query broker API for exact margin required for this order."""
+        return {"success": False, "margin_required": 0.0}
+
 
 class KotakNeoBrokerAdapter(BaseBrokerAdapter):
     """
@@ -653,7 +667,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             items = d.get("data") if isinstance(d, dict) else (d if isinstance(d, list) else [d] if isinstance(d, dict) else [])
             if items and isinstance(items, list):
                 item = items[0]
-                st = str(item.get("ordSt") or item.get("status") or "").upper()
+                st = str(item.get("ordSt") or item.get("status") or "").upper().strip()
                 if any(w in st for w in ("TRAD", "COMP", "FILL")):
                     return {
                         "filled": True,
@@ -661,14 +675,14 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         "price": float(item.get("avgPrc") or item.get("prc") or 0.0),
                         "order_id": oid_str
                     }
-                if any(w in st for w in ("CANC", "CAN")):
-                    return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
-                if any(w in st for w in ("REJ")):
-                    return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": item.get("rejRsn")}
-                if any(w in st for w in ("TRIG")):
+                if any(w in st for w in ("TRIG", "TRIGGER")):
                     return {"filled": False, "status": "TRIGGER PENDING", "order_id": oid_str}
-                if any(w in st for w in ("OPEN")):
+                if any(w in st for w in ("OPEN", "PENDING", "REQ", "SUBMIT", "MODIF")):
                     return {"filled": False, "status": "OPEN", "order_id": oid_str}
+                if any(w in st for w in ("CANC", "CANCELLED", "CANCELED")):
+                    return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
+                if any(w in st for w in ("REJ", "REJECTED")):
+                    return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": item.get("rejRsn")}
         except Exception as e_or:
             logger.debug(f"[Kotak Neo] order_report by id {oid_str} notice: {e_or}")
 
@@ -679,7 +693,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             items = d.get("data") if isinstance(d, dict) else (d if isinstance(d, list) else [])
             if items and isinstance(items, list):
                 item = items[0]
-                st = str(item.get("ordSt") or item.get("status") or "").upper()
+                st = str(item.get("ordSt") or item.get("status") or "").upper().strip()
                 if any(w in st for w in ("TRAD", "COMP", "FILL")):
                     return {
                         "filled": True,
@@ -687,14 +701,14 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         "price": float(item.get("avgPrc") or item.get("prc") or 0.0),
                         "order_id": oid_str
                     }
-                if any(w in st for w in ("CANC", "CAN")):
-                    return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
-                if any(w in st for w in ("REJ")):
-                    return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": item.get("rejRsn")}
-                if any(w in st for w in ("TRIG")):
+                if any(w in st for w in ("TRIG", "TRIGGER")):
                     return {"filled": False, "status": "TRIGGER PENDING", "order_id": oid_str}
-                if any(w in st for w in ("OPEN")):
+                if any(w in st for w in ("OPEN", "PENDING", "REQ", "SUBMIT", "MODIF")):
                     return {"filled": False, "status": "OPEN", "order_id": oid_str}
+                if any(w in st for w in ("CANC", "CANCELLED", "CANCELED")):
+                    return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
+                if any(w in st for w in ("REJ", "REJECTED")):
+                    return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": item.get("rejRsn")}
         except Exception as e_h:
             logger.debug(f"[Kotak Neo] order_history for {oid_str} notice: {e_h}")
 
@@ -812,16 +826,18 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 oid = str(item.get("nOrdNo") or item.get("order_id") or "")
                 tsym = item.get("trdSym") or item.get("trading_symbol") or ""
                 tt = "BUY" if str(item.get("trnsTp", "")).upper() in ("B", "BUY") else "SELL"
-                status_raw = str(item.get("ordSt", item.get("status", "OPEN"))).upper()
+                status_raw = str(item.get("ordSt", item.get("status", "OPEN"))).upper().strip()
 
-                if "TRAD" in status_raw or "FILL" in status_raw or "COMPLETE" in status_raw:
+                if any(w in status_raw for w in ("TRAD", "FILL", "COMPLETE")):
                     status = "COMPLETE"
-                elif "REJ" in status_raw:
-                    status = "REJECTED"
-                elif "CAN" in status_raw:
-                    status = "CANCELLED"
-                elif "TRIG" in status_raw:
+                elif any(w in status_raw for w in ("TRIG", "TRIGGER")):
                     status = "TRIGGER PENDING"
+                elif any(w in status_raw for w in ("OPEN", "PENDING", "REQ", "SUBMIT", "MODIF")):
+                    status = "OPEN"
+                elif any(w in status_raw for w in ("CANC", "CANCELLED", "CANCELED")):
+                    status = "CANCELLED"
+                elif any(w in status_raw for w in ("REJ", "REJECTED")):
+                    status = "REJECTED"
                 else:
                     status = "OPEN"
 
@@ -1275,6 +1291,46 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             logger.warning(f"[Kotak Neo] Exception fetching quotes: {e}")
             return {}
 
+    def get_margin_required(
+        self,
+        symbol: str,
+        instrument_key: str,
+        transaction_type: str,
+        quantity: int,
+        product: str = "NRML",
+        order_type: str = "MKT",
+        price: float = 0.0,
+        trigger_price: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Query Kotak Neo API for exact margin required for this order."""
+        client = self._get_client()
+        if not client:
+            return {"success": False, "margin_required": 0.0}
+        try:
+            canonical_symbol = _resolve_kotak_trading_symbol(symbol, instrument_key)
+            seg = get_exchange_segment_for_symbol(canonical_symbol, instrument_key).lower()
+            tok = instrument_key.split("|")[-1] if "|" in instrument_key else instrument_key
+            tt = "B" if transaction_type.upper().startswith("B") else "S"
+            ot = "MKT" if order_type.upper() in ("MARKET", "MKT") else "L"
+            prc_str = str(price) if ot == "L" and price > 0 else "0"
+            clean_prod = "NRML" if product.upper() in ("NRML", "NORMAL", "C") else "MIS"
+            res = client.margin_required(
+                exchange_segment=seg,
+                price=prc_str,
+                order_type=ot,
+                product=clean_prod,
+                quantity=str(int(quantity)),
+                instrument_token=str(tok),
+                transaction_type=tt,
+            )
+            if isinstance(res, dict) and res.get("stat") == "Ok":
+                d = res.get("data") or {}
+                ord_mrgn = float(d.get("ordMrgn") or d.get("totMrgnUsd") or 0.0)
+                return {"success": True, "margin_required": ord_mrgn, "data": d}
+        except Exception as e:
+            logger.debug(f"[Kotak Neo] margin_required query note: {e}")
+        return {"success": False, "margin_required": 0.0}
+
 
 class PaperBrokerAdapter(BaseBrokerAdapter):
     """
@@ -1352,7 +1408,15 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 if residual > 0:
                     slices[-1] += residual
 
-            exec_price = price if price and price > 0 else 100.0
+            exec_price = price if price and float(price) > 0 else 0.0
+            if exec_price <= 0:
+                q = self.get_live_quotes([canonical_symbol, symbol, instrument_key])
+                for k in (canonical_symbol, symbol, instrument_key):
+                    if k in q and float(q[k].get("ltp", 0.0)) > 0:
+                        exec_price = float(q[k]["ltp"])
+                        break
+            if exec_price <= 0:
+                exec_price = 100.0
             exec_price = round_to_tick(exec_price, tick_size=tick_size)
 
             order_ids = []
@@ -1515,9 +1579,125 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         self,
         order_id: str,
         timeout_sec: float = 15.0,
-        poll_interval_sec: float = 0.1,
+        poll_interval_sec: float = 0.05,
     ) -> Dict[str, Any]:
-        return {"filled": True, "status": "COMPLETE", "order_id": str(order_id), "price": 0.0}
+        oid_str = str(order_id).strip()
+        orders = self._read_json(self._orderbook_file)
+        matching = next((o for o in orders if str(o.get("order_id")) == oid_str), None)
+        if matching:
+            st = str(matching.get("status", "COMPLETE")).upper()
+            is_filled = any(x in st for x in ("TRAD", "COMP", "FILL"))
+            p = float(matching.get("average_price") or matching.get("price") or 0.0)
+            return {
+                "filled": is_filled,
+                "status": st,
+                "order_id": oid_str,
+                "price": p,
+                "data": matching,
+            }
+        return {"filled": True, "status": "COMPLETE", "order_id": oid_str, "price": 0.0}
+
+    def check_order_triggers(self, quotes_map: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Evaluates simulated resting Stoploss and Target orders against live market ticks.
+        Transitions filled orders to COMPLETE and updates simulated paper positions.
+        """
+        with self._lock:
+            orders = self._read_json(self._orderbook_file)
+            triggered = []
+            positions = self._read_json(self._positions_file)
+            changed = False
+
+            for o in orders:
+                st = str(o.get("status", "")).upper()
+                if st not in ("TRIGGER PENDING", "OPEN"):
+                    continue
+
+                tok = str(o.get("canonical_symbol") or o.get("trading_symbol") or o.get("instrument_key") or "")
+                q = quotes_map.get(tok) or quotes_map.get(o.get("trading_symbol")) or quotes_map.get(o.get("instrument_key")) or {}
+                ltp = float(q.get("ltp") or q.get("last_price") or 0.0) if isinstance(q, dict) else float(q or 0.0)
+                if ltp <= 0:
+                    continue
+
+                tt = str(o.get("transaction_type", "BUY")).upper()
+                trig_p = float(o.get("trigger_price") or 0.0)
+                lmt_p = float(o.get("price") or 0.0)
+                tag = str(o.get("tag") or "")
+
+                is_hit = False
+                hit_reason = ""
+                # Stoploss Trigger Check
+                if "SL" in tag or st == "TRIGGER PENDING":
+                    if tt == "BUY" and ltp >= trig_p and trig_p > 0:
+                        is_hit = True
+                        hit_reason = f"Simulated SL Trigger Hit @ ₹{ltp:.2f} (Trigger was ₹{trig_p:.2f})"
+                    elif tt == "SELL" and ltp <= trig_p and trig_p > 0:
+                        is_hit = True
+                        hit_reason = f"Simulated SL Trigger Hit @ ₹{ltp:.2f} (Trigger was ₹{trig_p:.2f})"
+                # Target Limit Order Check
+                elif "TGT" in tag or "adv_tgt" in tag:
+                    if tt == "BUY" and ltp <= lmt_p and lmt_p > 0:
+                        is_hit = True
+                        hit_reason = f"Simulated Target Hit @ ₹{ltp:.2f} (Limit was ₹{lmt_p:.2f})"
+                    elif tt == "SELL" and ltp >= lmt_p and lmt_p > 0:
+                        is_hit = True
+                        hit_reason = f"Simulated Target Hit @ ₹{ltp:.2f} (Limit was ₹{lmt_p:.2f})"
+
+                if is_hit:
+                    o["status"] = "COMPLETE"
+                    o["average_price"] = ltp
+                    o["filled_quantity"] = int(o.get("quantity") or 0)
+                    o["status_message"] = hit_reason
+                    triggered.append(dict(o))
+                    changed = True
+
+                    # Update position
+                    sym = o.get("trading_symbol")
+                    total_qty = int(o.get("quantity") or 0)
+                    for p in positions:
+                        if p.get("trading_symbol") == sym:
+                            curr_qty = int(p.get("quantity", 0))
+                            change_qty = total_qty if tt == "BUY" else -total_qty
+                            p["quantity"] = curr_qty + change_qty
+                            p["last_price"] = ltp
+                            break
+
+            if changed:
+                self._write_json(self._orderbook_file, orders)
+                self._write_json(self._positions_file, positions)
+
+            return triggered
+
+    def reset_account(self):
+        """Reset simulated paper trading state."""
+        with self._lock:
+            self._write_json(self._positions_file, [])
+            self._write_json(self._orderbook_file, [])
+            logger.info("[Paper Broker] Paper trading positions and orderbook reset cleanly.")
+
+    def get_margin_required(
+        self,
+        symbol: str,
+        instrument_key: str,
+        transaction_type: str,
+        quantity: int,
+        product: str = "NRML",
+        order_type: str = "MKT",
+        price: float = 0.0,
+        trigger_price: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Compute realistic simulated margin for paper trading."""
+        tt = str(transaction_type).upper()
+        if tt.startswith("B"):
+            # Buy option margin is just premium: price * quantity
+            prem = float(price or 100.0) * int(quantity or 65)
+            return {"success": True, "margin_required": round(prem, 2)}
+        else:
+            # Short option margin roughly ~1.25L per lot for NIFTY
+            lot_size = get_lot_size_for_symbol(symbol, instrument_key) or 65
+            lots = max(1, int(quantity or lot_size) // lot_size)
+            mrgn = lots * 125000.0
+            return {"success": True, "margin_required": round(mrgn, 2)}
 
 
 _LIVE_ADAPTER = KotakNeoBrokerAdapter()
