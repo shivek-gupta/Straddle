@@ -9103,6 +9103,10 @@ function closeStraddleLogsModal() {
     if (modal) modal.style.display = "none";
 }
 
+function downloadAuditLogsExcel() {
+    window.location.href = "/api/straddle/download_audit_logs";
+}
+
 function renderStraddleAuditLogs() {
     const container = document.getElementById("straddleAuditLogsContainer");
     if (!container) return;
@@ -9196,6 +9200,7 @@ window.onChangeOptChainUnderlying = onChangeOptChainUnderlying;
 window.loadStraddleOptionChain = loadStraddleOptionChain;
 window.openStraddleLogsModal = openStraddleLogsModal;
 window.closeStraddleLogsModal = closeStraddleLogsModal;
+window.downloadAuditLogsExcel = downloadAuditLogsExcel;
 window.renderStraddleAuditLogs = renderStraddleAuditLogs;
 
 // P&L Chart exports

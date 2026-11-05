@@ -2380,8 +2380,20 @@ class StraddleManager:
         target_strike = atm_strike
         s_sel = strike_selection.upper().replace("_", " ").strip()
 
-        if s_sel.startswith("ATM"):
+        if s_sel == "ATM":
             target_strike = atm_strike
+        elif "+" in s_sel:
+            try:
+                pts = float(s_sel.split("+")[-1].strip())
+                target_strike = atm_strike + pts
+            except Exception:
+                target_strike = atm_strike
+        elif "-" in s_sel:
+            try:
+                pts = float(s_sel.split("-")[-1].strip())
+                target_strike = atm_strike - pts
+            except Exception:
+                target_strike = atm_strike
         elif "OTM" in s_sel:
             try:
                 digits = "".join([c for c in s_sel.split("OTM")[-1] if c.isdigit()])
@@ -2402,23 +2414,13 @@ class StraddleManager:
                 target_strike = atm_strike - (num * step)
             else:
                 target_strike = atm_strike + (num * step)
-        elif "+" in s_sel:
-            try:
-                pts = float(s_sel.split("+")[-1].strip())
-                target_strike = atm_strike + pts
-            except Exception:
-                target_strike = atm_strike
-        elif "-" in s_sel:
-            try:
-                pts = float(s_sel.split("-")[-1].strip())
-                target_strike = atm_strike - pts
-            except Exception:
-                target_strike = atm_strike
         elif s_sel.replace(".", "", 1).isdigit():
             try:
                 target_strike = float(s_sel)
             except Exception:
                 target_strike = atm_strike
+        elif s_sel.startswith("ATM"):
+            target_strike = atm_strike
 
         # Apply 500/100 Multiple Strike Selection (closer to ATM)
         target_strike = self._adjust_strike_for_multiple(clean_und, target_strike, atm_strike, multiple_strike_selection)
@@ -4364,12 +4366,41 @@ class StraddleManager:
                     if h_cfg.get("enabled"):
                         init_otm = int(h_cfg.get("initial_otm", 20))
                         h_opt_type = leg.get("option_type", "CE")
+                        step = STRIKE_STEPS.get(und.upper(), 50)
+                        short_strike = float(contract.get("strike_price", 0.0))
+                        if short_strike > 0:
+                            h_strike = short_strike - (init_otm * step) if h_opt_type.upper() == "PE" else short_strike + (init_otm * step)
+                            h_strike_sel = str(int(h_strike))
+                        else:
+                            h_strike_sel = f"OTM {init_otm}"
+
                         h_contract = self.resolve_strike_and_contract(
                             underlying=und,
-                            strike_selection=f"OTM {init_otm}",
+                            strike_selection=h_strike_sel,
                             option_type=h_opt_type,
                             expiry_type=leg.get("expiry", "Weekly"),
                         )
+
+                        # INVIOLABLE SAFETY DIRECTIVE:
+                        # Strictly under no circumstances can a hedge buy order resolve to the identical strike as the short sell leg!
+                        # Buying and selling identical strike causes broker net zero position, false exits, and subsequent margin rejections.
+                        if h_contract and contract and (
+                            h_contract.get("instrument_key") == contract.get("instrument_key")
+                            or float(h_contract.get("strike_price", 0.0)) == float(contract.get("strike_price", 0.0))
+                        ):
+                            safe_otm_steps = max(10, init_otm)
+                            fallback_strike = (short_strike + (safe_otm_steps * step)) if h_opt_type.upper() == "CE" else (short_strike - (safe_otm_steps * step))
+                            self._log_event(
+                                f"[{strat.get('name')}] WARNING: Hedge strike {h_contract.get('strike_price')} matched short leg! Overriding to safe OTM strike {fallback_strike}.",
+                                level="WARNING"
+                            )
+                            h_contract = self.resolve_strike_and_contract(
+                                underlying=und,
+                                strike_selection=str(int(fallback_strike)),
+                                option_type=h_opt_type,
+                                expiry_type=leg.get("expiry", "Weekly"),
+                            )
+
                         if h_contract:
                             all_leg_keys.append(h_contract["instrument_key"])
                             h_leg_cfg = {
@@ -6613,6 +6644,59 @@ class StraddleManager:
             )
             return {"success": True, "message": "Margin auto-exit countdown cancelled. Positions kept open."}
 
+    def _cancel_leg_broker_orders(self, pos: Dict[str, Any], broker: Optional[BaseBrokerAdapter] = None) -> None:
+        """Robustly cancels both pending SL and Target broker orders for a leg and sweeps broker orderbook."""
+        if not pos:
+            return
+        if not broker:
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+
+        # 1. Cancel registered broker SL order
+        adv_sl_oid = pos.get("sl_broker_order_id")
+        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+            try:
+                broker.cancel_order(str(adv_sl_oid))
+                self._log_event(f"Cancelled broker SL order #{adv_sl_oid} for {pos.get('symbol')}", level="INFO")
+            except Exception as e_sl:
+                logger.warning(f"Error cancelling broker SL order {adv_sl_oid}: {e_sl}")
+            finally:
+                pos["sl_broker_order_id"] = None
+
+        # 2. Cancel registered broker Target order
+        adv_tgt_oid = pos.get("target_broker_order_id")
+        if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+            try:
+                broker.cancel_order(str(adv_tgt_oid))
+                self._log_event(f"Cancelled broker Target order #{adv_tgt_oid} for {pos.get('symbol')}", level="INFO")
+            except Exception as e_tgt:
+                logger.warning(f"Error cancelling broker Target order {adv_tgt_oid}: {e_tgt}")
+            finally:
+                pos["target_broker_order_id"] = None
+
+        # 3. Sweep broker orderbook for any pending trigger/limit orders for this exact symbol/token
+        try:
+            sym = pos.get("symbol") or pos.get("trading_symbol")
+            tok = pos.get("instrument_key", "").split("|")[-1]
+            ob = broker.get_order_book()
+            orders = ob.get("data", []) if isinstance(ob, dict) else (ob if isinstance(ob, list) else [])
+            for ord_item in orders:
+                if not isinstance(ord_item, dict):
+                    continue
+                o_st = str(ord_item.get("status") or ord_item.get("ordSt") or "").upper()
+                if any(w in o_st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
+                    o_sym = str(ord_item.get("trading_symbol") or ord_item.get("trdSym") or ord_item.get("sym") or "").strip()
+                    o_tok = str(ord_item.get("instrument_token") or ord_item.get("tok") or "")
+                    o_id = str(ord_item.get("order_id") or ord_item.get("nOrdNo") or "")
+                    if o_id and ((sym and o_sym == sym) or (tok and o_tok == tok)):
+                        try:
+                            broker.cancel_order(o_id)
+                            self._log_event(f"Swept & cancelled pending broker order #{o_id} for {o_sym} ({o_st})", level="INFO")
+                        except Exception as e_sw:
+                            logger.warning(f"Failed to sweep cancel order {o_id}: {e_sw}")
+        except Exception as e_ob:
+            logger.debug(f"Error sweeping orderbook for leg orders: {e_ob}")
+
     def _square_off_single_position(
         self,
         pos: Dict[str, Any],
@@ -6621,6 +6705,9 @@ class StraddleManager:
     ) -> Dict[str, Any]:
         if pos.get("status") not in ("OPEN", "EXIT_PENDING"):
             return {"success": False, "error": "Position is not OPEN"}
+
+        # Cancel any active advance SL & Target orders placed with broker FIRST
+        self._cancel_leg_broker_orders(pos, broker)
 
         exit_side = "BUY" if pos.get("side") == "SELL" else "SELL"
         qty = pos.get("quantity", 0)
@@ -6673,25 +6760,8 @@ class StraddleManager:
         strat_id = pos.get("strategy_id") or ""
         strat_tag = re.sub(r'[^a-zA-Z0-9]', '', str(strat_name))[:4] or "std"
 
-        # Cancel any active advance SL order placed with the broker
-        adv_sl_oid = pos.get("sl_broker_order_id")
-        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
-            try:
-                logger.info(f"Cancelling active broker advance SL order {adv_sl_oid} for {pos.get('symbol')} before exit...")
-                broker.cancel_order(str(adv_sl_oid))
-                pos["sl_broker_order_id"] = None
-            except Exception as e:
-                logger.warning(f"Error cancelling advance SL order {adv_sl_oid}: {e}")
-
-        # Cancel any active advance Target order placed with the broker
-        adv_tgt_oid = pos.get("target_broker_order_id")
-        if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
-            try:
-                logger.info(f"Cancelling active broker advance Target order {adv_tgt_oid} for {pos.get('symbol')} before exit...")
-                broker.cancel_order(str(adv_tgt_oid))
-                pos["target_broker_order_id"] = None
-            except Exception as e:
-                logger.warning(f"Error cancelling advance Target order {adv_tgt_oid}: {e}")
+        # Ensure any active advance SL / Target orders are cleared
+        self._cancel_leg_broker_orders(pos, broker)
 
         strat = None
         if strat_id:
@@ -7274,9 +7344,10 @@ class StraddleManager:
                 and p is not pos
                 and str(p.get("side", "SELL")).upper() == "SELL"
                 and not p.get("is_associated_hedge")
+                and (not opt_type or (str(p.get("option_type", "")).upper() == opt_type.upper() or opt_type.upper() in str(p.get("symbol", "")).upper()))
                 and (
-                    (parent_id and (p.get("id") == parent_id or p.get("leg_id") == parent_id))
-                    or (opt_type and (p.get("option_type") == opt_type or opt_type in str(p.get("symbol", "")).upper()))
+                    (parent_id and (str(p.get("id", "")) == str(parent_id) or str(p.get("leg_id", "")) == str(parent_id)))
+                    or (opt_type and (str(p.get("option_type", "")).upper() == opt_type.upper() or opt_type.upper() in str(p.get("symbol", "")).upper()))
                 )
             ]
             if other_open_shorts:
@@ -7346,47 +7417,41 @@ class StraddleManager:
                     and not p.get("is_associated_hedge")
                 ]
 
-                has_pending_re_entry = any(p.get("_re_entry_in_progress") for p in strat_positions)
-                if has_pending_re_entry:
-                    continue
-
                 for h in open_hedges:
                     h_parent_id = str(h.get("parent_leg_id") or "")
                     h_id = str(h.get("id") or "")
-                    h_opt = h.get("hedge_parent_type") or h.get("option_type") or ("CE" if "CE" in str(h.get("symbol", "")).upper() else "PE")
+                    h_opt = (h.get("hedge_parent_type") or h.get("option_type") or ("CE" if "CE" in str(h.get("symbol", "")).upper() else "PE")).upper()
 
                     matching_open = [
                         s for s in open_shorts
                         if (
                             (h_parent_id and (str(s.get("id", "")) == h_parent_id or str(s.get("leg_id", "")) == h_parent_id or str(s.get("symbol", "")) == h_parent_id))
                             or (h_id and str(s.get("associated_hedge_id", "")) == h_id)
-                            or (h_opt and (s.get("option_type") == h_opt or h_opt in str(s.get("symbol", "")).upper()))
+                            or (h_opt and (str(s.get("option_type", "")).upper() == h_opt or h_opt in str(s.get("symbol", "")).upper()))
                         )
                     ]
 
-                    if not matching_open:
-                        matching_closed = [
-                            s for s in strat_positions
-                            if s.get("status") in ("COMPLETE", "CLOSED", "EXITED")
-                            and str(s.get("side", "SELL")).upper() == "SELL"
-                            and not s.get("is_associated_hedge")
-                            and (
-                                (h_parent_id and (str(s.get("id", "")) == h_parent_id or str(s.get("leg_id", "")) == h_parent_id or str(s.get("symbol", "")) == h_parent_id))
-                                or (h_id and str(s.get("associated_hedge_id", "")) == h_id)
-                                or (h_opt and (s.get("option_type") == h_opt or h_opt in str(s.get("symbol", "")).upper()))
-                            )
-                        ]
-                        if matching_closed:
-                            self._log_event(
-                                f"[Orphan Hedge Cleanup] ⚡ Auto-exiting orphaned hedge '{h.get('symbol')}' (no open short leg of {h_opt} remains in strategy '{strat.get('name')}')...",
-                                level="INFO"
-                            )
-                            self._square_off_single_position(h, broker, reason="ORPHAN HEDGE AUTO-EXIT (Parent short leg completed)")
-                            with _ENGINE_LOCK:
-                                if self._active_strategy_id == strat.get("strategy_id"):
-                                    self._state["positions"] = strat.get("positions", [])
-                                self._save_strategies()
-                                self._save_state()
+                    # Check pending re-entry strictly for this hedge's parent / option type
+                    has_pending_re_entry = any(
+                        p.get("_re_entry_in_progress")
+                        for p in strat_positions
+                        if (
+                            (h_parent_id and (str(p.get("id", "")) == h_parent_id or str(p.get("leg_id", "")) == h_parent_id))
+                            or (h_opt and (str(p.get("option_type", "")).upper() == h_opt or h_opt in str(p.get("symbol", "")).upper()))
+                        )
+                    )
+
+                    if not matching_open and not has_pending_re_entry:
+                        self._log_event(
+                            f"[Orphan Hedge Cleanup] ⚡ Auto-exiting orphaned hedge '{h.get('symbol')}' (no open short leg of {h_opt} remains in strategy '{strat.get('name')}')...",
+                            level="INFO"
+                        )
+                        self._square_off_single_position(h, broker, reason="ORPHAN HEDGE AUTO-EXIT (Parent short leg completed)")
+                        with _ENGINE_LOCK:
+                            if self._active_strategy_id == strat.get("strategy_id"):
+                                self._state["positions"] = strat.get("positions", [])
+                            self._save_strategies()
+                            self._save_state()
         except Exception as e:
             logger.warning(f"Error in _cleanup_orphan_hedges: {e}")
 
@@ -9917,7 +9982,12 @@ class StraddleManager:
                                 p["_exit_in_progress"] = False
                                 changes_made = True
 
-                                self._handle_leg_re_entry(s, p, trigger=trigger)
+                                # Cancel any resting broker SL / Target orders for this closed position
+                                self._cancel_leg_broker_orders(p, broker)
+
+                                # Re-entries and associated hedge logic ONLY apply to short SELL legs!
+                                if str(p.get("side", "")).upper() == "SELL" and not p.get("is_associated_hedge"):
+                                    self._handle_leg_re_entry(s, p, trigger=trigger)
 
             if changes_made:
                 self._save_strategies()

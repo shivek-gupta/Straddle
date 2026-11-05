@@ -493,6 +493,7 @@
 
                 <!-- Quick Action Buttons -->
                 <button type="button" class="straddle-btn btn-outline" style="padding:5px 12px; font-size:12px;" onclick="openStraddleLogsModal()">📜 Audit Logs</button>
+                <button type="button" class="straddle-btn btn-outline" style="padding:5px 12px; font-size:12px; color:#10b981; border-color:rgba(16,185,129,0.4);" onclick="downloadAuditLogsExcel()" title="Download complete execution audit logs in Excel format">📥 Export Excel</button>
             </div>
         </div>
 
@@ -2104,8 +2105,13 @@
         <!-- Audit Logs Modal -->
         <div id="straddleLogsModal" class="straddle-modal-backdrop" style="display:none;">
             <div class="straddle-modal-dialog" style="max-width:850px;">
-                <div class="straddle-modal-header">
-                    <h3>📜 Straddle Algorithmic Execution Audit Logs</h3>
+                <div class="straddle-modal-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <h3 style="margin:0;">📜 Straddle Algorithmic Execution Audit Logs</h3>
+                        <button type="button" class="straddle-btn" style="padding:4px 10px; font-size:11.5px; font-weight:700; background:rgba(16,185,129,0.15); border:1px solid #10b981; color:#10b981; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" onclick="downloadAuditLogsExcel()" title="Download audit logs in formatted Excel (.xlsx) spreadsheet">
+                            <span>📥</span> Download Excel
+                        </button>
+                    </div>
                     <button class="straddle-modal-close" onclick="closeStraddleLogsModal()">×</button>
                 </div>
                 <div class="straddle-modal-body" style="background:#090d15; max-height:65vh; overflow-y:auto; font-family:var(--font-mono); font-size:12px;">

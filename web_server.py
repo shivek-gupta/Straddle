@@ -26,7 +26,7 @@ try:
 except Exception:
     pass
 
-from flask import Flask, jsonify, request, render_template, send_from_directory
+from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
 
 import config
 import kotak_auth
@@ -211,6 +211,110 @@ def api_straddle_logs():
     except Exception as e:
         logger.error(f"Error in api_straddle_logs: {e}")
         return jsonify({"success": False, "error": str(e), "logs": []}), 500
+
+
+@app.route("/api/straddle/download_audit_logs", methods=["GET"])
+def api_straddle_download_audit_logs():
+    """Generates and downloads a beautifully styled Excel (.xlsx) file containing all audit logs."""
+    try:
+        import io
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+        mgr = get_straddle_manager()
+        logs = mgr.get_logs(limit=1000)
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Audit Logs"
+        ws.views.sheetView[0].showGridLines = True
+
+        headers = ["Timestamp", "Date", "Level", "Message", "Details"]
+        ws.append(headers)
+
+        header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        thin_border = Border(
+            left=Side(style="thin", color="E2E8F0"),
+            right=Side(style="thin", color="E2E8F0"),
+            top=Side(style="thin", color="E2E8F0"),
+            bottom=Side(style="thin", color="E2E8F0")
+        )
+
+        for col_num in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
+        ws.row_dimensions[1].height = 28
+
+        level_colors = {
+            "INFO": ("0284C7", "F0F9FF"),
+            "SUCCESS": ("10B981", "ECFDF5"),
+            "WARNING": ("D97706", "FFFBEB"),
+            "ERROR": ("EF4444", "FEF2F2")
+        }
+
+        row_idx = 2
+        for log in logs:
+            ts = str(log.get("timestamp") or "")
+            dt = str(log.get("date") or "")
+            lvl = str(log.get("level") or "INFO").upper()
+            msg = str(log.get("message") or "")
+            det = log.get("details")
+            det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
+
+            ws.append([ts, dt, lvl, msg, det_str])
+
+            font_color, bg_color = level_colors.get(lvl, ("334155", "FFFFFF"))
+
+            ws.cell(row=row_idx, column=1).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(row=row_idx, column=2).alignment = Alignment(horizontal="center", vertical="center")
+
+            lvl_cell = ws.cell(row=row_idx, column=3)
+            lvl_cell.font = Font(name="Segoe UI", size=10, bold=True, color=font_color)
+            lvl_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
+            lvl_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            msg_cell = ws.cell(row=row_idx, column=4)
+            msg_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+            det_cell = ws.cell(row=row_idx, column=5)
+            det_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+            for c in range(1, 6):
+                cell = ws.cell(row=row_idx, column=c)
+                cell.border = thin_border
+                if c not in (3,):
+                    cell.font = Font(name="Segoe UI", size=10)
+
+            ws.row_dimensions[row_idx].height = 22
+            row_idx += 1
+
+        # Column widths
+        ws.column_dimensions["A"].width = 22
+        ws.column_dimensions["B"].width = 14
+        ws.column_dimensions["C"].width = 14
+        ws.column_dimensions["D"].width = 85
+        ws.column_dimensions["E"].width = 40
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        filename = f"straddle_audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(
+            buf,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        logger.error(f"Error generating audit logs Excel: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/straddle/strategy/save", methods=["POST"])
