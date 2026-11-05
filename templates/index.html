@@ -775,6 +775,46 @@
 
             <!-- 2. Live Positions Table (Screenshot 1) -->
             <div class="straddle-card" style="padding:0; overflow:hidden;">
+                <!-- Live Positions Filter & Multi-Criteria Sort Toolbar -->
+                <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:8px 14px; background:#0b1120; border-bottom:1px solid #1e293b;">
+                    <!-- Left: Quick Filters & Counts -->
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <span style="font-size:11px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">ALGO TRADES:</span>
+                        
+                        <!-- Toggle Show/Hide Closed Trades Button -->
+                        <button type="button" id="btnToggleAlgoClosedTrades" class="straddle-btn" style="padding:3px 10px; font-size:11px; font-weight:700; border-radius:5px; background:rgba(56,189,248,0.12); border:1px solid #0284c7; color:#38bdf8; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" onclick="toggleAlgoClosedTrades()" title="Toggle visibility of closed/completed trades in this algorithm">
+                            <span id="iconToggleAlgoClosed">🙈</span> <span id="textToggleAlgoClosed">Hide Closed</span>
+                        </button>
+
+                        <!-- Filter Selector Pills -->
+                        <div style="display:flex; align-items:center; gap:2px; background:#0f172a; padding:2px; border-radius:6px; border:1px solid #334155;">
+                            <button type="button" class="algo-filter-pill active" data-filter="all" onclick="setAlgoTradeFilter('all')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:#1e293b; color:#f8fafc;">All (<span id="algoCountAll">0</span>)</button>
+                            <button type="button" class="algo-filter-pill" data-filter="open" onclick="setAlgoTradeFilter('open')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#10b981;">Open (<span id="algoCountOpen">0</span>)</button>
+                            <button type="button" class="algo-filter-pill" data-filter="closed" onclick="setAlgoTradeFilter('closed')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#94a3b8;">Closed (<span id="algoCountClosed">0</span>)</button>
+                            <button type="button" class="algo-filter-pill" data-filter="main" onclick="setAlgoTradeFilter('main')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#f59e0b;">Main/Short</button>
+                            <button type="button" class="algo-filter-pill" data-filter="hedge" onclick="setAlgoTradeFilter('hedge')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#38bdf8;">Hedges</button>
+                            <button type="button" class="algo-filter-pill" data-filter="ce" onclick="setAlgoTradeFilter('ce')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#34d399;">CE</button>
+                            <button type="button" class="algo-filter-pill" data-filter="pe" onclick="setAlgoTradeFilter('pe')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#f87171;">PE</button>
+                        </div>
+                    </div>
+
+                    <!-- Right: Multi-Criteria Sort Dropdown -->
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="font-size:11px; font-weight:700; color:#94a3b8;">SORT BY:</span>
+                        <select id="algoPositionsSortSelect" class="straddle-select" style="min-width:185px; padding:3px 8px; font-size:11px; font-weight:700; background:#0f172a; border-color:#334155; color:#38bdf8; border-radius:5px; cursor:pointer;" onchange="onAlgoPositionsSortChange(this.value)">
+                            <option value="default">↕️ Default (Execution Order)</option>
+                            <option value="open_first">🟢 Open First, Closed Last</option>
+                            <option value="closed_first">⚪ Closed First, Open Last</option>
+                            <option value="main_first">⚡ Main Shorts First, Hedges Last</option>
+                            <option value="hedge_first">🛡️ Hedges First, Main Shorts Last</option>
+                            <option value="ce_first">📈 Calls (CE) First</option>
+                            <option value="pe_first">📉 Puts (PE) First</option>
+                            <option value="mtm_desc">💰 MTM: Highest Profit First</option>
+                            <option value="mtm_asc">🔻 MTM: Highest Loss First</option>
+                        </select>
+                    </div>
+                </div>
+
                 <div class="straddle-table-wrap">
                     <table class="straddle-table" id="straddlePositionsTable">
                         <thead>

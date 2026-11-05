@@ -4002,6 +4002,41 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
     const tbody = document.getElementById("straddlePositionsTableBody");
     if (!tbody) return;
 
+    // Update Algo Trades Toolbar Counts & Toggle State
+    const allCount = (positions || []).length;
+    const openCount = (positions || []).filter(p => {
+        const s = String(p.status || "OPEN").toUpperCase();
+        return s === "OPEN" || s === "LIVE OPEN";
+    }).length;
+    const closedCount = (positions || []).filter(p => {
+        const s = String(p.status || "OPEN").toUpperCase();
+        return s === "COMPLETE" || s === "CLOSED" || s === "EXITED";
+    }).length;
+
+    const elAll = document.getElementById("algoCountAll");
+    if (elAll) elAll.textContent = allCount;
+    const elOpen = document.getElementById("algoCountOpen");
+    if (elOpen) elOpen.textContent = openCount;
+    const elClosed = document.getElementById("algoCountClosed");
+    if (elClosed) elClosed.textContent = closedCount;
+
+    const btnToggle = document.getElementById("btnToggleAlgoClosedTrades");
+    const textToggle = document.getElementById("textToggleAlgoClosed");
+    const iconToggle = document.getElementById("iconToggleAlgoClosed");
+    if (btnToggle && textToggle && iconToggle) {
+        if (window._straddleAlgoShowClosed !== false) {
+            textToggle.textContent = `Hide Closed (${closedCount})`;
+            iconToggle.textContent = "🙈";
+            btnToggle.style.borderColor = "#0284c7";
+            btnToggle.style.color = "#38bdf8";
+        } else {
+            textToggle.textContent = `Show Closed (${closedCount})`;
+            iconToggle.textContent = "👁️";
+            btnToggle.style.borderColor = "#64748b";
+            btnToggle.style.color = "#94a3b8";
+        }
+    }
+
     if (!positions || positions.length === 0) {
         tbody.innerHTML = `
             <tr>
@@ -4014,133 +4049,239 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 </td>
             </tr>
         `;
-    } else {
-        const prevMap = window._straddleState.prevLtpMap || {};
+        return;
+    }
 
-        // Snapshot any active error banner inputs into persistent store so they never reset
-        positions.forEach((pos, idx) => {
-            const elLots = document.getElementById(`err_lots_${idx}`);
-            const elStrike = document.getElementById(`err_strike_${idx}`);
-            if (elLots && elLots.value) {
-                if (!window._straddleErrorLegEdits) window._straddleErrorLegEdits = {};
-                if (!window._straddleErrorLegEdits[idx]) window._straddleErrorLegEdits[idx] = {};
-                window._straddleErrorLegEdits[idx].lots = parseInt(elLots.value, 10) || 1;
-            }
-            if (elStrike && elStrike.value) {
-                if (!window._straddleErrorLegEdits) window._straddleErrorLegEdits = {};
-                if (!window._straddleErrorLegEdits[idx]) window._straddleErrorLegEdits[idx] = {};
-                window._straddleErrorLegEdits[idx].strike = elStrike.value.trim();
-            }
-        });
+    // Attach original strategy positions index to each leg
+    const indexedPositions = positions.map((pos, originalIndex) => ({
+        ...pos,
+        _origIdx: originalIndex
+    }));
 
-        // Check if we can perform smooth in-place DOM update instead of destroying innerHTML
-        const existingRows = tbody.querySelectorAll("tr[data-leg-index]:not(.straddle-error-banner-row)");
-        const existingErrorBanners = tbody.querySelectorAll("tr.straddle-error-banner-row");
-        const numErrorsExpected = positions.filter(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message || !!p.sl_cancelled_unexpectedly || !!p.target_cancelled_unexpectedly)).length;
+    // Multi-Criteria Filtering (Show/Hide closed, CE, PE, Main, Hedge)
+    let displayPositions = indexedPositions.filter(p => {
+        const rawStatus = String(p.status || "OPEN").toUpperCase();
+        const isOpen = (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
+        const isClosed = (rawStatus === "COMPLETE" || rawStatus === "CLOSED" || rawStatus === "EXITED");
 
-        // Active focus check - NEVER destroy DOM if user is actively interacting inside the table!
-        const activeEl = document.activeElement;
-        const isUserInteractingInTable = activeEl && tbody.contains(activeEl) && (activeEl.tagName === "INPUT" || activeEl.tagName === "SELECT");
-
-        // Verify if any leg's status, exit reason, or symbol has changed
-        let anyStateMismatch = false;
-        if (existingRows.length !== positions.length) {
-            anyStateMismatch = true;
-        } else {
-            for (let i = 0; i < positions.length; i++) {
-                const pos = positions[i];
-                const row = tbody.querySelector(`tr[data-leg-index="${i}"]`);
-                if (!row) { anyStateMismatch = true; break; }
-                const rowStatus = row.getAttribute("data-status");
-                const rowReason = row.getAttribute("data-exit-reason");
-                const rowSym = row.getAttribute("data-symbol");
-                const rowSlOid = row.getAttribute("data-sl-broker-oid") || "";
-                const rowTgtOid = row.getAttribute("data-tgt-broker-oid") || "";
-                const rowSlCanc = row.getAttribute("data-sl-cancelled") === "true";
-                const rowTgtCanc = row.getAttribute("data-tgt-cancelled") === "true";
-
-                const posStatus = String(pos.status || "OPEN").toUpperCase();
-                const posReason = String(pos.exit_reason || "");
-                const sym = pos.symbol || pos.trading_symbol || '';
-                const posSlOid = String(pos.sl_broker_order_id || "");
-                const posTgtOid = String(pos.target_broker_order_id || "");
-                const posSlCanc = !!pos.sl_cancelled_unexpectedly;
-                const posTgtCanc = !!pos.target_cancelled_unexpectedly;
-
-                if (rowStatus !== posStatus || rowReason !== posReason || rowSym !== sym ||
-                    rowSlOid !== posSlOid || rowTgtOid !== posTgtOid ||
-                    rowSlCanc !== posSlCanc || rowTgtCanc !== posTgtCanc) {
-                    anyStateMismatch = true;
-                    break;
-                }
-            }
+        if (window._straddleAlgoShowClosed === false && isClosed) {
+            return false;
         }
 
-        const canUpdateInPlace = (
-            !anyStateMismatch &&
-            existingRows.length === positions.length &&
-            positions.length > 0 &&
-            (existingErrorBanners.length === numErrorsExpected || isUserInteractingInTable)
-        );
+        const filter = window._straddleAlgoTradeFilter || "all";
+        if (filter === "open" && !isOpen) return false;
+        if (filter === "closed" && !isClosed) return false;
 
-        if (canUpdateInPlace) {
-            positions.forEach((pos, idx) => {
-                const row = tbody.querySelector(`tr[data-leg-index="${idx}"]`);
-                if (!row) return;
+        const sym = String(p.symbol || p.trading_symbol || "").toUpperCase();
+        const optType = String(p.option_type || (sym.includes("CE") ? "CE" : (sym.includes("PE") ? "PE" : ""))).toUpperCase();
+        if (filter === "ce" && optType !== "CE") return false;
+        if (filter === "pe" && optType !== "PE") return false;
 
-                const sym = pos.symbol || pos.trading_symbol || 'NIFTY OPT';
-                const side = String(pos.side || "SELL").toUpperCase();
-                const rawStatus = String(pos.status || "OPEN").toUpperCase();
-                const isOpen = (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
-                const ltp = Number(pos.ltp || pos.avg_ent_price || 0.0);
-                const prevLtp = prevMap[sym] || ltp;
-                let ltpClass = "";
-                if (ltp > prevLtp) ltpClass = "straddle-ltp-up";
-                else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
-                prevMap[sym] = ltp;
+        const isHedge = !!(p.is_associated_hedge || p.parent_leg_id || String(p.id || "").includes("hedge") || String(p.side || "").toUpperCase() === "BUY");
+        if (filter === "main" && isHedge) return false;
+        if (filter === "hedge" && !isHedge) return false;
 
-                const ltpColor = !isOpen ? '#f87171' : (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
-                const mtm = Number(pos.mtm || 0.0);
-                const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
+        return true;
+    });
 
-                // Update LTP cell
-                const ltpEl = row.querySelector(".straddle-ltp");
-                if (ltpEl) {
-                    ltpEl.textContent = ltp > 0 ? ltp.toFixed(2) : "-";
-                    ltpEl.style.color = ltpColor;
-                    ltpEl.className = `straddle-ltp ${ltpClass}`;
-                }
+    // Multi-Criteria Sorting (Open/Closed, CE/PE, Main/Hedges, MTM)
+    const sortOrder = window._straddleAlgoSortOrder || "default";
+    if (sortOrder !== "default") {
+        displayPositions.sort((a, b) => {
+            const rawA = String(a.status || "OPEN").toUpperCase();
+            const rawB = String(b.status || "OPEN").toUpperCase();
+            const isOpenA = (rawA === "OPEN" || rawA === "LIVE OPEN") ? 1 : 0;
+            const isOpenB = (rawB === "OPEN" || rawB === "LIVE OPEN") ? 1 : 0;
+            const isClosedA = (rawA === "COMPLETE" || rawA === "CLOSED" || rawA === "EXITED") ? 1 : 0;
+            const isClosedB = (rawB === "COMPLETE" || rawB === "CLOSED" || rawB === "EXITED") ? 1 : 0;
 
-                // Update MTM cell
-                const mtmEl = row.querySelector(".straddle-mtm");
-                if (mtmEl) {
-                    mtmEl.textContent = mtm.toFixed(2);
-                    mtmEl.className = `straddle-mtm ${mtmClass}`;
-                }
+            const isHedgeA = (a.is_associated_hedge || a.parent_leg_id || String(a.id || "").includes("hedge") || String(a.side || "").toUpperCase() === "BUY") ? 1 : 0;
+            const isHedgeB = (b.is_associated_hedge || b.parent_leg_id || String(b.id || "").includes("hedge") || String(b.side || "").toUpperCase() === "BUY") ? 1 : 0;
 
-                // Check pending edits or active focus
-                const hasPending = !!(window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]);
-                const isFocusedInRow = activeEl && row.contains(activeEl);
+            const symA = String(a.symbol || a.trading_symbol || "").toUpperCase();
+            const symB = String(b.symbol || b.trading_symbol || "").toUpperCase();
+            const optA = String(a.option_type || (symA.includes("CE") ? "CE" : (symA.includes("PE") ? "PE" : ""))).toUpperCase();
+            const optB = String(b.option_type || (symB.includes("CE") ? "CE" : (symB.includes("PE") ? "PE" : ""))).toUpperCase();
 
-                const btnSave = document.getElementById(`btn_save_running_${idx}`);
-                if (hasPending) {
-                    if (btnSave) btnSave.style.display = "inline-flex";
-                } else if (!isFocusedInRow) {
-                    if (btnSave) btnSave.style.display = "none";
-                    const tgtSub = document.getElementById(`live_tgt_sub_${idx}`);
-                    if (tgtSub && pos.target_price) tgtSub.textContent = `TGT: ₹${Number(pos.target_price).toFixed(2)}`;
-                    const slSub = document.getElementById(`live_sl_sub_${idx}`);
-                    if (slSub && pos.sl_price) slSub.textContent = `SL: ₹${Number(pos.sl_price).toFixed(2)}`;
-                }
-            });
-        } else {
-            // Full render with preserved pending edits and error leg inputs
-            const activeId = (activeEl && tbody.contains(activeEl) && activeEl.id) ? activeEl.id : null;
-            const selStart = (activeEl && typeof activeEl.selectionStart === "number") ? activeEl.selectionStart : null;
-            const selEnd = (activeEl && typeof activeEl.selectionEnd === "number") ? activeEl.selectionEnd : null;
+            const mtmA = Number(a.mtm || 0.0);
+            const mtmB = Number(b.mtm || 0.0);
 
-            let html = "";
-            positions.forEach((pos, idx) => {
+            if (sortOrder === "open_first") {
+                if (isOpenA !== isOpenB) return isOpenB - isOpenA;
+                return a._origIdx - b._origIdx;
+            }
+            if (sortOrder === "closed_first") {
+                if (isClosedA !== isClosedB) return isClosedB - isClosedA;
+                return a._origIdx - b._origIdx;
+            }
+            if (sortOrder === "main_first") {
+                if (isHedgeA !== isHedgeB) return isHedgeA - isHedgeB;
+                return a._origIdx - b._origIdx;
+            }
+            if (sortOrder === "hedge_first") {
+                if (isHedgeA !== isHedgeB) return isHedgeB - isHedgeA;
+                return a._origIdx - b._origIdx;
+            }
+            if (sortOrder === "ce_first") {
+                if (optA !== optB) return optA === "CE" ? -1 : 1;
+                return a._origIdx - b._origIdx;
+            }
+            if (sortOrder === "pe_first") {
+                if (optA !== optB) return optA === "PE" ? -1 : 1;
+                return a._origIdx - b._origIdx;
+            }
+            if (sortOrder === "mtm_desc") {
+                return mtmB - mtmA;
+            }
+            if (sortOrder === "mtm_asc") {
+                return mtmA - mtmB;
+            }
+            return a._origIdx - b._origIdx;
+        });
+    }
+
+    if (displayPositions.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="13" style="text-align:center; padding:32px 14px; color:#64748b;">
+                    <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Trades Match Current Filter</div>
+                    <div style="font-size:12px; margin-bottom:8px;">${closedCount} closed trades hidden. Adjust filter or toggle below to view.</div>
+                    <button type="button" class="straddle-btn btn-outline" onclick="window._straddleAlgoShowClosed=true; setAlgoTradeFilter('all');" style="border-color:#38bdf8; color:#38bdf8; font-size:11px; font-weight:700; padding:3px 10px;">👁️ Show All Trades</button>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    const prevMap = window._straddleState.prevLtpMap || {};
+
+    // Snapshot any active error banner inputs into persistent store so they never reset
+    positions.forEach((pos, idx) => {
+        const elLots = document.getElementById(`err_lots_${idx}`);
+        const elStrike = document.getElementById(`err_strike_${idx}`);
+        if (elLots && elLots.value) {
+            if (!window._straddleErrorLegEdits) window._straddleErrorLegEdits = {};
+            if (!window._straddleErrorLegEdits[idx]) window._straddleErrorLegEdits[idx] = {};
+            window._straddleErrorLegEdits[idx].lots = parseInt(elLots.value, 10) || 1;
+        }
+        if (elStrike && elStrike.value) {
+            if (!window._straddleErrorLegEdits) window._straddleErrorLegEdits = {};
+            if (!window._straddleErrorLegEdits[idx]) window._straddleErrorLegEdits[idx] = {};
+            window._straddleErrorLegEdits[idx].strike = elStrike.value.trim();
+        }
+    });
+
+    // Check if we can perform smooth in-place DOM update instead of destroying innerHTML
+    const existingRows = tbody.querySelectorAll("tr[data-leg-index]:not(.straddle-error-banner-row)");
+    const existingErrorBanners = tbody.querySelectorAll("tr.straddle-error-banner-row");
+    const numErrorsExpected = displayPositions.filter(p => (String(p.status || "").toUpperCase() === "ERROR" || !!p.error_message || !!p.sl_cancelled_unexpectedly || !!p.target_cancelled_unexpectedly)).length;
+
+    // Active focus check - NEVER destroy DOM if user is actively interacting inside the table!
+    const activeEl = document.activeElement;
+    const isUserInteractingInTable = activeEl && tbody.contains(activeEl) && (activeEl.tagName === "INPUT" || activeEl.tagName === "SELECT");
+
+    // Verify if any leg's status, exit reason, or symbol has changed
+    let anyStateMismatch = false;
+    if (existingRows.length !== displayPositions.length) {
+        anyStateMismatch = true;
+    } else {
+        for (let i = 0; i < displayPositions.length; i++) {
+            const pos = displayPositions[i];
+            const realIdx = pos._origIdx;
+            const row = existingRows[i];
+            if (!row || row.getAttribute("data-leg-index") !== String(realIdx)) { anyStateMismatch = true; break; }
+            const rowStatus = row.getAttribute("data-status");
+            const rowReason = row.getAttribute("data-exit-reason");
+            const rowSym = row.getAttribute("data-symbol");
+            const rowSlOid = row.getAttribute("data-sl-broker-oid") || "";
+            const rowTgtOid = row.getAttribute("data-tgt-broker-oid") || "";
+            const rowSlCanc = row.getAttribute("data-sl-cancelled") === "true";
+            const rowTgtCanc = row.getAttribute("data-tgt-cancelled") === "true";
+
+            const posStatus = String(pos.status || "OPEN").toUpperCase();
+            const posReason = String(pos.exit_reason || "");
+            const sym = pos.symbol || pos.trading_symbol || '';
+            const posSlOid = String(pos.sl_broker_order_id || "");
+            const posTgtOid = String(pos.target_broker_order_id || "");
+            const posSlCanc = !!pos.sl_cancelled_unexpectedly;
+            const posTgtCanc = !!pos.target_cancelled_unexpectedly;
+
+            if (rowStatus !== posStatus || rowReason !== posReason || rowSym !== sym ||
+                rowSlOid !== posSlOid || rowTgtOid !== posTgtOid ||
+                rowSlCanc !== posSlCanc || rowTgtCanc !== posTgtCanc) {
+                anyStateMismatch = true;
+                break;
+            }
+        }
+    }
+
+    const canUpdateInPlace = (
+        !anyStateMismatch &&
+        existingRows.length === displayPositions.length &&
+        displayPositions.length > 0 &&
+        (existingErrorBanners.length === numErrorsExpected || isUserInteractingInTable)
+    );
+
+    if (canUpdateInPlace) {
+        displayPositions.forEach((pos) => {
+            const idx = pos._origIdx;
+            const row = tbody.querySelector(`tr[data-leg-index="${idx}"]`);
+            if (!row) return;
+
+            const sym = pos.symbol || pos.trading_symbol || 'NIFTY OPT';
+            const side = String(pos.side || "SELL").toUpperCase();
+            const rawStatus = String(pos.status || "OPEN").toUpperCase();
+            const isOpen = (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
+            const ltp = Number(pos.ltp || pos.avg_ent_price || 0.0);
+            const prevLtp = prevMap[sym] || ltp;
+            let ltpClass = "";
+            if (ltp > prevLtp) ltpClass = "straddle-ltp-up";
+            else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
+            prevMap[sym] = ltp;
+
+            const ltpColor = !isOpen ? '#f87171' : (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
+            const mtm = Number(pos.mtm || 0.0);
+            const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
+
+            // Update LTP cell
+            const ltpEl = row.querySelector(".straddle-ltp");
+            if (ltpEl) {
+                ltpEl.textContent = ltp > 0 ? ltp.toFixed(2) : "-";
+                ltpEl.style.color = ltpColor;
+                ltpEl.className = `straddle-ltp ${ltpClass}`;
+            }
+
+            // Update MTM cell
+            const mtmEl = row.querySelector(".straddle-mtm");
+            if (mtmEl) {
+                mtmEl.textContent = mtm.toFixed(2);
+                mtmEl.className = `straddle-mtm ${mtmClass}`;
+            }
+
+            // Check pending edits or active focus
+            const hasPending = !!(window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]);
+            const isFocusedInRow = activeEl && row.contains(activeEl);
+
+            const btnSave = document.getElementById(`btn_save_running_${idx}`);
+            if (hasPending) {
+                if (btnSave) btnSave.style.display = "inline-flex";
+            } else if (!isFocusedInRow) {
+                if (btnSave) btnSave.style.display = "none";
+                const tgtSub = document.getElementById(`live_tgt_sub_${idx}`);
+                if (tgtSub && pos.target_price) tgtSub.textContent = `TGT: ₹${Number(pos.target_price).toFixed(2)}`;
+                const slSub = document.getElementById(`live_sl_sub_${idx}`);
+                if (slSub && pos.sl_price) slSub.textContent = `SL: ₹${Number(pos.sl_price).toFixed(2)}`;
+            }
+        });
+    } else {
+        // Full render with preserved pending edits and error leg inputs
+        const activeId = (activeEl && tbody.contains(activeEl) && activeEl.id) ? activeEl.id : null;
+        const selStart = (activeEl && typeof activeEl.selectionStart === "number") ? activeEl.selectionStart : null;
+        const selEnd = (activeEl && typeof activeEl.selectionEnd === "number") ? activeEl.selectionEnd : null;
+
+        let html = "";
+        displayPositions.forEach((pos) => {
+            const idx = pos._origIdx;
                 const rawStatus = String(pos.status || "OPEN").toUpperCase();
                 const isError = (rawStatus === "ERROR" || !!pos.error_message);
                 const isCompleteOrClosed = (rawStatus === "COMPLETE" || rawStatus === "CLOSED" || rawStatus === "EXITED" || (pos.avg_exit_price && Number(pos.avg_exit_price) > 0 && pos.exit_reason && pos.exit_reason !== "-"));
@@ -4680,7 +4821,6 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 }
             }
         }
-    }
 
     // Render MTM Banner Strip
     const grpMtmEl = document.getElementById("straddleGroupMtmDisplay");
@@ -4705,6 +4845,56 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
     // Update action buttons state
     onStraddlePositionCheckboxChange();
 }
+
+// =========================================================================
+// ALGO POSITIONS FILTERING & SORTING CONTROLS
+// =========================================================================
+
+function toggleAlgoClosedTrades() {
+    window._straddleAlgoShowClosed = !window._straddleAlgoShowClosed;
+    const strat = window._straddleState?.activeStrategy;
+    if (strat) {
+        renderStraddlePositions(strat.positions || [], strat.mtm, window._straddleState?.net_pnl);
+    }
+}
+
+function setAlgoTradeFilter(filter) {
+    window._straddleAlgoTradeFilter = filter;
+    document.querySelectorAll(".algo-filter-pill").forEach(btn => {
+        if (btn.getAttribute("data-filter") === filter) {
+            btn.style.background = "#1e293b";
+            btn.style.color = "#f8fafc";
+            btn.classList.add("active");
+        } else {
+            btn.style.background = "transparent";
+            btn.classList.remove("active");
+            const f = btn.getAttribute("data-filter");
+            if (f === "open") btn.style.color = "#10b981";
+            else if (f === "closed") btn.style.color = "#94a3b8";
+            else if (f === "main") btn.style.color = "#f59e0b";
+            else if (f === "hedge") btn.style.color = "#38bdf8";
+            else if (f === "ce") btn.style.color = "#34d399";
+            else if (f === "pe") btn.style.color = "#f87171";
+            else btn.style.color = "#cbd5e1";
+        }
+    });
+    const strat = window._straddleState?.activeStrategy;
+    if (strat) {
+        renderStraddlePositions(strat.positions || [], strat.mtm, window._straddleState?.net_pnl);
+    }
+}
+
+function onAlgoPositionsSortChange(sortVal) {
+    window._straddleAlgoSortOrder = sortVal;
+    const strat = window._straddleState?.activeStrategy;
+    if (strat) {
+        renderStraddlePositions(strat.positions || [], strat.mtm, window._straddleState?.net_pnl);
+    }
+}
+
+window.toggleAlgoClosedTrades = toggleAlgoClosedTrades;
+window.setAlgoTradeFilter = setAlgoTradeFilter;
+window.onAlgoPositionsSortChange = onAlgoPositionsSortChange;
 
 function onStraddlePositionCheckboxChange(inputEl = null, idx = null, legId = null) {
     if (inputEl !== null && idx !== null) {
@@ -9379,14 +9569,6 @@ async function submitAdoptBrokerPosition() {
                 confirmBtn.textContent = "➕ Add Selected Position to Algo";
             }
         }
-    } catch (e) {
-        showStraddleToast("Error adopting position: " + e.message, "error", 3500);
-        if (confirmBtn) {
-            confirmBtn.disabled = false;
-            confirmBtn.textContent = "➕ Add Selected Position to Algo";
-        }
-    }
-}
     } catch (e) {
         showStraddleToast("Error adopting position: " + e.message, "error", 3500);
         if (confirmBtn) {

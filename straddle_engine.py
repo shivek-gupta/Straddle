@@ -4165,8 +4165,11 @@ class StraddleManager:
 
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
+            strat = self.get_strategy(pos.get("strategy_id") or self._active_strategy_id)
             pos["status"] = "OPEN"  # Allow square off attempt
             self._square_off_single_position(pos, broker, reason="MANUAL LEG EXIT")
+            if strat and str(pos.get("side", "SELL")).upper() == "SELL":
+                self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Manual exit of {pos.get('symbol')}")
             self._save_state()
             self._save_strategies()
             if pos.get("status") == "COMPLETE":
@@ -7004,10 +7007,14 @@ class StraddleManager:
         chk = self.get_strategy_schedule_status(strat)
         if not chk["can_enter"]:
             self._log_event(f"[{strat.get('name')}] Re-entry not triggered: {chk['reason']}", level="INFO")
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Schedule window closed ({chk['reason']})")
             return
 
         if is_re_enabled and cur_count < re_max:
             new_count = cur_count + 1
+            pos["_re_entry_in_progress"] = True
             self._log_event(f"Triggering {re_type_u} #{new_count}/{re_max} for leg '{pos.get('symbol')}' ({trigger} hit)...")
 
             target_exit_order_id = exit_order_id or pos.get("exit_order_id")
@@ -7016,6 +7023,9 @@ class StraddleManager:
                 chk_w = self.get_strategy_schedule_status(strat)
                 if not chk_w["can_enter"] or not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
                     self._log_event(f"[{strat.get('name')}] Re-entry worker aborted: {chk_w['reason']}", level="INFO")
+                    mode = self._state.get("execution_mode", "LIVE_BROKER")
+                    broker = get_broker_adapter(mode)
+                    self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Re-entry aborted ({chk_w['reason']})")
                     return
 
                 mode = self._state.get("execution_mode", "LIVE_BROKER")
@@ -7043,6 +7053,7 @@ class StraddleManager:
                                 f"[Re-Entry #{new_count} ABORTED] Exit order {target_exit_order_id} is NOT filled ({err_st}). Re-entry cancelled to prevent margin breach.",
                                 level="ERROR"
                             )
+                            self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Re-entry aborted (Exit order {target_exit_order_id} unconfirmed)")
                             return
                         self._log_event(
                             f"[Re-Entry #{new_count}] Exit order {target_exit_order_id} verified FILLED @ ₹{fill_res.get('price', 0):.2f}. Placing Re-Entry immediately."
@@ -7220,28 +7231,164 @@ class StraddleManager:
                         self._log_event(f"Re-Execute #{new_count} order rejected for {new_pos['symbol']}: {err_msg}", level="ERROR")
                         if self._is_margin_error(err_msg):
                             self._trigger_margin_auto_exit(strat, broker, source=f"Re-Execute #{new_count}")
+                        else:
+                            self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Re-entry order rejected ({err_msg})")
 
-            threading.Thread(target=_re_entry_worker, daemon=True).start()
+            def _runner_wrapper():
+                try:
+                    _re_entry_worker()
+                finally:
+                    pos["_re_entry_in_progress"] = False
+
+            threading.Thread(target=_runner_wrapper, daemon=True).start()
         else:
             # Re-entries for this parent leg are EXHAUSTED (or re-entry is disabled)!
-            self._log_event(f"Re-entries exhausted for leg '{pos.get('symbol')}' ({cur_count}/{re_max}). Checking associated hedge...")
-            parent_id = pos.get("id")
-            active_hedge = None
-            with _ENGINE_LOCK:
-                active_hedge = next(
-                    (p for p in strat.get("positions", []) 
-                     if (p.get("parent_leg_id") == parent_id or p.get("id") == pos.get("associated_hedge_id"))
-                     and p.get("status") == "OPEN" 
-                     and p.get("is_associated_hedge")), 
-                    None
+            self._log_event(f"Re-entries exhausted for leg '{pos.get('symbol')}' ({cur_count}/{re_max}). Auto squaring off associated hedge...")
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Parent {pos.get('symbol')} re-entries exhausted ({cur_count}/{re_max})")
+
+    def _auto_square_off_associated_hedge(
+        self,
+        strat: Dict[str, Any],
+        pos: Dict[str, Any],
+        broker: Optional[BaseBrokerAdapter] = None,
+        reason: str = "PARENT SHORT COMPLETED",
+    ):
+        """Squares off the associated hedge leg when parent short leg completes or exhausts all re-entries."""
+        if not broker:
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+
+        parent_id = pos.get("id") or pos.get("leg_id") or ""
+        parent_sym = pos.get("symbol", "")
+        assoc_hedge_id = pos.get("associated_hedge_id") or ""
+        opt_type = pos.get("option_type") or ("CE" if "CE" in parent_sym.upper() else ("PE" if "PE" in parent_sym.upper() else ""))
+
+        with _ENGINE_LOCK:
+            strat_positions = strat.get("positions", [])
+            # Check if any OTHER short leg is still open for this option type or parent
+            other_open_shorts = [
+                p for p in strat_positions
+                if p.get("status") == "OPEN"
+                and p is not pos
+                and str(p.get("side", "SELL")).upper() == "SELL"
+                and not p.get("is_associated_hedge")
+                and (
+                    (parent_id and (p.get("id") == parent_id or p.get("leg_id") == parent_id))
+                    or (opt_type and (p.get("option_type") == opt_type or opt_type in str(p.get("symbol", "")).upper()))
                 )
-            if active_hedge:
+            ]
+            if other_open_shorts:
                 self._log_event(
-                    f"[Hedge Auto Square-Off] Squaring off associated hedge '{active_hedge.get('symbol')}' as parent leg has no re-entries left."
+                    f"[Hedge Retained] Not squaring off hedge for {parent_sym} because {len(other_open_shorts)} other open short leg(s) remain active."
                 )
-                mode = self._state.get("execution_mode", "LIVE_BROKER")
-                broker = get_broker_adapter(mode)
-                self._square_off_single_position(active_hedge, broker, reason=f"PARENT COMPLETED ({pos.get('symbol')})")
+                return
+
+            # Find matching open hedge positions
+            hedges_to_exit = []
+            for p in strat_positions:
+                if p.get("status") == "OPEN" and (p.get("is_associated_hedge") or str(p.get("side", "")).upper() == "BUY" or "HEDGE" in str(p.get("id", "")).upper()):
+                    is_match = False
+                    p_parent = str(p.get("parent_leg_id") or "")
+                    if parent_id and p_parent == str(parent_id):
+                        is_match = True
+                    elif parent_sym and p_parent == str(parent_sym):
+                        is_match = True
+                    elif assoc_hedge_id and (p.get("id") == assoc_hedge_id or p.get("leg_id") == assoc_hedge_id):
+                        is_match = True
+                    elif p.get("hedge_parent_type") == opt_type:
+                        is_match = True
+                    elif opt_type and opt_type in str(p.get("symbol", "")).upper():
+                        is_match = True
+
+                    if is_match and p not in hedges_to_exit:
+                        hedges_to_exit.append(p)
+
+        if not hedges_to_exit:
+            self._log_event(f"[Hedge Check] No active open hedge found for completed leg '{parent_sym}'.")
+            return
+
+        for h in hedges_to_exit:
+            self._log_event(
+                f"[Hedge Auto Square-Off] ⚡ Squaring off associated hedge '{h.get('symbol')}' ({reason})...",
+                level="INFO"
+            )
+            res = self._square_off_single_position(h, broker, reason=f"HEDGE EXIT ({reason})")
+            with _ENGINE_LOCK:
+                if self._active_strategy_id == strat.get("strategy_id"):
+                    self._state["positions"] = strat.get("positions", [])
+                self._save_strategies()
+                self._save_state()
+
+    def _cleanup_orphan_hedges(self, broker: BaseBrokerAdapter):
+        """Scans for open hedge positions that have no active open short legs and no pending re-entries."""
+        try:
+            for strat in self._strategies:
+                if strat.get("_entry_in_progress") or strat.get("status") == "ENTERING":
+                    continue
+                strat_positions = strat.get("positions", [])
+                if not strat_positions:
+                    continue
+
+                open_hedges = [
+                    p for p in strat_positions 
+                    if p.get("status") == "OPEN" 
+                    and (p.get("is_associated_hedge") or str(p.get("side", "")).upper() == "BUY" or "HEDGE" in str(p.get("id", "")).upper())
+                ]
+                if not open_hedges:
+                    continue
+
+                open_shorts = [
+                    p for p in strat_positions 
+                    if p.get("status") == "OPEN" 
+                    and str(p.get("side", "SELL")).upper() == "SELL" 
+                    and not p.get("is_associated_hedge")
+                ]
+
+                has_pending_re_entry = any(p.get("_re_entry_in_progress") for p in strat_positions)
+                if has_pending_re_entry:
+                    continue
+
+                for h in open_hedges:
+                    h_parent_id = str(h.get("parent_leg_id") or "")
+                    h_id = str(h.get("id") or "")
+                    h_opt = h.get("hedge_parent_type") or h.get("option_type") or ("CE" if "CE" in str(h.get("symbol", "")).upper() else "PE")
+
+                    matching_open = [
+                        s for s in open_shorts
+                        if (
+                            (h_parent_id and (str(s.get("id", "")) == h_parent_id or str(s.get("leg_id", "")) == h_parent_id or str(s.get("symbol", "")) == h_parent_id))
+                            or (h_id and str(s.get("associated_hedge_id", "")) == h_id)
+                            or (h_opt and (s.get("option_type") == h_opt or h_opt in str(s.get("symbol", "")).upper()))
+                        )
+                    ]
+
+                    if not matching_open:
+                        matching_closed = [
+                            s for s in strat_positions
+                            if s.get("status") in ("COMPLETE", "CLOSED", "EXITED")
+                            and str(s.get("side", "SELL")).upper() == "SELL"
+                            and not s.get("is_associated_hedge")
+                            and (
+                                (h_parent_id and (str(s.get("id", "")) == h_parent_id or str(s.get("leg_id", "")) == h_parent_id or str(s.get("symbol", "")) == h_parent_id))
+                                or (h_id and str(s.get("associated_hedge_id", "")) == h_id)
+                                or (h_opt and (s.get("option_type") == h_opt or h_opt in str(s.get("symbol", "")).upper()))
+                            )
+                        ]
+                        if matching_closed:
+                            self._log_event(
+                                f"[Orphan Hedge Cleanup] ⚡ Auto-exiting orphaned hedge '{h.get('symbol')}' (no open short leg of {h_opt} remains in strategy '{strat.get('name')}')...",
+                                level="INFO"
+                            )
+                            self._square_off_single_position(h, broker, reason="ORPHAN HEDGE AUTO-EXIT (Parent short leg completed)")
+                            with _ENGINE_LOCK:
+                                if self._active_strategy_id == strat.get("strategy_id"):
+                                    self._state["positions"] = strat.get("positions", [])
+                                self._save_strategies()
+                                self._save_state()
+        except Exception as e:
+            logger.warning(f"Error in _cleanup_orphan_hedges: {e}")
 
     # ==========================================================
     # Orderbook Logging & P&L Recording
@@ -9878,6 +10025,11 @@ class StraddleManager:
             if mode == "LIVE_BROKER" and (now_ts - getattr(self, "_last_reconcile_ts", 0)) > 1.0:
                 self._last_reconcile_ts = now_ts
                 self._reconcile_broker_positions(broker)
+
+            # Periodic orphan hedge cleanup (every 2 seconds)
+            if (now_ts - getattr(self, "_last_orphan_hedge_check_ts", 0)) > 2.0:
+                self._last_orphan_hedge_check_ts = now_ts
+                self._cleanup_orphan_hedges(broker)
 
             active_strat = self.get_strategy(self._active_strategy_id)
             und = self.get_active_underlying()
