@@ -724,6 +724,31 @@ def api_straddle_paper_reset():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/broker/connection", methods=["GET"])
+def api_straddle_get_broker_connection():
+    try:
+        mgr = get_straddle_manager()
+        return jsonify({"success": True, "connected": mgr.is_broker_connected()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/broker/connection", methods=["POST"])
+@app.route("/api/straddle/broker/toggle_connection", methods=["POST"])
+def api_straddle_toggle_broker_connection():
+    try:
+        data = request.get_json(silent=True) or {}
+        mgr = get_straddle_manager()
+        if "connected" in data:
+            connected = bool(data["connected"])
+        else:
+            connected = not mgr.is_broker_connected()
+        res = mgr.set_broker_connected(connected)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/option_chain", methods=["GET"])
 def api_straddle_option_chain():
     try:

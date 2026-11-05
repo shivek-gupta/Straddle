@@ -482,6 +482,10 @@ function renderStraddleHeader(state) {
         updateExecutionModeUI(state.execution_mode || "LIVE_BROKER");
     }
 
+    if (typeof updateBrokerConnectionUI === "function" && state.broker_connected !== undefined) {
+        updateBrokerConnectionUI(state.broker_connected);
+    }
+
     if (!window._activeGlobalUnderlying || window._activeGlobalUnderlying === state.underlying_symbol) {
         updateSpotPriceDisplay(state.underlying_spot, state.underlying_atm_strike, state.underlying_symbol);
     }
@@ -7447,6 +7451,111 @@ async function straddleToggleExecutionMode() {
 }
 window.straddleToggleExecutionMode = straddleToggleExecutionMode;
 window.toggleStraddleExecutionMode = straddleToggleExecutionMode;
+
+let _isBrokerConnected = true;
+
+function updateBrokerConnectionUI(connected) {
+    _isBrokerConnected = !!connected;
+    
+    // Topbar badge & button in dropdown
+    const connBadge = document.getElementById("kotakBrokerConnBadge");
+    const connBtn = document.getElementById("btnToggleBrokerConnection");
+    const connBtnText = document.getElementById("btnToggleBrokerConnectionText");
+    const topAlert = document.getElementById("topbarBrokerDisconnectedAlert");
+
+    // Modal badge & button
+    const modalBadge = document.getElementById("modalKotakBrokerConnBadge");
+    const modalBtn = document.getElementById("btnModalToggleBrokerConnection");
+
+    if (_isBrokerConnected) {
+        if (connBadge) {
+            connBadge.textContent = "CONNECTED";
+            connBadge.style.background = "rgba(16,185,129,0.15)";
+            connBadge.style.color = "#10b981";
+            connBadge.style.borderColor = "#059669";
+        }
+        if (connBtn) {
+            connBtn.style.background = "rgba(239,68,68,0.15)";
+            connBtn.style.color = "#ef4444";
+            connBtn.style.borderColor = "#ef4444";
+        }
+        if (connBtnText) connBtnText.textContent = "Disconnect from Kotak Neo";
+        if (topAlert) topAlert.style.display = "none";
+
+        if (modalBadge) {
+            modalBadge.textContent = "CONNECTED";
+            modalBadge.style.background = "rgba(16,185,129,0.15)";
+            modalBadge.style.color = "#10b981";
+            modalBadge.style.borderColor = "#059669";
+        }
+        if (modalBtn) {
+            modalBtn.className = "straddle-btn btn-danger";
+            modalBtn.textContent = "Disconnect from Kotak";
+        }
+    } else {
+        if (connBadge) {
+            connBadge.textContent = "DISCONNECTED";
+            connBadge.style.background = "rgba(239,68,68,0.2)";
+            connBadge.style.color = "#f87171";
+            connBadge.style.borderColor = "#ef4444";
+        }
+        if (connBtn) {
+            connBtn.style.background = "rgba(16,185,129,0.2)";
+            connBtn.style.color = "#34d399";
+            connBtn.style.borderColor = "#10b981";
+        }
+        if (connBtnText) connBtnText.textContent = "Connect to Kotak Neo";
+        if (topAlert) topAlert.style.display = "inline-flex";
+
+        if (modalBadge) {
+            modalBadge.textContent = "DISCONNECTED (BLOCKED)";
+            modalBadge.style.background = "rgba(239,68,68,0.2)";
+            modalBadge.style.color = "#f87171";
+            modalBadge.style.borderColor = "#ef4444";
+        }
+        if (modalBtn) {
+            modalBtn.className = "straddle-btn btn-success";
+            modalBtn.textContent = "Connect to Kotak Neo";
+        }
+    }
+}
+window.updateBrokerConnectionUI = updateBrokerConnectionUI;
+
+async function toggleBrokerConnection(event) {
+    if (event && event.stopPropagation) event.stopPropagation();
+    
+    const targetState = !_isBrokerConnected;
+    const confirmMsg = targetState
+        ? "Connect platform to Kotak Neo?\n\nLive orders will now be permitted to route to Kotak Neo."
+        : "⚠️ ARE YOU SURE YOU WANT TO DISCONNECT FROM KOTAK NEO?\n\nWhile disconnected, UNDER NO CIRCUMSTANCES will any order (entries, SL, targets, re-entries, square-offs) be sent to Kotak Neo.\n\nYou can safely make code updates or monitor the market with zero risk of rogue orders.";
+    
+    if (!confirm(confirmMsg)) return;
+
+    try {
+        const resp = await fetch("/api/straddle/broker/connection", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ connected: targetState })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            updateBrokerConnectionUI(res.connected);
+            showStraddleToast(
+                res.connected
+                    ? "⚡ Kotak Neo CONNECTED: Live orders enabled."
+                    : "🔴 Kotak Neo DISCONNECTED: All orders strictly blocked.",
+                res.connected ? "success" : "warning",
+                3500
+            );
+            if (typeof fetchStraddleState === "function") await fetchStraddleState();
+        } else {
+            showStraddleToast(res.error || "Failed to update connection", "error", 3500);
+        }
+    } catch (e) {
+        showStraddleToast("Error: " + e.message, "error", 3000);
+    }
+}
+window.toggleBrokerConnection = toggleBrokerConnection;
 
 async function resetPaperTradingAccount() {
     if (!confirm("Reset Paper Trading account?\n\nThis will clear all simulated paper positions and clear the paper orderbook.")) return;

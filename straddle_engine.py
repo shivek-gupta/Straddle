@@ -612,6 +612,7 @@ class StraddleManager:
             "max_mtm": 0.0,
             "min_mtm": 0.0,
             "execution_mode": "LIVE_BROKER",  # LIVE_BROKER or PAPER_TRADING
+            "broker_connected": True,          # True: live orders enabled, False: live orders strictly BLOCKED
             "underlying_spot": 22453.0,
             "underlying_symbol": "NIFTY",
             "underlying_atm_strike": 22450.0,
@@ -767,6 +768,7 @@ class StraddleManager:
                             self._state.update(saved)
                             saved_mode = saved.get("execution_mode", "LIVE_BROKER")
                             self._state["execution_mode"] = saved_mode if saved_mode in ("LIVE_BROKER", "PAPER_TRADING") else "LIVE_BROKER"
+                            self._state["broker_connected"] = bool(saved.get("broker_connected", True))
                             sid = self._state.get("active_strategy_id")
                             if sid and (str(sid).strip().lower() in self._deleted_strategy_ids or not any(s.get("strategy_id") == sid for s in self._strategies)):
                                 self._active_strategy_id = self._strategies[0].get("strategy_id") if self._strategies else None
@@ -4211,6 +4213,32 @@ class StraddleManager:
             self._log_event("Paper trading account state and positions reset cleanly.", level="INFO")
             return {"success": True, "message": "Paper trading account reset successfully."}
 
+    def is_broker_connected(self) -> bool:
+        """Returns True if live trading connection to Kotak Neo is enabled/connected.
+        When False, under no circumstances will any order be transmitted from platform to Kotak Neo."""
+        return bool(self._state.get("broker_connected", True))
+
+    def set_broker_connected(self, connected: bool) -> Dict[str, Any]:
+        """Toggles the live connection kill switch to Kotak Neo.
+        When disconnected, under NO circumstances will any order (entries, SL, targets, re-entries, square-offs)
+        be sent from the platform to Kotak Neo."""
+        with _ENGINE_LOCK:
+            self._state["broker_connected"] = bool(connected)
+            self._save_state(force=True)
+
+        status_msg = "CONNECTED" if connected else "DISCONNECTED"
+        if connected:
+            self._log_event(
+                "[BROKER CONNECTED] ⚡ Live order transmission to Kotak Neo is CONNECTED. Platform orders will route to Kotak Neo.",
+                level="SUCCESS"
+            )
+        else:
+            self._log_event(
+                "[BROKER DISCONNECTED] 🔴 Live order transmission to Kotak Neo is DISCONNECTED by Trader in Settings. Under NO circumstances will orders be sent to Kotak Neo!",
+                level="WARNING"
+            )
+        return {"success": True, "connected": bool(connected), "status": status_msg}
+
     # ==========================================================
     # Order Dispatch & Leg Lifecycle Machine
     # ==========================================================
@@ -4333,6 +4361,16 @@ class StraddleManager:
                 adv.update(strat["advanced_settings"])
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
+
+            if mode == "LIVE_BROKER" and not self.is_broker_connected():
+                self._log_event(
+                    f"[{strat.get('name')}] Strategy entry blocked: Kotak Neo is DISCONNECTED in Settings.",
+                    level="WARNING"
+                )
+                strat["entry_error"] = "Kotak Neo is DISCONNECTED in Settings"
+                strat["_entry_in_progress"] = False
+                self._save_strategies()
+                return
 
             legs_cfg = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
             if not legs_cfg:
@@ -4637,6 +4675,30 @@ class StraddleManager:
         side = leg_cfg.get("side", "Sell").upper()
         prod = leg_cfg.get("product", "NRML")
         lots = int(leg_cfg.get("lots", 1))
+
+        exec_mode = strategy.get("execution_mode") if strategy else self._state.get("execution_mode", "LIVE_BROKER")
+        if exec_mode == "LIVE_BROKER" and not self.is_broker_connected():
+            self._log_event(
+                f"[ORDER BLOCKED] Cannot place order for {contract.get('trading_symbol')}: Kotak Neo is DISCONNECTED in Settings.",
+                level="WARNING"
+            )
+            return {
+                "id": leg_cfg.get("id"),
+                "status": "ERROR",
+                "side": side,
+                "symbol": contract.get("trading_symbol", ""),
+                "instrument_key": contract.get("instrument_key", ""),
+                "contract": contract,
+                "error": "Kotak Neo is DISCONNECTED in Settings. Live order blocked.",
+                "error_message": "[ORDER BLOCKED] Kotak Neo is DISCONNECTED in Settings",
+                "lots": lots,
+                "lot_size": contract.get("lot_size", 65),
+                "quantity": lots * contract.get("lot_size", 65) * multiplier,
+                "entry_qty": "-",
+                "exit_qty": "-",
+                "ltp": 0.0,
+                "mtm": 0.0,
+            }
         lot_size = contract.get("lot_size", 65)
         total_qty = lots * lot_size * multiplier
 
@@ -4927,7 +4989,22 @@ class StraddleManager:
             elif side == "SELL" and sl_price <= ref_price:
                 sl_price = round_to_tick(ref_price + 0.05, 0.05)
 
-        orig_sl_label = f"ORIGINAL SL: -{sl_val:.0f}%" if ("%" in sl_type or "SL: %" in sl_type) else (f"ORIGINAL SL: {sl_price:.2f}" if sl_price > 0 else "")
+        is_hedge_leg = (
+            leg_cfg.get("is_associated_hedge")
+            or "hedge" in str(leg_cfg.get("id", "")).lower()
+            or bool(leg_cfg.get("hedge_parent_type"))
+            or side == "BUY"
+        )
+        if is_hedge_leg:
+            target_price = 0.0
+            sl_price = 0.0
+            tgt_type = "None"
+            sl_type = "None"
+            target_type_label = "-"
+            sl_type_label = "-"
+            orig_sl_label = ""
+        else:
+            orig_sl_label = f"ORIGINAL SL: -{sl_val:.0f}%" if ("%" in sl_type or "SL: %" in sl_type) else (f"ORIGINAL SL: {sl_price:.2f}" if sl_price > 0 else "")
         order_id = str(order_res.get("order_id") or "")
         order_cat = "Re-Entry" if is_re_entry else ("Entry" if side in ("SELL", "BUY") else "Hedge")
         strat_name = strategy.get("name") if strategy else (leg_cfg.get("underlying", "NIFTY") + " Straddle")
@@ -5059,6 +5136,8 @@ class StraddleManager:
         pos_record["trading_symbol"] = contract.get("trading_symbol", "")
 
         def _dispatch_advance_orders():
+            if is_hedge_leg or not self.is_broker_connected():
+                return
             sl_delay = int(adv.get("sl_placement_delay_sec", 0))
             if sl_delay > 0:
                 time.sleep(sl_delay)
@@ -5833,6 +5912,16 @@ class StraddleManager:
 
     def _place_advance_sl_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0):
         """Quantiply-parity: place Stoploss order with broker in advance after delay_sec."""
+        # Strictly never place SL orders for hedges or Buy legs
+        is_hedge = (
+            pos.get("is_associated_hedge")
+            or "hedge" in str(pos.get("id", "")).lower()
+            or bool(pos.get("hedge_parent_type"))
+            or str(pos.get("side", "")).upper() == "BUY"
+        )
+        if is_hedge or not self.is_broker_connected():
+            return
+
         if delay_sec > 0:
             time.sleep(delay_sec)
         with _ADVANCE_ORDER_LOCK:
@@ -5909,6 +5998,16 @@ class StraddleManager:
 
     def _place_advance_target_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0):
         """Quantiply-parity: place Target (LIMIT) order with broker in advance after delay_sec."""
+        # Strictly never place Target orders for hedges or Buy legs
+        is_hedge = (
+            pos.get("is_associated_hedge")
+            or "hedge" in str(pos.get("id", "")).lower()
+            or bool(pos.get("hedge_parent_type"))
+            or str(pos.get("side", "")).upper() == "BUY"
+        )
+        if is_hedge or not self.is_broker_connected():
+            return
+
         if delay_sec > 0:
             time.sleep(delay_sec)
         with _ADVANCE_ORDER_LOCK:
@@ -6706,6 +6805,14 @@ class StraddleManager:
         if pos.get("status") not in ("OPEN", "EXIT_PENDING"):
             return {"success": False, "error": "Position is not OPEN"}
 
+        mode = self._state.get("execution_mode", "LIVE_BROKER")
+        if mode == "LIVE_BROKER" and not self.is_broker_connected():
+            self._log_event(
+                f"[SQUARE-OFF BLOCKED] Order blocked for {pos.get('symbol')}: Kotak Neo is DISCONNECTED in Settings.",
+                level="WARNING"
+            )
+            return {"success": False, "error": "Kotak Neo is DISCONNECTED in Settings"}
+
         # Cancel any active advance SL & Target orders placed with broker FIRST
         self._cancel_leg_broker_orders(pos, broker)
 
@@ -6736,9 +6843,17 @@ class StraddleManager:
                         side = (pos.get("side") or "SELL").upper()
                         pnl = float(broker_pos.get("pnl") or broker_pos.get("realized_pnl") or 0.0)
 
+                        is_pos_hedge = (
+                            pos.get("is_associated_hedge")
+                            or "hedge" in str(pos.get("id", "")).lower()
+                            or bool(pos.get("hedge_parent_type"))
+                            or side == "BUY"
+                        )
                         is_loss = (side == "BUY" and exit_p < ent_p) or (side == "SELL" and exit_p > ent_p) or (pnl < 0)
                         is_profit = (side == "BUY" and exit_p > ent_p) or (side == "SELL" and exit_p < ent_p) or (pnl > 0)
-                        if is_loss:
+                        if is_pos_hedge:
+                            real_reason = f"HEDGE SQUARED OFF (₹{exit_p:.2f}) (Broker Exit)"
+                        elif is_loss:
                             real_reason = f"STOPLOSS HIT (₹{exit_p:.2f}) (Broker Exit)"
                         elif is_profit:
                             real_reason = f"TARGET HIT (₹{exit_p:.2f}) (Broker Exit)"
@@ -7101,6 +7216,13 @@ class StraddleManager:
                 mode = self._state.get("execution_mode", "LIVE_BROKER")
                 broker = get_broker_adapter(mode)
 
+                if mode == "LIVE_BROKER" and not self.is_broker_connected():
+                    self._log_event(
+                        f"[RE-ENTRY BLOCKED] Re-entry aborted for {pos.get('symbol')}: Kotak Neo is DISCONNECTED in Settings.",
+                        level="WARNING"
+                    )
+                    return
+
                 # STRICT ORDER SEQUENCE & MARGIN SAFETY:
                 # Re-entry MUST ONLY execute after the previous leg's exit order is confirmed FILLED by the broker.
                 # Holding both positions concurrently causes severe margin issues and potential broker rejections.
@@ -7267,6 +7389,69 @@ class StraddleManager:
                                     f"[Hedge Shift Warning] Failed to place new hedge ({err_h}). Old hedge retained for safety. Proceeding with short re-entry.",
                                     level="WARNING"
                                 )
+                elif hedge_enabled and not active_hedge:
+                    # Inviolable Margin Guard: Short re-entry requires associated hedge to be secured FIRST
+                    # Otherwise broker RMS rejects naked short order due to margin shortfall!
+                    step = STRIKE_STEPS.get(und, 50)
+                    new_short_strike = float(contract.get("strike_price"))
+                    init_otm = int(h_cfg.get("reset_otm") or h_cfg.get("initial_otm", 20))
+                    new_h_strike = new_short_strike - (init_otm * step) if opt_type == "PE" else new_short_strike + (init_otm * step)
+
+                    new_h_contract = self.resolve_strike_and_contract(
+                        underlying=und,
+                        strike_selection=str(int(new_h_strike)),
+                        option_type=opt_type,
+                        expiry_type=leg_cfg.get("expiry", "Weekly")
+                    )
+
+                    if new_h_contract:
+                        self._log_event(
+                            f"[Re-Entry Margin Guard] Buying new hedge {new_h_contract['trading_symbol']} (OTM {init_otm}) FIRST before re-entering short leg to secure SPAN margin benefit..."
+                        )
+                        dummy_h_cfg = {
+                            "id": f"hedge_{parent_id}_{new_count}",
+                            "side": "Buy",
+                            "product": leg_cfg.get("product", "NRML"),
+                            "strike_selection": f"OTM {init_otm}",
+                            "option_type": opt_type,
+                            "lots": leg_cfg.get("lots", 1),
+                            "target_type": "None",
+                            "target_value": 0.0,
+                            "sl_type": "None",
+                            "sl_value": 0.0,
+                            "action": "Square off leg",
+                            "underlying": und,
+                            "expiry": leg_cfg.get("expiry", "Weekly"),
+                            "is_associated_hedge": True,
+                            "parent_leg_id": parent_id,
+                            "hedge_parent_type": opt_type,
+                        }
+                        h_res = self._place_leg_entry_order(
+                            dummy_h_cfg,
+                            new_h_contract,
+                            mult,
+                            broker,
+                            adv,
+                            strategy=strat,
+                            is_re_entry=False
+                        )
+                        if h_res and h_res.get("status") == "OPEN":
+                            with _ENGINE_LOCK:
+                                strat.setdefault("positions", []).append(h_res)
+                                if self._active_strategy_id == strat.get("strategy_id"):
+                                    self._state["positions"] = strat.get("positions", [])
+                            active_hedge = h_res
+                            self._log_event(
+                                f"[Re-Entry Margin Guard] ⚡ Associated hedge {h_res.get('symbol')} successfully filled. Now placing short re-entry with SPAN margin benefit active.",
+                                level="SUCCESS"
+                            )
+                        else:
+                            err_h = h_res.get("error") if h_res else "Hedge order failed"
+                            self._log_event(
+                                f"[Re-Entry Aborted] ❌ Failed to secure associated hedge buy leg ({err_h}). Aborting short re-entry to prevent naked margin rejection.",
+                                level="ERROR"
+                            )
+                            return
 
                 new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat, is_re_entry=True)
                 if new_pos:
@@ -7353,6 +7538,18 @@ class StraddleManager:
             if other_open_shorts:
                 self._log_event(
                     f"[Hedge Retained] Not squaring off hedge for {parent_sym} because {len(other_open_shorts)} other open short leg(s) remain active."
+                )
+                return
+
+            # Check if any re-entry is currently pending/in progress for this option type or parent
+            has_re_entry_in_progress = any(
+                p.get("_re_entry_in_progress")
+                for p in strat_positions
+                if (not opt_type or (str(p.get("option_type", "")).upper() == opt_type.upper() or opt_type.upper() in str(p.get("symbol", "")).upper()))
+            )
+            if has_re_entry_in_progress:
+                self._log_event(
+                    f"[Hedge Retained] Not squaring off hedge for {parent_sym} because a re-entry is currently in progress."
                 )
                 return
 
@@ -9960,10 +10157,19 @@ class StraddleManager:
                                 if pnl == 0.0 and ent_price > 0 and exit_price > 0:
                                     pnl = round((exit_price - ent_price) * abs(int(p.get("quantity") or 1)) if side == "BUY" else (ent_price - exit_price) * abs(int(p.get("quantity") or 1)), 2)
 
+                                is_pos_hedge = (
+                                    p.get("is_associated_hedge")
+                                    or "hedge" in str(p.get("id", "")).lower()
+                                    or bool(p.get("hedge_parent_type"))
+                                    or side == "BUY"
+                                )
                                 is_loss = (side == "BUY" and exit_price < ent_price) or (side == "SELL" and exit_price > ent_price) or (pnl < 0)
                                 is_profit = (side == "BUY" and exit_price > ent_price) or (side == "SELL" and exit_price < ent_price) or (pnl > 0)
 
-                                if is_loss:
+                                if is_pos_hedge:
+                                    reason = f"HEDGE EXITED (₹{exit_price:.2f}) (Broker Exit)"
+                                    trigger = "MANUAL"
+                                elif is_loss:
                                     reason = f"STOPLOSS HIT (₹{exit_price:.2f}) (Broker Exit)"
                                     trigger = "STOPLOSS"
                                 elif is_profit:
@@ -10332,7 +10538,13 @@ class StraddleManager:
                     strat_mtm += pos["mtm"]
 
                     # Associated Dynamic Hedge: never trigger SL or Target on hedges!
-                    if pos.get("is_associated_hedge"):
+                    is_hedge_pos = (
+                        pos.get("is_associated_hedge")
+                        or "hedge" in str(pos.get("id", "")).lower()
+                        or bool(pos.get("hedge_parent_type"))
+                        or side == "BUY"
+                    )
+                    if is_hedge_pos:
                         continue
 
                     # Trailing Stoploss (TSL) Evaluation
@@ -10788,6 +11000,7 @@ class StraddleManager:
                 "live_feed_running": self._state.get("live_feed_running", True),
                 "order_api_running": self._state.get("order_api_running", True),
                 "execution_mode": self._state.get("execution_mode", "LIVE_BROKER"),
+                "broker_connected": self.is_broker_connected(),
                 "active_strategy": active_strat,
                 "all_strategies": self._strategies,
                 "positions": active_positions,

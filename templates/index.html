@@ -222,6 +222,12 @@
                 <span>🛑</span> SQUARE OFF ALL
             </button>
 
+            <!-- Disconnected Alert Badge (visible when Kotak Neo orders are blocked) -->
+            <div id="topbarBrokerDisconnectedAlert" style="display:none; align-items:center; gap:6px; background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; padding:5px 12px; border-radius:6px; font-size:11.5px; font-weight:800; cursor:pointer;" onclick="toggleBrokerConnection(event)" title="Live orders blocked! Click to reconnect platform to Kotak Neo">
+                <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#ef4444; box-shadow:0 0 8px #ef4444;"></span>
+                <span>KOTAK DISCONNECTED (ORDERS BLOCKED)</span>
+            </div>
+
             <!-- Merged Settings & System Dropdown (Kotak API + Git main + Trading Mode) -->
             <div style="position:relative; display:inline-block;" id="topbarSettingsMenuWrap">
                 <button type="button" class="straddle-sys-btn" id="btnTopbarSettingsToggle" onclick="toggleTopbarSettingsDropdown(event)" style="display:inline-flex; align-items:center; gap:7px; background:#0f172a; border:1px solid #334155; padding:6px 12px; border-radius:6px; cursor:pointer; color:#f8fafc; font-size:12px; font-weight:700;" title="System Settings & Integrations">
@@ -229,7 +235,22 @@
                     <span>Settings</span>
                     <span style="font-size:10px; color:#94a3b8; margin-left:2px;">▼</span>
                 </button>
-                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:36px; right:0; width:260px; background:#0b0f19; border:1px solid #334155; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.85); z-index:11500; overflow:hidden;">
+                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:36px; right:0; width:270px; background:#0b0f19; border:1px solid #334155; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.85); z-index:11500; overflow:hidden;">
+                    <!-- Kotak Neo Live Connection Kill Switch -->
+                    <div id="kotakBrokerConnectionCard" style="padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.08); background:rgba(15,23,42,0.6);">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:14px;">🔌</span>
+                                <span style="font-weight:700; color:#f8fafc; font-size:12px;">Kotak Neo Link</span>
+                            </div>
+                            <span id="kotakBrokerConnBadge" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid #059669; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800;">CONNECTED</span>
+                        </div>
+                        <button type="button" id="btnToggleBrokerConnection" onclick="toggleBrokerConnection(event)" style="width:100%; display:flex; align-items:center; justify-content:center; gap:6px; background:rgba(239,68,68,0.15); border:1px solid #ef4444; color:#ef4444; padding:6px 10px; border-radius:5px; font-size:11px; font-weight:700; cursor:pointer; transition:all 0.15s ease;" title="Disconnect platform from Kotak Neo to block all live orders during updates or market monitoring">
+                            <span>🔌</span>
+                            <span id="btnToggleBrokerConnectionText">Disconnect from Kotak Neo</span>
+                        </button>
+                    </div>
+
                     <!-- Kotak API Credentials -->
                     <div id="kotakAuthStatusPill" class="{% if not (auth_status and auth_status.is_authenticated) %}disconnected{% endif %}" onclick="openKotakSettingsModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Configure Kotak Neo API Keys">
                         <div style="display:flex; align-items:center; gap:8px;">
@@ -2255,6 +2276,22 @@
                     Configure your Kotak Neo Trade API credentials for automated headless login with TOTP.
                     Session tokens are refreshed automatically every morning at <b>08:15 AM IST</b>.
                 </p>
+                <!-- Live Order Transmission Kill Switch Card -->
+                <div style="background:rgba(15, 23, 42, 0.7); border:1px solid #334155; border-radius:6px; padding:10px 14px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                    <div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:14px;">🔌</span>
+                            <span style="font-weight:700; color:#f8fafc; font-size:12px;">Live Order Link:</span>
+                            <span id="modalKotakBrokerConnBadge" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid #059669; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800;">CONNECTED</span>
+                        </div>
+                        <div style="font-size:11px; color:#94a3b8; margin-top:3px;">
+                            When disconnected, under NO circumstances will any order be transmitted to Kotak Neo.
+                        </div>
+                    </div>
+                    <button type="button" id="btnModalToggleBrokerConnection" onclick="toggleBrokerConnection(event)" class="straddle-btn btn-danger" style="padding:6px 12px; font-size:11px; font-weight:700; white-space:nowrap;">
+                        Disconnect from Kotak
+                    </button>
+                </div>
                 <div style="background:rgba(56, 189, 248, 0.08); border:1px solid rgba(56, 189, 248, 0.25); border-radius:6px; padding:9px 12px; margin-bottom:12px; font-size:11.5px; color:#38bdf8; display:flex; align-items:flex-start; gap:10px;">
                     <span style="font-size:16px;">🌐</span>
                     <div style="line-height:1.45;">

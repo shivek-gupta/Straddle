@@ -47,6 +47,19 @@ _MAP_LOCK = threading.Lock()
 _MAP_LOADED = False
 
 
+def _is_kotak_disconnected() -> bool:
+    """Helper checking if trader has disconnected Kotak Neo live connection in Settings.
+    Under NO circumstances will orders, modifications, or cancellations be transmitted when True."""
+    try:
+        from straddle_engine import get_straddle_manager
+        mgr = get_straddle_manager()
+        if mgr and not mgr.is_broker_connected():
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _init_kotak_symbol_maps():
     """Initializes high-speed token and symbol resolution cache."""
     global _KOTAK_TOKEN_MAP, _KOTAK_DISPLAY_MAP, _MAP_LOADED
@@ -488,6 +501,18 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         trigger_price: float = 0.0,
         tag: str = "straddle_algo",
     ) -> Dict[str, Any]:
+        if _is_kotak_disconnected():
+            logger.warning(
+                f"[KOTAK KILL-SWITCH BLOCKED] Blocked place_order for {symbol} ({transaction_type} {quantity}). Kotak Neo is DISCONNECTED by user in Settings."
+            )
+            return {
+                "success": False,
+                "order_id": "",
+                "status": "DISCONNECTED_BLOCKED",
+                "error": "Kotak Neo is DISCONNECTED in Settings. Live order blocked from transmission.",
+                "status_code": 403,
+            }
+
         client = self._get_client()
         if client is None:
             return {
@@ -596,6 +621,15 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         trigger_price: Optional[float] = None,
         order_type: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if _is_kotak_disconnected():
+            logger.warning(f"[KOTAK KILL-SWITCH BLOCKED] Blocked modify_order for {order_id}. Kotak Neo is DISCONNECTED by user in Settings.")
+            return {
+                "success": False,
+                "order_id": str(order_id),
+                "status": "DISCONNECTED_BLOCKED",
+                "error": "Kotak Neo is DISCONNECTED in Settings. Order modification blocked.",
+            }
+
         client = self._get_client()
         if client is None:
             return {"success": False, "error": "Kotak Neo client not authenticated."}
@@ -642,6 +676,15 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             return {"success": False, "error": str(e)}
 
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        if _is_kotak_disconnected():
+            logger.warning(f"[KOTAK KILL-SWITCH BLOCKED] Blocked cancel_order for {order_id}. Kotak Neo is DISCONNECTED by user in Settings.")
+            return {
+                "success": False,
+                "order_id": str(order_id),
+                "status": "DISCONNECTED_BLOCKED",
+                "error": "Kotak Neo is DISCONNECTED in Settings. Order cancellation blocked.",
+            }
+
         client = self._get_client()
         if client is None:
             return {"success": False, "error": "Kotak Neo client not authenticated."}
