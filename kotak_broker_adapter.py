@@ -597,6 +597,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         all_succeeded = (len(order_ids) == len(slices)) and (failed_qty == 0)
 
         if order_ids:
+            self._positions_cache = None
+            self._positions_cache_ts = 0.0
             primary_id = order_ids[0] if len(order_ids) == 1 else ",".join(order_ids)
             return {
                 "success": all_succeeded,
@@ -662,6 +664,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
             clean_qty = str(int(quantity or 65))
 
+            self._positions_cache = None
+            self._positions_cache_ts = 0.0
             res = client.modify_order(
                 order_id=str(order_id),
                 price=clean_price,
@@ -690,6 +694,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             return {"success": False, "error": "Kotak Neo client not authenticated."}
 
         try:
+            self._positions_cache = None
+            self._positions_cache_ts = 0.0
             res = client.cancel_order(order_id=str(order_id))
             return {"success": True, "order_id": str(order_id), "data": res}
         except Exception as e:

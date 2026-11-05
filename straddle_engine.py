@@ -2972,9 +2972,14 @@ class StraddleManager:
             new_strat["last_trade_date"] = None
             new_strat["_reset_generation"] = 0
 
-            # Reset runtime state on all configured legs
-            for leg in new_strat.get("legs", []):
+            # Reset runtime state on all configured legs and give them brand new unique IDs
+            for idx, leg in enumerate(new_strat.get("legs", [])):
                 if isinstance(leg, dict):
+                    new_leg_id = f"leg_{int(time.time()*1000)}_{idx}"
+                    leg["id"] = new_leg_id
+                    if leg.get("associated_hedge_id") or leg.get("has_associated_hedge"):
+                        leg["associated_hedge_id"] = f"hedge_{new_leg_id}"
+                        leg["has_associated_hedge"] = True
                     leg["error"] = None
                     leg["error_message"] = None
                     leg["status"] = "READY"
@@ -3313,7 +3318,7 @@ class StraddleManager:
             broker = get_broker_adapter(mode)
             raw_positions = []
             try:
-                raw_positions = broker.get_positions() or []
+                raw_positions = broker.get_positions(force=True) or []
             except Exception as e:
                 logger.error(f"Error fetching Kotak Neo broker positions: {e}")
 
@@ -5063,6 +5068,7 @@ class StraddleManager:
             "benchmark_pending": bm_pending,
             "interim_protection_active": bm_pending,
             "entry_time": entry_time,
+            "_entry_epoch_ts": time.time(),
             "target_type": tgt_type,
             "target_type_label": target_type_label,
             "target_value": tgt_val,
@@ -10134,6 +10140,13 @@ class StraddleManager:
             for s in self._strategies:
                 for p in s.get("positions", []):
                     if p.get("status") == "OPEN" and not p.get("_exit_in_progress"):
+                        # INVIOLABLE SETTLEMENT GUARD:
+                        # Never reconcile an open position as closed if entered less than 20 seconds ago.
+                        # This prevents instantaneous 1-second ghost exits caused by broker OMS position book settling
+                        # or stale pre-entry cache.
+                        entry_epoch = float(p.get("_entry_epoch_ts") or 0.0)
+                        if entry_epoch > 0 and (time.time() - entry_epoch) < 20.0:
+                            continue
                         matched_bp = None
                         for bp in raw_positions:
                             bp_sym = bp.get("trading_symbol") or bp.get("symbol") or ""
