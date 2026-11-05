@@ -842,7 +842,7 @@
                         <thead>
                             <tr>
                                 <th style="width:36px; text-align:center;">
-                                    <input type="checkbox" id="straddleSelectAllLegs" class="straddle-checkbox" onchange="toggleSelectAllStraddleLegs(this)">
+                                    <input type="checkbox" id="straddleSelectAllLegs" class="straddle-checkbox" onclick="toggleSelectAllStraddleLegs(this)" onchange="toggleSelectAllStraddleLegs(this)">
                                 </th>
                                 <th>STATUS</th>
                                 <th>SIDE</th>
@@ -894,6 +894,7 @@
                 <button type="button" class="straddle-btn btn-primary" id="btnStraddleToggleSettings" onclick="toggleStraddleSettingsPanel()" title="Open strategy parameters, execution rules & leg builder" style="background:#2563eb; border-color:#3b82f6; font-weight:800;">⚙️ Settings</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleOptionChain" onclick="openStraddleOptionChainModal()" title="View live option chain matrix">📊 Option Chain</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleAdoptPosition" onclick="openAdoptBrokerPositionModal()" title="Adopt existing manual or broker positions into this algo for automated SL/Target management" style="border-color:#38bdf8; color:#38bdf8; font-weight:700;">📥 Adopt Trade</button>
+                <button type="button" class="straddle-btn btn-outline" id="btnStraddleBenchmark" onclick="openExecutionBenchmarkModal()" title="View real-time latency & slippage comparison between Kotak Neo Live Broker and Parallel Paper Simulation" style="border-color:#38bdf8; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.1);">⚡ Execution Benchmark</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleSquareOffSelected" style="margin-left:auto; display:none;" onclick="straddleSquareOffSelectedLegs()" title="Square off only the selected open leg positions">Square off selected legs</button>
             </div>
 
@@ -930,7 +931,21 @@
                                     <option value="COPPER">COPPER</option>
                                 </optgroup>
                             </select>
+                        
                         </div>
+                        <div style="display:flex; align-items:center; gap:6px; margin-left:6px;">
+                            <span style="font-size:12px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Mode:</span>
+                            <select id="cfgStrategyExecutionMode" class="straddle-select" style="min-width:135px; font-weight:700; color:#10b981; background:#1e293b; border:1px solid #10b981;" onchange="onStrategyExecutionModeChange(this.value)" title="Choose execution mode for this strategy">
+                                <option value="LIVE_BROKER" selected>🟢 Kotak Neo Live</option>
+                                <option value="PAPER_TRADING">📄 Paper Trading</option>
+                            </select>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px; margin-left:6px;" title="Run live strategy on paper trading simultaneously to compare broker latency and slippage">
+                            <label class="quantiply-switch">
+                                <input type="checkbox" id="cfgStrategyShadowPaper" checked>
+                                <span class="quantiply-slider"></span>
+                            </label>
+                            <span style="font-size:11px; font-weight:700; color:#38bdf8;">⚡ Benchmark Latency</span>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                         <button type="button" class="straddle-btn btn-outline" onclick="openAdoptBrokerPositionModal()" title="View and adopt manual or external broker positions into this algo" style="border-color:#38bdf8; color:#38bdf8; font-size:11.5px; font-weight:700;">📥 Adopt Trade</button>
@@ -3413,5 +3428,76 @@
             }, 1000);
         });
     </script>
+
+    <!-- ========================================================================= -->
+    <!-- MODAL: EXECUTION BENCHMARK (KOTAK NEO LIVE BROKER vs PARALLEL PAPER)      -->
+    <!-- ========================================================================= -->
+    <div id="modalExecutionBenchmark" class="straddle-modal-backdrop" style="display:none; z-index:200000;" onclick="if(event.target === this) closeExecutionBenchmarkModal()">
+        <div class="straddle-modal-card" style="max-width:1050px; width:95%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.85); overflow:hidden;">
+            <!-- Header -->
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:#0f172a; border-bottom:1px solid #1e293b;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:20px;">⚡</span>
+                    <div>
+                        <h3 style="margin:0; font-size:15px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">Real-Time Execution Benchmark & Latency Analysis</h3>
+                        <p style="margin:2px 0 0; font-size:11px; color:#94a3b8;">Comparing Kotak Neo live order execution against parallel zero-latency paper fill</p>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" class="straddle-btn btn-outline" onclick="downloadExecutionBenchmarkReport()" style="border-color:#10b981; color:#10b981; font-weight:700; font-size:11px; padding:4px 10px;" title="Download complete latency and slippage audit report in Excel format">📥 Download Excel (.xlsx)</button>
+                    <button type="button" class="straddle-btn btn-outline" onclick="loadExecutionBenchmarkData()" style="border-color:#38bdf8; color:#38bdf8; font-weight:700; font-size:11px; padding:4px 10px;" title="Refresh benchmark stats">🔄 Refresh</button>
+                    <button type="button" class="straddle-modal-close" onclick="closeExecutionBenchmarkModal()" style="font-size:18px; font-weight:800; color:#f8fafc; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:6px; cursor:pointer; padding:2px 10px;" title="Close (Esc)">✕</button>
+                </div>
+            </div>
+
+            <!-- KPI Cards Ribbon -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; padding:14px 20px; background:#0c101c; border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                    <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Avg Broker Latency</span>
+                    <strong id="bmkAvgLatency" style="color:#38bdf8; font-size:16px; font-family:var(--font-mono);">0.0 ms</strong>
+                </div>
+                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                    <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Fastest / Slowest</span>
+                    <strong id="bmkFastSlowLatency" style="color:#f8fafc; font-size:13px; font-family:var(--font-mono);">0 ms / 0 ms</strong>
+                </div>
+                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                    <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Total Slippage (pts)</span>
+                    <strong id="bmkTotalSlippagePts" style="color:#10b981; font-size:16px; font-family:var(--font-mono);">0.00 pts</strong>
+                </div>
+                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                    <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Total Slippage Impact (₹)</span>
+                    <strong id="bmkTotalSlippageInr" style="color:#10b981; font-size:16px; font-family:var(--font-mono);">₹0.00</strong>
+                </div>
+                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                    <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Execution Health</span>
+                    <strong id="bmkHealthGrade" style="color:#10b981; font-size:14px; font-weight:800;">⚡ EXCELLENT</strong>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div style="max-height:480px; overflow-y:auto; padding:12px 20px;">
+                <table style="width:100%; border-collapse:collapse; font-size:11px; font-family:var(--font-mono);">
+                    <thead>
+                        <tr style="border-bottom:1px solid #334155; color:#94a3b8; text-transform:uppercase; font-size:9.5px; text-align:left;">
+                            <th style="padding:6px 4px;">Time IST</th>
+                            <th style="padding:6px 4px;">Symbol</th>
+                            <th style="padding:6px 4px;">Side</th>
+                            <th style="padding:6px 4px;">Action</th>
+                            <th style="padding:6px 4px; text-align:right;">Paper Fill</th>
+                            <th style="padding:6px 4px; text-align:right;">Broker Fill</th>
+                            <th style="padding:6px 4px; text-align:right;">Latency (ms)</th>
+                            <th style="padding:6px 4px; text-align:right;">Slippage (pts)</th>
+                            <th style="padding:6px 4px; text-align:right;">Impact (₹)</th>
+                            <th style="padding:6px 4px; text-align:center;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bmkOrdersTbody">
+                        <tr><td colspan="10" style="text-align:center; padding:24px; color:#64748b;">No benchmark executions recorded yet. Start live trading to observe parallel benchmark comparison.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

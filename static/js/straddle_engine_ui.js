@@ -4262,6 +4262,13 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 mtmEl.className = `straddle-mtm ${mtmClass}`;
             }
 
+            // Sync checkbox selection state
+            const legCb = row.querySelector(".straddle-leg-checkbox, input[type='checkbox']");
+            if (legCb) {
+                const isSelected = (window._straddleSelectedLegIndices && window._straddleSelectedLegIndices.has(idx)) || (pos.id && window._straddleSelectedLegIds && window._straddleSelectedLegIds.has(pos.id));
+                legCb.checked = !!isSelected;
+            }
+
             // Check pending edits or active focus
             const hasPending = !!(window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]);
             const isFocusedInRow = activeEl && row.contains(activeEl);
@@ -4963,22 +4970,44 @@ function onStraddlePositionCheckboxChange(inputEl = null, idx = null, legId = nu
 }
 
 function toggleSelectAllStraddleLegs(masterCb) {
-    const isChecked = masterCb ? masterCb.checked : false;
-    const cbs = document.querySelectorAll(".straddle-leg-checkbox");
-    cbs.forEach(cb => {
-        cb.checked = isChecked;
-        const idx = parseInt(cb.getAttribute("data-index"), 10);
-        const legId = cb.getAttribute("data-leg-id");
-        if (isChecked) {
-            if (!isNaN(idx)) window._straddleSelectedLegIndices.add(idx);
-            if (legId) window._straddleSelectedLegIds.add(legId);
-        } else {
-            if (!isNaN(idx)) window._straddleSelectedLegIndices.delete(idx);
-            if (legId) window._straddleSelectedLegIds.delete(legId);
+    try {
+        const isChecked = masterCb ? !!masterCb.checked : false;
+        if (!window._straddleSelectedLegIndices) window._straddleSelectedLegIndices = new Set();
+        if (!window._straddleSelectedLegIds) window._straddleSelectedLegIds = new Set();
+
+        const tbody = document.getElementById("straddlePositionsTableBody");
+        const cbs = tbody ? tbody.querySelectorAll("input[type='checkbox'].straddle-leg-checkbox, input[type='checkbox']") : document.querySelectorAll(".straddle-leg-checkbox");
+
+        cbs.forEach(cb => {
+            cb.checked = isChecked;
+            const idx = parseInt(cb.getAttribute("data-index"), 10);
+            const legId = cb.getAttribute("data-leg-id");
+            if (isChecked) {
+                if (!isNaN(idx)) window._straddleSelectedLegIndices.add(idx);
+                if (legId) window._straddleSelectedLegIds.add(legId);
+            } else {
+                if (!isNaN(idx)) window._straddleSelectedLegIndices.delete(idx);
+                if (legId) window._straddleSelectedLegIds.delete(legId);
+            }
+        });
+
+        const activeStrat = window._straddleState?.activeStrategy;
+        if (isChecked && activeStrat && activeStrat.positions) {
+            activeStrat.positions.forEach((p, i) => {
+                window._straddleSelectedLegIndices.add(i);
+                if (p.id) window._straddleSelectedLegIds.add(p.id);
+            });
+        } else if (!isChecked) {
+            window._straddleSelectedLegIndices.clear();
+            window._straddleSelectedLegIds.clear();
         }
-    });
-    onStraddlePositionCheckboxChange();
+
+        onStraddlePositionCheckboxChange();
+    } catch (e) {
+        console.error("Error in toggleSelectAllStraddleLegs:", e);
+    }
 }
+window.toggleSelectAllStraddleLegs = toggleSelectAllStraddleLegs;
 
 async function retrySingleStraddleLeg(strategyId, legId, legIndex) {
     const stratId = strategyId || window._straddleState?.activeStrategy?.strategy_id;
@@ -5834,6 +5863,12 @@ function populateStraddleSettingsForm(s) {
     }
     if (document.getElementById("cfgStrategyUnderlying")) {
         document.getElementById("cfgStrategyUnderlying").value = (s.underlying || "NIFTY").toUpperCase();
+    }
+    if (document.getElementById("cfgStrategyExecutionMode")) {
+        document.getElementById("cfgStrategyExecutionMode").value = s.execution_mode || "LIVE_BROKER";
+    }
+    if (document.getElementById("cfgStrategyShadowPaper")) {
+        document.getElementById("cfgStrategyShadowPaper").checked = (s.shadow_paper_trading !== false);
     }
     const titleEl = document.getElementById("straddleTerminalStrategyTitle");
     if (titleEl) {
@@ -6917,7 +6952,11 @@ function serializeCurrentStrategySettings() {
     }
 
     const stratUnd = (document.getElementById("cfgStrategyUnderlying")?.value || active.underlying || "NIFTY").toUpperCase();
+    const stratExecMode = document.getElementById("cfgStrategyExecutionMode")?.value || active.execution_mode || "LIVE_BROKER";
+    const stratShadowPaper = document.getElementById("cfgStrategyShadowPaper") ? document.getElementById("cfgStrategyShadowPaper").checked : (active.shadow_paper_trading !== false);
     const strategy = {
+        execution_mode: stratExecMode,
+        shadow_paper_trading: stratShadowPaper,
         strategy_id: inputSid || active.strategy_id || ("strat_" + Date.now()),
         name: (inputName && inputName.trim()) ? inputName.trim() : (active.name || "Custom Straddle Strategy"),
         underlying: stratUnd,
@@ -13501,3 +13540,117 @@ function onBasketExpiryFilterChange(val) {
     }
 }
 window.onBasketExpiryFilterChange = onBasketExpiryFilterChange;
+
+
+// =========================================================================
+// EXECUTION BENCHMARK (KOTAK NEO LIVE BROKER vs PARALLEL PAPER SIMULATION)
+// =========================================================================
+
+async function openExecutionBenchmarkModal() {
+    const modal = document.getElementById("modalExecutionBenchmark");
+    if (!modal) return;
+    modal.style.display = "flex";
+    await loadExecutionBenchmarkData();
+}
+window.openExecutionBenchmarkModal = openExecutionBenchmarkModal;
+
+function closeExecutionBenchmarkModal() {
+    const modal = document.getElementById("modalExecutionBenchmark");
+    if (modal) modal.style.display = "none";
+}
+window.closeExecutionBenchmarkModal = closeExecutionBenchmarkModal;
+
+async function loadExecutionBenchmarkData() {
+    try {
+        const activeSid = window._straddleState?.activeStrategyId || window._straddleState?.activeStrategy?.strategy_id || "";
+        const url = activeSid ? `/api/straddle/benchmark?strategy_id=${encodeURIComponent(activeSid)}` : "/api/straddle/benchmark";
+        const resp = await fetch(url);
+        const res = await resp.json();
+        if (res.success && res.benchmark) {
+            renderExecutionBenchmarkData(res.benchmark);
+        }
+    } catch (e) {
+        console.error("Error loading benchmark data:", e);
+    }
+}
+window.loadExecutionBenchmarkData = loadExecutionBenchmarkData;
+
+function renderExecutionBenchmarkData(bmk) {
+    const elAvg = document.getElementById("bmkAvgLatency");
+    const elFastSlow = document.getElementById("bmkFastSlowLatency");
+    const elSlipPts = document.getElementById("bmkTotalSlippagePts");
+    const elSlipInr = document.getElementById("bmkTotalSlippageInr");
+    const elGrade = document.getElementById("bmkHealthGrade");
+    const tbody = document.getElementById("bmkOrdersTbody");
+
+    if (elAvg) elAvg.textContent = `${(bmk.avg_latency_ms || 0).toFixed(1)} ms`;
+    if (elFastSlow) elFastSlow.textContent = `${(bmk.fastest_latency_ms || 0).toFixed(0)} ms / ${(bmk.slowest_latency_ms || 0).toFixed(0)} ms`;
+    
+    const slipPts = Number(bmk.total_slippage_pts || 0);
+    const slipInr = Number(bmk.total_slippage_inr || 0);
+    if (elSlipPts) {
+        elSlipPts.textContent = `${slipPts >= 0 ? '+' : ''}${slipPts.toFixed(2)} pts`;
+        elSlipPts.style.color = slipPts >= 0 ? "#10b981" : "#f43f5e";
+    }
+    if (elSlipInr) {
+        elSlipInr.textContent = `₹${slipInr >= 0 ? '+' : ''}${slipInr.toFixed(2)}`;
+        elSlipInr.style.color = slipInr >= 0 ? "#10b981" : "#f43f5e";
+    }
+
+    if (elGrade) {
+        const g = bmk.health_grade || "GOOD";
+        if (g === "ULTRA_FAST") {
+            elGrade.textContent = "⚡ ULTRA-FAST (<200ms)";
+            elGrade.style.color = "#38bdf8";
+        } else if (g === "GOOD") {
+            elGrade.textContent = "🟢 GOOD (200-500ms)";
+            elGrade.style.color = "#10b981";
+        } else if (g === "MODERATE") {
+            elGrade.textContent = "🟡 MODERATE (500-1000ms)";
+            elGrade.style.color = "#fbbf24";
+        } else {
+            elGrade.textContent = "🔴 HIGH LATENCY (>1000ms)";
+            elGrade.style.color = "#f43f5e";
+        }
+    }
+
+    if (!tbody) return;
+    const orders = bmk.orders || [];
+    if (orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:28px; color:#64748b;">No benchmark executions recorded yet. Start live trading to observe parallel benchmark comparison.</td></tr>';
+        return;
+    }
+
+    let html = "";
+    orders.slice().reverse().forEach(o => {
+        const sPts = Number(o.slippage_pts || 0);
+        const sInr = Number(o.slippage_inr || 0);
+        const sColor = sPts >= 0 ? '#10b981' : '#f43f5e';
+        const isFilled = o.status === "FILLED";
+        const stColor = isFilled ? '#10b981' : '#f43f5e';
+        const sideColor = String(o.side).toUpperCase() === 'BUY' ? '#38bdf8' : '#fb923c';
+
+        html += `
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                <td style="padding:6px 4px; color:#94a3b8;">${o.dispatch_time || '-'}</td>
+                <td style="padding:6px 4px; font-weight:700; color:#f8fafc;">${o.symbol}</td>
+                <td style="padding:6px 4px;"><span style="color:${sideColor}; font-weight:800;">${o.side}</span></td>
+                <td style="padding:6px 4px; color:#cbd5e1;">${o.action || 'ENTRY'}</td>
+                <td style="padding:6px 4px; text-align:right; color:#94a3b8;">₹${Number(o.paper_price || 0).toFixed(2)}</td>
+                <td style="padding:6px 4px; text-align:right; font-weight:700; color:#f8fafc;">₹${Number(o.broker_price || 0).toFixed(2)}</td>
+                <td style="padding:6px 4px; text-align:right; color:#38bdf8; font-weight:700;">${Number(o.broker_latency_ms || 0).toFixed(0)} ms</td>
+                <td style="padding:6px 4px; text-align:right; color:${sColor}; font-weight:700;">${sPts >= 0 ? '+' : ''}${sPts.toFixed(2)}</td>
+                <td style="padding:6px 4px; text-align:right; color:${sColor}; font-weight:700;">₹${sInr >= 0 ? '+' : ''}${sInr.toFixed(2)}</td>
+                <td style="padding:6px 4px; text-align:center;"><span style="color:${stColor}; font-weight:800;">${o.status || 'FILLED'}</span></td>
+            </tr>
+        `;
+    });
+    tbody.innerHTML = html;
+}
+
+function downloadExecutionBenchmarkReport() {
+    const activeSid = window._straddleState?.activeStrategyId || window._straddleState?.activeStrategy?.strategy_id || "";
+    const url = activeSid ? `/api/straddle/download_benchmark_report?strategy_id=${encodeURIComponent(activeSid)}` : "/api/straddle/download_benchmark_report";
+    window.location.href = url;
+}
+window.downloadExecutionBenchmarkReport = downloadExecutionBenchmarkReport;

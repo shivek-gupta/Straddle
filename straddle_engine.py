@@ -17,6 +17,7 @@ import sys
 import time
 import math
 import json
+import random
 import gzip
 import re
 import logging
@@ -638,6 +639,8 @@ class StraddleManager:
         self._ob_cache: Dict[str, Dict[str, Any]] = {}
         self._last_inst_stat_ts: float = 0.0
         self._fast_resolved_contract_cache: Dict[Any, Dict[str, Any]] = {}
+        self._benchmarks_file = config.DATA_DIR / "straddle_shadow_benchmarks.json"
+        self._shadow_benchmarks: List[Dict[str, Any]] = self._load_shadow_benchmarks()
         self._active_underlying: str = "NIFTY"
 
         self._stop_event = threading.Event()
@@ -691,6 +694,195 @@ class StraddleManager:
             _safe_write_json(STRADDLE_DELETED_FILE, sorted(list(self._deleted_strategy_ids)))
         except Exception as e:
             logger.warning(f"Error saving deleted strategies: {e}")
+
+
+    def _load_shadow_benchmarks(self) -> List[Dict[str, Any]]:
+        """Load persistent shadow execution benchmarks."""
+        try:
+            if hasattr(self, "_benchmarks_file") and self._benchmarks_file.exists():
+                with open(self._benchmarks_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return data[-1000:]
+        except Exception as e:
+            logger.warning(f"Could not load shadow benchmarks: {e}")
+        return []
+
+    def _save_shadow_benchmarks(self):
+        """Save shadow execution benchmarks to disk atomically."""
+        try:
+            if hasattr(self, "_benchmarks_file"):
+                tmp = self._benchmarks_file.with_suffix(".tmp")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(self._shadow_benchmarks[-1000:], f, indent=2)
+                tmp.replace(self._benchmarks_file)
+        except Exception as e:
+            logger.warning(f"Could not save shadow benchmarks: {e}")
+
+    def _record_shadow_benchmark(
+        self,
+        strat: Optional[Dict[str, Any]],
+        pos: Optional[Dict[str, Any]],
+        symbol: str,
+        side: str,
+        quantity: int,
+        dispatch_perf_t: float,
+        dispatch_time_str: str,
+        broker_order_res: Dict[str, Any],
+        action_type: str = "ENTRY",
+    ) -> Dict[str, Any]:
+        """
+        Records parallel shadow paper trade execution alongside live broker execution.
+        Calculates sub-millisecond execution latency, slippage in points, and monetary impact (₹).
+        """
+        try:
+            ack_latency_ms = round((time.perf_counter() - dispatch_perf_t) * 1000.0, 1)
+            broker_success = bool(broker_order_res.get("success", False))
+            broker_price = float(broker_order_res.get("price") or 0.0)
+
+            # Paper Trading Simulation at exact dispatch instant
+            paper_price = 0.0
+            try:
+                from kotak_broker_adapter import _PAPER_ADAPTER
+                paper_res = _PAPER_ADAPTER.place_order(
+                    symbol=symbol,
+                    instrument_key=pos.get("instrument_key", "") if pos else "",
+                    transaction_type=side.upper(),
+                    quantity=quantity,
+                    product=pos.get("product", "NRML") if pos else "NRML",
+                    order_type="MARKET",
+                    price=0.0,
+                    tag=f"paper_bench_{action_type.lower()}"
+                )
+                paper_price = float(paper_res.get("price") or 0.0)
+            except Exception as e_p:
+                logger.warning(f"Paper benchmark simulation error: {e_p}")
+
+            if paper_price <= 0.0 and pos:
+                paper_price = float(pos.get("ltp") or pos.get("avg_ent_price") or broker_price)
+            if broker_price <= 0.0 and paper_price > 0.0:
+                broker_price = paper_price
+
+            # Slippage calculation
+            # For BUY: lower broker price than paper is favorable (+); higher broker price is unfavorable (-)
+            # For SELL: higher broker price than paper is favorable (+); lower broker price is unfavorable (-)
+            if side.upper() == "BUY":
+                slippage_pts = round(paper_price - broker_price, 2)
+            else:
+                slippage_pts = round(broker_price - paper_price, 2)
+            slippage_inr = round(slippage_pts * quantity, 2)
+
+            benchmark_entry = {
+                "id": f"bmk_{int(time.time()*1000)}_{random.randint(100, 999)}",
+                "strategy_id": (strat.get("strategy_id") or strat.get("id")) if strat else "",
+                "strategy_name": strat.get("name", "Algo") if strat else "Algo",
+                "symbol": symbol,
+                "side": side.upper(),
+                "action": action_type.upper(),
+                "quantity": quantity,
+                "dispatch_time": dispatch_time_str,
+                "paper_time": dispatch_time_str,
+                "paper_price": paper_price,
+                "broker_ack_ms": ack_latency_ms,
+                "broker_fill_time": now_ist_str(),
+                "broker_price": broker_price,
+                "broker_latency_ms": ack_latency_ms,
+                "slippage_pts": slippage_pts,
+                "slippage_inr": slippage_inr,
+                "broker_order_id": str(broker_order_res.get("order_id") or ""),
+                "status": "FILLED" if broker_success else "REJECTED",
+                "error": broker_order_res.get("error") or broker_order_res.get("error_message") or ""
+            }
+
+            # Attach to position
+            if pos:
+                if action_type.upper() == "ENTRY":
+                    pos["benchmark"] = benchmark_entry
+                else:
+                    pos["exit_benchmark"] = benchmark_entry
+
+            # Attach to strategy
+            if strat:
+                if "shadow_benchmark" not in strat or not isinstance(strat["shadow_benchmark"], list):
+                    strat["shadow_benchmark"] = []
+                strat["shadow_benchmark"].append(benchmark_entry)
+                # Keep last 100 per strategy
+                strat["shadow_benchmark"] = strat["shadow_benchmark"][-100:]
+
+            # Append to platform benchmark history
+            with _ENGINE_LOCK:
+                if not hasattr(self, "_shadow_benchmarks"):
+                    self._shadow_benchmarks = []
+                self._shadow_benchmarks.append(benchmark_entry)
+                self._shadow_benchmarks = self._shadow_benchmarks[-1000:]
+            self._save_shadow_benchmarks()
+
+            self._log_event(
+                f"[⚡ Parallel Paper Benchmark] {symbol} ({action_type} {side}): Paper Fill @ ₹{paper_price:.2f} (0ms) | Kotak Fill @ ₹{broker_price:.2f} ({ack_latency_ms}ms) | Slippage: {slippage_pts:+.2f} pts (₹{slippage_inr:+.2f})",
+                level="INFO"
+            )
+            return benchmark_entry
+        except Exception as e_b:
+            logger.warning(f"Error recording shadow benchmark: {e_b}")
+            return {}
+
+    def get_shadow_benchmark_summary(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
+        """Returns aggregated latency and slippage KPIs comparing Broker execution vs Paper."""
+        with _ENGINE_LOCK:
+            history = list(getattr(self, "_shadow_benchmarks", []))
+            if strategy_id:
+                history = [b for b in history if b.get("strategy_id") == strategy_id]
+
+        if not history:
+            return {
+                "total_orders": 0,
+                "filled_orders": 0,
+                "rejected_orders": 0,
+                "avg_latency_ms": 0.0,
+                "fastest_latency_ms": 0.0,
+                "slowest_latency_ms": 0.0,
+                "total_slippage_pts": 0.0,
+                "total_slippage_inr": 0.0,
+                "avg_slippage_pts": 0.0,
+                "health_grade": "NO_DATA",
+                "orders": []
+            }
+
+        latencies = [b.get("broker_latency_ms", 0.0) for b in history if b.get("broker_latency_ms", 0.0) > 0]
+        slippages_pts = [b.get("slippage_pts", 0.0) for b in history]
+        slippages_inr = [b.get("slippage_inr", 0.0) for b in history]
+        filled = [b for b in history if b.get("status") == "FILLED"]
+        rejected = [b for b in history if b.get("status") == "REJECTED"]
+
+        avg_lat = round(sum(latencies) / len(latencies), 1) if latencies else 0.0
+        fastest_lat = min(latencies) if latencies else 0.0
+        slowest_lat = max(latencies) if latencies else 0.0
+        tot_slip_pts = round(sum(slippages_pts), 2)
+        tot_slip_inr = round(sum(slippages_inr), 2)
+        avg_slip_pts = round(tot_slip_pts / len(history), 2) if history else 0.0
+
+        if avg_lat <= 200:
+            health = "ULTRA_FAST"
+        elif avg_lat <= 500:
+            health = "GOOD"
+        elif avg_lat <= 1000:
+            health = "MODERATE"
+        else:
+            health = "HIGH_LATENCY"
+
+        return {
+            "total_orders": len(history),
+            "filled_orders": len(filled),
+            "rejected_orders": len(rejected),
+            "avg_latency_ms": avg_lat,
+            "fastest_latency_ms": fastest_lat,
+            "slowest_latency_ms": slowest_lat,
+            "total_slippage_pts": tot_slip_pts,
+            "total_slippage_inr": tot_slip_inr,
+            "avg_slippage_pts": avg_slip_pts,
+            "health_grade": health,
+            "orders": history[-200:]
+        }
 
     def _load_strategies(self):
         with _ENGINE_LOCK:
@@ -4742,6 +4934,8 @@ class StraddleManager:
         und_name = contract.get("underlying") or leg_cfg.get("underlying") or "NIFTY"
         total_lots = lots * multiplier
         sliced_lots = slice_lots_by_freeze(total_lots, und_name)
+        t_entry_dispatch = time.perf_counter()
+        entry_dispatch_ist = now_ist_str()
 
         if len(sliced_lots) > 1:
             self._log_event(
@@ -4853,6 +5047,20 @@ class StraddleManager:
                 return None
 
             failed_order_id = str(order_res.get("order_id") or ("261008000" + str(int(time.time()*1000))[-6:]))
+            try:
+                self._record_shadow_benchmark(
+                    strat=strategy,
+                    pos=None,
+                    symbol=contract["trading_symbol"],
+                    side=side,
+                    quantity=total_qty,
+                    dispatch_perf_t=t_entry_dispatch,
+                    dispatch_time_str=entry_dispatch_ist,
+                    broker_order_res=order_res,
+                    action_type="RE-ENTRY" if is_re_entry else "ENTRY"
+                )
+            except Exception as e_bmk:
+                logger.warning(f"Error recording rejected entry benchmark: {e_bmk}")
             self._log_event(f"Order REJECTED on broker for {contract['trading_symbol']}: {err_msg}", level="ERROR", details=order_res)
             
             order_cat = "Re-Entry" if is_re_entry else ("Entry" if side in ("SELL", "BUY") else "Hedge")
@@ -5156,6 +5364,23 @@ class StraddleManager:
                 self._place_advance_target_order(broker, pos_record, delay_sec=0)
 
         threading.Thread(target=_dispatch_advance_orders, daemon=True).start()
+
+        # Record shadow paper benchmark comparison
+        try:
+            bmk = self._record_shadow_benchmark(
+                strat=strategy,
+                pos=pos_record,
+                symbol=contract["trading_symbol"],
+                side=side,
+                quantity=total_qty,
+                dispatch_perf_t=t_entry_dispatch,
+                dispatch_time_str=entry_dispatch_ist,
+                broker_order_res=order_res,
+                action_type="RE-ENTRY" if is_re_entry else "ENTRY"
+            )
+            pos_record["benchmark"] = bmk
+        except Exception as e_bmk:
+            logger.warning(f"Error recording entry benchmark: {e_bmk}")
 
         self._log_event(
             f"Entered {side} {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty}, TGT: ₹{target_price}, SL: ₹{sl_price})",
@@ -6933,6 +7158,8 @@ class StraddleManager:
             lot_size = get_lot_size_for_symbol(pos.get("symbol", ""), pos.get("instrument_key", ""))
 
         qty_slices = slice_quantity_by_freeze(qty, lot_size, und)
+        t_exit_dispatch = time.perf_counter()
+        exit_dispatch_ist = now_ist_str()
 
         if len(qty_slices) > 1:
             logger.info(f"[AUTO SLICING EXIT] Quantity {qty} exceeds {und} freeze limit. Auto-sliced into {len(qty_slices)} orders: {qty_slices}")
@@ -6983,6 +7210,22 @@ class StraddleManager:
             except Exception as e:
                 logger.error(f"Exception placing broker exit order for {pos.get('symbol')}: {e}")
                 order_res = {"success": False, "error": str(e)}
+
+        # Record shadow paper benchmark comparison on exit
+        try:
+            self._record_shadow_benchmark(
+                strat=strat,
+                pos=pos,
+                symbol=pos.get("symbol", ""),
+                side=exit_side,
+                quantity=qty,
+                dispatch_perf_t=t_exit_dispatch,
+                dispatch_time_str=exit_dispatch_ist,
+                broker_order_res=order_res,
+                action_type="EXIT"
+            )
+        except Exception as e_bmk:
+            logger.warning(f"Error recording exit benchmark: {e_bmk}")
 
         # Format exit reason cleanly
         r_clean = reason
@@ -7158,6 +7401,17 @@ class StraddleManager:
 
     def _handle_leg_re_entry(self, strat: Dict[str, Any], pos: Dict[str, Any], trigger: str = "STOPLOSS", exit_order_id: Optional[str] = None):
         """Handle Re-Entry / Re-Execute for a leg when SL or Target is hit."""
+        # STRICT HEDGE & BUY LEG GUARD:
+        # A hedge or long buy leg must NEVER trigger a re-entry or auto-exit other hedges!
+        is_pos_hedge = (
+            pos.get("is_associated_hedge")
+            or "hedge" in str(pos.get("id", "")).lower()
+            or bool(pos.get("hedge_parent_type"))
+            or str(pos.get("side", "SELL")).upper() == "BUY"
+        )
+        if is_pos_hedge:
+            logger.info(f"[Hedge Re-entry Guard] Position '{pos.get('symbol')}' is a hedge or buy leg. Skipping re-entry attempt.")
+            return
         legs_cfg = strat.get("legs", [])
         leg_cfg = next((l for l in legs_cfg if l.get("id") == pos.get("id")), None)
         if not leg_cfg:

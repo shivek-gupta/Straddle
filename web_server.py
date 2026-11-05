@@ -317,6 +317,197 @@ def api_straddle_download_audit_logs():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/straddle/benchmark", methods=["GET"])
+def api_straddle_benchmark():
+    """Fetches real-time execution benchmark metrics comparing Kotak Neo vs Parallel Paper Simulation."""
+    try:
+        mgr = get_straddle_manager()
+        sid = request.args.get("strategy_id")
+        summary = mgr.get_shadow_benchmark_summary(strategy_id=sid)
+        return jsonify({"success": True, "benchmark": summary})
+    except Exception as e:
+        logger.error(f"Error fetching benchmark: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/download_benchmark_report", methods=["GET"])
+def api_straddle_download_benchmark_report():
+    """Generates and downloads an executive-ready Excel report of execution latency & paper slippage."""
+    try:
+        import io
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+        mgr = get_straddle_manager()
+        sid = request.args.get("strategy_id")
+        summary = mgr.get_shadow_benchmark_summary(strategy_id=sid)
+        orders = summary.get("orders", [])
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Benchmark Report"
+        ws.views.sheetView[0].showGridLines = True
+
+        # Summary Title Block
+        ws.merge_cells("A1:K1")
+        title_cell = ws.cell(row=1, column=1)
+        title_cell.value = "⚡ REAL-TIME EXECUTION BENCHMARK: KOTAK NEO LIVE BROKER vs PARALLEL PAPER SIMULATION"
+        title_cell.font = Font(name="Segoe UI", size=13, bold=True, color="FFFFFF")
+        title_cell.fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+        title_cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 36
+
+        # KPI Summary Cards Block
+        kpi_headers = ["Total Orders", "Filled Orders", "Avg Latency (ms)", "Fastest (ms)", "Slowest (ms)", "Total Slippage (pts)", "Total Slippage (₹)", "Execution Health"]
+        kpi_values = [
+            summary.get("total_orders", 0),
+            summary.get("filled_orders", 0),
+            f"{summary.get('avg_latency_ms', 0):.1f} ms",
+            f"{summary.get('fastest_latency_ms', 0):.1f} ms",
+            f"{summary.get('slowest_latency_ms', 0):.1f} ms",
+            f"{summary.get('total_slippage_pts', 0):+.2f} pts",
+            f"₹{summary.get('total_slippage_inr', 0):+.2f}",
+            summary.get("health_grade", "GOOD")
+        ]
+
+        thin_border = Border(
+            left=Side(style="thin", color="CBD5E1"),
+            right=Side(style="thin", color="CBD5E1"),
+            top=Side(style="thin", color="CBD5E1"),
+            bottom=Side(style="thin", color="CBD5E1")
+        )
+
+        for c_idx, (kh, kv) in enumerate(zip(kpi_headers, kpi_values), 1):
+            h_c = ws.cell(row=3, column=c_idx)
+            h_c.value = kh
+            h_c.font = Font(name="Segoe UI", size=9, bold=True, color="475569")
+            h_c.fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+            h_c.alignment = Alignment(horizontal="center", vertical="center")
+            h_c.border = thin_border
+
+            v_c = ws.cell(row=4, column=c_idx)
+            v_c.value = str(kv)
+            v_c.font = Font(name="Segoe UI", size=11, bold=True, color="0284C7" if "ms" in str(kv) else ("10B981" if "+" in str(kv) else "0F172A"))
+            v_c.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+            v_c.alignment = Alignment(horizontal="center", vertical="center")
+            v_c.border = thin_border
+
+        ws.row_dimensions[3].height = 20
+        ws.row_dimensions[4].height = 26
+
+        # Orders Table Headers
+        table_headers = [
+            "Order ID", "Strategy", "Symbol", "Side", "Action", "Qty",
+            "Dispatch IST", "Paper Fill (₹)", "Broker Ack (ms)", "Broker Fill (₹)",
+            "Broker Latency (ms)", "Slippage (pts)", "Slippage (₹)", "Status", "Broker Order ID / Error"
+        ]
+
+        start_row = 6
+        for c_idx, th in enumerate(table_headers, 1):
+            cell = ws.cell(row=start_row, column=c_idx)
+            cell.value = th
+            cell.font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = thin_border
+        ws.row_dimensions[start_row].height = 28
+
+        curr_row = start_row + 1
+        for o in reversed(orders):
+            row_data = [
+                str(o.get("id") or ""),
+                str(o.get("strategy_name") or ""),
+                str(o.get("symbol") or ""),
+                str(o.get("side") or "").upper(),
+                str(o.get("action") or "ENTRY").upper(),
+                int(o.get("quantity") or 0),
+                str(o.get("dispatch_time") or ""),
+                float(o.get("paper_price") or 0.0),
+                float(o.get("broker_ack_ms") or 0.0),
+                float(o.get("broker_price") or 0.0),
+                float(o.get("broker_latency_ms") or 0.0),
+                float(o.get("slippage_pts") or 0.0),
+                float(o.get("slippage_inr") or 0.0),
+                str(o.get("status") or "FILLED"),
+                str(o.get("error") or o.get("broker_order_id") or "-")
+            ]
+            ws.append(row_data)
+
+            # Cell formatting & colors
+            slip_pts = float(o.get("slippage_pts") or 0.0)
+            slip_color = "10B981" if slip_pts >= 0 else "EF4444"
+            status_color = "10B981" if o.get("status") == "FILLED" else "EF4444"
+
+            ws.cell(row=curr_row, column=1).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(row=curr_row, column=2).alignment = Alignment(horizontal="left", vertical="center")
+            ws.cell(row=curr_row, column=3).alignment = Alignment(horizontal="left", vertical="center")
+            ws.cell(row=curr_row, column=4).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(row=curr_row, column=5).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(row=curr_row, column=6).alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=curr_row, column=7).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(row=curr_row, column=8).alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=curr_row, column=9).alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=curr_row, column=10).alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=curr_row, column=11).alignment = Alignment(horizontal="right", vertical="center")
+
+            slip_pts_c = ws.cell(row=curr_row, column=12)
+            slip_pts_c.font = Font(name="Segoe UI", size=10, bold=True, color=slip_color)
+            slip_pts_c.alignment = Alignment(horizontal="right", vertical="center")
+
+            slip_inr_c = ws.cell(row=curr_row, column=13)
+            slip_inr_c.font = Font(name="Segoe UI", size=10, bold=True, color=slip_color)
+            slip_inr_c.alignment = Alignment(horizontal="right", vertical="center")
+
+            st_c = ws.cell(row=curr_row, column=14)
+            st_c.font = Font(name="Segoe UI", size=10, bold=True, color=status_color)
+            st_c.alignment = Alignment(horizontal="center", vertical="center")
+
+            ws.cell(row=curr_row, column=15).alignment = Alignment(horizontal="left", vertical="center")
+
+            for c in range(1, len(table_headers) + 1):
+                ws.cell(row=curr_row, column=c).border = thin_border
+            ws.row_dimensions[curr_row].height = 22
+            curr_row += 1
+
+        # Adjust widths
+        col_widths = {"A": 16, "B": 20, "C": 26, "D": 10, "E": 12, "F": 10, "G": 14, "H": 16, "I": 16, "J": 16, "K": 18, "L": 14, "M": 14, "N": 12, "O": 35}
+        for col_letter, width in col_widths.items():
+            ws.column_dimensions[col_letter].width = width
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        filename = f"straddle_benchmark_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(
+            buf,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        logger.error(f"Error generating benchmark report: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/straddle/strategy/benchmark_toggle", methods=["POST"])
+def api_straddle_benchmark_toggle():
+    """Toggles parallel shadow paper benchmarking for a strategy."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
+        enabled = bool(data.get("enabled", True))
+        mgr = get_straddle_manager()
+        if sid:
+            strat = mgr.get_strategy(sid)
+            if strat:
+                strat["shadow_paper_trading"] = enabled
+                mgr._save_strategies()
+                return jsonify({"success": True, "enabled": enabled, "strategy_id": sid})
+        return jsonify({"success": False, "error": "Strategy not found"}), 404
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/straddle/strategy/save", methods=["POST"])
 def api_straddle_strategy_save():
     try:
