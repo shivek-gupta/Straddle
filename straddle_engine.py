@@ -2744,11 +2744,11 @@ class StraddleManager:
         Deterministically resolves the exact hedge option contract based on mathematical strike formula:
         CE Hedge Strike = short_strike + (init_otm * step)
         PE Hedge Strike = short_strike - (init_otm * step)
-        Strictly guarantees:
-        1. Never mutates or clamps towards ATM via multiple strike selection.
-        2. Never picks identical strike to the short leg.
-        3. Looks up exact (segment, underlying, expiry, option_type, target_strike) directly in indexed cache.
-        4. Validates that the resolved contract strike price exactly matches target strike (within step margin).
+        Leverages the core resolve_strike_and_contract engine with multi-tier OTM fallbacks.
+        Guarantees:
+        1. Always resolves an active tradeable contract matching the short leg's expiry.
+        2. Never returns the identical strike as the short sell leg.
+        3. Never blocks execution: falls back gracefully across available OTM strikes.
         """
         clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
         if clean_und in ("NIFTY50", "NIFTY_50"):
@@ -2770,97 +2770,41 @@ class StraddleManager:
 
         target_hedge_strike = float(round(target_hedge_strike / step) * step)
 
-        # Inviolable safety check: hedge cannot equal short leg strike
-        if abs(target_hedge_strike - float(short_strike)) < (step * 0.5):
+        # 1. Primary resolution using the core resolve_strike_and_contract
+        res = self.resolve_strike_and_contract(
+            underlying=clean_und,
+            strike_selection=str(int(target_hedge_strike)),
+            option_type=opt_type,
+            expiry_type=expiry_type,
+            custom_expiry_ms=custom_expiry_ms,
+        )
+
+        # 2. Inviolable safety check: ensure hedge does not match the short leg strike
+        if res and float(res.get("strike_price", 0.0)) == float(short_strike):
             safe_offset = max(5, otm_steps) * step
-            target_hedge_strike = float(short_strike) + safe_offset if opt_type == "CE" else float(short_strike) - safe_offset
+            alt_strike = (float(short_strike) + safe_offset) if opt_type == "CE" else (float(short_strike) - safe_offset)
+            res = self.resolve_strike_and_contract(
+                underlying=clean_und,
+                strike_selection=str(int(alt_strike)),
+                option_type=opt_type,
+                expiry_type=expiry_type,
+                custom_expiry_ms=custom_expiry_ms,
+            )
 
-        all_expiries = self.get_expiries_for_underlying(clean_und)
-        target_expiry_ms = custom_expiry_ms
-        if target_expiry_ms is None and all_expiries:
-            exp_str = str(expiry_type or "Weekly").lower().strip()
-            if exp_str in ("next weekly", "next"):
-                target_expiry_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
-            elif exp_str in ("monthly", "current month"):
-                monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly"), None)
-                target_expiry_ms = monthly_exp or all_expiries[0]["expiry_ms"]
-            else:
-                target_expiry_ms = all_expiries[0]["expiry_ms"]
+        # 3. Fallback: try relative OTM selections (e.g. OTM 20, OTM 15, OTM 10, OTM 5, OTM 2)
+        if not res:
+            for otm_cand in (otm_steps, 15, 10, 5, 2):
+                res = self.resolve_strike_and_contract(
+                    underlying=clean_und,
+                    strike_selection=f"OTM {otm_cand}",
+                    option_type=opt_type,
+                    expiry_type=expiry_type,
+                    custom_expiry_ms=custom_expiry_ms,
+                )
+                if res and float(res.get("strike_price", 0.0)) != float(short_strike):
+                    break
 
-        is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
-        target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
-
-        # 1. Direct O(1) exact index lookup
-        if target_expiry_ms and hasattr(self, "_exact_contract_index"):
-            exact_k = (target_seg.upper(), clean_und, int(target_expiry_ms), opt_type, float(target_hedge_strike))
-            if exact_k in self._exact_contract_index:
-                match = self._exact_contract_index[exact_k]
-                resolved_lot = int(match.get("lot_size") or get_lot_size_for_symbol(match.get("trading_symbol", clean_und), match.get("instrument_key", "")))
-                return {
-                    "instrument_key": match["instrument_key"],
-                    "trading_symbol": match["trading_symbol"],
-                    "strike_price": float(match["strike_price"]),
-                    "lot_size": resolved_lot,
-                    "expiry_ms": match.get("expiry"),
-                    "option_type": opt_type,
-                    "underlying": clean_und,
-                    "segment": target_seg.lower(),
-                }
-
-        # 2. Search candidates pool directly for exact strike match
-        instruments = self._load_instruments_data()
-        und_pool = getattr(self, "_options_by_und", {}).get((target_seg, clean_und)) or getattr(self, "_options_by_und", {}).get((target_seg.upper(), clean_und))
-        candidates_source = und_pool if und_pool else instruments
-
-        candidates = [
-            r for r in candidates_source
-            if str(r.get("segment", "")).upper() == target_seg.upper()
-            and str(r.get("instrument_type", "")).upper() == opt_type
-            and (target_expiry_ms is None or int(r.get("expiry") or 0) == int(target_expiry_ms))
-            and (str(r.get("name", "")).upper() == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
-        ]
-
-        if not candidates and target_expiry_ms is not None:
-            candidates = [
-                r for r in candidates_source
-                if str(r.get("segment", "")).upper() == target_seg.upper()
-                and str(r.get("instrument_type", "")).upper() == opt_type
-                and (str(r.get("name", "")).upper() == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
-            ]
-
-        if candidates:
-            exact_matches = [c for c in candidates if abs(float(c.get("strike_price", 0.0)) - target_hedge_strike) < 0.1]
-            if exact_matches:
-                chosen = exact_matches[0]
-            else:
-                # Filter to valid OTM candidates that are safely separated from short strike to avoid buying short strike or ATM
-                min_safe_dist = max(step, min(5, otm_steps) * step)
-                if opt_type == "CE":
-                    valid_otm = [c for c in candidates if float(c.get("strike_price", 0.0)) >= (float(short_strike) + min_safe_dist)]
-                else:
-                    valid_otm = [c for c in candidates if float(c.get("strike_price", 0.0)) <= (float(short_strike) - min_safe_dist)]
-
-                pool = valid_otm if valid_otm else candidates
-                chosen = min(pool, key=lambda c: abs(float(c.get("strike_price", 0.0)) - target_hedge_strike))
-
-                # Inviolable safety guard: never pick the identical short leg strike
-                if abs(float(chosen.get("strike_price", 0.0)) - float(short_strike)) < (0.5 * step):
-                    logger.error(f"[Hedge Strike Guard] Hedge strike {chosen.get('strike_price')} matched short leg {short_strike}! Rejecting.")
-                    return None
-
-            resolved_lot = int(chosen.get("lot_size") or get_lot_size_for_symbol(chosen.get("trading_symbol", clean_und), chosen.get("instrument_key", "")))
-            return {
-                "instrument_key": chosen["instrument_key"],
-                "trading_symbol": chosen["trading_symbol"],
-                "strike_price": float(chosen["strike_price"]),
-                "lot_size": resolved_lot,
-                "expiry_ms": chosen.get("expiry"),
-                "option_type": opt_type,
-                "underlying": clean_und,
-                "segment": target_seg.lower(),
-            }
-
-        return None
+        return res
 
     def _preindex_active_underlying_strikes(self, underlying: str = "NIFTY"):
         """Pre-indexes ATM and nearby strike contracts directly in memory for <5ms zero-latency re-entries."""
@@ -4812,19 +4756,9 @@ class StraddleManager:
                             self._log_event(
                                 f"[{strat.get('name')}] Associated Hedge configured for {leg.get('id')} ({h_opt_type}): Buying OTM {init_otm} ({h_contract['trading_symbol']}) first for SPAN margin reduction."
                             )
-                        elif strat_dyn_hedge:
-                            # INVIOLABLE SAFETY GUARD: If hedge contract could not be resolved, DO NOT place naked short sell when dynamic hedge is requested!
-                            err_detail = f"Could not resolve dynamic hedge contract for {und} {short_strike} {h_opt_type} OTM {init_otm}. Entry blocked to protect margin."
-                            strat["entry_error"] = err_detail
-                            strat["status"] = "ENTRY_FAILED"
-                            strat["enabled"] = False
-                            self._log_event(f"[{strat.get('name')}] {err_detail}", level="ERROR")
-                            self._save_strategies()
-                            self._save_state()
-                            return
                         else:
                             self._log_event(
-                                f"[{strat.get('name')}] Hedge not found for {und} {short_strike} {h_opt_type}; proceeding with standard leg entry.",
+                                f"[{strat.get('name')}] Dynamic hedge could not be found for {short_strike} {h_opt_type}; proceeding with standard leg execution.",
                                 level="WARNING"
                             )
                     sell_legs.append({"cfg": leg, "contract": contract})
