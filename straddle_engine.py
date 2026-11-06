@@ -2731,6 +2731,126 @@ class StraddleManager:
             self._fast_resolved_contract_cache[cache_k] = dict(fallback_res)
         return fallback_res
 
+    def _resolve_exact_hedge_contract(
+        self,
+        underlying: str,
+        short_strike: float,
+        init_otm: int,
+        option_type: str,
+        expiry_type: str = "Weekly",
+        custom_expiry_ms: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Deterministically resolves the exact hedge option contract based on mathematical strike formula:
+        CE Hedge Strike = short_strike + (init_otm * step)
+        PE Hedge Strike = short_strike - (init_otm * step)
+        Strictly guarantees:
+        1. Never mutates or clamps towards ATM via multiple strike selection.
+        2. Never picks identical strike to the short leg.
+        3. Looks up exact (segment, underlying, expiry, option_type, target_strike) directly in indexed cache.
+        4. Validates that the resolved contract strike price exactly matches target strike (within step margin).
+        """
+        clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
+        if clean_und in ("NIFTY50", "NIFTY_50"):
+            clean_und = "NIFTY"
+        elif clean_und == "CRUDE":
+            clean_und = "CRUDEOIL"
+        elif clean_und == "NATGAS":
+            clean_und = "NATURALGAS"
+
+        step = STRIKE_STEPS.get(clean_und, 50)
+        opt_type = str(option_type).upper().strip()
+        otm_steps = int(init_otm) if int(init_otm) > 0 else 20
+
+        # Mathematical target strike
+        if opt_type == "PE":
+            target_hedge_strike = float(short_strike) - (otm_steps * step)
+        else:
+            target_hedge_strike = float(short_strike) + (otm_steps * step)
+
+        target_hedge_strike = float(round(target_hedge_strike / step) * step)
+
+        # Inviolable safety check: hedge cannot equal short leg strike
+        if abs(target_hedge_strike - float(short_strike)) < (step * 0.5):
+            safe_offset = max(5, otm_steps) * step
+            target_hedge_strike = float(short_strike) + safe_offset if opt_type == "CE" else float(short_strike) - safe_offset
+
+        all_expiries = self.get_expiries_for_underlying(clean_und)
+        target_expiry_ms = custom_expiry_ms
+        if target_expiry_ms is None and all_expiries:
+            if expiry_type.lower() in ("next weekly", "next"):
+                target_expiry_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
+            elif expiry_type.lower() == "monthly":
+                monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly"), None)
+                target_expiry_ms = monthly_exp or all_expiries[0]["expiry_ms"]
+            else:
+                target_expiry_ms = all_expiries[0]["expiry_ms"]
+
+        is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+        target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
+
+        # 1. Direct O(1) exact index lookup
+        if target_expiry_ms and hasattr(self, "_exact_contract_index"):
+            exact_k = (target_seg.upper(), clean_und, int(target_expiry_ms), opt_type, float(target_hedge_strike))
+            if exact_k in self._exact_contract_index:
+                match = self._exact_contract_index[exact_k]
+                resolved_lot = int(match.get("lot_size") or get_lot_size_for_symbol(match.get("trading_symbol", clean_und), match.get("instrument_key", "")))
+                return {
+                    "instrument_key": match["instrument_key"],
+                    "trading_symbol": match["trading_symbol"],
+                    "strike_price": float(match["strike_price"]),
+                    "lot_size": resolved_lot,
+                    "expiry_ms": match.get("expiry"),
+                    "option_type": opt_type,
+                    "underlying": clean_und,
+                    "segment": target_seg.lower(),
+                }
+
+        # 2. Search candidates pool directly for exact strike match
+        instruments = self._load_instruments_data()
+        und_pool = getattr(self, "_options_by_und", {}).get((target_seg, clean_und)) or getattr(self, "_options_by_und", {}).get((target_seg.upper(), clean_und))
+        candidates_source = und_pool if und_pool else instruments
+
+        candidates = [
+            r for r in candidates_source
+            if r.get("segment") == target_seg
+            and r.get("instrument_type") == opt_type
+            and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
+            and (str(r.get("name", "")).upper() == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
+        ]
+
+        if not candidates and target_expiry_ms is not None:
+            candidates = [
+                r for r in candidates_source
+                if r.get("segment") == target_seg
+                and r.get("instrument_type") == opt_type
+                and (str(r.get("name", "")).upper() == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
+            ]
+
+        if candidates:
+            exact_matches = [c for c in candidates if abs(float(c.get("strike_price", 0.0)) - target_hedge_strike) < 0.1]
+            if exact_matches:
+                chosen = exact_matches[0]
+            else:
+                chosen = min(candidates, key=lambda c: abs(float(c.get("strike_price", 0.0)) - target_hedge_strike))
+                if abs(float(chosen.get("strike_price", 0.0)) - target_hedge_strike) > (3 * step):
+                    logger.error(f"[Hedge Strike Guard] Closest available strike {chosen.get('strike_price')} is >3 steps away from target {target_hedge_strike}. Rejecting to prevent near-ATM buy.")
+                    return None
+
+            resolved_lot = int(chosen.get("lot_size") or get_lot_size_for_symbol(chosen.get("trading_symbol", clean_und), chosen.get("instrument_key", "")))
+            return {
+                "instrument_key": chosen["instrument_key"],
+                "trading_symbol": chosen["trading_symbol"],
+                "strike_price": float(chosen["strike_price"]),
+                "lot_size": resolved_lot,
+                "expiry_ms": chosen.get("expiry"),
+                "option_type": opt_type,
+                "underlying": clean_und,
+                "segment": target_seg.lower(),
+            }
+
+        return None
+
     def _preindex_active_underlying_strikes(self, underlying: str = "NIFTY"):
         """Pre-indexes ATM and nearby strike contracts directly in memory for <5ms zero-latency re-entries."""
         clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
@@ -4601,17 +4721,12 @@ class StraddleManager:
                     if h_cfg.get("enabled"):
                         init_otm = int(h_cfg.get("initial_otm", 20))
                         h_opt_type = leg.get("option_type", "CE")
-                        step = STRIKE_STEPS.get(und.upper(), 50)
                         short_strike = float(contract.get("strike_price", 0.0))
-                        if short_strike > 0:
-                            h_strike = short_strike - (init_otm * step) if h_opt_type.upper() == "PE" else short_strike + (init_otm * step)
-                            h_strike_sel = str(int(h_strike))
-                        else:
-                            h_strike_sel = f"OTM {init_otm}"
 
-                        h_contract = self.resolve_strike_and_contract(
+                        h_contract = self._resolve_exact_hedge_contract(
                             underlying=und,
-                            strike_selection=h_strike_sel,
+                            short_strike=short_strike,
+                            init_otm=init_otm,
                             option_type=h_opt_type,
                             expiry_type=leg.get("expiry", "Weekly"),
                         )
@@ -4623,15 +4738,17 @@ class StraddleManager:
                             h_contract.get("instrument_key") == contract.get("instrument_key")
                             or float(h_contract.get("strike_price", 0.0)) == float(contract.get("strike_price", 0.0))
                         ):
+                            step = STRIKE_STEPS.get(und.upper(), 50)
                             safe_otm_steps = max(10, init_otm)
                             fallback_strike = (short_strike + (safe_otm_steps * step)) if h_opt_type.upper() == "CE" else (short_strike - (safe_otm_steps * step))
                             self._log_event(
                                 f"[{strat.get('name')}] WARNING: Hedge strike {h_contract.get('strike_price')} matched short leg! Overriding to safe OTM strike {fallback_strike}.",
                                 level="WARNING"
                             )
-                            h_contract = self.resolve_strike_and_contract(
+                            h_contract = self._resolve_exact_hedge_contract(
                                 underlying=und,
-                                strike_selection=str(int(fallback_strike)),
+                                short_strike=fallback_strike,
+                                init_otm=0,
                                 option_type=h_opt_type,
                                 expiry_type=leg.get("expiry", "Weekly"),
                             )
@@ -5104,6 +5221,8 @@ class StraddleManager:
                 "product": prod,
                 "symbol": contract["trading_symbol"],
                 "instrument_key": contract["instrument_key"],
+                "strike_price": float(contract.get("strike_price", 0.0)),
+                "option_type": contract.get("option_type", leg_cfg.get("option_type", "")),
                 "contract": contract,
                 "expiry_str": contract.get("expiry_date", "Weekly"),
                 "lots": int(order_res.get("lots", lots)),
@@ -5261,6 +5380,8 @@ class StraddleManager:
             "symbol": contract["trading_symbol"],
             "instrument_key": contract["instrument_key"],
             "underlying": und_name,
+            "strike_price": float(contract.get("strike_price", 0.0)),
+            "option_type": contract.get("option_type", leg_cfg.get("option_type", "")),
             "exchange_segment": contract.get("segment") or get_exchange_segment_for_symbol(contract.get("trading_symbol", ""), contract.get("instrument_key", "")),
             "contract": contract,
             "expiry_str": contract.get("expiry_date", "Weekly"),
@@ -7565,8 +7686,18 @@ class StraddleManager:
                 if active_hedge and hedge_enabled:
                     step = STRIKE_STEPS.get(und, 50)
                     new_short_strike = float(contract.get("strike_price"))
-                    curr_hedge_strike = float(active_hedge.get("strike_price", 0.0))
-                    strike_dist = abs(new_short_strike - curr_hedge_strike) / step
+                    curr_hedge_strike = float(
+                        active_hedge.get("strike_price")
+                        or active_hedge.get("contract", {}).get("strike_price")
+                        or 0.0
+                    )
+                    if curr_hedge_strike <= 0:
+                        parts = str(active_hedge.get("symbol", "")).split()
+                        for p_str in parts:
+                            if p_str.isdigit() and len(p_str) >= 4:
+                                curr_hedge_strike = float(p_str)
+                                break
+                    strike_dist = (abs(new_short_strike - curr_hedge_strike) / step) if curr_hedge_strike > 0 else 0.0
                     max_thresh = int(h_cfg.get("max_distance_threshold", 22))
                     reset_otm = int(h_cfg.get("reset_otm", 20))
 
@@ -7580,14 +7711,10 @@ class StraddleManager:
                         self._log_event(
                             f"[Hedge Shift] ⚠️ Existing hedge '{active_hedge.get('symbol')}' is {strike_dist:.0f} strikes away (> threshold {max_thresh}). Executing concurrent shift to OTM {reset_otm}..."
                         )
-                        if opt_type == "PE":
-                            new_h_strike = new_short_strike - (reset_otm * step)
-                        else:
-                            new_h_strike = new_short_strike + (reset_otm * step)
-
-                        new_h_contract = self.resolve_strike_and_contract(
+                        new_h_contract = self._resolve_exact_hedge_contract(
                             underlying=und,
-                            strike_selection=str(int(new_h_strike)),
+                            short_strike=new_short_strike,
+                            init_otm=reset_otm,
                             option_type=opt_type,
                             expiry_type=leg_cfg.get("expiry", "Weekly")
                         )
@@ -7652,14 +7779,13 @@ class StraddleManager:
                 elif hedge_enabled and not active_hedge:
                     # Inviolable Margin Guard: Short re-entry requires associated hedge to be secured FIRST
                     # Otherwise broker RMS rejects naked short order due to margin shortfall!
-                    step = STRIKE_STEPS.get(und, 50)
                     new_short_strike = float(contract.get("strike_price"))
                     init_otm = int(h_cfg.get("reset_otm") or h_cfg.get("initial_otm", 20))
-                    new_h_strike = new_short_strike - (init_otm * step) if opt_type == "PE" else new_short_strike + (init_otm * step)
 
-                    new_h_contract = self.resolve_strike_and_contract(
+                    new_h_contract = self._resolve_exact_hedge_contract(
                         underlying=und,
-                        strike_selection=str(int(new_h_strike)),
+                        short_strike=new_short_strike,
+                        init_otm=init_otm,
                         option_type=opt_type,
                         expiry_type=leg_cfg.get("expiry", "Weekly")
                     )

@@ -215,14 +215,14 @@ def api_straddle_logs():
 
 @app.route("/api/straddle/download_audit_logs", methods=["GET"])
 def api_straddle_download_audit_logs():
-    """Generates and downloads a beautifully styled Excel (.xlsx) file containing all audit logs."""
+    """Generates and downloads a beautifully styled Excel (.xlsx) file containing all audit logs, with automatic UTF-8 BOM CSV spreadsheet fallback if openpyxl is not installed."""
+    mgr = get_straddle_manager()
+    logs = mgr.get_logs(limit=2000)
+
     try:
         import io
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-
-        mgr = get_straddle_manager()
-        logs = mgr.get_logs(limit=1000)
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -312,9 +312,36 @@ def api_straddle_download_audit_logs():
             as_attachment=True,
             download_name=filename
         )
-    except Exception as e:
-        logger.error(f"Error generating audit logs Excel: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as e_excel:
+        logger.warning(f"openpyxl unavailable or failed ({e_excel}). Falling back to UTF-8 BOM CSV spreadsheet: {e_excel}")
+        try:
+            import csv
+            import io
+            str_io = io.StringIO()
+            writer = csv.writer(str_io, quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(["Timestamp", "Date", "Level", "Message", "Details"])
+            for log in logs:
+                ts = str(log.get("timestamp") or "")
+                dt = str(log.get("date") or "")
+                lvl = str(log.get("level") or "INFO").upper()
+                msg = str(log.get("message") or "")
+                det = log.get("details")
+                det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
+                writer.writerow([ts, dt, lvl, msg, det_str])
+
+            # UTF-8 with BOM (0xEF, 0xBB, 0xBF) guarantees Microsoft Excel opens it directly with correct columns
+            csv_bytes = str_io.getvalue().encode("utf-8-sig")
+            bytes_io = io.BytesIO(csv_bytes)
+            filename = f"straddle_audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            return send_file(
+                bytes_io,
+                as_attachment=True,
+                download_name=filename,
+                mimetype="text/csv; charset=utf-8"
+            )
+        except Exception as e_csv:
+            logger.error(f"Error generating audit logs CSV fallback: {e_csv}")
+            return jsonify({"success": False, "error": str(e_csv)}), 500
 
 
 @app.route("/api/straddle/benchmark", methods=["GET"])
