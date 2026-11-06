@@ -2778,9 +2778,10 @@ class StraddleManager:
         all_expiries = self.get_expiries_for_underlying(clean_und)
         target_expiry_ms = custom_expiry_ms
         if target_expiry_ms is None and all_expiries:
-            if expiry_type.lower() in ("next weekly", "next"):
+            exp_str = str(expiry_type or "Weekly").lower().strip()
+            if exp_str in ("next weekly", "next"):
                 target_expiry_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
-            elif expiry_type.lower() == "monthly":
+            elif exp_str in ("monthly", "current month"):
                 monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly"), None)
                 target_expiry_ms = monthly_exp or all_expiries[0]["expiry_ms"]
             else:
@@ -2813,17 +2814,17 @@ class StraddleManager:
 
         candidates = [
             r for r in candidates_source
-            if r.get("segment") == target_seg
-            and r.get("instrument_type") == opt_type
-            and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
+            if str(r.get("segment", "")).upper() == target_seg.upper()
+            and str(r.get("instrument_type", "")).upper() == opt_type
+            and (target_expiry_ms is None or int(r.get("expiry") or 0) == int(target_expiry_ms))
             and (str(r.get("name", "")).upper() == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
         ]
 
         if not candidates and target_expiry_ms is not None:
             candidates = [
                 r for r in candidates_source
-                if r.get("segment") == target_seg
-                and r.get("instrument_type") == opt_type
+                if str(r.get("segment", "")).upper() == target_seg.upper()
+                and str(r.get("instrument_type", "")).upper() == opt_type
                 and (str(r.get("name", "")).upper() == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
             ]
 
@@ -2832,9 +2833,19 @@ class StraddleManager:
             if exact_matches:
                 chosen = exact_matches[0]
             else:
-                chosen = min(candidates, key=lambda c: abs(float(c.get("strike_price", 0.0)) - target_hedge_strike))
-                if abs(float(chosen.get("strike_price", 0.0)) - target_hedge_strike) > (3 * step):
-                    logger.error(f"[Hedge Strike Guard] Closest available strike {chosen.get('strike_price')} is >3 steps away from target {target_hedge_strike}. Rejecting to prevent near-ATM buy.")
+                # Filter to valid OTM candidates that are safely separated from short strike to avoid buying short strike or ATM
+                min_safe_dist = max(step, min(5, otm_steps) * step)
+                if opt_type == "CE":
+                    valid_otm = [c for c in candidates if float(c.get("strike_price", 0.0)) >= (float(short_strike) + min_safe_dist)]
+                else:
+                    valid_otm = [c for c in candidates if float(c.get("strike_price", 0.0)) <= (float(short_strike) - min_safe_dist)]
+
+                pool = valid_otm if valid_otm else candidates
+                chosen = min(pool, key=lambda c: abs(float(c.get("strike_price", 0.0)) - target_hedge_strike))
+
+                # Inviolable safety guard: never pick the identical short leg strike
+                if abs(float(chosen.get("strike_price", 0.0)) - float(short_strike)) < (0.5 * step):
+                    logger.error(f"[Hedge Strike Guard] Hedge strike {chosen.get('strike_price')} matched short leg {short_strike}! Rejecting.")
                     return None
 
             resolved_lot = int(chosen.get("lot_size") or get_lot_size_for_symbol(chosen.get("trading_symbol", clean_und), chosen.get("instrument_key", "")))
@@ -4717,20 +4728,17 @@ class StraddleManager:
                     buy_legs.append({"cfg": leg, "contract": contract})
                 else:
                     # Check for Associated Dynamic Hedge (Auto Margin Saver)
-                    strat_dyn_hedge = strat.get("toggles", {}).get("dynamic_hedging") is not False and strat.get("dynamic_hedging") is not False
+                    strat_dyn_hedge = bool(strat.get("dynamic_hedging")) or bool(strat.get("toggles", {}).get("dynamic_hedging"))
                     h_cfg = leg.get("associated_hedge") or {}
-                    # If strategy-level dynamic hedging is ON, every Sell leg is hedged by default unless explicitly disabled
                     is_hedge_enabled = h_cfg.get("enabled")
                     if is_hedge_enabled is None:
                         is_hedge_enabled = strat_dyn_hedge
-                    elif not is_hedge_enabled and strat_dyn_hedge:
-                        # Strategy has dynamic hedging active: protect trader against naked RMS rejections
-                        is_hedge_enabled = True
 
                     if is_hedge_enabled:
                         init_otm = int(h_cfg.get("initial_otm") or 20)
                         h_opt_type = leg.get("option_type", "CE")
                         short_strike = float(contract.get("strike_price", 0.0))
+                        short_expiry_ms = contract.get("expiry_ms") or contract.get("expiry") or leg.get("custom_expiry_ms")
 
                         h_contract = self._resolve_exact_hedge_contract(
                             underlying=und,
@@ -4738,6 +4746,7 @@ class StraddleManager:
                             init_otm=init_otm,
                             option_type=h_opt_type,
                             expiry_type=leg.get("expiry", "Weekly"),
+                            custom_expiry_ms=short_expiry_ms,
                         )
 
                         # INVIOLABLE SAFETY DIRECTIVE:
@@ -4757,9 +4766,21 @@ class StraddleManager:
                             h_contract = self._resolve_exact_hedge_contract(
                                 underlying=und,
                                 short_strike=fallback_strike,
-                                init_otm=0,
+                                init_otm=safe_otm_steps,
                                 option_type=h_opt_type,
                                 expiry_type=leg.get("expiry", "Weekly"),
+                                custom_expiry_ms=short_expiry_ms,
+                            )
+
+                        if not h_contract:
+                            # Secondary fallback: try 10 OTM
+                            h_contract = self._resolve_exact_hedge_contract(
+                                underlying=und,
+                                short_strike=short_strike,
+                                init_otm=10,
+                                option_type=h_opt_type,
+                                expiry_type=leg.get("expiry", "Weekly"),
+                                custom_expiry_ms=short_expiry_ms,
                             )
 
                         if h_contract:
@@ -4791,8 +4812,8 @@ class StraddleManager:
                             self._log_event(
                                 f"[{strat.get('name')}] Associated Hedge configured for {leg.get('id')} ({h_opt_type}): Buying OTM {init_otm} ({h_contract['trading_symbol']}) first for SPAN margin reduction."
                             )
-                        else:
-                            # INVIOLABLE SAFETY GUARD: If hedge contract could not be resolved, DO NOT place naked short sell!
+                        elif strat_dyn_hedge:
+                            # INVIOLABLE SAFETY GUARD: If hedge contract could not be resolved, DO NOT place naked short sell when dynamic hedge is requested!
                             err_detail = f"Could not resolve dynamic hedge contract for {und} {short_strike} {h_opt_type} OTM {init_otm}. Entry blocked to protect margin."
                             strat["entry_error"] = err_detail
                             strat["status"] = "ENTRY_FAILED"
@@ -4801,6 +4822,11 @@ class StraddleManager:
                             self._save_strategies()
                             self._save_state()
                             return
+                        else:
+                            self._log_event(
+                                f"[{strat.get('name')}] Hedge not found for {und} {short_strike} {h_opt_type}; proceeding with standard leg entry.",
+                                level="WARNING"
+                            )
                     sell_legs.append({"cfg": leg, "contract": contract})
 
             # Batch 2: Pre-fetch quotes for all legs in a single high-speed call
@@ -5678,7 +5704,7 @@ class StraddleManager:
                     continue
 
                 # Ensure prerequisite hedge is bought FIRST if this is a SELL leg and dynamic hedging is enabled
-                strat_dyn_hedge = strat.get("toggles", {}).get("dynamic_hedging") is not False and strat.get("dynamic_hedging") is not False
+                strat_dyn_hedge = bool(strat.get("dynamic_hedging")) or bool(strat.get("toggles", {}).get("dynamic_hedging"))
                 h_cfg = leg_cfg.get("associated_hedge") or {}
                 needs_hedge = (leg_cfg.get("side", "Sell").upper() == "SELL") and ((h_cfg.get("enabled") is True) or strat_dyn_hedge)
                 if needs_hedge:
@@ -5691,13 +5717,24 @@ class StraddleManager:
                         init_otm = int(h_cfg.get("initial_otm") or 20)
                         h_opt_type = leg_cfg.get("option_type", "CE")
                         short_strike = float(contract.get("strike_price", 0.0))
+                        short_expiry_ms = contract.get("expiry_ms") or contract.get("expiry") or leg_cfg.get("custom_expiry_ms")
                         h_contract = self._resolve_exact_hedge_contract(
                             underlying=und,
                             short_strike=short_strike,
                             init_otm=init_otm,
                             option_type=h_opt_type,
                             expiry_type=leg_cfg.get("expiry", "Weekly"),
+                            custom_expiry_ms=short_expiry_ms,
                         )
+                        if not h_contract:
+                            h_contract = self._resolve_exact_hedge_contract(
+                                underlying=und,
+                                short_strike=short_strike,
+                                init_otm=10,
+                                option_type=h_opt_type,
+                                expiry_type=leg_cfg.get("expiry", "Weekly"),
+                                custom_expiry_ms=short_expiry_ms,
+                            )
                         if h_contract:
                             h_leg_cfg = {
                                 "id": f"hedge_{leg_cfg.get('id', 'leg')}",
@@ -7790,7 +7827,8 @@ class StraddleManager:
                             short_strike=new_short_strike,
                             init_otm=reset_otm,
                             option_type=opt_type,
-                            expiry_type=leg_cfg.get("expiry", "Weekly")
+                            expiry_type=leg_cfg.get("expiry", "Weekly"),
+                            custom_expiry_ms=contract.get("expiry_ms") or contract.get("expiry") or leg_cfg.get("custom_expiry_ms"),
                         )
 
                         if new_h_contract:
@@ -7861,7 +7899,8 @@ class StraddleManager:
                         short_strike=new_short_strike,
                         init_otm=init_otm,
                         option_type=opt_type,
-                        expiry_type=leg_cfg.get("expiry", "Weekly")
+                        expiry_type=leg_cfg.get("expiry", "Weekly"),
+                        custom_expiry_ms=contract.get("expiry_ms") or contract.get("expiry") or leg_cfg.get("custom_expiry_ms"),
                     )
 
                     if new_h_contract:
