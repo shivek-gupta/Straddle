@@ -4717,9 +4717,18 @@ class StraddleManager:
                     buy_legs.append({"cfg": leg, "contract": contract})
                 else:
                     # Check for Associated Dynamic Hedge (Auto Margin Saver)
+                    strat_dyn_hedge = strat.get("toggles", {}).get("dynamic_hedging") is not False and strat.get("dynamic_hedging") is not False
                     h_cfg = leg.get("associated_hedge") or {}
-                    if h_cfg.get("enabled"):
-                        init_otm = int(h_cfg.get("initial_otm", 20))
+                    # If strategy-level dynamic hedging is ON, every Sell leg is hedged by default unless explicitly disabled
+                    is_hedge_enabled = h_cfg.get("enabled")
+                    if is_hedge_enabled is None:
+                        is_hedge_enabled = strat_dyn_hedge
+                    elif not is_hedge_enabled and strat_dyn_hedge:
+                        # Strategy has dynamic hedging active: protect trader against naked RMS rejections
+                        is_hedge_enabled = True
+
+                    if is_hedge_enabled:
+                        init_otm = int(h_cfg.get("initial_otm") or 20)
                         h_opt_type = leg.get("option_type", "CE")
                         short_strike = float(contract.get("strike_price", 0.0))
 
@@ -4782,6 +4791,16 @@ class StraddleManager:
                             self._log_event(
                                 f"[{strat.get('name')}] Associated Hedge configured for {leg.get('id')} ({h_opt_type}): Buying OTM {init_otm} ({h_contract['trading_symbol']}) first for SPAN margin reduction."
                             )
+                        else:
+                            # INVIOLABLE SAFETY GUARD: If hedge contract could not be resolved, DO NOT place naked short sell!
+                            err_detail = f"Could not resolve dynamic hedge contract for {und} {short_strike} {h_opt_type} OTM {init_otm}. Entry blocked to protect margin."
+                            strat["entry_error"] = err_detail
+                            strat["status"] = "ENTRY_FAILED"
+                            strat["enabled"] = False
+                            self._log_event(f"[{strat.get('name')}] {err_detail}", level="ERROR")
+                            self._save_strategies()
+                            self._save_state()
+                            return
                     sell_legs.append({"cfg": leg, "contract": contract})
 
             # Batch 2: Pre-fetch quotes for all legs in a single high-speed call
@@ -5452,19 +5471,17 @@ class StraddleManager:
         adv_sl_placement = adv.get("sl_order_placement")
         leg_sl_placement = leg_cfg.get("sl_order_placement")
         if adv_sl_placement in ("Place in advance", "With Broker", "BROKER"):
-            if not leg_sl_placement or leg_sl_placement in ("Keep with self", "With Platform"):
-                leg_sl_placement = adv_sl_placement
-        if not leg_sl_placement:
-            leg_sl_placement = adv_sl_placement or "Keep with self"
+            leg_sl_placement = "Place in advance"
+        elif not leg_sl_placement:
+            leg_sl_placement = adv_sl_placement or "Place in advance"
 
         # Leg-level & Strategy-level Target Order Placement (With Broker vs With Self)
         adv_tgt_placement = adv.get("target_order_placement")
         leg_tgt_placement = leg_cfg.get("target_order_placement")
         if adv_tgt_placement in ("Place in advance", "With Broker", "BROKER"):
-            if not leg_tgt_placement or leg_tgt_placement in ("Keep with self", "With Platform"):
-                leg_tgt_placement = adv_tgt_placement
-        if not leg_tgt_placement:
-            leg_tgt_placement = adv_tgt_placement or "Keep with self"
+            leg_tgt_placement = "Place in advance"
+        elif not leg_tgt_placement:
+            leg_tgt_placement = adv_tgt_placement or "Place in advance"
 
         pos_record["sl_order_placement"] = leg_sl_placement
         pos_record["target_order_placement"] = leg_tgt_placement
@@ -5659,6 +5676,55 @@ class StraddleManager:
                 if not contract:
                     retried_failed.append((pos.get("symbol", "Leg"), "Contract resolution failed"))
                     continue
+
+                # Ensure prerequisite hedge is bought FIRST if this is a SELL leg and dynamic hedging is enabled
+                strat_dyn_hedge = strat.get("toggles", {}).get("dynamic_hedging") is not False and strat.get("dynamic_hedging") is not False
+                h_cfg = leg_cfg.get("associated_hedge") or {}
+                needs_hedge = (leg_cfg.get("side", "Sell").upper() == "SELL") and ((h_cfg.get("enabled") is True) or strat_dyn_hedge)
+                if needs_hedge:
+                    # Check if hedge already exists in OPEN positions
+                    open_h = next((p for p in positions if p.get("status") == "OPEN" and (
+                        p.get("parent_leg_id") == leg_cfg.get("id") or
+                        (p.get("is_associated_hedge") and p.get("hedge_parent_type") == leg_cfg.get("option_type"))
+                    )), None)
+                    if not open_h:
+                        init_otm = int(h_cfg.get("initial_otm") or 20)
+                        h_opt_type = leg_cfg.get("option_type", "CE")
+                        short_strike = float(contract.get("strike_price", 0.0))
+                        h_contract = self._resolve_exact_hedge_contract(
+                            underlying=und,
+                            short_strike=short_strike,
+                            init_otm=init_otm,
+                            option_type=h_opt_type,
+                            expiry_type=leg_cfg.get("expiry", "Weekly"),
+                        )
+                        if h_contract:
+                            h_leg_cfg = {
+                                "id": f"hedge_{leg_cfg.get('id', 'leg')}",
+                                "side": "Buy",
+                                "product": leg_cfg.get("product", "NRML"),
+                                "strike_selection": f"OTM {init_otm}",
+                                "option_type": h_opt_type,
+                                "lots": target_retry_lots,
+                                "target_type": "None",
+                                "target_value": 0.0,
+                                "sl_type": "None",
+                                "sl_value": 0.0,
+                                "action": "Square off leg",
+                                "underlying": und,
+                                "expiry": leg_cfg.get("expiry", "Weekly"),
+                                "is_associated_hedge": True,
+                                "parent_leg_id": leg_cfg.get("id"),
+                                "hedge_parent_type": h_opt_type,
+                            }
+                            self._log_event(f"[{strat.get('name')}] Buying prerequisite hedge ({h_contract['trading_symbol']}) before retrying sell leg...")
+                            h_pos = self._place_leg_entry_order(h_leg_cfg, h_contract, mult, broker, adv, strategy=strat)
+                            if h_pos and h_pos.get("status") == "OPEN":
+                                positions.insert(0, h_pos)
+                                if h_pos.get("order_id") and not str(h_pos["order_id"]).startswith("ORD_") and not str(h_pos["order_id"]).startswith("PAPER_"):
+                                    broker.wait_for_order_fill(str(h_pos["order_id"]), 6.0, 0.05)
+                                leg_cfg["associated_hedge_id"] = h_pos.get("id")
+                                leg_cfg["has_associated_hedge"] = True
 
                 new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat)
                 if new_pos and new_pos.get("status") == "OPEN":
@@ -6325,6 +6391,7 @@ class StraddleManager:
 
                 if res.get("success") and res.get("order_id"):
                     pos["sl_broker_order_id"] = str(res.get("order_id"))
+                    pos["last_sl_broker_order_id"] = str(res.get("order_id"))
                     pos["sl_order_placement"] = "Place in advance"
                     pos["sl_cancelled_unexpectedly"] = False
                     pos.pop("sl_cancel_notice", None)
@@ -6387,6 +6454,7 @@ class StraddleManager:
                 )
                 if res.get("success") and res.get("order_id"):
                     pos["target_broker_order_id"] = str(res.get("order_id"))
+                    pos["last_target_broker_order_id"] = str(res.get("order_id"))
                     pos["target_order_placement"] = "Place in advance"
                     pos["target_cancelled_unexpectedly"] = False
                     pos.pop("target_cancel_notice", None)
@@ -6674,6 +6742,8 @@ class StraddleManager:
                             broker.cancel_order(str(adv_tgt_oid))
                         except Exception as e:
                             logger.warning(f"Error cancelling target order {adv_tgt_oid}: {e}")
+                    if adv_tgt_oid:
+                        pos["last_target_broker_order_id"] = str(adv_tgt_oid)
                     pos["target_broker_order_id"] = None
                     changes.append("Target -> Platform")
 
@@ -6698,6 +6768,8 @@ class StraddleManager:
                             broker.cancel_order(str(adv_sl_oid))
                         except Exception as e:
                             logger.warning(f"Error cancelling SL order {adv_sl_oid}: {e}")
+                    if adv_sl_oid:
+                        pos["last_sl_broker_order_id"] = str(adv_sl_oid)
                     pos["sl_broker_order_id"] = None
                     changes.append("SL -> Platform")
 
@@ -7112,6 +7184,7 @@ class StraddleManager:
             except Exception as e_sl:
                 logger.warning(f"Error cancelling broker SL order {adv_sl_oid}: {e_sl}")
             finally:
+                pos["last_sl_broker_order_id"] = str(adv_sl_oid)
                 pos["sl_broker_order_id"] = None
 
         # 2. Cancel registered broker Target order
@@ -7123,6 +7196,7 @@ class StraddleManager:
             except Exception as e_tgt:
                 logger.warning(f"Error cancelling broker Target order {adv_tgt_oid}: {e_tgt}")
             finally:
+                pos["last_target_broker_order_id"] = str(adv_tgt_oid)
                 pos["target_broker_order_id"] = None
 
         # 3. Sweep broker orderbook for any pending trigger/limit orders for this exact symbol/token

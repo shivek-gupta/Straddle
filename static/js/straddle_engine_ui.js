@@ -4469,7 +4469,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 }
 
                 // Per Leg Target (Interactive ONLY for live filled/partially filled trades)
-                const isTgtBroker = (pos.target_order_placement === "Place in advance" || pos.target_order_placement === "With Broker" || !!pos.target_broker_order_id);
+                const isTgtBroker = (pos.target_order_placement === "Place in advance" || pos.target_order_placement === "With Broker" || pos.target_order_placement === "BROKER" || !!pos.target_broker_order_id || !!pos.last_target_broker_order_id);
                 let tgtStatusHtml = "";
                 if (pos.target_cancelled_unexpectedly) {
                     tgtStatusHtml = `
@@ -4480,6 +4480,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     `;
                 } else if (pos.target_broker_order_id) {
                     tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Order #${pos.target_broker_order_id}">🏦 #${pos.target_broker_order_id}</span>`;
+                } else if (pos.last_target_broker_order_id) {
+                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Target Order #${pos.last_target_broker_order_id}">🏦 #${pos.last_target_broker_order_id}</span>`;
                 } else if (pos.target_placement_error && isTgtBroker) {
                     tgtStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
@@ -4487,6 +4489,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET')">🏦 Retry Broker Placement</button>
                         </div>
                     `;
+                } else if (isTgtBroker) {
+                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Placed with Broker (Limit)">🏦 Broker</span>`;
                 } else {
                     tgtStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
                 }
@@ -4524,7 +4528,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 }
 
                 // Per Leg Stoploss (Interactive ONLY for live filled/partially filled trades)
-                const isSlBroker = (pos.sl_order_placement === "Place in advance" || pos.sl_order_placement === "With Broker" || !!pos.sl_broker_order_id);
+                const isSlBroker = (pos.sl_order_placement === "Place in advance" || pos.sl_order_placement === "With Broker" || pos.sl_order_placement === "BROKER" || !!pos.sl_broker_order_id || !!pos.last_sl_broker_order_id);
                 let slStatusHtml = "";
                 if (pos.sl_cancelled_unexpectedly) {
                     slStatusHtml = `
@@ -4535,6 +4539,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     `;
                 } else if (pos.sl_broker_order_id) {
                     slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Order #${pos.sl_broker_order_id}">🏦 #${pos.sl_broker_order_id}</span>`;
+                } else if (pos.last_sl_broker_order_id) {
+                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Stoploss Order #${pos.last_sl_broker_order_id}">🏦 #${pos.last_sl_broker_order_id}</span>`;
                 } else if (pos.sl_placement_error && isSlBroker) {
                     slStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
@@ -4542,6 +4548,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL')">🏦 Retry Broker Placement</button>
                         </div>
                     `;
+                } else if (isSlBroker) {
+                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Placed with Broker (SL-L)">🏦 Broker</span>`;
                 } else {
                     slStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
                 }
@@ -5805,6 +5813,21 @@ function onLegSideChanged(rowId, sideVal) {
             btn.style.background = "transparent";
             btn.textContent = "Hedge Off";
         }
+    } else {
+        const dynHedgeChecked = document.getElementById("cfgToggleDynamicHedges") ? document.getElementById("cfgToggleDynamicHedges").checked : true;
+        const chk = tr.querySelector(".leg-hedge-enabled");
+        if (chk && dynHedgeChecked) {
+            chk.checked = true;
+            const btn = tr.querySelector(".leg-hedge-btn");
+            const initV = tr.querySelector(".leg-hedge-initial-otm")?.value || "20";
+            const thrV = tr.querySelector(".leg-hedge-max-thresh")?.value || "22";
+            if (btn) {
+                btn.style.color = "#38bdf8";
+                btn.style.borderColor = "#38bdf8";
+                btn.style.background = "rgba(56,189,248,0.1)";
+                btn.textContent = `OTM ${initV} (≤${thrV})`;
+            }
+        }
     }
     if (typeof syncStrategyLegChange === "function") {
         syncStrategyLegChange(rowId);
@@ -6003,9 +6026,9 @@ function populateStraddleSettingsForm(s) {
     document.getElementById("cfgExitDelaySide").value = adv.exit_delay_side || adv.exit_order_delay_side || "Delay exit of Buy positions";
     document.getElementById("cfgExitDelaySec").value = adv.exit_delay_sec !== undefined ? adv.exit_delay_sec : (adv.exit_order_delay_sec !== undefined ? adv.exit_order_delay_sec : 3);
 
-    document.getElementById("cfgSlOrderPlacement").value = adv.sl_order_placement || "Keep with self";
+    document.getElementById("cfgSlOrderPlacement").value = adv.sl_order_placement || "Place in advance";
     const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
-    if (tgtOrderEl) tgtOrderEl.value = adv.target_order_placement || "Keep with self";
+    if (tgtOrderEl) tgtOrderEl.value = adv.target_order_placement || "Place in advance";
 
     const refModeEl = document.getElementById("cfgRefPriceMode");
     if (refModeEl) refModeEl.value = adv.reference_price_mode || "ENTRY_PRICE";
@@ -6023,6 +6046,7 @@ function populateStraddleSettingsForm(s) {
                 el.value = val;
                 el.style.color = (val === "Place in advance" ? "#10b981" : "#94a3b8");
             });
+            if (typeof syncStrategyLegChange === "function") syncStrategyLegChange();
         });
     }
     const tgtEl = document.getElementById("cfgTargetOrderPlacement");
@@ -6034,6 +6058,7 @@ function populateStraddleSettingsForm(s) {
                 el.value = val;
                 el.style.color = (val === "Place in advance" ? "#10b981" : "#94a3b8");
             });
+            if (typeof syncStrategyLegChange === "function") syncStrategyLegChange();
         });
     }
     document.getElementById("cfgSlPlacementDelaySec").value = adv.sl_placement_delay_sec !== undefined ? adv.sl_placement_delay_sec : 0;
@@ -6064,14 +6089,21 @@ function addStraddleLegRow(leg = null) {
         multiple_strike_selection: "None",
         option_type: "CE",
         lots: 1,
+        associated_hedge: {
+            enabled: true,
+            initial_otm: 20,
+            max_distance_threshold: 22,
+            reset_otm: 20,
+            exit_with_parent: true
+        },
         target_type: "TGT: %",
         target_value: 45.0,
         target_re_execute_type: "RE EXECUTE",
         target_re_execute_count: 6,
         sl_type: "SL: %",
         sl_value: 66.0,
-        sl_order_placement: document.getElementById("cfgSlOrderPlacement")?.value || "Keep with self",
-        target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Keep with self",
+        sl_order_placement: document.getElementById("cfgSlOrderPlacement")?.value || "Place in advance",
+        target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Place in advance",
         tsl_type: "None",
         sl_re_execute_type: "RE EXECUTE",
         sl_re_execute_count: 1,
@@ -6184,16 +6216,19 @@ function addStraddleLegRow(leg = null) {
     const hasMult = (l.multiple_strike_selection === "500/100 multiple" || l.multiple_strike_selection === "500_100_multiple");
 
     const isSell = (String(l.side || "Sell").toLowerCase() === "sell");
+    const dynHedgeChecked = document.getElementById("cfgToggleDynamicHedges") ? document.getElementById("cfgToggleDynamicHedges").checked : true;
     const hCfg = l.associated_hedge || {};
-    const hEnabled = (hCfg.enabled !== undefined) ? !!hCfg.enabled : isSell;
+    const hEnabled = (hCfg.enabled !== undefined) ? !!hCfg.enabled : (isSell && dynHedgeChecked);
     const hInit = parseInt(hCfg.initial_otm, 10) || 20;
     const hThresh = parseInt(hCfg.max_distance_threshold, 10) || 22;
     const hReset = parseInt(hCfg.reset_otm, 10) || 20;
 
-    const effectiveTgtPlacement = l.target_order_placement || document.getElementById("cfgTargetOrderPlacement")?.value || "Keep with self";
-    const isTgtAdv = (effectiveTgtPlacement === "Place in advance");
-    const effectiveSlPlacement = l.sl_order_placement || document.getElementById("cfgSlOrderPlacement")?.value || "Keep with self";
-    const isSlAdv = (effectiveSlPlacement === "Place in advance");
+    const stratTgtAdv = document.getElementById("cfgTargetOrderPlacement")?.value;
+    const stratSlAdv = document.getElementById("cfgSlOrderPlacement")?.value;
+    const effectiveTgtPlacement = (stratTgtAdv === "Place in advance") ? "Place in advance" : (l.target_order_placement || stratTgtAdv || "Place in advance");
+    const isTgtAdv = (effectiveTgtPlacement === "Place in advance" || effectiveTgtPlacement === "With Broker" || effectiveTgtPlacement === "BROKER");
+    const effectiveSlPlacement = (stratSlAdv === "Place in advance") ? "Place in advance" : (l.sl_order_placement || stratSlAdv || "Place in advance");
+    const isSlAdv = (effectiveSlPlacement === "Place in advance" || effectiveSlPlacement === "With Broker" || effectiveSlPlacement === "BROKER");
 
     const tr = document.createElement("tr");
     tr.id = rowId;
@@ -7034,8 +7069,8 @@ function serializeCurrentStrategySettings() {
             exit_order_delay_side: document.getElementById("cfgExitDelaySide")?.value || "Delay exit of Buy positions",
             exit_delay_sec: isNaN(parseInt(document.getElementById("cfgExitDelaySec")?.value, 10)) ? 3 : parseInt(document.getElementById("cfgExitDelaySec")?.value, 10),
             exit_order_delay_sec: isNaN(parseInt(document.getElementById("cfgExitDelaySec")?.value, 10)) ? 3 : parseInt(document.getElementById("cfgExitDelaySec")?.value, 10),
-            sl_order_placement: document.getElementById("cfgSlOrderPlacement")?.value || "Keep with self",
-            target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Keep with self",
+            sl_order_placement: document.getElementById("cfgSlOrderPlacement")?.value || "Place in advance",
+            target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Place in advance",
             sl_placement_delay_sec: isNaN(parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value, 10),
             mtm_sl_delay_sec: isNaN(parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10),
             auto_handling_sl_cancellation: document.getElementById("cfgAutoHandlingSl")?.checked !== false,
@@ -7051,16 +7086,19 @@ function serializeCurrentStrategySettings() {
     strategy.advanced = Object.assign({}, strategy.advanced_settings);
 
     const trs = document.querySelectorAll("#straddleLegsBuilderBody tr");
+    const dynHedgeChecked = document.getElementById("cfgToggleDynamicHedges") ? document.getElementById("cfgToggleDynamicHedges").checked : true;
     trs.forEach(tr => {
+        const legSide = tr.querySelector(".leg-side")?.value || "Sell";
+        const isSellLeg = String(legSide).toUpperCase() === "SELL";
         const hChk = tr.querySelector(".leg-hedge-enabled");
-        const isHedgeOn = hChk ? hChk.checked : false;
+        const isHedgeOn = isSellLeg && (hChk ? hChk.checked : dynHedgeChecked);
         const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
         const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
         const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
 
         strategy.legs.push({
             id: tr.id,
-            side: tr.querySelector(".leg-side")?.value,
+            side: legSide,
             product: tr.querySelector(".leg-product")?.value,
             strike_selection: tr.querySelector(".leg-strike")?.value,
             multiple_strike_selection: tr.querySelector(".leg-multiple-strike")?.value || "None",
@@ -7075,12 +7113,12 @@ function serializeCurrentStrategySettings() {
             },
             target_type: tr.querySelector(".leg-tgt-type")?.value,
             target_value: parseFloat(tr.querySelector(".leg-tgt-val")?.value) || 45.0,
-            target_order_placement: tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Keep with self",
+            target_order_placement: tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Place in advance",
             target_re_execute_type: tr.querySelector(".leg-tgt-re-type")?.value,
             target_re_execute_count: parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value) || 6,
             sl_type: tr.querySelector(".leg-sl-type")?.value,
             sl_value: parseFloat(tr.querySelector(".leg-sl-val")?.value) || 66.0,
-            sl_order_placement: tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Keep with self",
+            sl_order_placement: tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Place in advance",
             tsl_type: tr.querySelector(".leg-tsl-type")?.value,
             sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
             sl_re_execute_count: parseInt(tr.querySelector(".leg-sl-re-cnt")?.value) || 1,
