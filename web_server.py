@@ -207,7 +207,9 @@ def api_straddle_logs():
     try:
         mgr = get_straddle_manager()
         logs = mgr.get_logs(limit=250)
-        return jsonify({"success": True, "logs": logs})
+        resp = jsonify({"success": True, "logs": logs})
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
     except Exception as e:
         logger.error(f"Error in api_straddle_logs: {e}")
         return jsonify({"success": False, "error": str(e), "logs": []}), 500

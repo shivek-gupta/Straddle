@@ -7091,10 +7091,18 @@ function serializeCurrentStrategySettings() {
         const legSide = tr.querySelector(".leg-side")?.value || "Sell";
         const isSellLeg = String(legSide).toUpperCase() === "SELL";
         const hChk = tr.querySelector(".leg-hedge-enabled");
-        const isHedgeOn = isSellLeg && (hChk ? hChk.checked : dynHedgeChecked);
+        const isHedgeOn = isSellLeg && (dynHedgeChecked || (hChk ? hChk.checked : true));
         const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
         const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
         const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
+
+        const effectiveTgtPlacement = (strategy.advanced_settings.target_order_placement === "Place in advance") 
+            ? "Place in advance" 
+            : (tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Place in advance");
+
+        const effectiveSlPlacement = (strategy.advanced_settings.sl_order_placement === "Place in advance") 
+            ? "Place in advance" 
+            : (tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Place in advance");
 
         strategy.legs.push({
             id: tr.id,
@@ -7113,12 +7121,12 @@ function serializeCurrentStrategySettings() {
             },
             target_type: tr.querySelector(".leg-tgt-type")?.value,
             target_value: parseFloat(tr.querySelector(".leg-tgt-val")?.value) || 45.0,
-            target_order_placement: tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Place in advance",
+            target_order_placement: effectiveTgtPlacement,
             target_re_execute_type: tr.querySelector(".leg-tgt-re-type")?.value,
             target_re_execute_count: parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value) || 6,
             sl_type: tr.querySelector(".leg-sl-type")?.value,
             sl_value: parseFloat(tr.querySelector(".leg-sl-val")?.value) || 66.0,
-            sl_order_placement: tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Place in advance",
+            sl_order_placement: effectiveSlPlacement,
             tsl_type: tr.querySelector(".leg-tsl-type")?.value,
             sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
             sl_re_execute_count: parseInt(tr.querySelector(".leg-sl-re-cnt")?.value) || 1,
@@ -9296,44 +9304,58 @@ function downloadAuditLogsExcel() {
 function renderStraddleAuditLogs() {
     const container = document.getElementById("straddleAuditLogsContainer");
     if (!container) return;
-    container.innerHTML = `<div style="color:#64748b; text-align:center; padding:20px;">Fetching live audit logs...</div>`;
-    
-    fetch("/api/straddle/logs")
+
+    function _buildLogsHtml(logsList) {
+        if (!logsList || logsList.length === 0) {
+            return `<div style="color:#64748b; text-align:center; padding:25px;">No audit events recorded yet.</div>`;
+        }
+        let html = "";
+        logsList.forEach(l => {
+            const level = (l.level || "INFO").toUpperCase();
+            const color = level === "ERROR" ? "#f43f5e" : (level === "WARN" ? "#f59e0b" : (level === "SUCCESS" ? "#10b981" : "#38bdf8"));
+            const bg = level === "ERROR" ? "rgba(244,63,94,0.08)" : (level === "WARN" ? "rgba(245,158,11,0.08)" : (level === "SUCCESS" ? "rgba(16,185,129,0.08)" : "rgba(56,189,248,0.04)"));
+            const border = level === "ERROR" ? "rgba(244,63,94,0.3)" : (level === "WARN" ? "rgba(245,158,11,0.3)" : (level === "SUCCESS" ? "rgba(16,185,129,0.3)" : "rgba(56,189,248,0.2)"));
+            const dateStr = l.date ? `${l.date} ` : "";
+            html += `
+                <div style="padding:8px 12px; background:${bg}; border:1px solid ${border}; border-radius:6px; display:flex; gap:12px; align-items:flex-start; margin-bottom:6px;">
+                    <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:600;">[${dateStr}${l.timestamp || ''}]</span>
+                    <span style="color:${color}; font-weight:800; font-size:11px; text-transform:uppercase; min-width:55px;">${level}</span>
+                    <span style="color:#e2e8f0; font-size:12px; line-height:1.4; word-break:break-word;">${l.message || ''}</span>
+                </div>
+            `;
+        });
+        return html;
+    }
+
+    // Instant optimistic render from in-memory state
+    const cachedLogs = (window._straddleState && window._straddleState.state && window._straddleState.state.logs)
+        ? window._straddleState.state.logs
+        : [];
+    if (cachedLogs && cachedLogs.length > 0) {
+        container.innerHTML = _buildLogsHtml(cachedLogs);
+    } else {
+        container.innerHTML = `<div style="color:#64748b; text-align:center; padding:20px;">Fetching live audit logs...</div>`;
+    }
+
+    const abortCtrl = new AbortController();
+    const timeoutId = setTimeout(() => abortCtrl.abort(), 4000);
+
+    fetch("/api/straddle/logs", { signal: abortCtrl.signal })
         .then(r => r.json())
         .then(data => {
-            let logs = (data && data.success && data.logs) ? data.logs : [];
-            if (!logs || logs.length === 0) {
-                // Fallback to /api/straddle/state if needed
-                return fetch("/api/straddle/state").then(r => r.json()).then(sdata => {
-                    return (sdata && sdata.success && sdata.state && sdata.state.logs) ? sdata.state.logs : [];
-                });
-            }
-            return logs;
-        })
-        .then(logs => {
+            clearTimeout(timeoutId);
+            const logs = (data && data.success && data.logs) ? data.logs : [];
             if (logs && logs.length > 0) {
-                let html = "";
-                logs.forEach(l => {
-                    const level = (l.level || "INFO").toUpperCase();
-                    const color = level === "ERROR" ? "#f43f5e" : (level === "WARN" ? "#f59e0b" : "#38bdf8");
-                    const bg = level === "ERROR" ? "rgba(244,63,94,0.08)" : (level === "WARN" ? "rgba(245,158,11,0.08)" : "rgba(56,189,248,0.04)");
-                    const border = level === "ERROR" ? "rgba(244,63,94,0.3)" : (level === "WARN" ? "rgba(245,158,11,0.3)" : "rgba(56,189,248,0.2)");
-                    const dateStr = l.date ? `${l.date} ` : "";
-                    html += `
-                        <div style="padding:8px 12px; background:${bg}; border:1px solid ${border}; border-radius:6px; display:flex; gap:12px; align-items:flex-start;">
-                            <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:600;">[${dateStr}${l.timestamp || ''}]</span>
-                            <span style="color:${color}; font-weight:800; font-size:11px; text-transform:uppercase; min-width:55px;">${level}</span>
-                            <span style="color:#e2e8f0; font-size:12px; line-height:1.4; word-break:break-word;">${l.message || ''}</span>
-                        </div>
-                    `;
-                });
-                container.innerHTML = html;
-            } else {
+                container.innerHTML = _buildLogsHtml(logs);
+            } else if (!cachedLogs || cachedLogs.length === 0) {
                 container.innerHTML = `<div style="color:#64748b; text-align:center; padding:25px;">No audit events recorded yet.</div>`;
             }
         })
         .catch(e => {
-            container.innerHTML = `<div style="color:#f43f5e; text-align:center; padding:20px;">Error loading logs: ${e.message}</div>`;
+            clearTimeout(timeoutId);
+            if (!cachedLogs || cachedLogs.length === 0) {
+                container.innerHTML = `<div style="color:#f43f5e; text-align:center; padding:20px;">Error loading logs: ${e.message}</div>`;
+            }
         });
 }
 
