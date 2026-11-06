@@ -2744,11 +2744,11 @@ class StraddleManager:
         Deterministically resolves the exact hedge option contract based on mathematical strike formula:
         CE Hedge Strike = short_strike + (init_otm * step)
         PE Hedge Strike = short_strike - (init_otm * step)
-        Leverages the core resolve_strike_and_contract engine with multi-tier OTM fallbacks.
-        Guarantees:
+        Strictly guarantees:
         1. Always resolves an active tradeable contract matching the short leg's expiry.
-        2. Never returns the identical strike as the short sell leg.
-        3. Never blocks execution: falls back gracefully across available OTM strikes.
+        2. Strictly enforces OTM direction: strike > short_strike for CE, strike < short_strike for PE.
+        3. Under NO circumstances can it return a strike equal to short_strike or on the wrong side.
+        4. O(1) index lookup with fallback to strictly OTM filtered candidates pool.
         """
         clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
         if clean_und in ("NIFTY50", "NIFTY_50"):
@@ -2770,41 +2770,93 @@ class StraddleManager:
 
         target_hedge_strike = float(round(target_hedge_strike / step) * step)
 
-        # 1. Primary resolution using the core resolve_strike_and_contract
+        is_comm = clean_und in COMMODITY_SYMBOLS or any(c in clean_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+        target_seg = "MCX_FO" if is_comm else ("BSE_FO" if clean_und in ("SENSEX", "BANKEX") else "NSE_FO")
+
+        all_expiries = self.get_expiries_for_underlying(clean_und)
+        target_expiry_ms = custom_expiry_ms
+        if target_expiry_ms is None and all_expiries:
+            exp_str = str(expiry_type or "Weekly").lower().strip()
+            if exp_str in ("next weekly", "next"):
+                target_expiry_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
+            elif exp_str in ("monthly", "current month"):
+                monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly"), None)
+                target_expiry_ms = monthly_exp or all_expiries[0]["expiry_ms"]
+            else:
+                target_expiry_ms = all_expiries[0]["expiry_ms"]
+
+        # 1. Direct O(1) exact index lookup for mathematically computed hedge strike
+        if target_expiry_ms and hasattr(self, "_exact_contract_index"):
+            exact_k = (target_seg.upper(), clean_und, int(target_expiry_ms), opt_type, float(target_hedge_strike))
+            if exact_k in self._exact_contract_index:
+                match = self._exact_contract_index[exact_k]
+                resolved_lot = int(match.get("lot_size") or get_lot_size_for_symbol(match.get("trading_symbol", clean_und), match.get("instrument_key", "")))
+                return {
+                    "instrument_key": match["instrument_key"],
+                    "trading_symbol": match["trading_symbol"],
+                    "strike_price": float(match["strike_price"]),
+                    "lot_size": resolved_lot,
+                    "expiry_ms": match.get("expiry"),
+                    "option_type": opt_type,
+                    "underlying": clean_und,
+                    "segment": target_seg.lower(),
+                }
+
+        # 2. Strict OTM-filtered candidates search from fast pre-indexed pool or loaded instruments
+        instruments = self._load_instruments_data()
+        und_pool = getattr(self, "_options_by_und", {}).get((target_seg, clean_und)) or getattr(self, "_options_by_und", {}).get((target_seg.upper(), clean_und))
+        candidates_source = und_pool if und_pool else instruments
+
+        candidates = [
+            r for r in candidates_source
+            if str(r.get("segment", "")).upper() == target_seg.upper()
+            and str(r.get("instrument_type", "")).upper() == opt_type
+            and (target_expiry_ms is None or int(r.get("expiry") or 0) == int(target_expiry_ms))
+            and (str(r.get("name", "")).upper() == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
+        ]
+
+        # Strict directional filter: CE hedge MUST be strictly higher than short strike, PE hedge MUST be strictly lower
+        min_safe_dist = max(step, min(3, otm_steps) * step)
+        if opt_type == "CE":
+            valid_cands = [r for r in candidates if float(r.get("strike_price", 0.0)) >= (float(short_strike) + min_safe_dist)]
+            if not valid_cands:
+                valid_cands = [r for r in candidates if float(r.get("strike_price", 0.0)) > float(short_strike)]
+        else:
+            valid_cands = [r for r in candidates if float(r.get("strike_price", 0.0)) <= (float(short_strike) - min_safe_dist)]
+            if not valid_cands:
+                valid_cands = [r for r in candidates if float(r.get("strike_price", 0.0)) < float(short_strike)]
+
+        if valid_cands:
+            best_match = min(valid_cands, key=lambda c: abs(float(c.get("strike_price", 0.0)) - target_hedge_strike))
+            resolved_lot = int(best_match.get("lot_size") or get_lot_size_for_symbol(best_match.get("trading_symbol", clean_und), best_match.get("instrument_key", "")))
+            return {
+                "instrument_key": best_match["instrument_key"],
+                "trading_symbol": best_match["trading_symbol"],
+                "strike_price": float(best_match["strike_price"]),
+                "lot_size": resolved_lot,
+                "expiry_ms": best_match.get("expiry"),
+                "option_type": opt_type,
+                "underlying": clean_und,
+                "segment": target_seg.lower(),
+            }
+
+        # 3. Fallback: try core resolve_strike_and_contract with explicit numeric strike string
         res = self.resolve_strike_and_contract(
             underlying=clean_und,
             strike_selection=str(int(target_hedge_strike)),
             option_type=opt_type,
             expiry_type=expiry_type,
-            custom_expiry_ms=custom_expiry_ms,
+            custom_expiry_ms=target_expiry_ms,
         )
 
-        # 2. Inviolable safety check: ensure hedge does not match the short leg strike
-        if res and float(res.get("strike_price", 0.0)) == float(short_strike):
-            safe_offset = max(5, otm_steps) * step
-            alt_strike = (float(short_strike) + safe_offset) if opt_type == "CE" else (float(short_strike) - safe_offset)
-            res = self.resolve_strike_and_contract(
-                underlying=clean_und,
-                strike_selection=str(int(alt_strike)),
-                option_type=opt_type,
-                expiry_type=expiry_type,
-                custom_expiry_ms=custom_expiry_ms,
-            )
+        # Inviolable safety check: ensure resolved contract is strictly OTM and never equals short_strike
+        if res:
+            res_sp = float(res.get("strike_price", 0.0))
+            is_valid_otm = (res_sp > float(short_strike)) if opt_type == "CE" else (res_sp < float(short_strike))
+            if is_valid_otm and res_sp != float(short_strike):
+                return res
 
-        # 3. Fallback: try relative OTM selections (e.g. OTM 20, OTM 15, OTM 10, OTM 5, OTM 2)
-        if not res:
-            for otm_cand in (otm_steps, 15, 10, 5, 2):
-                res = self.resolve_strike_and_contract(
-                    underlying=clean_und,
-                    strike_selection=f"OTM {otm_cand}",
-                    option_type=opt_type,
-                    expiry_type=expiry_type,
-                    custom_expiry_ms=custom_expiry_ms,
-                )
-                if res and float(res.get("strike_price", 0.0)) != float(short_strike):
-                    break
-
-        return res
+        return None
 
     def _preindex_active_underlying_strikes(self, underlying: str = "NIFTY"):
         """Pre-indexes ATM and nearby strike contracts directly in memory for <5ms zero-latency re-entries."""
@@ -4694,27 +4746,32 @@ class StraddleManager:
                         )
 
                         # INVIOLABLE SAFETY DIRECTIVE:
-                        # Strictly under no circumstances can a hedge buy order resolve to the identical strike as the short sell leg!
+                        # Strictly under no circumstances can a hedge buy order resolve to the identical strike as the short sell leg or be on the wrong side!
                         # Buying and selling identical strike causes broker net zero position, false exits, and subsequent margin rejections.
                         if h_contract and contract and (
                             h_contract.get("instrument_key") == contract.get("instrument_key")
                             or float(h_contract.get("strike_price", 0.0)) == float(contract.get("strike_price", 0.0))
+                            or (h_opt_type.upper() == "CE" and float(h_contract.get("strike_price", 0.0)) <= float(short_strike))
+                            or (h_opt_type.upper() == "PE" and float(h_contract.get("strike_price", 0.0)) >= float(short_strike))
                         ):
-                            step = STRIKE_STEPS.get(und.upper(), 50)
-                            safe_otm_steps = max(10, init_otm)
-                            fallback_strike = (short_strike + (safe_otm_steps * step)) if h_opt_type.upper() == "CE" else (short_strike - (safe_otm_steps * step))
                             self._log_event(
-                                f"[{strat.get('name')}] WARNING: Hedge strike {h_contract.get('strike_price')} matched short leg! Overriding to safe OTM strike {fallback_strike}.",
+                                f"[{strat.get('name')}] WARNING: Hedge contract {h_contract.get('trading_symbol')} matches or violates short strike {short_strike}! Re-resolving with safe OTM distance.",
                                 level="WARNING"
                             )
                             h_contract = self._resolve_exact_hedge_contract(
                                 underlying=und,
-                                short_strike=fallback_strike,
-                                init_otm=safe_otm_steps,
+                                short_strike=short_strike,
+                                init_otm=max(10, init_otm),
                                 option_type=h_opt_type,
                                 expiry_type=leg.get("expiry", "Weekly"),
                                 custom_expiry_ms=short_expiry_ms,
                             )
+                            if h_contract and (
+                                float(h_contract.get("strike_price", 0.0)) == float(short_strike)
+                                or (h_opt_type.upper() == "CE" and float(h_contract.get("strike_price", 0.0)) <= float(short_strike))
+                                or (h_opt_type.upper() == "PE" and float(h_contract.get("strike_price", 0.0)) >= float(short_strike))
+                            ):
+                                h_contract = None
 
                         if not h_contract:
                             # Secondary fallback: try 10 OTM
@@ -5660,6 +5717,14 @@ class StraddleManager:
                             expiry_type=leg_cfg.get("expiry", "Weekly"),
                             custom_expiry_ms=short_expiry_ms,
                         )
+                        # INVIOLABLE SAFETY CHECK: Hedge must never match short leg or violate OTM direction
+                        if h_contract and (
+                            float(h_contract.get("strike_price", 0.0)) == float(short_strike)
+                            or (h_opt_type.upper() == "CE" and float(h_contract.get("strike_price", 0.0)) <= float(short_strike))
+                            or (h_opt_type.upper() == "PE" and float(h_contract.get("strike_price", 0.0)) >= float(short_strike))
+                        ):
+                            h_contract = None
+
                         if not h_contract:
                             h_contract = self._resolve_exact_hedge_contract(
                                 underlying=und,
@@ -5669,6 +5734,8 @@ class StraddleManager:
                                 expiry_type=leg_cfg.get("expiry", "Weekly"),
                                 custom_expiry_ms=short_expiry_ms,
                             )
+                            if h_contract and float(h_contract.get("strike_price", 0.0)) == float(short_strike):
+                                h_contract = None
                         if h_contract:
                             h_leg_cfg = {
                                 "id": f"hedge_{leg_cfg.get('id', 'leg')}",
@@ -7836,6 +7903,24 @@ class StraddleManager:
                         expiry_type=leg_cfg.get("expiry", "Weekly"),
                         custom_expiry_ms=contract.get("expiry_ms") or contract.get("expiry") or leg_cfg.get("custom_expiry_ms"),
                     )
+
+                    # INVIOLABLE SAFETY CHECK: Hedge must never match short leg or violate OTM direction
+                    if new_h_contract and (
+                        float(new_h_contract.get("strike_price", 0.0)) == float(new_short_strike)
+                        or (opt_type.upper() == "CE" and float(new_h_contract.get("strike_price", 0.0)) <= float(new_short_strike))
+                        or (opt_type.upper() == "PE" and float(new_h_contract.get("strike_price", 0.0)) >= float(new_short_strike))
+                    ):
+                        self._log_event(f"[Re-Entry Margin Guard] WARNING: Hedge contract matched short leg {new_short_strike}! Re-resolving with safe distance.", level="WARNING")
+                        new_h_contract = self._resolve_exact_hedge_contract(
+                            underlying=und,
+                            short_strike=new_short_strike,
+                            init_otm=max(10, init_otm),
+                            option_type=opt_type,
+                            expiry_type=leg_cfg.get("expiry", "Weekly"),
+                            custom_expiry_ms=contract.get("expiry_ms") or contract.get("expiry") or leg_cfg.get("custom_expiry_ms"),
+                        )
+                        if new_h_contract and float(new_h_contract.get("strike_price", 0.0)) == float(new_short_strike):
+                            new_h_contract = None
 
                     if new_h_contract:
                         self._log_event(
