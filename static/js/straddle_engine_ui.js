@@ -394,13 +394,17 @@ async function fetchStraddleState() {
             window._straddleState.allStrategies = s.all_strategies || [];
 
             // Determine active strategy strictly matching activeStrategyId or activeStrategy
-            const curTargetId = window._straddleState.activeStrategyId || (window._straddleState.activeStrategy ? window._straddleState.activeStrategy.strategy_id : null);
+            const prevActiveId = window._straddleState.activeStrategy ? window._straddleState.activeStrategy.strategy_id : null;
+            const curTargetId = window._straddleState.activeStrategyId;
             let active = null;
             if (curTargetId) {
                 active = (s.all_strategies || []).find(x => x.strategy_id === curTargetId || x.name === curTargetId);
             }
+            if (!active && s.active_strategy) {
+                active = s.active_strategy;
+            }
             if (!active) {
-                active = s.active_strategy || (s.all_strategies && s.all_strategies[0]) || null;
+                active = (s.all_strategies && s.all_strategies[0]) || null;
             }
             window._straddleState.activeStrategy = active;
             window._straddleState.activeStrategyId = active ? active.strategy_id : null;
@@ -419,9 +423,12 @@ async function fetchStraddleState() {
             renderStraddleHeader(s);
             updateStraddleStrategyDropdown(s.all_strategies || [], active);
 
-            // Update Terminal positions if in Algo Detail view
+            // Update Terminal positions and re-populate settings if active strategy changed
             if (window._straddleState.currentSubView === "terminal") {
                 renderStraddlePositions(activePositions, active ? (active.group_mtm || 0.0) : 0.0, active ? (active.mtm || 0.0) : 0.0);
+                if (active && prevActiveId && prevActiveId !== active.strategy_id) {
+                    populateStraddleSettingsForm(active);
+                }
             }
 
             // Render Margin Error 15s Countdown Alert Banner (Quantiply Parity)
@@ -3255,14 +3262,17 @@ function updateStraddleStrategyDropdown(strategies, activeStrat) {
     const sel = document.getElementById("straddleStrategySelect");
     if (!sel) return;
     
-    const activeId = activeStrat ? activeStrat.strategy_id : null;
+    const activeId = activeStrat ? activeStrat.strategy_id : (window._straddleState?.activeStrategyId || null);
+    const curOpts = Array.from(sel.options).map(o => o.value).join(",");
+    const newOpts = (strategies || []).map(s => s.strategy_id).join(",");
 
-    if (sel.options.length !== strategies.length) {
+    if (curOpts !== newOpts || sel.options.length !== (strategies || []).length) {
         sel.innerHTML = "";
-        strategies.forEach(s => {
+        (strategies || []).forEach(s => {
             const opt = document.createElement("option");
             opt.value = s.strategy_id;
             opt.textContent = s.name || s.strategy_id;
+            if (activeId && s.strategy_id === activeId) opt.selected = true;
             sel.appendChild(opt);
         });
     }
@@ -3417,7 +3427,18 @@ function syncStrategyLegChange(rowId) {
     if (legObj) {
         legObj.lots = parseInt(tr.querySelector(".leg-lots")?.value, 10) || 1;
         legObj.strike_selection = tr.querySelector(".leg-strike")?.value || "ATM";
+        legObj.multiple_strike_selection = tr.querySelector(".leg-multiple-strike")?.value || "None";
+        legObj.option_type = tr.querySelector(".leg-type")?.value || legObj.option_type || "CE";
         legObj.underlying = tr.querySelector(".leg-underlying")?.value || window._straddleState.activeStrategy.underlying || "NIFTY";
+        const hChk = tr.querySelector(".leg-hedge-enabled");
+        const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
+        const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
+        const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
+        if (!legObj.associated_hedge) legObj.associated_hedge = {};
+        if (hChk) legObj.associated_hedge.enabled = hChk.checked;
+        legObj.associated_hedge.initial_otm = hInitVal;
+        legObj.associated_hedge.max_distance_threshold = hThreshVal;
+        legObj.associated_hedge.reset_otm = hResetVal;
     }
 }
 window.syncStrategyLegChange = syncStrategyLegChange;
@@ -5718,11 +5739,27 @@ function openLegSettingsModal(rowId) {
             toggleLegModalHedgeFields(hEnabled);
         }
         const selInit = document.getElementById("legSettingsHedgeInitialOtm");
-        if (selInit) selInit.value = hInit;
+        if (selInit) {
+            if (!Array.from(selInit.options).some(o => o.value === String(hInit))) {
+                const opt = document.createElement("option");
+                opt.value = hInit;
+                opt.textContent = `OTM ${hInit}`;
+                selInit.appendChild(opt);
+            }
+            selInit.value = hInit;
+        }
         const inpThresh = document.getElementById("legSettingsHedgeMaxThresh");
         if (inpThresh) inpThresh.value = hThresh;
         const selReset = document.getElementById("legSettingsHedgeResetOtm");
-        if (selReset) selReset.value = hReset;
+        if (selReset) {
+            if (!Array.from(selReset.options).some(o => o.value === String(hReset))) {
+                const opt = document.createElement("option");
+                opt.value = hReset;
+                opt.textContent = `OTM ${hReset}`;
+                selReset.appendChild(opt);
+            }
+            selReset.value = hReset;
+        }
     }
 
     const modal = document.getElementById("modalLegSettings");
@@ -5797,6 +5834,14 @@ function saveLegSettingsModal() {
             btnHedge.style.borderColor = isH ? "#38bdf8" : "#334155";
             btnHedge.style.background = isH ? "rgba(56,189,248,0.1)" : "transparent";
             btnHedge.textContent = isH ? `OTM ${initV} (≤${thrV})` : "Hedge Off";
+        }
+
+        // Sync changes to in-memory activeStrategy and auto-save
+        if (typeof syncStrategyLegChange === "function") {
+            syncStrategyLegChange(rowId);
+        }
+        if (typeof saveStraddleStrategySettings === "function") {
+            saveStraddleStrategySettings();
         }
     }
 
@@ -7282,13 +7327,66 @@ async function saveAndStartStraddleTrade() {
 }
 
 async function onStraddleStrategySelect(stratId) {
+    if (!stratId) return;
     try {
-        await fetch("/api/straddle/strategy/set_active", {
+        // 1. Immediately find target strategy in allStrategies
+        let strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === stratId || s.name === stratId);
+        
+        // 2. Synchronously update activeStrategy and activeStrategyId
+        window._straddleState.activeStrategyId = strat ? strat.strategy_id : stratId;
+        if (strat) {
+            window._straddleState.activeStrategy = strat;
+            window._straddleState.positions = strat.positions || [];
+        }
+
+        // 3. Immediately update header title and dropdown element
+        const titleEl = document.getElementById("straddleTerminalStrategyTitle");
+        if (titleEl && strat) {
+            titleEl.textContent = strat.name || strat.strategy_id;
+        }
+
+        const sel = document.getElementById("straddleStrategySelect");
+        if (sel && sel.value !== (strat ? strat.strategy_id : stratId)) {
+            sel.value = strat ? strat.strategy_id : stratId;
+        }
+
+        // 4. Immediately update settings form, positions, action bar, and alert banner
+        if (strat) {
+            populateStraddleSettingsForm(strat);
+            renderStraddlePositions(strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
+            if (typeof updateTerminalActionBar === "function") {
+                updateTerminalActionBar(strat);
+            }
+            if (typeof renderStraddleMarginAutoExitAlert === "function") {
+                renderStraddleMarginAutoExitAlert(strat);
+            }
+            if (typeof renderStraddleHeader === "function") {
+                renderStraddleHeader({
+                    ...window._straddleState,
+                    active_strategy: strat
+                });
+            }
+        }
+
+        // 5. Notify backend to persist active strategy
+        const resp = await fetch("/api/straddle/strategy/set_active", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy_id: stratId })
+            body: JSON.stringify({ strategy_id: strat ? strat.strategy_id : stratId })
         });
-        await fetchStraddleState();
+        const res = await resp.json();
+        if (res && res.strategy) {
+            window._straddleState.activeStrategy = res.strategy;
+            window._straddleState.activeStrategyId = res.strategy.strategy_id;
+            if (window._straddleState.allStrategies) {
+                const idx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === res.strategy.strategy_id);
+                if (idx >= 0) window._straddleState.allStrategies[idx] = res.strategy;
+            }
+            if (window._straddleState.currentSubView === "terminal") {
+                populateStraddleSettingsForm(res.strategy);
+                renderStraddlePositions(res.strategy.positions || [], res.strategy.group_mtm || 0.0, res.strategy.mtm || 0.0);
+            }
+        }
     } catch (e) {
         console.error("Error setting active strategy:", e);
     }

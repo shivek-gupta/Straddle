@@ -2826,16 +2826,18 @@ class StraddleManager:
         option_type: str,
         expiry_type: str = "Weekly",
         custom_expiry_ms: Optional[Any] = None,
+        reference_strike: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Deterministically resolves the exact hedge option contract based on mathematical strike formula:
-        CE Hedge Strike = short_strike + (init_otm * step)
-        PE Hedge Strike = short_strike - (init_otm * step)
+        CE Hedge Strike = ATM Strike + (init_otm * step)
+        PE Hedge Strike = ATM Strike - (init_otm * step)
         Strictly guarantees:
         1. Always resolves an active tradeable contract matching the short leg's expiry.
-        2. Strictly enforces OTM direction: strike > short_strike for CE, strike < short_strike for PE.
-        3. Under NO circumstances can it return a strike equal to short_strike or on the wrong side.
-        4. Multi-tier resolution: O(1) exact index lookup -> same expiry OTM candidates -> fallback active expiries -> failsafe OTM contract.
+        2. Anchors to underlying ATM strike (matching standard option chain OTM convention).
+        3. Strictly enforces OTM direction: strike > short_strike for CE, strike < short_strike for PE.
+        4. Under NO circumstances can it return a strike equal to short_strike or on the wrong side.
+        5. Multi-tier resolution: O(1) exact index lookup -> same expiry OTM candidates -> fallback active expiries -> failsafe OTM contract.
         """
         clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
         if clean_und in ("NIFTY50", "NIFTY_50"):
@@ -2850,11 +2852,26 @@ class StraddleManager:
         otm_steps = int(init_otm) if int(init_otm) > 0 else 20
         short_strike_flt = float(short_strike)
 
-        # Mathematical target strike
+        # In algorithmic trading and Quantiply parity, OTM N hedge strike is anchored to the underlying ATM strike
+        # (e.g. NIFTY spot 25030, ATM 25050 -> OTM 20 is 26050 CE / 24050 PE; OTM 22 is 26150 CE / 23950 PE).
+        # Fall back to short_strike_flt only if ATM cannot be determined.
+        atm_strike = float(reference_strike or 0.0)
+        if atm_strike <= 0:
+            atm_strike = float(self.get_underlying_atm_strike(clean_und) or 0.0)
+        if atm_strike <= 0:
+            atm_strike = short_strike_flt
+
+        # Mathematical target strike relative to ATM
         if opt_type == "PE":
-            target_hedge_strike = short_strike_flt - (otm_steps * step)
+            target_hedge_strike = atm_strike - (otm_steps * step)
+            # Strict safety: PE hedge must never be above or equal to short strike
+            if target_hedge_strike >= short_strike_flt:
+                target_hedge_strike = short_strike_flt - (otm_steps * step)
         else:
-            target_hedge_strike = short_strike_flt + (otm_steps * step)
+            target_hedge_strike = atm_strike + (otm_steps * step)
+            # Strict safety: CE hedge must never be below or equal to short strike
+            if target_hedge_strike <= short_strike_flt:
+                target_hedge_strike = short_strike_flt + (otm_steps * step)
 
         target_hedge_strike = float(round(target_hedge_strike / step) * step)
 
