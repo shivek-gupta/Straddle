@@ -48,6 +48,8 @@ logger.setLevel(logging.INFO)
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+_PERSISTENT_LEG_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="StraddleLegExec")
+
 
 def now_ist() -> datetime:
     return datetime.now(IST)
@@ -5015,14 +5017,18 @@ class StraddleManager:
             entry_delay_side = str(adv.get("entry_order_delay_side") or adv.get("entry_delay_side") or "Delay entry of Sell positions")
             entry_delay_sec = int(adv.get("entry_order_delay_sec") or adv.get("entry_delay_sec") or 0)
 
+            # Pre-warm connection right before order transmission for sub-millisecond execution
+            try:
+                kotak_auth.warm_up_connection()
+            except Exception:
+                pass
+
             # INVIOLABLE SAFETY DIRECTIVE:
             # Strictly under no conditions are Sell legs executed before Buy (Hedge) legs!
             # Buy orders are ALWAYS filled first to secure exchange SPAN margin benefits and avoid RMS rejections.
             # If delay is 0s (or "None"), buffer time is 0: execute Sell legs immediately upon Buy fills!
             if buy_legs:
-                from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=min(8, len(buy_legs))) as executor:
-                    buy_results = list(executor.map(_place_single, buy_legs))
+                buy_results = list(_PERSISTENT_LEG_POOL.map(_place_single, buy_legs))
                 for pos in buy_results:
                     if pos:
                         new_positions.append(pos)
@@ -5053,13 +5059,12 @@ class StraddleManager:
                 if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
                     all_buys_filled = True
                     unfilled_reasons = []
-                    with ThreadPoolExecutor(max_workers=min(8, len(buy_oids) + 1)) as v_exec:
-                        v_futs = {v_exec.submit(broker.wait_for_order_fill, oid, 8.0, 0.05): oid for oid in buy_oids}
-                        for fut in concurrent.futures.as_completed(v_futs):
-                            res = fut.result()
-                            if not res.get("filled"):
-                                all_buys_filled = False
-                                unfilled_reasons.append(f"Order {v_futs[fut]}: {res.get('error') or res.get('status')}")
+                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.05): oid for oid in buy_oids}
+                    for fut in concurrent.futures.as_completed(v_futs):
+                        res = fut.result()
+                        if not res.get("filled"):
+                            all_buys_filled = False
+                            unfilled_reasons.append(f"Order {v_futs[fut]}: {res.get('error') or res.get('status')}")
 
                     if not all_buys_filled:
                         err_str = "; ".join(unfilled_reasons)
@@ -5087,9 +5092,7 @@ class StraddleManager:
 
             # Phase 2: Execute Sell legs in parallel (immediately if entry_delay_sec == 0)
             if sell_legs:
-                from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=min(8, len(sell_legs))) as executor:
-                    sell_results = list(executor.map(_place_single, sell_legs))
+                sell_results = list(_PERSISTENT_LEG_POOL.map(_place_single, sell_legs))
                 for pos in sell_results:
                     if pos:
                         new_positions.append(pos)
@@ -5282,9 +5285,8 @@ class StraddleManager:
                     tag=tag_str
                 )
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, len(sliced_lots))) as executor:
-                futs = [executor.submit(_fire_leg_slice, i, l) for i, l in enumerate(sliced_lots)]
-                slice_results = [f.result() for f in futs]
+            futs = [_PERSISTENT_LEG_POOL.submit(_fire_leg_slice, i, l) for i, l in enumerate(sliced_lots)]
+            slice_results = [f.result() for f in futs]
 
             successful_slices = [r for r in slice_results if r.get("success")]
             failed_slices = [r for r in slice_results if not r.get("success")]
@@ -7705,10 +7707,9 @@ class StraddleManager:
                 except Exception as ex:
                     return {"slice_qty": s_qty, "res": {"success": False, "error": str(ex)}}
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(qty_slices))) as executor:
-                futures = [executor.submit(_place_exit_slice, i, sq) for i, sq in enumerate(qty_slices)]
-                for fut in concurrent.futures.as_completed(futures):
-                    child_results.append(fut.result())
+            futures = [_PERSISTENT_LEG_POOL.submit(_place_exit_slice, i, sq) for i, sq in enumerate(qty_slices)]
+            for fut in concurrent.futures.as_completed(futures):
+                child_results.append(fut.result())
 
             successful_slices = [cr for cr in child_results if cr["res"].get("success")]
             if successful_slices:
@@ -9573,9 +9574,8 @@ class StraddleManager:
         # PHASE 1: EXECUTE ALL BUY SLICES PARALLELY (BUY-FIRST PRIORITY FOR SEBI MARGIN)
         if buy_slices:
             self._log_event(f"[Basket Margin Priority] Dispathing {len(buy_slices)} BUY slice(s) in parallel...", level="INFO")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, len(buy_slices) + 1)) as executor:
-                buy_futures = [executor.submit(_fire_single_slice, s) for s in buy_slices]
-                buy_results = [f.result() for f in concurrent.futures.as_completed(buy_futures)]
+            buy_futures = [_PERSISTENT_LEG_POOL.submit(_fire_single_slice, s) for s in buy_slices]
+            buy_results = [f.result() for f in concurrent.futures.as_completed(buy_futures)]
 
             buy_order_ids = []
             for br in buy_results:
@@ -9609,16 +9609,14 @@ class StraddleManager:
 
             # Ultra-fast parallel verification of BUY fills (5ms micro-poll, 200ms timeout)
             if buy_order_ids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, len(buy_order_ids) + 1)) as v_exec:
-                    v_futs = [v_exec.submit(broker.wait_for_order_fill, b_oid, 0.20, 0.005) for b_oid in buy_order_ids]
-                    _ = [f.result() for f in concurrent.futures.as_completed(v_futs)]
+                v_futs = [_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, b_oid, 0.20, 0.005) for b_oid in buy_order_ids]
+                _ = [f.result() for f in concurrent.futures.as_completed(v_futs)]
 
         # PHASE 2: IMMEDIATELY DISPATCH ALL SELL SLICES PARALLELY (ZERO TIME GAP)
         if sell_slices:
             self._log_event(f"[Basket Margin Priority] Dispatching {len(sell_slices)} SELL slice(s) in parallel...", level="INFO")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, len(sell_slices) + 1)) as executor:
-                sell_futures = [executor.submit(_fire_single_slice, s) for s in sell_slices]
-                sell_results = [f.result() for f in concurrent.futures.as_completed(sell_futures)]
+            sell_futures = [_PERSISTENT_LEG_POOL.submit(_fire_single_slice, s) for s in sell_slices]
+            sell_results = [f.result() for f in concurrent.futures.as_completed(sell_futures)]
 
             for sr in sell_results:
                 sl = sr["slice"]
@@ -11764,17 +11762,15 @@ class StraddleManager:
         # Sell orders are ALWAYS exited first to free up margin obligation and avoid RMS shortfall penalty.
         # If exit_delay_sec == 0s (or "None"), buffer time is 0: exit Buy hedge legs immediately upon Sell exits!
         if sells:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(sells))) as executor:
-                sell_res = list(executor.map(lambda p: self._square_off_single_position(p, broker, reason=reason), sells))
+            sell_res = list(_PERSISTENT_LEG_POOL.map(lambda p: self._square_off_single_position(p, broker, reason=reason), sells))
 
             # Confirm sell exits without blocking user UI
             sell_exit_oids = [str(p.get("exit_order_id")) for p in sells if p.get("exit_order_id") and not str(p.get("exit_order_id")).startswith("ORD_") and not str(p.get("exit_order_id")).startswith("PAPER_")]
             is_urgent = any(k in reason.upper() for k in ("MANUAL", "SQUARE OFF", "EMERGENCY"))
             if sell_exit_oids and not is_urgent:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(sell_exit_oids) + 1)) as v_exec:
-                    v_futs = [v_exec.submit(broker.wait_for_order_fill, oid, 2.0, 0.05) for oid in sell_exit_oids]
-                    for fut in concurrent.futures.as_completed(v_futs):
-                        pass
+                v_futs = [_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 2.0, 0.05) for oid in sell_exit_oids]
+                for fut in concurrent.futures.as_completed(v_futs):
+                    pass
 
             self._log_event(f"[{strat.get('name')}] All Short Sell positions squared off. Closing Buy hedges...")
 
@@ -11784,8 +11780,7 @@ class StraddleManager:
 
         # Phase 2: Square off Long Buy (Hedge) positions ONLY after Short Sell positions are completely exited!
         if buys:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(buys))) as executor:
-                _ = list(executor.map(lambda p: self._square_off_single_position(p, broker, reason=reason), buys))
+            _ = list(_PERSISTENT_LEG_POOL.map(lambda p: self._square_off_single_position(p, broker, reason=reason), buys))
 
         strat_open = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
         if not strat_open:

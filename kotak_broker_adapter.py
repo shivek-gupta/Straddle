@@ -22,6 +22,11 @@ from pathlib import Path
 
 import config
 import kotak_auth
+import concurrent.futures
+
+_ORDER_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=16, thread_name_prefix="KotakFastOrder")
+_TAG_SEQ = 0
+_TAG_LOCK = threading.Lock()
 
 logger = logging.getLogger("kotak_broker_adapter")
 logger.setLevel(logging.INFO)
@@ -412,8 +417,12 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         clean_trig = str(round_to_tick(trigger_price, tick_size=tick_size)) if trigger_price and trigger_price > 0 else "0"
         clean_qty = str(int(quantity))
 
-        tag_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(tag or 'std'))[:6] or 'std'
-        unique_tag = f"{tag_prefix}_{int(time.time()*1000)%1000000}_{uuid.uuid4().hex[:4]}"
+        global _TAG_SEQ
+        with _TAG_LOCK:
+            _TAG_SEQ = (_TAG_SEQ + 1) % 1000000
+            seq_val = _TAG_SEQ
+        tag_prefix = str(tag or 'std')[:6]
+        unique_tag = f"{tag_prefix}_{seq_val:06d}"
 
         try:
             res = client.place_order(
@@ -557,10 +566,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 tick_size=tick_size
             )
 
-        # Execute multiple slices concurrently at sub-millisecond speed
+        # Execute multiple slices concurrently at sub-millisecond speed using pre-warmed worker pool
         if len(slices) > 1:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, len(slices))) as pool:
-                slice_results = list(pool.map(_dispatch_slice, enumerate(slices)))
+            slice_results = list(_ORDER_THREAD_POOL.map(_dispatch_slice, enumerate(slices)))
         else:
             slice_results = [_dispatch_slice((0, slices[0]))]
 
