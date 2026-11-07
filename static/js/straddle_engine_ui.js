@@ -426,7 +426,9 @@ async function fetchStraddleState() {
             // Update Terminal positions and re-populate settings if active strategy changed
             if (window._straddleState.currentSubView === "terminal") {
                 renderStraddlePositions(activePositions, active ? (active.group_mtm || 0.0) : 0.0, active ? (active.mtm || 0.0) : 0.0);
-                if (active && prevActiveId && prevActiveId !== active.strategy_id) {
+                const settingsPanel = document.getElementById("straddleSettingsPanel");
+                const isSettingsOpen = settingsPanel && (settingsPanel.style.display === "block" || !settingsPanel.classList.contains("hidden"));
+                if (!isSettingsOpen && active && prevActiveId && prevActiveId !== active.strategy_id) {
                     populateStraddleSettingsForm(active);
                 }
             }
@@ -3419,27 +3421,36 @@ window.stepLegLotsInput = stepLegLotsInput;
 
 function syncStrategyLegChange(rowId) {
     if (!window._straddleState?.activeStrategy) return;
-    const legs = window._straddleState.activeStrategy.legs || [];
+    if (!Array.isArray(window._straddleState.activeStrategy.legs)) {
+        window._straddleState.activeStrategy.legs = [];
+    }
+    const legs = window._straddleState.activeStrategy.legs;
     const tr = document.getElementById(rowId);
     if (!tr) return;
     const legIdx = Array.from(tr.parentElement ? tr.parentElement.children : []).indexOf(tr);
-    const legObj = (legIdx >= 0 && legs[legIdx]) ? legs[legIdx] : legs.find(l => l.id === rowId);
-    if (legObj) {
-        legObj.lots = parseInt(tr.querySelector(".leg-lots")?.value, 10) || 1;
-        legObj.strike_selection = tr.querySelector(".leg-strike")?.value || "ATM";
-        legObj.multiple_strike_selection = tr.querySelector(".leg-multiple-strike")?.value || "None";
-        legObj.option_type = tr.querySelector(".leg-type")?.value || legObj.option_type || "CE";
-        legObj.underlying = tr.querySelector(".leg-underlying")?.value || window._straddleState.activeStrategy.underlying || "NIFTY";
-        const hChk = tr.querySelector(".leg-hedge-enabled");
-        const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
-        const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
-        const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
-        if (!legObj.associated_hedge) legObj.associated_hedge = {};
-        if (hChk) legObj.associated_hedge.enabled = hChk.checked;
-        legObj.associated_hedge.initial_otm = hInitVal;
-        legObj.associated_hedge.max_distance_threshold = hThreshVal;
-        legObj.associated_hedge.reset_otm = hResetVal;
+    let legObj = (legIdx >= 0 && legs[legIdx]) ? legs[legIdx] : legs.find(l => l.id === rowId);
+    if (!legObj) {
+        legObj = { id: rowId };
+        legs.push(legObj);
     }
+    legObj.id = rowId;
+    legObj.side = tr.querySelector(".leg-side")?.value || "Sell";
+    legObj.product = tr.querySelector(".leg-product")?.value || "NRML";
+    legObj.lots = parseInt(tr.querySelector(".leg-lots")?.value, 10) || 1;
+    legObj.strike_selection = tr.querySelector(".leg-strike")?.value || "ATM";
+    legObj.multiple_strike_selection = tr.querySelector(".leg-multiple-strike")?.value || "None";
+    legObj.option_type = tr.querySelector(".leg-type")?.value || legObj.option_type || "CE";
+    legObj.underlying = tr.querySelector(".leg-underlying")?.value || window._straddleState.activeStrategy.underlying || "NIFTY";
+    legObj.expiry = tr.querySelector(".leg-expiry")?.value || "Weekly";
+    const hChk = tr.querySelector(".leg-hedge-enabled");
+    const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
+    const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
+    const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
+    if (!legObj.associated_hedge) legObj.associated_hedge = {};
+    if (hChk) legObj.associated_hedge.enabled = hChk.checked;
+    legObj.associated_hedge.initial_otm = hInitVal;
+    legObj.associated_hedge.max_distance_threshold = hThreshVal;
+    legObj.associated_hedge.reset_otm = hResetVal;
 }
 window.syncStrategyLegChange = syncStrategyLegChange;
 
@@ -5565,6 +5576,16 @@ async function resetCurrentStraddleAlgo() {
     // Instant optimistic clearing across all state caches
     window._straddleSelectedLegIndices.clear();
     window._straddleSelectedLegIds.clear();
+    window._straddleErrorLegEdits = {};
+    window._straddlePendingLegEdits = {};
+
+    const btnRetry = document.getElementById("btnStraddleRetryErrors");
+    if (btnRetry) btnRetry.style.display = "none";
+    const btnReset = document.getElementById("btnStraddleResetAlgo");
+    if (btnReset) btnReset.style.display = "none";
+    const errBanner = document.getElementById("straddleErrorBannerRow");
+    if (errBanner) errBanner.style.display = "none";
+
     if (typeof dismissAllStraddleToasts === "function") {
         dismissAllStraddleToasts();
     } else {
@@ -5576,6 +5597,8 @@ async function resetCurrentStraddleAlgo() {
     (window._straddleState.allStrategies || []).forEach(s => {
         if (s.strategy_id === targetSid || s.name === name || s.name === targetSid || s.strategy_id === activeStrat.strategy_id) {
             s.positions = [];
+            s.closed_positions = [];
+            s.shadow_benchmark = [];
             s.mtm = 0.0;
             s.max_mtm = 0.0;
             s.min_mtm = 0.0;
@@ -5602,6 +5625,8 @@ async function resetCurrentStraddleAlgo() {
     });
 
     activeStrat.positions = [];
+    activeStrat.closed_positions = [];
+    activeStrat.shadow_benchmark = [];
     activeStrat.mtm = 0.0;
     activeStrat.max_mtm = 0.0;
     activeStrat.min_mtm = 0.0;
@@ -5636,6 +5661,9 @@ async function resetCurrentStraddleAlgo() {
     renderStraddlePositions([], 0.0, 0.0);
     renderStraddleAlgosTable(true);
     renderStraddleHeader(window._straddleState);
+    if (typeof updateTerminalActionBar === "function") {
+        updateTerminalActionBar(activeStrat, []);
+    }
     onStraddlePositionCheckboxChange();
 
     showStraddleToast(`🔄 Resetting algo '${name}'...`, "info", 1500);
@@ -5661,6 +5689,9 @@ async function resetCurrentStraddleAlgo() {
             renderStraddlePositions(window._straddleState.activeStrategy?.positions || [], 0.0, 0.0);
             renderStraddleAlgosTable(true);
             renderStraddleHeader(window._straddleState);
+            if (typeof updateTerminalActionBar === "function") {
+                updateTerminalActionBar(window._straddleState.activeStrategy, window._straddleState.activeStrategy?.positions || []);
+            }
             onStraddlePositionCheckboxChange();
         } else {
             showStraddleToast("Reset failed: " + (res.error || "Failed"), "error", 3500);
@@ -5836,12 +5867,9 @@ function saveLegSettingsModal() {
             btnHedge.textContent = isH ? `OTM ${initV} (≤${thrV})` : "Hedge Off";
         }
 
-        // Sync changes to in-memory activeStrategy and auto-save
+        // Sync changes into in-memory activeStrategy
         if (typeof syncStrategyLegChange === "function") {
             syncStrategyLegChange(rowId);
-        }
-        if (typeof saveStraddleStrategySettings === "function") {
-            saveStraddleStrategySettings();
         }
     }
 
@@ -6162,9 +6190,16 @@ function addStraddleLegRow(leg = null) {
         sl_re_execute_type: "RE EXECUTE",
         sl_re_execute_count: 1,
         action: "Square off leg",
-        underlying: "NIFTY",
+        underlying: window._straddleState?.activeStrategy?.underlying || "NIFTY",
         expiry: "Weekly"
     };
+
+    if (!leg && window._straddleState?.activeStrategy) {
+        if (!Array.isArray(window._straddleState.activeStrategy.legs)) {
+            window._straddleState.activeStrategy.legs = [];
+        }
+        window._straddleState.activeStrategy.legs.push(l);
+    }
 
     // Normalize strike selection
     const curStrike = String(l.strike_selection || "ATM").toUpperCase().replace("_", " ").trim();
@@ -6420,7 +6455,20 @@ function addStraddleLegRow(leg = null) {
 
 function removeStraddleLegRow(rowId) {
     const tr = document.getElementById(rowId);
-    if (tr) tr.remove();
+    if (tr) {
+        const tbody = tr.parentElement;
+        const rowIdx = tbody ? Array.from(tbody.children).indexOf(tr) : -1;
+        tr.remove();
+        if (window._straddleState?.activeStrategy?.legs) {
+            const legs = window._straddleState.activeStrategy.legs;
+            const idx = legs.findIndex(l => l.id === rowId);
+            if (idx >= 0) {
+                legs.splice(idx, 1);
+            } else if (rowIdx >= 0 && rowIdx < legs.length) {
+                legs.splice(rowIdx, 1);
+            }
+        }
+    }
 }
 
 function syncLegRowDisabledFields(tr) {

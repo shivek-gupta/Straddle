@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 import requests
+import httpx
 import pyotp
 from neo_api_client import NeoAPI
 
@@ -204,10 +205,13 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
         print(f"[{now_ist().strftime('%H:%M:%S')}] [KOTAK-AUTH] Initiating automated TOTP login for UCC: {ucc} (Mobile: {clean_mobile})...")
 
         try:
-            # 1. Initialize NeoAPI (v3 SDK only requires consumer_key and environment)
+            # 1. Initialize NeoAPI with HTTP/2 pooling and ultra-responsive socket timeouts
             client = NeoAPI(
                 consumer_key=consumer_key,
-                environment=env
+                environment=env,
+                http2=True,
+                timeout=httpx.Timeout(connect=1.5, read=3.5, write=2.0, pool=1.5),
+                limits=httpx.Limits(max_connections=50, max_keepalive_connections=30, keepalive_expiry=120.0)
             )
 
             # 2. Generate live TOTP code via pyotp with network time synchronization

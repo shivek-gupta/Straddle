@@ -710,15 +710,25 @@ class StraddleManager:
         return []
 
     def _save_shadow_benchmarks(self):
-        """Save shadow execution benchmarks to disk atomically."""
+        """Save shadow execution benchmarks to disk asynchronously to eliminate disk I/O latency."""
         try:
-            if hasattr(self, "_benchmarks_file"):
-                tmp = self._benchmarks_file.with_suffix(".tmp")
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(self._shadow_benchmarks[-1000:], f, indent=2)
-                tmp.replace(self._benchmarks_file)
+            if not hasattr(self, "_benchmarks_file") or not self._benchmarks_file:
+                return
+            snapshot = list(getattr(self, "_shadow_benchmarks", []))[-1000:]
+            target_file = self._benchmarks_file
+
+            def _bg_write(data, dest):
+                try:
+                    tmp = dest.with_suffix(".tmp")
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+                    tmp.replace(dest)
+                except Exception as e_w:
+                    logger.warning(f"Could not async save shadow benchmarks: {e_w}")
+
+            threading.Thread(target=_bg_write, args=(snapshot, target_file), daemon=True).start()
         except Exception as e:
-            logger.warning(f"Could not save shadow benchmarks: {e}")
+            logger.warning(f"Could not dispatch shadow benchmarks save: {e}")
 
     def _record_shadow_benchmark(
         self,
@@ -7248,8 +7258,8 @@ class StraddleManager:
                 # Bump generation counter so any pending thread discards its stale results
                 strat["_reset_generation"] = strat.get("_reset_generation", 0) + 1
                 strat["positions"] = []
-                if "closed_positions" in strat:
-                    strat["closed_positions"] = []
+                strat["closed_positions"] = []
+                strat["shadow_benchmark"] = []
                 strat["mtm"] = 0.0
                 strat["max_mtm"] = 0.0
                 strat["min_mtm"] = 0.0
@@ -7306,6 +7316,19 @@ class StraddleManager:
                         and str(o.get("strategy_name", "")).lower() != str(strat_name).lower()
                     ]
                     self._save_orderbook()
+
+            # Clean benchmark history for matched strategies so execution benchmarks truly reset
+            if hasattr(self, "_shadow_benchmarks") and self._shadow_benchmarks:
+                m_ids = {str(s.get("strategy_id", "")).lower() for s in matched_strats}
+                m_names = {str(s.get("name", "")).lower() for s in matched_strats}
+                self._shadow_benchmarks = [
+                    b for b in self._shadow_benchmarks
+                    if str(b.get("strategy_id", "")).lower() not in m_ids
+                    and str(b.get("strategy_name", "")).lower() not in m_names
+                    and str(b.get("strategy_id", "")).lower() not in cand_keys
+                    and str(b.get("strategy_name", "")).lower() not in cand_keys
+                ]
+                self._save_shadow_benchmarks()
 
             # Always clean active state if active matches any of the reset strategies or if reset_algo was called
             self._state["positions"] = []

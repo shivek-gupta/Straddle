@@ -442,42 +442,28 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 order_id = res.get("nOrdNo") or res.get("order_id") or (res.get("data") or {}).get("nOrdNo")
 
             if order_id:
-                # Fast parallel RMS status verification (40ms initial micro-wait, 1 retry if pending)
-                confirmed_status = "OPEN"
-                for attempt in range(2):
-                    if attempt > 0:
-                        time.sleep(0.10)
-                    else:
-                        time.sleep(0.04)
+                # Ultra-low latency execution: Return immediately upon OMS order_id acknowledgment (~50-80ms)
+                # Background worker verifies asynchronous RMS status without stalling order dispatch
+                def _async_verify_rms(oid, cli):
                     try:
-                        hist = client.order_history(order_id=str(order_id))
-                        d = hist.get("data", {})
+                        time.sleep(0.15)
+                        hist = cli.order_history(order_id=str(oid))
+                        d = hist.get("data", {}) if isinstance(hist, dict) else {}
                         items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
                         if items and isinstance(items, list):
                             latest = items[0]
                             st = str(latest.get("ordSt", "")).lower()
                             if st in ("rejected", "cancelled"):
                                 rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
-                                logger.warning(f"[Kotak Neo] Order slice {order_id} rejected by RMS: {rej_msg}")
-                                if "adapter has been logged off" in rej_msg.lower() or "adapter is logged off" in rej_msg.lower():
-                                    rej_msg = "Adapter has been Logged off (Market Closed: Exchange Gateway is offline outside trading hours / on weekends. Orders will execute when market opens)."
-                                return {
-                                    "success": False,
-                                    "status": "REJECTED",
-                                    "order_id": str(order_id),
-                                    "error": rej_msg,
-                                    "status_message": rej_msg,
-                                    "data": latest
-                                }
-                            elif st in ("traded", "complete", "open", "trigger pending"):
-                                confirmed_status = st.upper()
-                                break
-                    except Exception as e_chk:
-                        logger.debug(f"[Kotak Neo] RMS check notice: {e_chk}")
+                                logger.warning(f"[Kotak Neo] Async RMS notice: Order {oid} rejected: {rej_msg}")
+                    except Exception as e_bg:
+                        logger.debug(f"[Kotak Neo] Async RMS check note: {e_bg}")
+
+                threading.Thread(target=_async_verify_rms, args=(order_id, client), daemon=True).start()
 
                 return {
                     "success": True,
-                    "status": confirmed_status,
+                    "status": "OPEN",
                     "order_id": str(order_id),
                     "data": res,
                     "quantity": int(quantity)
