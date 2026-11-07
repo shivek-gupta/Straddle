@@ -3715,9 +3715,16 @@ async function retrySingleStraddleLegInline(stratId, legId, legIndex) {
     const strikeInput = document.getElementById(`live_strike_${legIndex}`) || document.getElementById(`err_strike_${legIndex}`);
     const savedEdit = window._straddleErrorLegEdits?.[legIndex];
     const newLots = lotsInput ? (parseInt(lotsInput.value, 10) || 1) : (savedEdit?.lots || 1);
-    const newStrike = strikeInput ? strikeInput.value.trim() : (savedEdit?.strike || "");
 
-    showStraddleToast(`⚡ Retrying leg ${legIndex + 1} with Lots: ${newLots}, Strike: ${newStrike || 'Auto'}...`, "info", 2000);
+    // Check if position is a hedge
+    const activeStrat = window._straddleState?.activeStrategy || (window._straddleState?.allStrategies || []).find(s => s.strategy_id === stratId);
+    const pos = (activeStrat?.positions && activeStrat.positions[legIndex]) || null;
+    const isHedge = !!(pos?.is_associated_hedge || String(legId || "").startsWith("hedge_") || pos?.parent_leg_id);
+
+    // If it's a hedge, do NOT send the current hedge strike as a strike_selection override for the parent leg
+    const newStrike = (!isHedge && strikeInput) ? strikeInput.value.trim() : (savedEdit?.strike || "");
+
+    showStraddleToast(`⚡ Retrying ${isHedge ? 'hedge ' : ''}order ${legIndex + 1}...`, "info", 2000);
     try {
         const payload = {
             strategy_id: stratId || window._straddleState?.activeStrategy?.strategy_id,
@@ -3728,10 +3735,12 @@ async function retrySingleStraddleLegInline(stratId, legId, legIndex) {
         const legKey = legId || String(legIndex);
         payload.updated_legs[legKey] = {
             lots: newLots,
-            strike: newStrike,
-            strike_price: newStrike,
-            strike_selection: newStrike
+            is_hedge: isHedge
         };
+        if (!isHedge && newStrike) {
+            payload.updated_legs[legKey].strike = newStrike;
+            payload.updated_legs[legKey].strike_selection = newStrike;
+        }
         payload.updated_legs[legIndex] = payload.updated_legs[legKey];
 
         const resp = await fetch("/api/straddle/retry_legs", {

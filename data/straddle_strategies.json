@@ -4,22 +4,18 @@
     "name": "Test Strategy",
     "underlying": "NIFTY",
     "status": "STOPPED",
-    "advanced": {
-      "sl_order_placement": "Keep with self",
-      "target_order_placement": "Keep with self"
-    },
-    "legs": [
-      {
-        "id": "leg_1",
-        "strike_selection": "22550",
-        "lots": 1,
-        "target_value": 10.0,
-        "target_type": "TGT: Pts",
-        "sl_value": 5.0,
-        "sl_type": "SL: -Pts"
-      }
-    ],
-    "positions": [],
+    "enabled": false,
+    "_manual_reset": true,
+    "entry_error": "-",
+    "repair_needed": false,
+    "mtm": 0.0,
+    "_pnl_history": [],
+    "multiplier_type": "MANUAL",
+    "multiplier": 1,
+    "cushion_margin": 15000.0,
+    "available_capital": 1400000.0,
+    "broker_margin_per_lot": 175369.87,
+    "effective_multiplier": 1,
     "start_time": "09:15:56",
     "end_time": "15:29:50",
     "schedule_days": [
@@ -29,17 +25,76 @@
       "Thursday",
       "Friday"
     ],
-    "enabled": false,
-    "_manual_reset": true,
-    "entry_error": "Strategy is disabled",
-    "repair_needed": false,
-    "mtm": 0.0,
-    "_pnl_history": [],
-    "multiplier_type": "MANUAL",
-    "multiplier": 1,
-    "cushion_margin": 15000.0,
-    "available_capital": 1400000.0,
-    "broker_margin_per_lot": 175369.87,
-    "effective_multiplier": 1
+    "advanced": {
+      "sl_order_placement": "Place in advance",
+      "target_order_placement": "Place in advance"
+    },
+    "advanced_settings": {
+      "sl_order_placement": "Place in advance",
+      "target_order_placement": "Place in advance"
+    },
+    "legs": [
+      {
+        "id": "leg_1",
+        "side": "Sell",
+        "product": "NRML",
+        "strike_selection": "ATM",
+        "multiple_strike_selection": "None",
+        "option_type": "CE",
+        "lots": 1,
+        "expiry": "Weekly",
+        "associated_hedge": {
+          "enabled": true,
+          "initial_otm": 20,
+          "max_distance_threshold": 22,
+          "reset_otm": 20,
+          "exit_with_parent": true
+        },
+        "target_type": "TGT: %",
+        "target_value": 25.0,
+        "target_order_placement": "Place in advance",
+        "target_re_execute_type": "RE EXECUTE",
+        "target_re_execute_count": 2,
+        "sl_type": "SL: %",
+        "sl_value": 20.0,
+        "sl_order_placement": "Place in advance",
+        "sl_re_execute_type": "None",
+        "sl_re_execute_count": 0,
+        "tsl_type": "None",
+        "action": "Square off leg",
+        "underlying": "NIFTY"
+      },
+      {
+        "id": "leg_2",
+        "side": "Sell",
+        "product": "NRML",
+        "strike_selection": "ATM",
+        "multiple_strike_selection": "None",
+        "option_type": "PE",
+        "lots": 1,
+        "expiry": "Weekly",
+        "associated_hedge": {
+          "enabled": true,
+          "initial_otm": 20,
+          "max_distance_threshold": 22,
+          "reset_otm": 20,
+          "exit_with_parent": true
+        },
+        "target_type": "TGT: %",
+        "target_value": 25.0,
+        "target_order_placement": "Place in advance",
+        "target_re_execute_type": "RE EXECUTE",
+        "target_re_execute_count": 2,
+        "sl_type": "SL: %",
+        "sl_value": 20.0,
+        "sl_order_placement": "Place in advance",
+        "sl_re_execute_type": "None",
+        "sl_re_execute_count": 0,
+        "tsl_type": "None",
+        "action": "Square off leg",
+        "underlying": "NIFTY"
+      }
+    ],
+    "positions": []
   }
 ]

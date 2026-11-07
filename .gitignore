@@ -11,3 +11,4 @@ data/straddle_backups/
 data/straddle_paper_orderbook.json
 data/straddle_paper_positions.json
 data/straddle_shadow_benchmarks.json
+data/straddle_order_registry.json

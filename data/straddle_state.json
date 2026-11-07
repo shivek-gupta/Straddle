@@ -10,9 +10,10 @@
   "max_mtm": 0.0,
   "min_mtm": 0.0,
   "execution_mode": "LIVE_BROKER",
-  "underlying_spot": 23818.75,
+  "broker_connected": true,
+  "underlying_spot": 25030.35,
   "underlying_symbol": "NIFTY",
-  "underlying_atm_strike": 23800,
+  "underlying_atm_strike": 25050,
   "last_tick_time": "12:50:20",
   "logs": [
     {

@@ -1313,17 +1313,43 @@ class StraddleManager:
                     pass
 
         effective_exp = sorted(list(expiries_set)) if expiries_set else sorted(list(all_found_expiries))
+        # Group expiries by calendar (year, month) to identify the month-end monthly expiry for each month
+        month_to_max_exp = {}
+        for exp_ms in effective_exp:
+            try:
+                dt_tmp = datetime.fromtimestamp(exp_ms / 1000, tz=timezone.utc)
+                ym_key = (dt_tmp.year, dt_tmp.month)
+                if ym_key not in month_to_max_exp or exp_ms > month_to_max_exp[ym_key]:
+                    month_to_max_exp[ym_key] = exp_ms
+            except Exception:
+                pass
+        monthly_exp_set = set(month_to_max_exp.values())
+
         result = []
+        found_first_monthly = False
         for i, exp_ms in enumerate(effective_exp):
             dt = datetime.fromtimestamp(exp_ms / 1000, tz=timezone.utc)
             label = dt.strftime("%d %b %Y").upper()
-            tag = "Monthly" if is_comm else ("Current Weekly" if i == 0 else ("Next Weekly" if i == 1 else "Weekly"))
+            is_month_end = exp_ms in monthly_exp_set
+            if is_comm:
+                tag = "Monthly"
+            elif i == 0:
+                tag = "Current Weekly"
+            elif i == 1:
+                tag = "Next Weekly"
+            elif is_month_end and not found_first_monthly:
+                tag = "Monthly"
+                found_first_monthly = True
+            else:
+                tag = "Monthly" if is_month_end else "Weekly"
+
             result.append({
                 "expiry_ms": exp_ms,
                 "date_str": dt.strftime("%Y-%m-%d"),
                 "formatted_label": label,
                 "tag": tag,
                 "is_current": i == 0,
+                "is_monthly": is_month_end,
             })
         self._expiries_cache[clean_und] = (now_ts, result)
         return result
@@ -2375,16 +2401,24 @@ class StraddleManager:
             if clean_und in _SPOT_CACHE and _SPOT_CACHE[clean_und] > 0:
                 return _SPOT_CACHE[clean_und]
 
+        # 4. Check persisted state spot price if matching underlying
+        st_und = str(self._state.get("underlying_symbol") or "NIFTY").upper().replace(" ", "").strip()
+        st_spot = float(self._state.get("underlying_spot") or 0.0)
+        if st_spot > 0 and (clean_und == st_und or (clean_und.startswith("NIFTY") and st_und.startswith("NIFTY"))):
+            with _SPOT_FETCH_LOCK:
+                _SPOT_CACHE[clean_und] = st_spot
+            return st_spot
+
         fallbacks = {
-            "NIFTY": 24450.0,
-            "NIFTY50": 24450.0,
+            "NIFTY": 25030.35,
+            "NIFTY50": 25030.35,
             "BANKNIFTY": 54900.0,
             "FINNIFTY": 24870.0,
             "MIDCPNIFTY": 13390.0,
             "SENSEX": 75450.0,
             "BANKEX": 61200.0,
         }
-        return fallbacks.get(clean_und, 24450.0)
+        return fallbacks.get(clean_und, 25030.35)
 
     def get_underlying_atm_strike(self, underlying: str = "NIFTY") -> float:
         """Calculate the nearest ATM strike based on live spot price."""
@@ -2567,8 +2601,11 @@ class StraddleManager:
         spot_price = self._get_underlying_spot_price(clean_und)
         atm_strike = round(spot_price / step) * step if spot_price > 0 else 0.0
 
-        # Ultra-low latency memory cache (<0.01ms resolution without disk or network)
+        # Ultra-low latency memory cache (<0.01ms resolution without disk or network) with 60s TTL
+        trade_date = now_ist().strftime("%Y-%m-%d")
+        now_ts = time.time()
         cache_k = (
+            trade_date,
             clean_und,
             float(atm_strike),
             str(strike_selection).upper().strip(),
@@ -2578,7 +2615,13 @@ class StraddleManager:
             str(multiple_strike_selection).lower().strip(),
         )
         if hasattr(self, "_fast_resolved_contract_cache") and cache_k in self._fast_resolved_contract_cache:
-            return dict(self._fast_resolved_contract_cache[cache_k])
+            entry = self._fast_resolved_contract_cache[cache_k]
+            if isinstance(entry, tuple) and len(entry) == 2:
+                c_ts, c_val = entry
+                if (now_ts - c_ts) < 60.0:
+                    return dict(c_val)
+            elif isinstance(entry, dict):
+                return dict(entry)
 
         target_strike = atm_strike
         s_sel = strike_selection.upper().replace("_", " ").strip()
@@ -2638,7 +2681,7 @@ class StraddleManager:
             if expiry_type.lower() in ("next weekly", "next"):
                 target_expiry_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
             elif expiry_type.lower() == "monthly":
-                monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly"), None)
+                monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly" or e.get("is_monthly")), None)
                 if monthly_exp:
                     target_expiry_ms = monthly_exp
                 elif len(all_expiries) >= 4:
@@ -2668,7 +2711,7 @@ class StraddleManager:
                     "segment": target_seg.lower(),
                 }
                 if hasattr(self, "_fast_resolved_contract_cache"):
-                    self._fast_resolved_contract_cache[cache_k] = dict(res_item)
+                    self._fast_resolved_contract_cache[cache_k] = (now_ts, dict(res_item))
                 return res_item
 
         # Fast fallback pool filtered by (segment, underlying) ~200 items instead of 100,000
@@ -2737,7 +2780,7 @@ class StraddleManager:
             "segment": target_seg.lower(),
         }
         if hasattr(self, "_fast_resolved_contract_cache"):
-            self._fast_resolved_contract_cache[cache_k] = dict(fallback_res)
+            self._fast_resolved_contract_cache[cache_k] = (now_ts, dict(fallback_res))
         return fallback_res
 
     def _resolve_exact_hedge_contract(
@@ -2787,7 +2830,7 @@ class StraddleManager:
             if val is None:
                 return None
             try:
-                v = int(val)
+                v = int(float(str(val).strip()))
                 return v * 1000 if v < 10_000_000_000 else v
             except (ValueError, TypeError):
                 return None
@@ -2799,7 +2842,7 @@ class StraddleManager:
             if exp_str in ("next weekly", "next"):
                 target_exp_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
             elif exp_str in ("monthly", "current month"):
-                monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly"), None)
+                monthly_exp = next((e["expiry_ms"] for e in all_expiries if e.get("tag") == "Monthly" or e.get("is_monthly")), None)
                 target_exp_ms = monthly_exp or all_expiries[0]["expiry_ms"]
             else:
                 target_exp_ms = all_expiries[0]["expiry_ms"]
@@ -2824,7 +2867,7 @@ class StraddleManager:
                         "segment": target_seg.lower(),
                     }
 
-        # 2. Strict OTM-filtered candidates search from fast pre-indexed pool or loaded instruments
+        # 2. Strict OTM-filtered candidates search strictly within the same target expiry
         instruments = self._load_instruments_data()
         und_pool = (
             getattr(self, "_options_by_und", {}).get((target_seg, clean_und))
@@ -2848,14 +2891,10 @@ class StraddleManager:
 
         def _exp_matches(r_exp, t_exp):
             if t_exp is None or r_exp is None:
-                return True
+                return False
             try:
-                r_v = int(r_exp)
-                t_v = int(t_exp)
-                if r_v < 10_000_000_000:
-                    r_v *= 1000
-                if t_v < 10_000_000_000:
-                    t_v *= 1000
+                r_v = int(r_exp) * 1000 if int(r_exp) < 10_000_000_000 else int(r_exp)
+                t_v = int(t_exp) * 1000 if int(t_exp) < 10_000_000_000 else int(t_exp)
                 return abs(r_v - t_v) <= 86400 * 1000
             except Exception:
                 return False
@@ -2867,9 +2906,16 @@ class StraddleManager:
             and _is_matching_und(r)
         ]
 
-        # Prioritize matching target expiry (matching timestamp or within 24h window)
+        # Strict expiry filtering: Hedge MUST strictly belong to target expiry (never fall back to 5-year candidate pool)
         expiry_cands = [r for r in all_und_cands if _exp_matches(r.get("expiry"), target_exp_ms)]
-        active_pool = expiry_cands if expiry_cands else all_und_cands
+        if not expiry_cands and all_expiries:
+            # If target_exp_ms didn't match directly, fall back to current active weekly expiry
+            first_exp = all_expiries[0]["expiry_ms"]
+            expiry_cands = [r for r in all_und_cands if _exp_matches(r.get("expiry"), first_exp)]
+            if expiry_cands:
+                target_exp_ms = first_exp
+
+        active_pool = expiry_cands
 
         # Strict directional filter: CE hedge MUST be strictly higher than short strike, PE hedge MUST be strictly lower
         min_safe_dist = max(step, min(3, otm_steps) * step)
@@ -2896,7 +2942,7 @@ class StraddleManager:
                 "segment": target_seg.lower(),
             }
 
-        # 3. Fallback: try core resolve_strike_and_contract with explicit numeric strike string
+        # 3. Fallback: try core resolve_strike_and_contract strictly constrained to target_exp_ms
         res = self.resolve_strike_and_contract(
             underlying=clean_und,
             strike_selection=str(int(target_hedge_strike)),
@@ -2905,20 +2951,20 @@ class StraddleManager:
             custom_expiry_ms=target_exp_ms,
         )
 
-        # Inviolable safety check: ensure resolved contract is strictly OTM and never equals short_strike
-        if res:
+        # Inviolable safety check: ensure resolved contract is strictly OTM, matches target expiry, and never equals short_strike
+        if res and _exp_matches(res.get("expiry_ms"), target_exp_ms):
             res_sp = float(res.get("strike_price", 0.0))
             is_valid_otm = (res_sp > short_strike_flt) if opt_type == "CE" else (res_sp < short_strike_flt)
             if is_valid_otm and res_sp != short_strike_flt:
                 return res
 
-        # 4. Ultimate Failsafe: pick the furthest available OTM contract in the active underlying pool
-        if all_und_cands:
+        # 4. Strict Same-Expiry Failsafe: pick the furthest available OTM contract in the SAME target expiry pool ONLY
+        if expiry_cands:
             if opt_type == "CE":
-                otm_pool = [r for r in all_und_cands if float(r.get("strike_price", 0.0)) > short_strike_flt]
+                otm_pool = [r for r in expiry_cands if float(r.get("strike_price", 0.0)) > short_strike_flt]
                 chosen = max(otm_pool, key=lambda c: float(c.get("strike_price", 0.0))) if otm_pool else None
             else:
-                otm_pool = [r for r in all_und_cands if float(r.get("strike_price", 0.0)) < short_strike_flt]
+                otm_pool = [r for r in expiry_cands if float(r.get("strike_price", 0.0)) < short_strike_flt]
                 chosen = min(otm_pool, key=lambda c: float(c.get("strike_price", 0.0))) if otm_pool else None
 
             if chosen and float(chosen.get("strike_price", 0.0)) != short_strike_flt:
@@ -2934,6 +2980,10 @@ class StraddleManager:
                     "segment": target_seg.lower(),
                 }
 
+        self._log_event(
+            f"[{clean_und}] CRITICAL: No safe tradeable hedge contract found matching expiry {target_exp_ms} for short strike {short_strike_flt} {opt_type} OTM {otm_steps}. Naked entry blocked.",
+            level="ERROR"
+        )
         return None
 
     def _preindex_active_underlying_strikes(self, underlying: str = "NIFTY"):
@@ -5710,6 +5760,108 @@ class StraddleManager:
                     continue
 
                 # Otherwise it failed on Entry -> Retry Entry!
+                is_hedge_pos = bool(
+                    pos.get("is_associated_hedge")
+                    or str(pos.get("id", "")).startswith("hedge_")
+                    or pos.get("parent_leg_id")
+                )
+
+                if is_hedge_pos:
+                    # RETRYING A FAILED HEDGE ORDER SPECIFICALLY:
+                    # Find associated parent sell leg in strategy configuration
+                    parent_leg_id = pos.get("parent_leg_id")
+                    parent_cfg = next((l for l in legs_cfg if l.get("id") == parent_leg_id), None)
+                    if not parent_cfg:
+                        h_p_type = pos.get("hedge_parent_type") or pos.get("option_type", "CE")
+                        parent_cfg = next((l for l in legs_cfg if str(l.get("side", "Sell")).upper() == "SELL" and l.get("option_type") == h_p_type), None)
+                    if not parent_cfg and 0 <= idx < len(legs_cfg):
+                        parent_cfg = legs_cfg[idx]
+
+                    # Target lots from pending error position or parent leg
+                    pending_lots = pos.get("remaining_lots") or pos.get("failed_lots")
+                    target_retry_lots = int(pending_lots) if (pending_lots and pending_lots > 0) else int(parent_cfg.get("lots", 1) if parent_cfg else 1)
+                    if updated_legs and isinstance(updated_legs, dict):
+                        up_info = updated_legs.get(idx) or updated_legs.get(str(idx)) or (updated_legs.get(pos.get("id")) if pos.get("id") else None)
+                        if up_info and isinstance(up_info, dict) and up_info.get("lots"):
+                            target_retry_lots = int(up_info["lots"])
+
+                    h_opt_type = pos.get("hedge_parent_type") or pos.get("option_type", "CE")
+                    h_cfg = (parent_cfg.get("associated_hedge") if parent_cfg else {}) or {}
+                    init_otm = int(h_cfg.get("initial_otm") or 20)
+                    exp_type = parent_cfg.get("expiry", "Weekly") if parent_cfg else "Weekly"
+
+                    # Resolve parent short leg contract to get accurate short strike & expiry
+                    p_contract = self.resolve_strike_and_contract(
+                        underlying=und,
+                        strike_selection=parent_cfg.get("strike_selection", "ATM") if parent_cfg else "ATM",
+                        option_type=h_opt_type,
+                        expiry_type=exp_type,
+                        multiple_strike_selection=parent_cfg.get("multiple_strike_selection", "none") if parent_cfg else "none",
+                    )
+                    short_strike = float(p_contract.get("strike_price", 0.0)) if p_contract else float(self.get_underlying_atm_strike(und))
+                    short_expiry_ms = p_contract.get("expiry_ms") if p_contract else None
+
+                    # Resolve exact mathematical hedge contract without corrupting parent leg's strike
+                    h_contract = self._resolve_exact_hedge_contract(
+                        underlying=und,
+                        short_strike=short_strike,
+                        init_otm=init_otm,
+                        option_type=h_opt_type,
+                        expiry_type=exp_type,
+                        custom_expiry_ms=short_expiry_ms,
+                    )
+
+                    if not h_contract:
+                        h_contract = self._resolve_exact_hedge_contract(
+                            underlying=und,
+                            short_strike=short_strike,
+                            init_otm=10,
+                            option_type=h_opt_type,
+                            expiry_type=exp_type,
+                            custom_expiry_ms=short_expiry_ms,
+                        )
+
+                    if not h_contract:
+                        retried_failed.append((pos.get("symbol", "Hedge Leg"), "Hedge contract resolution failed"))
+                        continue
+
+                    h_leg_cfg = {
+                        "id": pos.get("id") or f"hedge_{parent_cfg.get('id', 'leg') if parent_cfg else 'leg'}",
+                        "side": "Buy",
+                        "product": parent_cfg.get("product", "NRML") if parent_cfg else "NRML",
+                        "strike_selection": f"OTM {init_otm}",
+                        "option_type": h_opt_type,
+                        "lots": target_retry_lots,
+                        "target_type": "None",
+                        "target_value": 0.0,
+                        "sl_type": "None",
+                        "sl_value": 0.0,
+                        "action": "Square off leg",
+                        "underlying": und,
+                        "expiry": exp_type,
+                        "is_associated_hedge": True,
+                        "parent_leg_id": parent_cfg.get("id") if parent_cfg else None,
+                        "hedge_parent_type": h_opt_type,
+                    }
+
+                    self._log_event(f"[{strat.get('name')}] Re-placing hedge order ({h_contract['trading_symbol']})...")
+                    new_h_pos = self._place_leg_entry_order(h_leg_cfg, h_contract, mult, broker, adv, strategy=strat)
+                    if new_h_pos and new_h_pos.get("status") == "OPEN":
+                        # Replace error position with active hedge position
+                        positions[idx] = new_h_pos
+                        if parent_cfg:
+                            parent_cfg["associated_hedge_id"] = new_h_pos.get("id")
+                            parent_cfg["has_associated_hedge"] = True
+                        retried_success.append(f"{new_h_pos.get('symbol')} (Hedge)")
+                        self._log_event(f"[{strat.get('name')}] Hedge order successfully placed: {new_h_pos.get('symbol')}", level="SUCCESS")
+                    else:
+                        err_text = new_h_pos.get("error") if new_h_pos else "Order placement failed"
+                        if new_h_pos:
+                            positions[idx] = new_h_pos
+                        retried_failed.append((h_contract.get("trading_symbol", "Hedge"), err_text))
+                    continue
+
+                # Normal leg retry (Sell or Buy main leg):
                 leg_cfg = next((l for l in legs_cfg if l.get("id") == pos.get("id")), None)
                 if not leg_cfg and 0 <= idx < len(legs_cfg):
                     leg_cfg = legs_cfg[idx]
@@ -5723,16 +5875,17 @@ class StraddleManager:
                 else:
                     target_retry_lots = int(leg_cfg.get("lots", 1))
 
-                # Apply inline updated lots and strike if passed
+                # Apply inline updated lots and strike if passed for normal main leg
                 if updated_legs and isinstance(updated_legs, dict):
                     up_info = updated_legs.get(idx) or updated_legs.get(str(idx)) or (updated_legs.get(pos.get("id")) if pos.get("id") else None)
                     if up_info and isinstance(up_info, dict):
                         if up_info.get("lots"):
                             target_retry_lots = int(up_info["lots"])
-                        if up_info.get("strike_selection"):
-                            leg_cfg["strike_selection"] = str(up_info["strike_selection"]).strip()
-                        if up_info.get("strike"):
-                            leg_cfg["strike_selection"] = str(up_info["strike"]).strip()
+                        if not is_hedge_pos:
+                            if up_info.get("strike_selection"):
+                                leg_cfg["strike_selection"] = str(up_info["strike_selection"]).strip()
+                            if up_info.get("strike"):
+                                leg_cfg["strike_selection"] = str(up_info["strike"]).strip()
 
                 leg_cfg = dict(leg_cfg)
                 leg_cfg["lots"] = target_retry_lots
@@ -5903,21 +6056,24 @@ class StraddleManager:
             legs_cfg = strat.get("legs", [])
             target_cfg = None
             target_idx = None
-            for idx_c, l in enumerate(legs_cfg):
-                if l.get("id") == leg_id:
-                    target_cfg = l
-                    target_idx = idx_c
-                    break
+            is_hedge_id = bool(leg_id and str(leg_id).startswith("hedge_"))
             
-            if not target_cfg and leg_index is not None and 0 <= leg_index < len(legs_cfg):
-                target_cfg = legs_cfg[leg_index]
-                target_idx = leg_index
+            if not is_hedge_id:
+                for idx_c, l in enumerate(legs_cfg):
+                    if l.get("id") == leg_id:
+                        target_cfg = l
+                        target_idx = idx_c
+                        break
+                
+                if not target_cfg and leg_index is not None and 0 <= leg_index < len(legs_cfg):
+                    target_cfg = legs_cfg[leg_index]
+                    target_idx = leg_index
 
-            if updated_leg_config and target_cfg:
-                target_cfg.update(updated_leg_config)
-                if leg_id and not target_cfg.get("id"):
-                    target_cfg["id"] = leg_id
-                self._save_strategies()
+                if updated_leg_config and target_cfg:
+                    target_cfg.update(updated_leg_config)
+                    if leg_id and not target_cfg.get("id"):
+                        target_cfg["id"] = leg_id
+                    self._save_strategies()
 
             if not retry_immediately:
                 return {"success": True, "message": "Leg configuration saved successfully", "strategy": strat}
