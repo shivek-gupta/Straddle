@@ -1237,6 +1237,46 @@ class StraddleManager:
                     self._expiries_cache.clear()
                     self._chain_snapshot_cache.clear()
 
+                    # Self-healing validation: check if instruments file is missing current market strikes
+                    # E.g., if NIFTY spot is ~25000+, but maximum NIFTY CE strike for near-term expiry is <= 24600
+                    nifty_cands = indexed.get(("NSE_FO", "NIFTY"), []) or indexed.get(("nse_fo", "NIFTY"), [])
+                    if nifty_cands:
+                        max_ce = max([float(r.get("strike_price", 0.0)) for r in nifty_cands if str(r.get("instrument_type", "")).upper() == "CE"], default=0.0)
+                        spot_est = float(self._state.get("underlying_spot") or 25030.35)
+                        if max_ce > 0 and max_ce < (spot_est + 200):
+                            logger.warning(f"Detected truncated instruments data (max NIFTY CE strike={max_ce} < spot={spot_est}). Re-syncing live Kotak master...")
+                            try:
+                                from instrument_sync import sync_instruments_from_kotak
+                                res = sync_instruments_from_kotak(force=True, target_file=instrument_path)
+                                if res.get("success"):
+                                    with gzip.open(instrument_path, "rt", encoding="utf-8") as f_fresh:
+                                        fresh_data = json.load(f_fresh)
+                                    indexed.clear()
+                                    exact_idx.clear()
+                                    for r in fresh_data:
+                                        itype = r.get("instrument_type")
+                                        if itype not in ("CE", "PE"):
+                                            continue
+                                        seg = r.get("segment")
+                                        r_name = str(r.get("name", "")).upper().replace(" ", "")
+                                        r_tsym = str(r.get("trading_symbol", "")).upper()
+                                        root_cand = r_tsym.split()[0] if r_tsym else r_name
+                                        target_und = root_cand if root_cand in known_unds_set else (r_name if r_name in known_unds_set else None)
+                                        if target_und:
+                                            k = (str(seg).upper(), target_und)
+                                            if k not in indexed:
+                                                indexed[k] = []
+                                            indexed[k].append(r)
+                                            exp_ms = r.get("expiry")
+                                            sp = float(r.get("strike_price") or 0.0)
+                                            if exp_ms and sp > 0:
+                                                exact_idx[(str(seg).upper(), target_und, int(exp_ms), itype, sp)] = r
+                                    self._instruments_cache = fresh_data
+                                    self._instruments_mtime = instrument_path.stat().st_mtime
+                                    logger.info(f"Re-synced and loaded {len(fresh_data)} fresh instruments successfully.")
+                            except Exception as e_resync:
+                                logger.warning(f"On-demand instrument resync warning: {e_resync}")
+
                     # Dynamic auto-discovery of active near-month MCX futures
                     today_ms = int(time.time() * 1000)
                     target_comm_prefixes = {
@@ -2676,8 +2716,24 @@ class StraddleManager:
         if not all_expiries:
             return None
 
+        def _exp_match_chk(r_exp, t_exp):
+            if t_exp is None or r_exp is None:
+                return False
+            try:
+                r_v = int(float(str(r_exp).strip()))
+                t_v = int(float(str(t_exp).strip()))
+                r_ms = r_v * 1000 if r_v < 10_000_000_000 else r_v
+                t_ms = t_v * 1000 if t_v < 10_000_000_000 else t_v
+                return abs(r_ms - t_ms) <= 86400 * 1000
+            except Exception:
+                return False
+
         target_expiry_ms = custom_expiry_ms
-        if target_expiry_ms is None:
+        if target_expiry_ms and all_expiries:
+            matched_exp = next((e["expiry_ms"] for e in all_expiries if _exp_match_chk(e["expiry_ms"], target_expiry_ms)), None)
+            if matched_exp:
+                target_expiry_ms = matched_exp
+        elif target_expiry_ms is None:
             if expiry_type.lower() in ("next weekly", "next"):
                 target_expiry_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
             elif expiry_type.lower() == "monthly":
@@ -2724,45 +2780,24 @@ class StraddleManager:
                 if r.get("segment") == "MCX_FO"
                 and r.get("instrument_type") == option_type.upper()
                 and str(r.get("trading_symbol", "")).upper().startswith(clean_und + " ")
-                and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
+                and (target_expiry_ms is None or _exp_match_chk(r.get("expiry"), target_expiry_ms))
             ]
-            if not candidates and target_expiry_ms is not None:
-                candidates = [
-                    r for r in candidates_source
-                    if r.get("segment") == "MCX_FO"
-                    and r.get("instrument_type") == option_type.upper()
-                    and str(r.get("trading_symbol", "")).upper().startswith(clean_und + " ")
-                ]
         elif target_seg == "BSE_FO":
             candidates = [
                 r for r in candidates_source
                 if r.get("segment") == "BSE_FO"
                 and r.get("instrument_type") == option_type.upper()
                 and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
-                and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
+                and (target_expiry_ms is None or _exp_match_chk(r.get("expiry"), target_expiry_ms))
             ]
-            if not candidates and target_expiry_ms is not None:
-                candidates = [
-                    r for r in candidates_source
-                    if r.get("segment") == "BSE_FO"
-                    and r.get("instrument_type") == option_type.upper()
-                    and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
-                ]
         else:
             candidates = [
                 r for r in candidates_source
-                if r.get("segment") == "NSE_FO"
+                if str(r.get("segment", "")).upper() == "NSE_FO"
                 and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
                 and r.get("instrument_type") == option_type.upper()
-                and (target_expiry_ms is None or r.get("expiry") == target_expiry_ms)
+                and (target_expiry_ms is None or _exp_match_chk(r.get("expiry"), target_expiry_ms))
             ]
-            if not candidates and target_expiry_ms is not None:
-                candidates = [
-                    r for r in candidates_source
-                    if r.get("segment") == "NSE_FO"
-                    and (r.get("name") == clean_und or str(r.get("trading_symbol", "")).upper().startswith(clean_und + " "))
-                    and r.get("instrument_type") == option_type.upper()
-                ]
 
         if not candidates:
             return None
@@ -2837,7 +2872,12 @@ class StraddleManager:
 
         target_exp_ms = _parse_exp_val(custom_expiry_ms)
         all_expiries = self.get_expiries_for_underlying(clean_und)
-        if target_exp_ms is None and all_expiries:
+        if target_exp_ms and all_expiries:
+            # Reconcile target_exp_ms to the exact instrument expiry_ms if within 24 hours (e.g. 23:59:59 vs 15:30:00)
+            matched_exp = next((e["expiry_ms"] for e in all_expiries if abs(int(e["expiry_ms"]) - int(target_exp_ms)) <= 86400 * 1000), None)
+            if matched_exp:
+                target_exp_ms = matched_exp
+        elif target_exp_ms is None and all_expiries:
             exp_str = str(expiry_type or "Weekly").lower().strip()
             if exp_str in ("next weekly", "next"):
                 target_exp_ms = all_expiries[1]["expiry_ms"] if len(all_expiries) > 1 else all_expiries[0]["expiry_ms"]
@@ -2893,9 +2933,11 @@ class StraddleManager:
             if t_exp is None or r_exp is None:
                 return False
             try:
-                r_v = int(r_exp) * 1000 if int(r_exp) < 10_000_000_000 else int(r_exp)
-                t_v = int(t_exp) * 1000 if int(t_exp) < 10_000_000_000 else int(t_exp)
-                return abs(r_v - t_v) <= 86400 * 1000
+                r_v = int(float(str(r_exp).strip()))
+                t_v = int(float(str(t_exp).strip()))
+                r_ms = r_v * 1000 if r_v < 10_000_000_000 else r_v
+                t_ms = t_v * 1000 if t_v < 10_000_000_000 else t_v
+                return abs(r_ms - t_ms) <= 86400 * 1000
             except Exception:
                 return False
 

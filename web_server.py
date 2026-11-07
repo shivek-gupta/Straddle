@@ -1646,6 +1646,9 @@ def _execute_safe_git_pull_operation():
                 full_p = Path(root) / f_name
                 try:
                     rel_p = str(full_p.relative_to(config.PROJECT_ROOT)).replace("\\", "/")
+                    # Never snapshot or restore master instrument definitions over git!
+                    if "instruments.json.gz" in rel_p or rel_p.endswith(".tmp.gz"):
+                        continue
                     if full_p.stat().st_size > 0:
                         with open(full_p, "rb") as f_snap:
                             data_snapshots[rel_p] = f_snap.read()
@@ -1685,6 +1688,13 @@ def _execute_safe_git_pull_operation():
                 f_out.write(b_data)
         except Exception as e_rest:
             out += f"\nNote restoring {rel}: {e_rest}"
+
+    # 4. Trigger fresh instrument synchronization in background post-reset
+    try:
+        from instrument_sync import sync_instruments_from_kotak
+        threading.Thread(target=sync_instruments_from_kotak, kwargs={"force": False}, daemon=True).start()
+    except Exception as e_sync:
+        logger.warning(f"[GitPull] Post-reset instrument sync check: {e_sync}")
 
     return success, out
 
