@@ -410,19 +410,21 @@ body {
 .straddle-table th {
     background: #101626;
     color: #94a3b8;
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 12px 14px;
+    letter-spacing: 0.05em;
+    padding: 8px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    white-space: nowrap;
 }
 
 .straddle-table td {
-    padding: 11px 14px;
+    padding: 7px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     vertical-align: middle;
     color: #e2e8f0;
+    font-size: 11.5px;
 }
 
 .straddle-table tr:hover td {
@@ -729,13 +731,23 @@ body {
 .exit-reason-tgt {
     color: #10b981;
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
+    white-space: normal;
+    word-break: break-word;
+    display: inline-block;
+    max-width: 125px;
+    line-height: 1.25;
 }
 
 .exit-reason-sl {
     color: #f43f5e;
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
+    white-space: normal;
+    word-break: break-word;
+    display: inline-block;
+    max-width: 125px;
+    line-height: 1.25;
 }
 
 .straddle-ltp {

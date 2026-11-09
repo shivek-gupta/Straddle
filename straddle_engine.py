@@ -5158,6 +5158,19 @@ class StraddleManager:
 
             # Phase 2: Execute Sell legs in parallel (immediately if entry_delay_sec == 0)
             if sell_legs:
+                # Pre-fetch ultra-fresh quotes specifically for short legs right before firing orders
+                # Eliminates stale quotes from pre-hedge phase and guarantees sub-millisecond pricing
+                sell_keys = [s["contract"]["instrument_key"] for s in sell_legs if s.get("contract", {}).get("instrument_key")]
+                if sell_keys:
+                    try:
+                        fresh_prices, fresh_quotes = self._fetch_live_quotes(sell_keys)
+                        if fresh_prices:
+                            cached_prices.update(fresh_prices)
+                        if fresh_quotes:
+                            cached_quotes.update(fresh_quotes)
+                    except Exception as e_rf:
+                        logger.debug(f"Fresh quote refresh before short sell legs notice: {e_rf}")
+
                 sell_results = list(_PERSISTENT_LEG_POOL.map(_place_single, sell_legs))
                 for pos in sell_results:
                     if pos:
@@ -5330,12 +5343,12 @@ class StraddleManager:
             effective_order_type = "LIMIT" if "Limit" in order_type_cfg else "MARKET"
             if effective_order_type == "LIMIT":
                 if "Points" in buffer_type:
-                    effective_buf = max(buffer_val, 2.0 if (side == "BUY" and ltp < 15.0) else 0.05)
-                    raw_limit = ltp + effective_buf if side == "BUY" else max(0.05, ltp - buffer_val)
+                    effective_buf = max(buffer_val, 2.0 if (side == "BUY" and ltp < 15.0) else (2.0 if side == "SELL" else 0.05))
+                    raw_limit = ltp + effective_buf if side == "BUY" else max(0.05, ltp - effective_buf)
                 else:
-                    pct_buf = ltp * (buffer_val / 100.0)
-                    effective_buf = max(pct_buf, 2.0 if (side == "BUY" and ltp < 15.0) else 0.05)
-                    raw_limit = ltp + effective_buf if side == "BUY" else max(0.05, ltp * (1.0 - buffer_val / 100.0))
+                    pct_buf = ltp * (max(buffer_val, 3.0 if side == "SELL" else 1.0) / 100.0)
+                    effective_buf = max(pct_buf, 2.0 if (side == "BUY" and ltp < 15.0) else (1.5 if side == "SELL" else 0.05))
+                    raw_limit = ltp + effective_buf if side == "BUY" else max(0.05, ltp - effective_buf)
                 limit_price = round_to_tick(raw_limit, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
             else:
                 effective_order_type = "LIMIT"
@@ -5458,20 +5471,22 @@ class StraddleManager:
                 return None
 
             failed_order_id = str(order_res.get("order_id") or ("261008000" + str(int(time.time()*1000))[-6:]))
-            try:
-                self._record_shadow_benchmark(
-                    strat=strategy,
-                    pos=None,
-                    symbol=contract["trading_symbol"],
-                    side=side,
-                    quantity=total_qty,
-                    dispatch_perf_t=t_entry_dispatch,
-                    dispatch_time_str=entry_dispatch_ist,
-                    broker_order_res=order_res,
-                    action_type="RE-ENTRY" if is_re_entry else "ENTRY"
-                )
-            except Exception as e_bmk:
-                logger.warning(f"Error recording rejected entry benchmark: {e_bmk}")
+            def _bg_rej_benchmark():
+                try:
+                    self._record_shadow_benchmark(
+                        strat=strategy,
+                        pos=None,
+                        symbol=contract["trading_symbol"],
+                        side=side,
+                        quantity=total_qty,
+                        dispatch_perf_t=t_entry_dispatch,
+                        dispatch_time_str=entry_dispatch_ist,
+                        broker_order_res=order_res,
+                        action_type="RE-ENTRY" if is_re_entry else "ENTRY"
+                    )
+                except Exception as e_bmk:
+                    logger.warning(f"Error recording rejected entry benchmark: {e_bmk}")
+            threading.Thread(target=_bg_rej_benchmark, daemon=True).start()
             self._log_event(f"Order REJECTED on broker for {contract['trading_symbol']}: {err_msg}", level="ERROR", details=order_res)
             
             order_cat = "Re-Entry" if is_re_entry else ("Entry" if side in ("SELL", "BUY") else "Hedge")
@@ -5806,22 +5821,24 @@ class StraddleManager:
 
         threading.Thread(target=_dispatch_advance_orders, daemon=True).start()
 
-        # Record shadow paper benchmark comparison
-        try:
-            bmk = self._record_shadow_benchmark(
-                strat=strategy,
-                pos=pos_record,
-                symbol=contract["trading_symbol"],
-                side=side,
-                quantity=total_qty,
-                dispatch_perf_t=t_entry_dispatch,
-                dispatch_time_str=entry_dispatch_ist,
-                broker_order_res=order_res,
-                action_type="RE-ENTRY" if is_re_entry else "ENTRY"
-            )
-            pos_record["benchmark"] = bmk
-        except Exception as e_bmk:
-            logger.warning(f"Error recording entry benchmark: {e_bmk}")
+        # Record shadow paper benchmark comparison asynchronously to never block order execution thread
+        def _bg_entry_benchmark():
+            try:
+                bmk = self._record_shadow_benchmark(
+                    strat=strategy,
+                    pos=pos_record,
+                    symbol=contract["trading_symbol"],
+                    side=side,
+                    quantity=total_qty,
+                    dispatch_perf_t=t_entry_dispatch,
+                    dispatch_time_str=entry_dispatch_ist,
+                    broker_order_res=order_res,
+                    action_type="RE-ENTRY" if is_re_entry else "ENTRY"
+                )
+                pos_record["benchmark"] = bmk
+            except Exception as e_bmk:
+                logger.warning(f"Error recording entry benchmark: {e_bmk}")
+        threading.Thread(target=_bg_entry_benchmark, daemon=True).start()
 
         self._log_event(
             f"Entered {side} {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty}, TGT: ₹{target_price}, SL: ₹{sl_price})",
@@ -11559,8 +11576,21 @@ class StraddleManager:
                         if t_ord:
                             t_st = str(t_ord.get("status", "")).upper()
                             if any(w in t_st for w in ("TRAD", "COMP")):
-                                tgt_filled = True
-                                pos["avg_exit_price"] = t_ord.get("price") or pos.get("target_price") or ltp
+                                fill_prc = float(t_ord.get("price") or 0.0)
+                                avg_ent = float(pos.get("avg_ent_price", 0.0))
+                                tgt_p = float(pos.get("target_price", 0.0))
+                                is_valid = True
+                                if pos.get("side") == "SELL":
+                                    if tgt_p > 0 and fill_prc > tgt_p * 1.05 and fill_prc >= avg_ent:
+                                        logger.warning(f"[OCO Sanity] Ignored false Target fill on {pos.get('symbol')} (order {adv_tgt_oid} reported price {fill_prc}, entry={avg_ent}, target={tgt_p})")
+                                        is_valid = False
+                                elif pos.get("side") == "BUY":
+                                    if tgt_p > 0 and fill_prc < tgt_p * 0.95 and fill_prc <= avg_ent:
+                                        logger.warning(f"[OCO Sanity] Ignored false Target fill on {pos.get('symbol')} (order {adv_tgt_oid} reported price {fill_prc}, entry={avg_ent}, target={tgt_p})")
+                                        is_valid = False
+                                if is_valid:
+                                    tgt_filled = True
+                                    pos["avg_exit_price"] = fill_prc or pos.get("target_price") or ltp
                             elif any(w in t_st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
                                 if pos.get("target_cancelled_unexpectedly"):
                                     pos["target_cancelled_unexpectedly"] = False
@@ -11593,8 +11623,21 @@ class StraddleManager:
                             try:
                                 t_stat = broker.wait_for_order_fill(str(adv_tgt_oid), timeout_sec=0.01)
                                 if t_stat.get("filled"):
-                                    tgt_filled = True
-                                    pos["avg_exit_price"] = t_stat.get("price") or pos.get("target_price") or ltp
+                                    fill_prc = float(t_stat.get("price") or 0.0)
+                                    avg_ent = float(pos.get("avg_ent_price", 0.0))
+                                    tgt_p = float(pos.get("target_price", 0.0))
+                                    is_valid = True
+                                    if pos.get("side") == "SELL":
+                                        if tgt_p > 0 and fill_prc > tgt_p * 1.05 and fill_prc >= avg_ent:
+                                            logger.warning(f"[OCO Sanity] Ignored false Target fill on {pos.get('symbol')} (order {adv_tgt_oid} reported price {fill_prc}, entry={avg_ent}, target={tgt_p})")
+                                            is_valid = False
+                                    elif pos.get("side") == "BUY":
+                                        if tgt_p > 0 and fill_prc < tgt_p * 0.95 and fill_prc <= avg_ent:
+                                            logger.warning(f"[OCO Sanity] Ignored false Target fill on {pos.get('symbol')} (order {adv_tgt_oid} reported price {fill_prc}, entry={avg_ent}, target={tgt_p})")
+                                            is_valid = False
+                                    if is_valid:
+                                        tgt_filled = True
+                                        pos["avg_exit_price"] = fill_prc or pos.get("target_price") or ltp
                                 elif any(w in str(t_stat.get("status", "")).upper() for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
                                     if pos.get("target_cancelled_unexpectedly"):
                                         pos["target_cancelled_unexpectedly"] = False
@@ -11635,8 +11678,21 @@ class StraddleManager:
                         if s_ord:
                             s_st = str(s_ord.get("status", "")).upper()
                             if any(w in s_st for w in ("TRAD", "COMP")):
-                                sl_filled = True
-                                pos["avg_exit_price"] = s_ord.get("price") or pos.get("sl_price") or ltp
+                                fill_prc = float(s_ord.get("price") or 0.0)
+                                avg_ent = float(pos.get("avg_ent_price", 0.0))
+                                sl_p = float(pos.get("sl_price", 0.0))
+                                is_valid = True
+                                if pos.get("side") == "SELL":
+                                    if sl_p > 0 and fill_prc < avg_ent * 0.90:
+                                        logger.warning(f"[OCO Sanity] Ignored false SL fill on {pos.get('symbol')} (order {adv_sl_oid} reported price {fill_prc}, entry={avg_ent}, sl={sl_p})")
+                                        is_valid = False
+                                elif pos.get("side") == "BUY":
+                                    if sl_p > 0 and fill_prc > avg_ent * 1.10:
+                                        logger.warning(f"[OCO Sanity] Ignored false SL fill on {pos.get('symbol')} (order {adv_sl_oid} reported price {fill_prc}, entry={avg_ent}, sl={sl_p})")
+                                        is_valid = False
+                                if is_valid:
+                                    sl_filled = True
+                                    pos["avg_exit_price"] = fill_prc or pos.get("sl_price") or ltp
                             elif any(w in s_st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
                                 if pos.get("sl_cancelled_unexpectedly"):
                                     pos["sl_cancelled_unexpectedly"] = False
@@ -11672,8 +11728,21 @@ class StraddleManager:
                             try:
                                 s_stat = broker.wait_for_order_fill(str(adv_sl_oid), timeout_sec=0.01)
                                 if s_stat.get("filled"):
-                                    sl_filled = True
-                                    pos["avg_exit_price"] = s_stat.get("price") or pos.get("sl_price") or ltp
+                                    fill_prc = float(s_stat.get("price") or 0.0)
+                                    avg_ent = float(pos.get("avg_ent_price", 0.0))
+                                    sl_p = float(pos.get("sl_price", 0.0))
+                                    is_valid = True
+                                    if pos.get("side") == "SELL":
+                                        if sl_p > 0 and fill_prc < avg_ent * 0.90:
+                                            logger.warning(f"[OCO Sanity] Ignored false SL fill on {pos.get('symbol')} (order {adv_sl_oid} reported price {fill_prc}, entry={avg_ent}, sl={sl_p})")
+                                            is_valid = False
+                                    elif pos.get("side") == "BUY":
+                                        if sl_p > 0 and fill_prc > avg_ent * 1.10:
+                                            logger.warning(f"[OCO Sanity] Ignored false SL fill on {pos.get('symbol')} (order {adv_sl_oid} reported price {fill_prc}, entry={avg_ent}, sl={sl_p})")
+                                            is_valid = False
+                                    if is_valid:
+                                        sl_filled = True
+                                        pos["avg_exit_price"] = fill_prc or pos.get("sl_price") or ltp
                                 elif any(w in str(s_stat.get("status", "")).upper() for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
                                     if pos.get("sl_cancelled_unexpectedly"):
                                         pos["sl_cancelled_unexpectedly"] = False

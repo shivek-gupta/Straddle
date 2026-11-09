@@ -4562,10 +4562,16 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     targetHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="tgt-label-badge" style="opacity:0.8;">TGT: ${tgtValLabel}</span></div>`;
                 } else if (pos.target_price && pos.target_price > 0) {
                     const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
-                    targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span> ${tgtStatusHtml}</div>`;
+                    targetHtml = `
+                        <div style="white-space:nowrap;"><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span></div>
+                        ${tgtStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${tgtStatusHtml}</div>` : ''}
+                    `;
                 } else if (pos.target_value && pos.target_value > 0) {
                     const tgtLabel = `TGT: ${pos.target_value}%`;
-                    targetHtml = `<div><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>`;
+                    targetHtml = `
+                        <div style="white-space:nowrap;"><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>
+                        ${tgtStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${tgtStatusHtml}</div>` : ''}
+                    `;
                 }
 
                 // Per Leg Stoploss (Interactive ONLY for live filled/partially filled trades)
@@ -4622,13 +4628,19 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 } else if (pos.sl_price && pos.sl_price > 0) {
                     const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
                     const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
-                    slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span> ${slStatusHtml}</div>
-                              <div class="orig-sl-sub">${origSlLabel}</div>`;
+                    slHtml = `
+                        <div style="white-space:nowrap;"><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span></div>
+                        ${slStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${slStatusHtml}</div>` : ''}
+                        ${origSlLabel ? `<div class="orig-sl-sub" style="font-size:9px; margin-top:1px;">${origSlLabel}</div>` : ''}
+                    `;
                 } else if (pos.sl_value && pos.sl_value > 0) {
                     const slLabel = `SL: -${pos.sl_value}%`;
                     const origSlLabel = `ORIGINAL SL: -${pos.sl_value}%`;
-                    slHtml = `<div><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">-</span></div>
-                              <div class="orig-sl-sub">${origSlLabel}</div>`;
+                    slHtml = `
+                        <div style="white-space:nowrap;"><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">-</span></div>
+                        ${slStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${slStatusHtml}</div>` : ''}
+                        ${origSlLabel ? `<div class="orig-sl-sub" style="font-size:9px; margin-top:1px;">${origSlLabel}</div>` : ''}
+                    `;
                 }
 
                 // Avg Exit Price & Exit Time
@@ -4744,7 +4756,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${avgExitPrice}</div>
                             ${exitTime !== '-' ? `<div class="straddle-subtext">${exitTime}</div>` : ''}
                         </td>
-                        <td>${exitReasonHtml}</td>
+                        <td style="white-space:normal; max-width:125px; word-break:break-word; line-height:1.25;">${exitReasonHtml}</td>
                         <td style="text-align:right;">
                             <span class="straddle-ltp ${ltpClass}" style="color:${ltpColor}; font-weight:700; font-family:var(--font-mono);">${ltp > 0 ? ltp.toFixed(2) : '-'}</span>
                         </td>

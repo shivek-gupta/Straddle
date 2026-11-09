@@ -741,61 +741,55 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         if not client or not oid_str:
             return {"status": "UNKNOWN", "order_id": oid_str}
 
-        # 1. Quick check against order_report by ID
+        # 1. First, check active order_book (which maps all current orders with exact IDs)
         try:
-            res = client.order_report(order_id=oid_str)
-            d = res.get("data") if isinstance(res, dict) else res
-            items = d.get("data") if isinstance(d, dict) else (d if isinstance(d, list) else [d] if isinstance(d, dict) else [])
-            if items and isinstance(items, list):
-                traded_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("TRAD", "COMP", "FILL"))), None)
-                if traded_it:
+            ob = self.get_order_book()
+            for o in ob:
+                if str(o.get("order_id", "")).strip() == oid_str:
+                    st = str(o.get("status", "")).upper()
                     return {
-                        "filled": True,
-                        "status": "COMPLETE",
-                        "price": float(traded_it.get("avgPrc") or traded_it.get("prc") or 0.0),
-                        "order_id": oid_str
+                        "filled": st == "COMPLETE",
+                        "status": st,
+                        "price": float(o.get("average_price") or o.get("price") or 0.0),
+                        "order_id": oid_str,
+                        "error": o.get("status_message", "")
                     }
-                trig_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("TRIG", "TRIGGER"))), None)
-                if trig_it:
-                    return {"filled": False, "status": "TRIGGER PENDING", "order_id": oid_str}
-                open_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("OPEN", "PENDING", "REQ", "SUBMIT", "MODIF"))), None)
-                if open_it:
-                    return {"filled": False, "status": "OPEN", "order_id": oid_str}
-                canc_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("CANC", "CANCELLED", "CANCELED"))), None)
-                if canc_it:
-                    return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
-                rej_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("REJ", "REJECTED"))), None)
-                if rej_it:
-                    return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": rej_it.get("rejRsn")}
-        except Exception as e_or:
-            logger.debug(f"[Kotak Neo] order_report by id {oid_str} notice: {e_or}")
+        except Exception as e_ob:
+            logger.debug(f"[Kotak Neo] order_book check for {oid_str} notice: {e_ob}")
 
-        # 2. Check via order history
+        # 2. Check via order history strictly filtered by order_id
         try:
             hist = client.order_history(order_id=oid_str)
             d = hist.get("data") if isinstance(hist, dict) else hist
-            items = d.get("data") if isinstance(d, dict) else (d if isinstance(d, list) else [])
+            items = d.get("data") if isinstance(d, dict) else (d if isinstance(d, list) else [d] if isinstance(d, dict) else [])
             if items and isinstance(items, list):
-                traded_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("TRAD", "COMP", "FILL"))), None)
-                if traded_it:
-                    return {
-                        "filled": True,
-                        "status": "COMPLETE",
-                        "price": float(traded_it.get("avgPrc") or traded_it.get("prc") or 0.0),
-                        "order_id": oid_str
-                    }
-                trig_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("TRIG", "TRIGGER"))), None)
-                if trig_it:
-                    return {"filled": False, "status": "TRIGGER PENDING", "order_id": oid_str}
-                open_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("OPEN", "PENDING", "REQ", "SUBMIT", "MODIF"))), None)
-                if open_it:
-                    return {"filled": False, "status": "OPEN", "order_id": oid_str}
-                canc_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("CANC", "CANCELLED", "CANCELED"))), None)
-                if canc_it:
-                    return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
-                rej_it = next((it for it in items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("REJ", "REJECTED"))), None)
-                if rej_it:
-                    return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": rej_it.get("rejRsn")}
+                # STRICT FILTER: Never match an item belonging to another order
+                matched_items = [
+                    it for it in items
+                    if not (it.get("nOrdNo") or it.get("order_id") or it.get("ordNo"))
+                    or str(it.get("nOrdNo") or it.get("order_id") or it.get("ordNo") or "").strip() == oid_str
+                ]
+                if matched_items:
+                    traded_it = next((it for it in matched_items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("TRAD", "COMP", "FILL"))), None)
+                    if traded_it:
+                        return {
+                            "filled": True,
+                            "status": "COMPLETE",
+                            "price": float(traded_it.get("avgPrc") or traded_it.get("prc") or 0.0),
+                            "order_id": oid_str
+                        }
+                    trig_it = next((it for it in matched_items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("TRIG", "TRIGGER"))), None)
+                    if trig_it:
+                        return {"filled": False, "status": "TRIGGER PENDING", "order_id": oid_str}
+                    open_it = next((it for it in matched_items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("OPEN", "PENDING", "REQ", "SUBMIT", "MODIF"))), None)
+                    if open_it:
+                        return {"filled": False, "status": "OPEN", "order_id": oid_str}
+                    canc_it = next((it for it in matched_items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("CANC", "CANCELLED", "CANCELED"))), None)
+                    if canc_it:
+                        return {"filled": False, "status": "CANCELLED", "order_id": oid_str}
+                    rej_it = next((it for it in matched_items if any(w in str(it.get("ordSt") or it.get("status") or "").upper().strip() for w in ("REJ", "REJECTED"))), None)
+                    if rej_it:
+                        return {"filled": False, "status": "REJECTED", "order_id": oid_str, "error": rej_it.get("rejRsn")}
         except Exception as e_h:
             logger.debug(f"[Kotak Neo] order_history for {oid_str} notice: {e_h}")
 
@@ -836,7 +830,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     items = hist
 
                 if items and isinstance(items, list):
-                    traded_it = next((it for it in items if str(it.get("ordSt", "")).lower() in ("traded", "complete")), None)
+                    # Filter strictly by target order_id to prevent matching previous trades
+                    matched_items = [
+                        it for it in items
+                        if not (it.get("nOrdNo") or it.get("order_id") or it.get("ordNo"))
+                        or str(it.get("nOrdNo") or it.get("order_id") or it.get("ordNo") or "").strip() == oid_str
+                    ]
+                    traded_it = next((it for it in matched_items if str(it.get("ordSt", "")).lower() in ("traded", "complete")), None)
                     if traded_it:
                         avg_p = float(traded_it.get("avgPrc", traded_it.get("prc", 0.0)) or 0.0)
                         f_qty = int(traded_it.get("fldQty", traded_it.get("qty", 0)) or 0)
@@ -850,10 +850,10 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             "data": traded_it,
                         }
                     # If any item is open or trigger pending, order is alive
-                    open_it = next((it for it in items if any(w in str(it.get("ordSt", "")).upper() for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT", "MODIF"))), None)
+                    open_it = next((it for it in matched_items if any(w in str(it.get("ordSt", "")).upper() for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT", "MODIF"))), None)
                     if not open_it:
                         # Check rejected or cancelled only if no open or trigger status exists
-                        canc_it = next((it for it in items if str(it.get("ordSt", "")).lower() in ("rejected", "cancelled")), None)
+                        canc_it = next((it for it in matched_items if str(it.get("ordSt", "")).lower() in ("rejected", "cancelled")), None)
                         if canc_it:
                             st = str(canc_it.get("ordSt", "")).lower()
                             rej_msg = canc_it.get("rejRsn") or canc_it.get("rejLongDesc") or canc_it.get("rejShortDesc") or f"Order {st}"
