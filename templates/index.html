@@ -1358,6 +1358,14 @@
                                     <option value="Market (MKT)">Market (MKT)</option>
                                 </select>
                             </div>
+                            <div class="straddle-form-group">
+                                <label>Hedge order type (Margin Saver):</label>
+                                <select id="cfgHedgeOrderType" class="straddle-select">
+                                    <option value="Market (MKT)" selected>Market (MKT) - Instant Zero-Delay Fill [Quantiply Standard]</option>
+                                    <option value="Marketable Limit">Marketable Limit (Aggressive Buffer)</option>
+                                    <option value="Same as Main Legs">Same as Main Legs</option>
+                                </select>
+                            </div>
                             <div style="display:flex; gap:10px;">
                                 <div class="straddle-form-group" style="flex:1;">
                                     <label>Trigger & Limit price buffer in:</label>

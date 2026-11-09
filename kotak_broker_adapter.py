@@ -443,6 +443,26 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 st_code = res.get("stCode")
                 if st_code and int(st_code) != 200:
                     err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
+                    # Auto-fallback: If broker rejects MARKET for options, immediately retry as aggressive Marketable Limit
+                    if clean_ot == "MKT" and any(k in err_msg.lower() for k in ("market order not allowed", "mkt not allowed", "price protection", "order type not allowed", "not allowed for option", "rms:rule")):
+                        logger.info(f"[Kotak Neo] MKT rejected for {canonical_symbol} ({err_msg}). Auto-retrying as aggressive Marketable Limit...")
+                        mkt_price = float(price or 0.0)
+                        if mkt_price <= 0:
+                            mkt_price = 5.0
+                        limit_alt_price = round_to_tick(max(mkt_price * 1.5, mkt_price + 2.5), tick_size=tick_size)
+                        return self._place_single_order(
+                            client=client,
+                            canonical_symbol=canonical_symbol,
+                            transaction_type=transaction_type,
+                            quantity=quantity,
+                            product=product,
+                            order_type="LIMIT",
+                            price=limit_alt_price,
+                            trigger_price=trigger_price,
+                            tag=tag,
+                            segment=segment,
+                            tick_size=tick_size
+                        )
                     logger.warning(f"[Kotak Neo] Order slice rejected: {err_msg} (res: {res})")
                     return {"success": False, "error": err_msg, "data": res}
 

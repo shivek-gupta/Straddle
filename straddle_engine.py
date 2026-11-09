@@ -478,6 +478,7 @@ DEFAULT_STRATEGIES = [
         },
         "advanced": {
             "entry_order_type": "Limit (L) / Stoploss Limit (SL-L)",
+            "hedge_order_type": "Market (MKT)",
             "entry_buffer_type": "Percentage",
             "entry_buffer_value": 5.0,
             "entry_market_timeout_sec": 0,
@@ -5123,7 +5124,8 @@ class StraddleManager:
                 if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
                     all_buys_filled = True
                     unfilled_reasons = []
-                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.05): oid for oid in buy_oids}
+                    # Ultra-low latency 10ms polling for instant confirmation of filled hedge orders
+                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 6.0, 0.01): oid for oid in buy_oids}
                     for fut in concurrent.futures.as_completed(v_futs):
                         res = fut.result()
                         if not res.get("filled"):
@@ -5309,19 +5311,34 @@ class StraddleManager:
         buffer_val = float(adv.get("entry_buffer_value") or adv.get("entry_buffer_val") or 5.0)
         buffer_type = str(adv.get("entry_buffer_type", "Percentage"))
 
-        if "Points" in buffer_type:
-            if side == "BUY":
-                raw_limit = ltp + buffer_val
-            else:
-                raw_limit = max(0.05, ltp - buffer_val)
+        # Hedge Order Type Execution (Quantiply Parity: Instant Zero-Delay Fill)
+        # Far OTM hedges have wide opening spreads. Placing rigid 5% limit orders causes orders
+        # to sit on the exchange queue for seconds. Executing hedges as MARKET (or aggressive Marketable Limit)
+        # fills them in <20ms, immediately unlocking SPAN margin without delaying short straddle legs.
+        is_hedge_leg = bool(leg_cfg.get("is_associated_hedge")) or str(leg_cfg.get("id", "")).startswith("hedge_")
+        is_buy_hedge = is_hedge_leg or (side == "BUY" and any(l.get("side", "").upper() == "SELL" for l in (strategy.get("legs", []) if strategy else [])))
+        hedge_ot_cfg = adv.get("hedge_order_type", "Market (MKT)")
+
+        if is_buy_hedge and ("Market" in hedge_ot_cfg or "MKT" in hedge_ot_cfg):
+            effective_order_type = "MARKET"
+            limit_price = 0.0
+        elif is_buy_hedge and "Marketable Limit" in hedge_ot_cfg:
+            effective_order_type = "LIMIT"
+            marketable_buf = max(ltp * 0.50, 2.50)
+            limit_price = round_to_tick(ltp + marketable_buf, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
         else:
-            if side == "BUY":
-                raw_limit = ltp * (1.0 + buffer_val / 100.0)
+            effective_order_type = "LIMIT" if "Limit" in order_type_cfg else "MARKET"
+            if effective_order_type == "LIMIT":
+                if "Points" in buffer_type:
+                    effective_buf = max(buffer_val, 2.0 if (side == "BUY" and ltp < 15.0) else 0.05)
+                    raw_limit = ltp + effective_buf if side == "BUY" else max(0.05, ltp - buffer_val)
+                else:
+                    pct_buf = ltp * (buffer_val / 100.0)
+                    effective_buf = max(pct_buf, 2.0 if (side == "BUY" and ltp < 15.0) else 0.05)
+                    raw_limit = ltp + effective_buf if side == "BUY" else max(0.05, ltp * (1.0 - buffer_val / 100.0))
+                limit_price = round_to_tick(raw_limit, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
             else:
-                raw_limit = max(0.05, ltp * (1.0 - buffer_val / 100.0))
-        
-        # Enforce exchange-mandated tick size (1.0 for Gold/Silver/Crude, 0.10 for NatGas, 0.05 for NSE)
-        limit_price = round_to_tick(raw_limit, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+                limit_price = 0.0
 
         tag_prefix = "re" if is_re_entry else "ent"
         und_name = contract.get("underlying") or leg_cfg.get("underlying") or "NIFTY"
@@ -5344,8 +5361,8 @@ class StraddleManager:
                     transaction_type=side,
                     quantity=s_qty,
                     product=prod,
-                    order_type="LIMIT" if "Limit" in order_type_cfg else "MARKET",
-                    price=limit_price if "Limit" in order_type_cfg else 0.0,
+                    order_type=effective_order_type,
+                    price=limit_price if effective_order_type == "LIMIT" else 0.0,
                     tag=tag_str
                 )
 
@@ -5408,8 +5425,8 @@ class StraddleManager:
                 transaction_type=side,
                 quantity=total_qty,
                 product=prod,
-                order_type="LIMIT" if "Limit" in order_type_cfg else "MARKET",
-                price=limit_price if "Limit" in order_type_cfg else 0.0,
+                order_type=effective_order_type,
+                price=limit_price if effective_order_type == "LIMIT" else 0.0,
                 tag=f"{tag_prefix}_{leg_cfg.get('id', 'leg')[:4]}",
             )
 

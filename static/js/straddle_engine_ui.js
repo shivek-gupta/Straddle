@@ -6095,6 +6095,9 @@ function populateStraddleSettingsForm(s) {
     // Advanced sequencing
     const adv = s.advanced_settings || s.advanced || {};
     document.getElementById("cfgEntryOrderType").value = adv.entry_order_type || "Limit (L) / Stoploss Limit (SL-L)";
+    if (document.getElementById("cfgHedgeOrderType")) {
+        document.getElementById("cfgHedgeOrderType").value = adv.hedge_order_type || "Market (MKT)";
+    }
     document.getElementById("cfgEntryBufferType").value = adv.entry_buffer_type || "Percentage";
     document.getElementById("cfgEntryBufferVal").value = adv.entry_buffer_val !== undefined ? adv.entry_buffer_val : (adv.entry_buffer_value !== undefined ? adv.entry_buffer_value : 5.0);
     document.getElementById("cfgEntryMarketTimeoutSec").value = adv.entry_market_timeout_sec !== undefined ? adv.entry_market_timeout_sec : 0;
@@ -7154,6 +7157,7 @@ function serializeCurrentStrategySettings() {
         },
         advanced_settings: {
             entry_order_type: document.getElementById("cfgEntryOrderType")?.value || "Limit (L) / Stoploss Limit (SL-L)",
+            hedge_order_type: document.getElementById("cfgHedgeOrderType")?.value || "Market (MKT)",
             entry_buffer_type: document.getElementById("cfgEntryBufferType")?.value || "Percentage",
             entry_buffer_val: isNaN(parseFloat(document.getElementById("cfgEntryBufferVal")?.value)) ? 5.0 : parseFloat(document.getElementById("cfgEntryBufferVal")?.value),
             entry_buffer_value: isNaN(parseFloat(document.getElementById("cfgEntryBufferVal")?.value)) ? 5.0 : parseFloat(document.getElementById("cfgEntryBufferVal")?.value),
@@ -9455,10 +9459,6 @@ function closeStraddleLogsModal() {
 function downloadAuditLogsExcel() {
     window.location.href = "/api/straddle/download_audit_logs";
 }
-
-function renderStraddleAuditLogs() {
-    const container = document.getElementById("straddleAuditLogsContainer");
-    if (!container) return;
 
 window._straddleAuditLogsFilter = "all"; // "all" | "actual" | "paper" | "trades"
 window._straddleAuditSideFilter = "ALL"; // "ALL" | "BUY" | "SELL"
