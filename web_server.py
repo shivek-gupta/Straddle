@@ -231,7 +231,7 @@ def api_straddle_download_audit_logs():
         ws.title = "Audit Logs"
         ws.views.sheetView[0].showGridLines = True
 
-        headers = ["Timestamp", "Date", "Level", "Message", "Details"]
+        headers = ["Timestamp", "Date", "Level", "Trade Type", "Side", "Message", "Details"]
         ws.append(headers)
 
         header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
@@ -265,11 +265,13 @@ def api_straddle_download_audit_logs():
             ts = str(log.get("timestamp") or "")
             dt = str(log.get("date") or "")
             lvl = str(log.get("level") or "INFO").upper()
+            tt = str(log.get("trade_type") or ("PAPER" if "[PAPER" in str(log.get("message", "")).upper() else ("LIVE" if any(k in str(log.get("message", "")).upper() for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET")) else "-"))).upper()
+            side = str(log.get("side") or "").upper()
             msg = str(log.get("message") or "")
             det = log.get("details")
             det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
 
-            ws.append([ts, dt, lvl, msg, det_str])
+            ws.append([ts, dt, lvl, tt, side, msg, det_str])
 
             font_color, bg_color = level_colors.get(lvl, ("334155", "FFFFFF"))
 
@@ -281,27 +283,47 @@ def api_straddle_download_audit_logs():
             lvl_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
             lvl_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-            msg_cell = ws.cell(row=row_idx, column=4)
+            # Trade Type (Column 4)
+            tt_cell = ws.cell(row=row_idx, column=4)
+            tt_cell.alignment = Alignment(horizontal="center", vertical="center")
+            if tt == "LIVE":
+                tt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="10B981")
+                tt_cell.fill = PatternFill(start_color="ECFDF5", end_color="ECFDF5", fill_type="solid")
+            elif tt == "PAPER":
+                tt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="8B5CF6")
+                tt_cell.fill = PatternFill(start_color="F5F3FF", end_color="F5F3FF", fill_type="solid")
+
+            # Side (Column 5)
+            side_cell = ws.cell(row=row_idx, column=5)
+            side_cell.alignment = Alignment(horizontal="center", vertical="center")
+            if side == "BUY":
+                side_cell.font = Font(name="Segoe UI", size=10, bold=True, color="16A34A")
+            elif side == "SELL":
+                side_cell.font = Font(name="Segoe UI", size=10, bold=True, color="DC2626")
+
+            msg_cell = ws.cell(row=row_idx, column=6)
             msg_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-            det_cell = ws.cell(row=row_idx, column=5)
+            det_cell = ws.cell(row=row_idx, column=7)
             det_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-            for c in range(1, 6):
+            for c in range(1, 8):
                 cell = ws.cell(row=row_idx, column=c)
                 cell.border = thin_border
-                if c not in (3,):
+                if c not in (3, 4, 5):
                     cell.font = Font(name="Segoe UI", size=10)
 
             ws.row_dimensions[row_idx].height = 22
             row_idx += 1
 
         # Column widths
-        ws.column_dimensions["A"].width = 22
+        ws.column_dimensions["A"].width = 20
         ws.column_dimensions["B"].width = 14
-        ws.column_dimensions["C"].width = 14
-        ws.column_dimensions["D"].width = 85
-        ws.column_dimensions["E"].width = 40
+        ws.column_dimensions["C"].width = 12
+        ws.column_dimensions["D"].width = 14
+        ws.column_dimensions["E"].width = 10
+        ws.column_dimensions["F"].width = 80
+        ws.column_dimensions["G"].width = 40
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -321,15 +343,17 @@ def api_straddle_download_audit_logs():
             import io
             str_io = io.StringIO()
             writer = csv.writer(str_io, quoting=csv.QUOTE_MINIMAL)
-            writer.writerow(["Timestamp", "Date", "Level", "Message", "Details"])
+            writer.writerow(["Timestamp", "Date", "Level", "Trade Type", "Side", "Message", "Details"])
             for log in logs:
                 ts = str(log.get("timestamp") or "")
                 dt = str(log.get("date") or "")
                 lvl = str(log.get("level") or "INFO").upper()
+                tt = str(log.get("trade_type") or ("PAPER" if "[PAPER" in str(log.get("message", "")).upper() else ("LIVE" if any(k in str(log.get("message", "")).upper() for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET")) else "-"))).upper()
+                side = str(log.get("side") or "").upper()
                 msg = str(log.get("message") or "")
                 det = log.get("details")
                 det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
-                writer.writerow([ts, dt, lvl, msg, det_str])
+                writer.writerow([ts, dt, lvl, tt, side, msg, det_str])
 
             # UTF-8 with BOM (0xEF, 0xBB, 0xBF) guarantees Microsoft Excel opens it directly with correct columns
             csv_bytes = str_io.getvalue().encode("utf-8-sig")

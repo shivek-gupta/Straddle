@@ -2161,6 +2161,22 @@
                     </div>
                     <button class="straddle-modal-close" onclick="closeStraddleLogsModal()">×</button>
                 </div>
+                <div class="straddle-audit-filter-bar" style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:#0b101b; border-bottom:1px solid rgba(255,255,255,0.08); flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <button type="button" class="straddle-btn active-toggle" id="btnAuditFilterAll" style="padding:4px 10px; font-size:11px;" onclick="setStraddleAuditFilter('all')">All Events</button>
+                        <button type="button" class="straddle-btn btn-outline" id="btnAuditFilterActual" style="padding:4px 10px; font-size:11px; color:#10b981; border-color:rgba(16,185,129,0.3);" onclick="setStraddleAuditFilter('actual')">🟢 Actual / Live</button>
+                        <button type="button" class="straddle-btn btn-outline" id="btnAuditFilterPaper" style="padding:4px 10px; font-size:11px; color:#c084fc; border-color:rgba(168,85,247,0.3);" onclick="setStraddleAuditFilter('paper')">🟣 Paper</button>
+                        <button type="button" class="straddle-btn btn-outline" id="btnAuditFilterTrades" style="padding:4px 10px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.3);" onclick="setStraddleAuditFilter('trades')">⚡ Both (All Trades)</button>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:600;">Side:</span>
+                        <select id="selAuditSideFilter" class="straddle-select" style="padding:3px 8px; font-size:11px; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditSideFilter(this.value)">
+                            <option value="ALL">All Sides</option>
+                            <option value="BUY">BUY Only</option>
+                            <option value="SELL">SELL Only</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="straddle-modal-body" style="background:#090d15; max-height:65vh; overflow-y:auto; font-family:var(--font-mono); font-size:12px;">
                     <div id="straddleAuditLogsContainer" style="display:flex; flex-direction:column; gap:6px;">
                         <!-- Logs rendered dynamically -->

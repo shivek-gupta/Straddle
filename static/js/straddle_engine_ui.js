@@ -9460,34 +9460,120 @@ function renderStraddleAuditLogs() {
     const container = document.getElementById("straddleAuditLogsContainer");
     if (!container) return;
 
-    function _buildLogsHtml(logsList) {
-        if (!logsList || logsList.length === 0) {
-            return `<div style="color:#64748b; text-align:center; padding:25px;">No audit events recorded yet.</div>`;
+window._straddleAuditLogsFilter = "all"; // "all" | "actual" | "paper" | "trades"
+window._straddleAuditSideFilter = "ALL"; // "ALL" | "BUY" | "SELL"
+window._cachedAuditLogsList = [];
+
+function setStraddleAuditFilter(filterType) {
+    window._straddleAuditLogsFilter = filterType;
+    ["btnAuditFilterAll", "btnAuditFilterActual", "btnAuditFilterPaper", "btnAuditFilterTrades"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.classList.remove("active-toggle");
+            el.classList.add("btn-outline");
         }
-        let html = "";
-        logsList.forEach(l => {
-            const level = (l.level || "INFO").toUpperCase();
-            const color = level === "ERROR" ? "#f43f5e" : (level === "WARN" ? "#f59e0b" : (level === "SUCCESS" ? "#10b981" : "#38bdf8"));
-            const bg = level === "ERROR" ? "rgba(244,63,94,0.08)" : (level === "WARN" ? "rgba(245,158,11,0.08)" : (level === "SUCCESS" ? "rgba(16,185,129,0.08)" : "rgba(56,189,248,0.04)"));
-            const border = level === "ERROR" ? "rgba(244,63,94,0.3)" : (level === "WARN" ? "rgba(245,158,11,0.3)" : (level === "SUCCESS" ? "rgba(16,185,129,0.3)" : "rgba(56,189,248,0.2)"));
-            const dateStr = l.date ? `${l.date} ` : "";
-            html += `
-                <div style="padding:8px 12px; background:${bg}; border:1px solid ${border}; border-radius:6px; display:flex; gap:12px; align-items:flex-start; margin-bottom:6px;">
-                    <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:600;">[${dateStr}${l.timestamp || ''}]</span>
-                    <span style="color:${color}; font-weight:800; font-size:11px; text-transform:uppercase; min-width:55px;">${level}</span>
-                    <span style="color:#e2e8f0; font-size:12px; line-height:1.4; word-break:break-word;">${l.message || ''}</span>
-                </div>
-            `;
-        });
-        return html;
+    });
+    const map = {
+        all: "btnAuditFilterAll",
+        actual: "btnAuditFilterActual",
+        paper: "btnAuditFilterPaper",
+        trades: "btnAuditFilterTrades"
+    };
+    const activeEl = document.getElementById(map[filterType]);
+    if (activeEl) {
+        activeEl.classList.add("active-toggle");
+        activeEl.classList.remove("btn-outline");
     }
+    renderStraddleAuditLogsFiltered();
+}
+
+function setStraddleAuditSideFilter(side) {
+    window._straddleAuditSideFilter = side || "ALL";
+    renderStraddleAuditLogsFiltered();
+}
+
+function renderStraddleAuditLogsFiltered() {
+    const container = document.getElementById("straddleAuditLogsContainer");
+    if (!container || !window._cachedAuditLogsList) return;
+    container.innerHTML = _buildAuditLogsHtml(window._cachedAuditLogsList);
+}
+
+function _buildAuditLogsHtml(logsList) {
+    if (!logsList || logsList.length === 0) {
+        return `<div style="color:#64748b; text-align:center; padding:25px;">No audit events recorded yet.</div>`;
+    }
+    const filterType = window._straddleAuditLogsFilter || "all";
+    const sideFilter = window._straddleAuditSideFilter || "ALL";
+
+    const filtered = logsList.filter(l => {
+        const tt = (l.trade_type || (l.message && (l.message.includes("[Paper") || l.message.includes("Paper Fill")) ? "PAPER" : "LIVE")).toUpperCase();
+        const side = (l.side || "").toUpperCase();
+        
+        // Filter by trade type
+        if (filterType === "actual" && tt !== "LIVE") return false;
+        if (filterType === "paper" && tt !== "PAPER") return false;
+        if (filterType === "trades" && tt !== "LIVE" && tt !== "PAPER") return false;
+
+        // Filter by side
+        if (sideFilter !== "ALL" && side !== sideFilter) return false;
+
+        return true;
+    });
+
+    if (filtered.length === 0) {
+        return `<div style="color:#64748b; text-align:center; padding:25px;">No matching log events for current filter (${filterType.toUpperCase()}, Side: ${sideFilter}).</div>`;
+    }
+
+    let html = "";
+    filtered.forEach(l => {
+        const level = (l.level || "INFO").toUpperCase();
+        const color = level === "ERROR" ? "#f43f5e" : (level === "WARN" ? "#f59e0b" : (level === "SUCCESS" ? "#10b981" : "#38bdf8"));
+        const bg = level === "ERROR" ? "rgba(244,63,94,0.08)" : (level === "WARN" ? "rgba(245,158,11,0.08)" : (level === "SUCCESS" ? "rgba(16,185,129,0.08)" : "rgba(56,189,248,0.04)"));
+        const border = level === "ERROR" ? "rgba(244,63,94,0.3)" : (level === "WARN" ? "rgba(245,158,11,0.3)" : (level === "SUCCESS" ? "rgba(16,185,129,0.3)" : "rgba(56,189,248,0.2)"));
+        const dateStr = l.date ? `${l.date} ` : "";
+
+        // Trade Type Badge
+        let tradeTypeBadge = "";
+        const tt = (l.trade_type || (l.message && (l.message.includes("[Paper") || l.message.includes("Paper Fill")) ? "PAPER" : "LIVE")).toUpperCase();
+        if (tt === "LIVE") {
+            tradeTypeBadge = `<span style="background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.5); color:#10b981; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; letter-spacing:0.5px; white-space:nowrap;">LIVE</span>`;
+        } else if (tt === "PAPER") {
+            tradeTypeBadge = `<span style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.5); color:#c084fc; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; letter-spacing:0.5px; white-space:nowrap;">PAPER</span>`;
+        }
+
+        // Side Badge
+        let sideBadge = "";
+        const side = (l.side || "").toUpperCase();
+        if (side === "BUY") {
+            sideBadge = `<span style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#4ade80; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; white-space:nowrap;">BUY</span>`;
+        } else if (side === "SELL") {
+            sideBadge = `<span style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#f87171; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; white-space:nowrap;">SELL</span>`;
+        }
+
+        html += `
+            <div style="padding:7px 12px; background:${bg}; border:1px solid ${border}; border-radius:6px; display:flex; gap:10px; align-items:center; margin-bottom:5px;">
+                <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:600;">[${dateStr}${l.timestamp || ''}]</span>
+                ${tradeTypeBadge}
+                ${sideBadge}
+                <span style="color:${color}; font-weight:800; font-size:10.5px; text-transform:uppercase; min-width:48px;">${level}</span>
+                <span style="color:#e2e8f0; font-size:12px; line-height:1.4; word-break:break-word; flex:1;">${l.message || ''}</span>
+            </div>
+        `;
+    });
+    return html;
+}
+
+function renderStraddleAuditLogs() {
+    const container = document.getElementById("straddleAuditLogsContainer");
+    if (!container) return;
 
     // Instant optimistic render from in-memory state
     const cachedLogs = (window._straddleState && window._straddleState.state && window._straddleState.state.logs)
         ? window._straddleState.state.logs
         : [];
     if (cachedLogs && cachedLogs.length > 0) {
-        container.innerHTML = _buildLogsHtml(cachedLogs);
+        window._cachedAuditLogsList = cachedLogs;
+        container.innerHTML = _buildAuditLogsHtml(cachedLogs);
     } else {
         container.innerHTML = `<div style="color:#64748b; text-align:center; padding:20px;">Fetching live audit logs...</div>`;
     }
@@ -9501,7 +9587,8 @@ function renderStraddleAuditLogs() {
             clearTimeout(timeoutId);
             const logs = (data && data.success && data.logs) ? data.logs : [];
             if (logs && logs.length > 0) {
-                container.innerHTML = _buildLogsHtml(logs);
+                window._cachedAuditLogsList = logs;
+                container.innerHTML = _buildAuditLogsHtml(logs);
             } else if (!cachedLogs || cachedLogs.length === 0) {
                 container.innerHTML = `<div style="color:#64748b; text-align:center; padding:25px;">No audit events recorded yet.</div>`;
             }
@@ -9565,6 +9652,8 @@ window.openStraddleLogsModal = openStraddleLogsModal;
 window.closeStraddleLogsModal = closeStraddleLogsModal;
 window.downloadAuditLogsExcel = downloadAuditLogsExcel;
 window.renderStraddleAuditLogs = renderStraddleAuditLogs;
+window.setStraddleAuditFilter = setStraddleAuditFilter;
+window.setStraddleAuditSideFilter = setStraddleAuditSideFilter;
 
 // P&L Chart exports
 window.loadStraddlePnlChart = loadStraddlePnlChart;

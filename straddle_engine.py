@@ -831,8 +831,10 @@ class StraddleManager:
             self._save_shadow_benchmarks()
 
             self._log_event(
-                f"[⚡ Parallel Paper Benchmark] {symbol} ({action_type} {side}): Paper Fill @ ₹{paper_price:.2f} (0ms) | Kotak Fill @ ₹{broker_price:.2f} ({ack_latency_ms}ms) | Slippage: {slippage_pts:+.2f} pts (₹{slippage_inr:+.2f})",
-                level="INFO"
+                f"[Paper Benchmark] {symbol} {action_type} {side}: Paper ₹{paper_price:.2f} | Live ₹{broker_price:.2f} ({ack_latency_ms}ms) | Slip: {slippage_pts:+.2f} pts",
+                level="INFO",
+                trade_type="PAPER",
+                side=side.upper(),
             )
             return benchmark_entry
         except Exception as e_b:
@@ -1103,19 +1105,56 @@ class StraddleManager:
             }
             self._save_order_registry()
 
-    def _log_event(self, message: str, level: str = "INFO", details: Optional[Dict] = None):
+    def _log_event(
+        self,
+        message: str,
+        level: str = "INFO",
+        details: Optional[Dict] = None,
+        trade_type: Optional[str] = None,
+        side: Optional[str] = None,
+    ):
+        det = details or {}
+        # Auto-detect trade_type if not explicitly passed
+        if not trade_type:
+            msg_u = message.upper()
+            if any(k in msg_u for k in ("[PAPER", "PAPER BENCHMARK", "PAPER FILL", "PAPER TRADE")):
+                trade_type = "PAPER"
+            elif det.get("mode") == "PAPER" or det.get("broker") == "PAPER" or det.get("paper"):
+                trade_type = "PAPER"
+            elif any(k in msg_u for k in ("ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS ORDER", "TARGET ORDER", "RE-EXECUTE", "HEDGE EXIT", "OCO", "FILLED ON BROKER", "ORDER REJECTED", "BROKER SL")):
+                mode = self._state.get("execution_mode", "LIVE_BROKER")
+                trade_type = "PAPER" if mode == "PAPER" else "LIVE"
+            else:
+                trade_type = "SYSTEM"
+
+        # Auto-detect side if not explicitly passed
+        if not side:
+            msg_u = message.upper()
+            if "HEDGE EXIT" in msg_u or "(EXIT SELL)" in msg_u or "ENTERED SELL" in msg_u:
+                side = "SELL"
+            elif "ENTERED BUY" in msg_u or "(EXIT BUY)" in msg_u or "BUY HEDGE" in msg_u:
+                side = "BUY"
+            elif "BUY" in msg_u and "SELL" not in msg_u:
+                side = "BUY"
+            elif "SELL" in msg_u and "BUY" not in msg_u:
+                side = "SELL"
+            else:
+                side = ""
+
         entry = {
             "timestamp": now_ist_str(),
             "date": today_ist_str(),
             "level": level,
             "message": message,
-            "details": details or {},
+            "trade_type": trade_type,
+            "side": side,
+            "details": det,
         }
         with _LOGS_LOCK:
             logs = self._state.setdefault("logs", [])
             logs.insert(0, entry)
-            if len(logs) > 500:
-                self._state["logs"] = logs[:500]
+            if len(logs) > 1000:
+                self._state["logs"] = logs[:1000]
 
         # Non-blocking async background flush to disk
         def _persist_logs():
@@ -1127,7 +1166,7 @@ class StraddleManager:
                 pass
         threading.Thread(target=_persist_logs, daemon=True).start()
 
-    def get_logs(self, limit: int = 150) -> List[Dict[str, Any]]:
+    def get_logs(self, limit: int = 250) -> List[Dict[str, Any]]:
         with _LOGS_LOCK:
             logs = self._state.get("logs", [])
             if not logs and STRADDLE_LOGS_FILE.exists():
@@ -1136,7 +1175,32 @@ class StraddleManager:
                         logs = json.load(f)
                 except Exception:
                     logs = []
-            return list(logs[:limit])
+            
+            enriched = []
+            for l in logs[:limit]:
+                l_copy = dict(l)
+                if not l_copy.get("trade_type"):
+                    msg_u = str(l_copy.get("message", "")).upper()
+                    if any(k in msg_u for k in ("[PAPER", "PAPER BENCHMARK", "PAPER FILL", "PAPER TRADE")):
+                        l_copy["trade_type"] = "PAPER"
+                    elif any(k in msg_u for k in ("ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS ORDER", "TARGET ORDER", "RE-EXECUTE", "HEDGE EXIT", "OCO", "FILLED ON BROKER", "ORDER REJECTED", "BROKER SL")):
+                        l_copy["trade_type"] = "LIVE"
+                    else:
+                        l_copy["trade_type"] = "SYSTEM"
+                if not l_copy.get("side"):
+                    msg_u = str(l_copy.get("message", "")).upper()
+                    if "HEDGE EXIT" in msg_u or "(EXIT SELL)" in msg_u or "ENTERED SELL" in msg_u:
+                        l_copy["side"] = "SELL"
+                    elif "ENTERED BUY" in msg_u or "(EXIT BUY)" in msg_u or "BUY HEDGE" in msg_u:
+                        l_copy["side"] = "BUY"
+                    elif "BUY" in msg_u and "SELL" not in msg_u:
+                        l_copy["side"] = "BUY"
+                    elif "SELL" in msg_u and "BUY" not in msg_u:
+                        l_copy["side"] = "SELL"
+                    else:
+                        l_copy["side"] = ""
+                enriched.append(l_copy)
+            return enriched
 
     def _send_telegram_alert(self, message: str):
         """Dispatches an asynchronous Telegram notification alert if configured."""
@@ -5488,7 +5552,7 @@ class StraddleManager:
 
         ref_price = entry_price
         bm_pending = False
-        now_str = time.strftime("%H:%M:%S")
+        now_str = now_ist_str()
 
         if ref_mode == "SPECIFIC_TIME":
             if now_str < bm_time:
@@ -5682,15 +5746,43 @@ class StraddleManager:
         def _dispatch_advance_orders():
             if is_hedge_leg or not self.is_broker_connected():
                 return
+            
+            # CRITICAL ORDER SEQUENCE GUARD:
+            # Advance exit orders (SL or Target) MUST NOT be submitted to the broker
+            # before the entry order is confirmed FILLED by the exchange!
+            # If entry order is still pending/unfilled, placing exit orders triggers RMS rejections.
+            if order_id and not str(order_id).startswith("ORD_") and not str(order_id).startswith("PAPER_"):
+                fill_check = broker.wait_for_order_fill(order_id, timeout_sec=60.0, poll_interval_sec=0.2)
+                if not fill_check.get("filled"):
+                    logger.warning(
+                        f"[Advance Orders Blocked] Entry order {order_id} for {contract.get('trading_symbol')} "
+                        f"not filled ({fill_check.get('error') or fill_check.get('status')}). Skipping advance order placement."
+                    )
+                    return
+                # Update pos_record with exact traded fill price from exchange if available
+                fill_p = float(fill_check.get("price") or 0.0)
+                if fill_p > 0:
+                    pos_record["avg_ent_price"] = fill_p
+                    if "%" in tgt_type or "TGT: %" in tgt_type:
+                        pos_record["target_price"] = round_to_tick(
+                            fill_p * (1.0 - tgt_val / 100.0) if side == "SELL" else fill_p * (1.0 + tgt_val / 100.0)
+                        )
+                    if "%" in sl_type or "SL: %" in sl_type:
+                        pos_record["sl_price"] = round_to_tick(
+                            fill_p * (1.0 + sl_val / 100.0) if side == "SELL" else fill_p * (1.0 - sl_val / 100.0)
+                        )
+
             sl_delay = int(adv.get("sl_placement_delay_sec", 0))
             if sl_delay > 0:
                 time.sleep(sl_delay)
             # 1. Place Stoploss with broker if selected
-            if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and sl_price > 0:
+            curr_sl_p = float(pos_record.get("sl_price") or sl_price)
+            if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and curr_sl_p > 0:
                 self._place_advance_sl_order(broker, pos_record, delay_sec=0)
                 time.sleep(0.15)  # Safe broker sequence buffer
             # 2. Place Target with broker if selected
-            if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and target_price > 0:
+            curr_tgt_p = float(pos_record.get("target_price") or target_price)
+            if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and curr_tgt_p > 0:
                 self._place_advance_target_order(broker, pos_record, delay_sec=0)
 
         threading.Thread(target=_dispatch_advance_orders, daemon=True).start()
@@ -6875,7 +6967,7 @@ class StraddleManager:
         pos["reference_price"] = ref_price
         pos["benchmark_pending"] = False
         pos["interim_protection_active"] = False
-        pos["benchmark_applied_at"] = time.strftime("%H:%M:%S")
+        pos["benchmark_applied_at"] = now_ist_str()
 
         self._recalculate_pos_sl_target(strat, pos, broker, ref_price)
 
@@ -6955,7 +7047,7 @@ class StraddleManager:
                 bm_t = str(benchmark_time or pos.get("benchmark_time") or "09:16:00").strip()
                 pos["benchmark_time"] = bm_t
                 pos["reference_price_mode"] = "SPECIFIC_TIME"
-                now_t = time.strftime("%H:%M:%S")
+                now_t = now_ist_str()
                 if now_t >= bm_t:
                     ref_price = float(pos.get("ltp") or pos.get("avg_ent_price") or 0.0)
                     pos["reference_price"] = ref_price
@@ -7968,8 +8060,27 @@ class StraddleManager:
                 "tsl_trail_pts": pos.get("tsl_trail_pts", 0.0),
             }
 
-        re_type = pos.get("sl_re_execute_type") or leg_cfg.get("sl_re_execute_type", "NONE") if trigger == "STOPLOSS" else (pos.get("target_re_execute_type") or leg_cfg.get("target_re_execute_type", "NONE"))
-        re_max = int(pos.get("sl_re_execute_count") if pos.get("sl_re_execute_count") is not None else leg_cfg.get("sl_re_execute_count", 0) if trigger == "STOPLOSS" else (pos.get("target_re_execute_count") if pos.get("target_re_execute_count") is not None else leg_cfg.get("target_re_execute_count", 0)))
+        if trigger.upper() == "STOPLOSS":
+            raw_re_type = pos.get("sl_re_execute_type")
+            if not raw_re_type or str(raw_re_type).upper() == "NONE":
+                raw_re_type = leg_cfg.get("sl_re_execute_type", "NONE")
+            re_type = str(raw_re_type or "NONE")
+
+            c_val = pos.get("sl_re_execute_count")
+            if c_val is None or c_val == "":
+                c_val = leg_cfg.get("sl_re_execute_count", 0)
+            re_max = int(c_val or 0)
+        else:
+            raw_re_type = pos.get("target_re_execute_type")
+            if not raw_re_type or str(raw_re_type).upper() == "NONE":
+                raw_re_type = leg_cfg.get("target_re_execute_type", "NONE")
+            re_type = str(raw_re_type or "NONE")
+
+            c_val = pos.get("target_re_execute_count")
+            if c_val is None or c_val == "":
+                c_val = leg_cfg.get("target_re_execute_count", 0)
+            re_max = int(c_val or 0)
+
         cur_count = int(pos.get("re_execute_count", 0))
 
         re_type_u = str(re_type or "").upper()
@@ -8276,9 +8387,9 @@ class StraddleManager:
                     new_pos["is_re_entry"] = True
                     # Preserve re-execute configurations on the new position
                     new_pos["sl_re_execute_type"] = leg_cfg.get("sl_re_execute_type") or pos.get("sl_re_execute_type", "NONE")
-                    new_pos["sl_re_execute_count"] = int(leg_cfg.get("sl_re_execute_count") or pos.get("sl_re_execute_count", 0))
+                    new_pos["sl_re_execute_count"] = int(leg_cfg.get("sl_re_execute_count") if leg_cfg.get("sl_re_execute_count") is not None else pos.get("sl_re_execute_count", 0))
                     new_pos["target_re_execute_type"] = leg_cfg.get("target_re_execute_type") or pos.get("target_re_execute_type", "NONE")
-                    new_pos["target_re_execute_count"] = int(leg_cfg.get("target_re_execute_count") or pos.get("target_re_execute_count", 0))
+                    new_pos["target_re_execute_count"] = int(leg_cfg.get("target_re_execute_count") if leg_cfg.get("target_re_execute_count") is not None else pos.get("target_re_execute_count", 0))
                     if active_hedge:
                         new_pos["has_associated_hedge"] = True
                         new_pos["associated_hedge_id"] = active_hedge.get("id")
@@ -11343,7 +11454,7 @@ class StraddleManager:
                     # AlgoTest Parity: Check if benchmark reference price needs to be locked
                     if pos.get("status") == "OPEN" and pos.get("benchmark_pending"):
                         bm_time = str(pos.get("benchmark_time") or "09:16:00").strip()
-                        now_time = time.strftime("%H:%M:%S")
+                        now_time = now_ist_str()
                         if now_time >= bm_time:
                             self._lock_benchmark_reference_price(strat, pos, broker, ltp)
 
@@ -11447,8 +11558,7 @@ class StraddleManager:
                                 if not pos.get("_tgt_cancel_notified"):
                                     pos["_tgt_cancel_notified"] = True
                                     self._log_event(
-                                        f"[AUTO HANDLING] Unexpected Target order cancellation detected for {pos.get('symbol')} on broker. "
-                                        f"Algo active protection: monitoring live price (Target ₹{pos.get('target_price', 0):.2f}) on platform.",
+                                        f"Target cancelled on broker for {pos.get('symbol')}. Monitoring live price (TGT: ₹{pos.get('target_price', 0):.2f}).",
                                         level="WARNING"
                                     )
                                     self._send_telegram_alert(
@@ -11480,8 +11590,7 @@ class StraddleManager:
                                     if not pos.get("_tgt_cancel_notified"):
                                         pos["_tgt_cancel_notified"] = True
                                         self._log_event(
-                                            f"[AUTO HANDLING] Unexpected Target order cancellation detected for {pos.get('symbol')} on broker. "
-                                            f"Algo active protection: monitoring live price (Target ₹{pos.get('target_price', 0):.2f}) on platform.",
+                                            f"Target cancelled on broker for {pos.get('symbol')}. Monitoring live price (TGT: ₹{pos.get('target_price', 0):.2f}).",
                                             level="WARNING"
                                         )
                                         self._send_telegram_alert(
@@ -11528,8 +11637,7 @@ class StraddleManager:
                                     if not pos.get("_sl_cancel_notified"):
                                         pos["_sl_cancel_notified"] = True
                                         self._log_event(
-                                            f"[AUTO HANDLING] Unexpected Stoploss cancellation detected for {pos.get('symbol')} on broker. "
-                                            f"Algo active protection: monitoring live price (SL ₹{pos.get('sl_price', 0):.2f}, TG ₹{pos.get('target_price', 0):.2f}) on platform.",
+                                            f"Stoploss cancelled on broker for {pos.get('symbol')}. Monitoring live price (SL: ₹{pos.get('sl_price', 0):.2f}).",
                                             level="WARNING"
                                         )
                                         self._send_telegram_alert(
@@ -11564,8 +11672,7 @@ class StraddleManager:
                                         if not pos.get("_sl_cancel_notified"):
                                             pos["_sl_cancel_notified"] = True
                                             self._log_event(
-                                                f"[AUTO HANDLING] Unexpected Stoploss cancellation detected for {pos.get('symbol')} on broker. "
-                                                f"Algo active protection: monitoring live price (SL ₹{pos.get('sl_price', 0):.2f}, TG ₹{pos.get('target_price', 0):.2f}) on platform.",
+                                                f"Stoploss cancelled on broker for {pos.get('symbol')}. Monitoring live price (SL: ₹{pos.get('sl_price', 0):.2f}).",
                                                 level="WARNING"
                                             )
                                             self._send_telegram_alert(
@@ -11591,8 +11698,8 @@ class StraddleManager:
                         pos["_exit_in_progress"] = False
                         pos["exit_reason"] = "TARGET HIT (Broker OCO)"
                         pos["exit_order_id"] = str(adv_tgt_oid)
-                        pos["exit_time"] = time.strftime("%H:%M:%S")
-                        self._log_event(f"Target order {adv_tgt_oid} FILLED on broker for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. OCO SL cancelled.")
+                        pos["exit_time"] = now_ist_str()
+                        self._log_event(f"Target order {adv_tgt_oid} FILLED for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. SL cancelled.")
                         self._handle_leg_re_entry(strat, pos, trigger="TARGET", exit_order_id=str(adv_tgt_oid))
                         continue
 
@@ -11607,8 +11714,8 @@ class StraddleManager:
                         pos["_exit_in_progress"] = False
                         pos["exit_reason"] = "STOPLOSS HIT (Broker OCO)"
                         pos["exit_order_id"] = str(adv_sl_oid)
-                        pos["exit_time"] = time.strftime("%H:%M:%S")
-                        self._log_event(f"Stoploss order {adv_sl_oid} FILLED on broker for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. OCO Target cancelled.")
+                        pos["exit_time"] = now_ist_str()
+                        self._log_event(f"Stoploss order {adv_sl_oid} FILLED for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. Target cancelled.")
                         self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS", exit_order_id=str(adv_sl_oid))
                         continue
 
