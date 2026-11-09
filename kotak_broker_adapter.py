@@ -413,7 +413,25 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         clean_tt = "B" if transaction_type.upper() in ("BUY", "B") else "S"
         clean_ot = "L" if order_type.upper() in ("LIMIT", "LMT", "L") else ("MKT" if order_type.upper() in ("MARKET", "MKT") else ("SL-M" if "M" in order_type.upper() else "SL"))
         clean_prod = "MIS" if product.upper() in ("MIS", "I", "INTRADAY") else "NRML"
-        clean_price = str(round_to_tick(price, tick_size=tick_size)) if clean_ot in ("L", "SL") else "0"
+
+        # INVIOLABLE EXCHANGE & KOTAK NEO RULE:
+        # In NSE F&O (Options), pure Market ('MKT') orders are strictly blocked by Kotak Neo core RMS
+        # and trigger 'error from core'. Always convert 'MKT' in 'nse_fo' into an instantaneous
+        # Marketable Limit order with price protection ceiling/floor:
+        if segment == "nse_fo" and clean_ot == "MKT":
+            clean_ot = "L"
+            p_flt = float(price or 0.0)
+            if clean_tt == "B":
+                # Buy: ceiling above Ask to match lowest ask on book immediately (<10ms)
+                mkt_price = max(p_flt * 1.50, p_flt + 2.50, 5.0) if p_flt > 0 else 5.0
+                clean_price = str(round_to_tick(mkt_price, tick_size=tick_size))
+            else:
+                # Sell: floor below Bid to match highest bid on book immediately (<10ms)
+                mkt_price = max(0.05, p_flt * 0.70) if p_flt > 0 else 0.05
+                clean_price = str(round_to_tick(mkt_price, tick_size=tick_size))
+        else:
+            clean_price = str(round_to_tick(price, tick_size=tick_size)) if clean_ot in ("L", "SL") else "0"
+
         clean_trig = str(round_to_tick(trigger_price, tick_size=tick_size)) if trigger_price and trigger_price > 0 else "0"
         clean_qty = str(int(quantity))
 
@@ -443,13 +461,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 st_code = res.get("stCode")
                 if st_code and int(st_code) != 200:
                     err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
-                    # Auto-fallback: If broker rejects MARKET for options, immediately retry as aggressive Marketable Limit
-                    if clean_ot == "MKT" and any(k in err_msg.lower() for k in ("market order not allowed", "mkt not allowed", "price protection", "order type not allowed", "not allowed for option", "rms:rule")):
-                        logger.info(f"[Kotak Neo] MKT rejected for {canonical_symbol} ({err_msg}). Auto-retrying as aggressive Marketable Limit...")
+                    # Auto-fallback: If broker rejects with error from core or market order disallowed
+                    if any(k in err_msg.lower() for k in ("error from core", "from core", "market order not allowed", "mkt not allowed", "price protection", "order type not allowed", "not allowed for option", "rms:rule")):
+                        logger.info(f"[Kotak Neo] Order rejected with '{err_msg}'. Auto-retrying as aggressive Marketable Limit...")
                         mkt_price = float(price or 0.0)
                         if mkt_price <= 0:
                             mkt_price = 5.0
-                        limit_alt_price = round_to_tick(max(mkt_price * 1.5, mkt_price + 2.5), tick_size=tick_size)
+                        limit_alt_price = round_to_tick(max(mkt_price * 1.5, mkt_price + 2.5), tick_size=tick_size) if clean_tt == "B" else round_to_tick(max(0.05, mkt_price * 0.7), tick_size=tick_size)
                         return self._place_single_order(
                             client=client,
                             canonical_symbol=canonical_symbol,

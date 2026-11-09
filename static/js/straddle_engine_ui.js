@@ -6096,7 +6096,7 @@ function populateStraddleSettingsForm(s) {
     const adv = s.advanced_settings || s.advanced || {};
     document.getElementById("cfgEntryOrderType").value = adv.entry_order_type || "Limit (L) / Stoploss Limit (SL-L)";
     if (document.getElementById("cfgHedgeOrderType")) {
-        document.getElementById("cfgHedgeOrderType").value = adv.hedge_order_type || "Market (MKT)";
+        document.getElementById("cfgHedgeOrderType").value = adv.hedge_order_type || "Marketable Limit";
     }
     document.getElementById("cfgEntryBufferType").value = adv.entry_buffer_type || "Percentage";
     document.getElementById("cfgEntryBufferVal").value = adv.entry_buffer_val !== undefined ? adv.entry_buffer_val : (adv.entry_buffer_value !== undefined ? adv.entry_buffer_value : 5.0);
@@ -7157,7 +7157,7 @@ function serializeCurrentStrategySettings() {
         },
         advanced_settings: {
             entry_order_type: document.getElementById("cfgEntryOrderType")?.value || "Limit (L) / Stoploss Limit (SL-L)",
-            hedge_order_type: document.getElementById("cfgHedgeOrderType")?.value || "Market (MKT)",
+            hedge_order_type: document.getElementById("cfgHedgeOrderType")?.value || "Marketable Limit",
             entry_buffer_type: document.getElementById("cfgEntryBufferType")?.value || "Percentage",
             entry_buffer_val: isNaN(parseFloat(document.getElementById("cfgEntryBufferVal")?.value)) ? 5.0 : parseFloat(document.getElementById("cfgEntryBufferVal")?.value),
             entry_buffer_value: isNaN(parseFloat(document.getElementById("cfgEntryBufferVal")?.value)) ? 5.0 : parseFloat(document.getElementById("cfgEntryBufferVal")?.value),
