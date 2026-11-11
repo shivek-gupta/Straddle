@@ -10534,3 +10534,127 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     padding: 1px 5px !important;
     border-radius: 4px !important;
 }
+
+/* ==========================================================
+   ORDERBOOK NAVIGATION TABS & ACTION BUTTONS
+   ========================================================== */
+
+.orderbook-tab-btn {
+    background: #0f172a !important;
+    color: #94a3b8 !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 6px !important;
+    padding: 6px 16px !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    outline: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.orderbook-tab-btn:hover {
+    color: #f8fafc !important;
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    background: #1e293b !important;
+}
+
+.orderbook-tab-btn.active {
+    background: linear-gradient(135deg, #0284c7, #2563eb) !important;
+    color: #ffffff !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 2px 10px rgba(37, 99, 235, 0.45) !important;
+}
+
+.orderbook-blue-btn {
+    background: linear-gradient(135deg, #0284c7, #2563eb) !important;
+    color: #ffffff !important;
+    border: 1px solid #38bdf8 !important;
+    border-radius: 6px !important;
+    padding: 6px 14px !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3) !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    outline: none !important;
+}
+
+.orderbook-blue-btn:hover {
+    background: linear-gradient(135deg, #0369a1, #1d4ed8) !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.5) !important;
+    transform: translateY(-1px);
+}
+
+.orderbook-blue-btn:active {
+    transform: translateY(0);
+}
+
+/* ==========================================================
+   ENRICHED CAUSAL ENTRY & EXIT REASON BADGES
+   ========================================================== */
+
+.straddle-reason-pill {
+    display: inline-block;
+    padding: 3px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: 0.2px;
+    word-break: break-word;
+}
+
+.straddle-reason-pill.entry-initial {
+    color: #94a3b8;
+    background: rgba(148, 163, 184, 0.1);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.straddle-reason-pill.entry-hedge {
+    color: #34d399;
+    background: rgba(16, 185, 129, 0.14);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.straddle-reason-pill.entry-reentry {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.14);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.straddle-reason-pill.entry-shifted {
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.14);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.exit-reason-tgt {
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.14);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 4px;
+    padding: 3px 7px;
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.exit-reason-sl {
+    color: #f43f5e;
+    background: rgba(244, 63, 94, 0.14);
+    border: 1px solid rgba(244, 63, 94, 0.35);
+    border-radius: 4px;
+    padding: 3px 7px;
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+

@@ -374,9 +374,13 @@ async function fetchLiveSpotTick() {
     }
 }
 
+let _lastOrderbookAutoRefreshTs = 0;
+let _lastPnlAutoRefreshTs = 0;
+
 async function pollStraddleCycle() {
     try {
         await fetchStraddleState();
+        const now = Date.now();
         if (window._straddleState.currentSubView === "open_positions") {
             await loadStraddleOpenPositions();
         } else if (window._straddleState.currentSubView === "option_chain") {
@@ -384,8 +388,22 @@ async function pollStraddleCycle() {
                 await loadStraddleOptionChain();
             }
         } else if (window._straddleState.currentSubView === "pnl") {
-            if (typeof loadStraddlePnlChart === "function" && !window._straddleState._pnlHoverActive) {
-                await loadStraddlePnlChart();
+            if (now - _lastPnlAutoRefreshTs >= 5000) {
+                _lastPnlAutoRefreshTs = now;
+                if (typeof loadStraddlePnlChart === "function" && !window._straddleState._pnlHoverActive) {
+                    await loadStraddlePnlChart();
+                }
+            }
+        }
+
+        // Automatic 5-second live refresh for Orderbook & Margins
+        const orderbookSec = document.getElementById("orderbookOrdersSection");
+        const isOrderbookVisible = (window._straddleState.currentSubView === "orderbook") || 
+            (orderbookSec && orderbookSec.style.display !== "none");
+        if (isOrderbookVisible && (now - _lastOrderbookAutoRefreshTs >= 5000)) {
+            _lastOrderbookAutoRefreshTs = now;
+            if (typeof loadStraddleOrderbook === "function") {
+                await loadStraddleOrderbook(false);
             }
         }
     } catch (err) {
@@ -399,7 +417,18 @@ async function fetchStraddleState() {
         const data = await resp.json();
         if (data && data.success && data.state) {
             const s = data.state;
-            window._straddleState.allStrategies = s.all_strategies || [];
+            if (s.all_strategies && Array.isArray(s.all_strategies)) {
+                s.all_strategies.forEach(serverStrat => {
+                    const sid = String(serverStrat.strategy_id || "").trim();
+                    const pending = window._pendingMultiplierModes?.[sid];
+                    if (pending && (Date.now() - pending.timestamp < 4000)) {
+                        serverStrat.multiplier_type = pending.mode;
+                    }
+                });
+                window._straddleState.allStrategies = s.all_strategies;
+            } else {
+                window._straddleState.allStrategies = s.all_strategies || [];
+            }
 
             // Determine active strategy strictly matching activeStrategyId or activeStrategy
             const prevActiveId = window._straddleState.activeStrategy ? window._straddleState.activeStrategy.strategy_id : null;
@@ -1424,7 +1453,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 <td>
                     ${daysHtml}
                 </td>
-                <td style="text-align:center; min-width:115px; padding:6px 6px;">
+                <td id="algo_mult_cell_${s.strategy_id}" style="text-align:center; min-width:115px; padding:6px 6px;">
                     <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                         <div style="display:inline-flex; background:#0b1120; border:1px solid #334155; border-radius:4px; padding:1px;">
                             <button type="button" onclick="setAlgoMultiplierMode('${s.strategy_id}', 'MANUAL')" style="background:${isManual ? '#2563eb' : 'transparent'}; color:${isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Manual Lots Multiplier">Manual</button>
@@ -1650,13 +1679,18 @@ async function onToggleAlgoEnable(strategyId, isChecked) {
 }
 
 async function setAlgoMultiplierMode(strategyId, mode) {
-    const strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === strategyId);
+    const sIdStr = String(strategyId).trim();
+    const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
     if (!strat) return;
+
+    window._pendingMultiplierModes = window._pendingMultiplierModes || {};
+    window._pendingMultiplierModes[sIdStr] = { mode: mode, timestamp: Date.now() };
+
     strat.multiplier_type = mode;
     showStraddleToast(`'${strat.name}' switched to ${mode} Multiplier`, "info", 1500);
 
     // Sync to strategy builder form if this strategy is active
-    if (window._straddleState?.activeStrategyId === strategyId || window._straddleState?.activeStrategy?.strategy_id === strategyId) {
+    if (String(window._straddleState?.activeStrategyId || "").trim() === sIdStr || String(window._straddleState?.activeStrategy?.strategy_id || "").trim() === sIdStr) {
         setFormMultiplierMode(mode, false);
     }
 
@@ -1667,13 +1701,18 @@ async function setAlgoMultiplierMode(strategyId, mode) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                strategy_id: strategyId,
+                strategy_id: strat.strategy_id || strategyId,
                 multiplier_type: mode
             })
         });
         const res = await resp.json();
-        if (res.success && res.strategy) {
-            Object.assign(strat, res.strategy);
+        if (res.success) {
+            if (window._pendingMultiplierModes) delete window._pendingMultiplierModes[sIdStr];
+            const currentStrat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
+            if (currentStrat && res.strategy) {
+                Object.assign(currentStrat, res.strategy);
+                currentStrat.multiplier_type = mode;
+            }
             renderStraddleAlgosTable(true);
         }
     } catch (e) {
@@ -1683,13 +1722,14 @@ async function setAlgoMultiplierMode(strategyId, mode) {
 window.setAlgoMultiplierMode = setAlgoMultiplierMode;
 
 async function onChangeAlgoCushionMargin(strategyId, val) {
+    const sIdStr = String(strategyId).trim();
     const cushion = Math.max(0, parseFloat(val) || 0);
-    const strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === strategyId);
+    const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
     if (!strat) return;
     strat.cushion_margin = cushion;
 
     // Sync to strategy builder form if active
-    if (window._straddleState?.activeStrategyId === strategyId || window._straddleState?.activeStrategy?.strategy_id === strategyId) {
+    if (String(window._straddleState?.activeStrategyId || "").trim() === sIdStr || String(window._straddleState?.activeStrategy?.strategy_id || "").trim() === sIdStr) {
         const formInput = document.getElementById("cfgCushionMargin");
         if (formInput && parseFloat(formInput.value) !== cushion) formInput.value = cushion;
         updateFormAutoMultiplierPreview();
@@ -1702,13 +1742,16 @@ async function onChangeAlgoCushionMargin(strategyId, val) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                strategy_id: strategyId,
+                strategy_id: strat.strategy_id || strategyId,
                 cushion_margin: cushion
             })
         });
         const res = await resp.json();
-        if (res.success && res.strategy) {
-            Object.assign(strat, res.strategy);
+        if (res.success) {
+            const currentStrat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
+            if (currentStrat && res.strategy) {
+                Object.assign(currentStrat, res.strategy);
+            }
             renderStraddleAlgosTable(true);
         }
     } catch (e) {
@@ -1718,13 +1761,17 @@ async function onChangeAlgoCushionMargin(strategyId, val) {
 window.onChangeAlgoCushionMargin = onChangeAlgoCushionMargin;
 
 async function onChangeAlgoMultiplier(strategyId, val) {
+    const sIdStr = String(strategyId).trim();
     const num = Math.max(1, parseInt(val) || 1);
-    const strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === strategyId);
+    const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
     if (strat) {
+        window._pendingMultiplierModes = window._pendingMultiplierModes || {};
+        window._pendingMultiplierModes[sIdStr] = { mode: "MANUAL", timestamp: Date.now() };
+
         strat.multiplier = num;
         strat.multiplier_type = "MANUAL";
 
-        if (window._straddleState?.activeStrategyId === strategyId || window._straddleState?.activeStrategy?.strategy_id === strategyId) {
+        if (String(window._straddleState?.activeStrategyId || "").trim() === sIdStr || String(window._straddleState?.activeStrategy?.strategy_id || "").trim() === sIdStr) {
             const formInput = document.getElementById("cfgMultiplier");
             if (formInput && parseInt(formInput.value) !== num) formInput.value = num;
             setFormMultiplierMode("MANUAL", false);
@@ -1738,14 +1785,20 @@ async function onChangeAlgoMultiplier(strategyId, val) {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    strategy_id: strategyId,
+                    strategy_id: strat.strategy_id || strategyId,
                     multiplier: num,
                     multiplier_type: "MANUAL"
                 })
             });
             const res = await resp.json();
-            if (res.success && res.strategy) {
-                Object.assign(strat, res.strategy);
+            if (res.success) {
+                if (window._pendingMultiplierModes) delete window._pendingMultiplierModes[sIdStr];
+                const currentStrat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
+                if (currentStrat && res.strategy) {
+                    Object.assign(currentStrat, res.strategy);
+                    currentStrat.multiplier = num;
+                    currentStrat.multiplier_type = "MANUAL";
+                }
                 renderStraddleAlgosTable(true);
             }
         } catch (e) {
@@ -4772,30 +4825,47 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const exitTime = (isClosed && pos.exit_time) ? pos.exit_time : (pos.avg_exit_price && pos.avg_exit_price > 0 ? (pos.exit_time || '-') : '-');
 
                 // Exit Reason
-                let exitReasonHtml = "-";
+                let exitReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
                 if (pos.exit_reason && pos.exit_reason !== "-") {
-                    const rLower = String(pos.exit_reason).toLowerCase();
+                    const rStr = String(pos.exit_reason);
+                    const rLower = rStr.toLowerCase();
                     if (rLower.includes("target")) {
-                        exitReasonHtml = `<span class="exit-reason-tgt">${pos.exit_reason}</span>`;
+                        exitReasonHtml = `<span class="exit-reason-tgt" title="${rStr}">🎯 ${rStr}</span>`;
                     } else if (rLower.includes("stoploss") || rLower.includes("sl")) {
-                        exitReasonHtml = `<span class="exit-reason-sl">${pos.exit_reason}</span>`;
+                        exitReasonHtml = `<span class="exit-reason-sl" title="${rStr}">🛑 ${rStr}</span>`;
+                    } else if (rLower.includes("hedge shift") || rLower.includes("shift hedge")) {
+                        exitReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${rStr}">🔄 ${rStr}</span>`;
+                    } else if (rLower.includes("hedge")) {
+                        exitReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${rStr}">🛡️ ${rStr}</span>`;
                     } else {
-                        exitReasonHtml = `<span class="straddle-reason-pill">${pos.exit_reason}</span>`;
+                        exitReasonHtml = `<span class="straddle-reason-pill entry-initial" title="${rStr}">${rStr}</span>`;
                     }
                 }
 
                 // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift)
-                let entryReasonHtml = "-";
+                let entryReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
                 if (pos.entry_reason && pos.entry_reason !== "-") {
-                    entryReasonHtml = `<span class="straddle-reason-pill entry-reason-pill" style="font-size:10px; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); border-radius:4px; padding:2px 6px; display:inline-block; font-weight:600;">${pos.entry_reason}</span>`;
+                    const eStr = String(pos.entry_reason);
+                    const eLower = eStr.toLowerCase();
+                    if (eLower.includes("hedge") && (eLower.includes("shift") || eLower.includes("re-aligned") || eLower.includes("replaced"))) {
+                        entryReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${eStr}">🔄 ${eStr}</span>`;
+                    } else if (eLower.includes("hedge")) {
+                        entryReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${eStr}">🛡️ ${eStr}</span>`;
+                    } else if (eLower.includes("re-execute") || eLower.includes("re-entry") || eLower.includes("re-cost")) {
+                        entryReasonHtml = `<span class="straddle-reason-pill entry-reentry" title="${eStr}">⚡ ${eStr}</span>`;
+                    } else {
+                        entryReasonHtml = `<span class="straddle-reason-pill entry-initial" title="${eStr}">📌 ${eStr}</span>`;
+                    }
                 } else if (pos.is_associated_hedge) {
                     const pType = pos.hedge_parent_type || "MAIN";
-                    entryReasonHtml = `<span class="straddle-reason-pill" style="font-size:10px; color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.25); border-radius:4px; padding:2px 6px; display:inline-block; font-weight:600;">HEDGE (${pType})</span>`;
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-hedge">🛡️ HEDGE (${pType}) [Protecting Main]</span>`;
                 } else if (pos.is_re_entry || (pos.re_execute_count || 0) > 0) {
                     const reCount = pos.re_execute_count || 1;
-                    entryReasonHtml = `<span class="straddle-reason-pill" style="font-size:10px; color:#f59e0b; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); border-radius:4px; padding:2px 6px; display:inline-block; font-weight:600;">RE-EXECUTE #${reCount}</span>`;
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-reentry">⚡ RE-EXECUTE #${reCount}</span>`;
                 } else {
-                    entryReasonHtml = `<span class="straddle-reason-pill" style="font-size:10px; color:#94a3b8; background:rgba(148,163,184,0.08); border:1px solid rgba(148,163,184,0.2); border-radius:4px; padding:2px 6px; display:inline-block; font-weight:600;">Initial Entry</span>`;
+                    const sSide = String(pos.side || "SELL").toUpperCase();
+                    const sType = String(pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE")).toUpperCase();
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-initial">📌 Initial Entry [${sSide} ${sType}]</span>`;
                 }
 
                 // Action buttons (Save on live change + Exit + Detach + Combined Placement)

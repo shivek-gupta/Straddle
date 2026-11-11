@@ -3463,10 +3463,10 @@ class StraddleManager:
                 available_capital = 0.0
 
         if available_capital <= 0:
-            return 1 if mult_type != "AUTO" else 0
+            return max(1, int(strat.get("multiplier", 1) or 1))
 
         auto_lots = int(math.floor(available_capital / total_margin_per_lot))
-        return max(0, auto_lots)
+        return max(1, auto_lots)
 
 
     def update_strategy_multiplier(
@@ -3499,6 +3499,10 @@ class StraddleManager:
             eff_mult = self.get_effective_multiplier(strat)
             strat["broker_margin_per_lot"] = broker_margin
             strat["effective_multiplier"] = eff_mult
+
+            # Synchronize active strategy in memory state
+            if self._active_strategy_id and str(self._active_strategy_id).strip() == str(strat.get("strategy_id")).strip():
+                self._state["active_strategy"] = strat
 
             self._save_strategies()
             self._log_event(
@@ -5835,13 +5839,17 @@ class StraddleManager:
             pos_record["associated_hedge"] = leg_cfg.get("associated_hedge")
 
         if not pos_record.get("entry_reason"):
+            opt_t = leg_cfg.get("option_type") or ("CE" if "CE" in str(contract.get("trading_symbol", "")).upper() else "PE")
+            side_t = str(leg_cfg.get("side", "SELL")).upper()
+            stk_val = contract.get("strike_price") or leg_cfg.get("strike_selection") or "ATM"
             if leg_cfg.get("is_associated_hedge"):
-                p_name = leg_cfg.get("hedge_parent_type") or "MAIN"
-                pos_record["entry_reason"] = f"HEDGE ({p_name})"
+                p_name = leg_cfg.get("hedge_parent_type") or "Main Leg"
+                h_otm = leg_cfg.get("associated_hedge", {}).get("initial_otm", 20)
+                pos_record["entry_reason"] = f"HEDGE ({opt_t}) [OTM +{h_otm} • Protecting {p_name}]"
             elif is_re_entry:
-                pos_record["entry_reason"] = "RE-EXECUTE"
+                pos_record["entry_reason"] = f"RE-EXECUTE [{side_t} {opt_t} {stk_val}]"
             else:
-                pos_record["entry_reason"] = "Initial Strategy Entry"
+                pos_record["entry_reason"] = f"Initial Entry [{side_t} {opt_t} {stk_val}]"
 
         # Quantiply-parity: timeout conversion to market
         # If N = 0: Timeout conversion disabled (Order stays as Limit order in exchange orderbook)
@@ -8751,7 +8759,7 @@ class StraddleManager:
                         if new_h_contract:
                             old_h_pos = active_hedge
                             def _exit_old_h():
-                                return self._square_off_single_position(old_h_pos, broker, reason=f"SHIFT HEDGE TO OTM {reset_otm}")
+                                return self._square_off_single_position(old_h_pos, broker, reason=f"HEDGE SHIFT ➔ Re-aligned to Strike {new_short_strike:.0f}")
 
                             def _buy_new_h():
                                 dummy_h_cfg = {
@@ -8780,7 +8788,7 @@ class StraddleManager:
                                     adv,
                                     strategy=strat,
                                     is_re_entry=False,
-                                    entry_reason=f"HEDGE SHIFT TO OTM {reset_otm} (Parent {old_h_pos.get('symbol', 'Main')})"
+                                    entry_reason=f"Shifted Hedge ({opt_type}) [OTM +{reset_otm} • Replaced {curr_hedge_strike:.0f}]"
                                 )
 
                             # INVIOLABLE HEDGE DIRECTIVE: Buy new hedge FIRST before squaring off old hedge!
@@ -8940,7 +8948,7 @@ class StraddleManager:
                                 p_cand["target_broker_order_id"] = None
 
                 new_pos = None
-                re_reason_str = f"RE-EXECUTE #{new_count} (After {pos.get('exit_reason', 'Exit')} @ ₹{pos.get('avg_exit_price', 0.0):.2f})"
+                re_reason_str = f"Re-Execute #{new_count} [Triggered by {pos.get('symbol')} {trigger} Hit @ ₹{pos.get('avg_exit_price', 0.0):.2f}]"
                 try:
                     new_pos = self._place_leg_entry_order(
                         leg_cfg,
@@ -8952,6 +8960,9 @@ class StraddleManager:
                         is_re_entry=True,
                         entry_reason=re_reason_str
                     )
+                    if new_pos and new_pos.get("status") == "OPEN":
+                        if pos.get("exit_reason") and "➔" not in str(pos.get("exit_reason")):
+                            pos["exit_reason"] = f"{pos['exit_reason']} ➔ Triggered Re-Execute #{new_count}"
                 finally:
                     if unblocked_items:
                         def _restore_unblocked_orders():
