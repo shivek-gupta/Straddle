@@ -3680,7 +3680,8 @@ async function changeLegReferenceBasis(stratId, legId, legIndex, choice) {
         }
         customPrice = parseFloat(inputVal);
     } else if (choice === "SPECIFIC_TIME") {
-        const inputTime = prompt("Enter benchmark time (HH:MM:SS) for reference price:", "09:16:00");
+        const defaultT = (window._straddleState?.last_tick_time || "10:20:00").substring(0, 5);
+        const inputTime = prompt("Enter 1-minute candle time (HH:MM, e.g. 10:20 or 09:16) for Target/SL parity:", defaultT);
         if (!inputTime) return;
         bmTime = inputTime.trim();
     }
@@ -3701,7 +3702,7 @@ async function changeLegReferenceBasis(stratId, legId, legIndex, choice) {
         });
         const res = await resp.json();
         if (res.success) {
-            showStraddleToast(res.message || "Reference price updated successfully!", "success", 2500);
+            showStraddleToast(res.message || "Reference price updated successfully!", "success", 3000);
             await fetchStraddleState();
             await loadStraddleOpenPositions();
         } else {
@@ -4479,31 +4480,39 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
                 // Reference Price badges and basis selector (AlgoTest Parity)
                 let refPriceBadgeHtml = "";
+                const curRefPrice = Number(pos.reference_price || 0);
+                const curAvgPrice = Number(pos.avg_ent_price || 0);
+                const hasDiffRef = curRefPrice > 0 && Math.abs(curRefPrice - curAvgPrice) > 0.01;
+
                 if (pos.benchmark_pending) {
+                    const pendTime = (pos.benchmark_time || pos.reference_candle_time || '09:16').substring(0, 5);
                     refPriceBadgeHtml = `
                         <div style="margin-top:2px;">
-                            <span style="font-size:9px; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:1px 4px; font-weight:800; display:inline-block;" title="Interim protection active. Will lock to exact ${pos.benchmark_time || '09:16:00'} market price when clock strikes.">⏳ Ref @ ${pos.benchmark_time || '09:16'}</span>
+                            <span style="font-size:9px; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:1px 4px; font-weight:800; display:inline-block;" title="Interim protection active. Will lock to exact ${pendTime} 1-min candle close price when complete.">⏳ Ref @ ${pendTime} Close</span>
                         </div>
                     `;
-                } else if (pos.reference_price && Math.abs(Number(pos.reference_price) - Number(pos.avg_ent_price || 0)) > 0.01) {
+                } else if (hasDiffRef || pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" || pos.reference_price_mode === "SPECIFIC_TIME") {
+                    let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : "Ref"));
                     refPriceBadgeHtml = `
                         <div style="margin-top:2px;">
-                            <span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target and Stoploss calculated from Reference Price ₹${Number(pos.reference_price).toFixed(2)} (${pos.reference_price_mode || 'Benchmark'})">🎯 Ref: ₹${Number(pos.reference_price).toFixed(2)}</span>
+                            <span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target and Stoploss calculated from ${modeTag} Price ₹${curRefPrice.toFixed(2)} (Entry fill was ₹${curAvgPrice.toFixed(2)})">🎯 ${modeTag}: ₹${curRefPrice.toFixed(2)}</span>
                         </div>
                     `;
                 }
 
                 let refBasisSelectHtml = "";
                 if (isOpen) {
-                    const curRefLabel = pos.reference_price ? `₹${Number(pos.reference_price).toFixed(1)}` : 'Avg';
+                    const curRefLabel = curRefPrice > 0 ? `₹${curRefPrice.toFixed(1)}` : 'Avg';
+                    const entryMinStr = (pos.entry_time || '09:37:00').substring(0, 5);
                     refBasisSelectHtml = `
                         <div style="margin-top:3px;">
-                            <select class="straddle-select" style="padding:1px 2px; font-size:8.5px; height:18px; font-weight:700; color:#38bdf8; background:#0b1120; border-color:#0284c7; border-radius:3px; cursor:pointer;" onchange="changeLegReferenceBasis('${stratId}', '${pos.id || ''}', ${idx}, this.value)" title="Choose basis for Target & Stoploss: Entry Fill Price, Current LTP, Custom Price, or 09:16 Benchmark">
+                            <select class="straddle-select" style="padding:1px 2px; font-size:8.5px; height:18px; font-weight:700; color:#38bdf8; background:#0b1120; border-color:#0284c7; border-radius:3px; cursor:pointer;" onchange="changeLegReferenceBasis('${stratId}', '${pos.id || ''}', ${idx}, this.value)" title="Choose basis for Target & Stoploss: Entry Fill Price, Entry Candle Close, Specific Minute Candle (e.g. 10:20), Current LTP, or Custom Price">
                                 <option value="" disabled selected>Ref: ${curRefLabel} ▾</option>
                                 <option value="AVERAGE_ENTRY">Avg Fill (₹${avgEntPrice})</option>
+                                <option value="ENTRY_CANDLE_CLOSE">Entry Candle Close (${entryMinStr})</option>
+                                <option value="SPECIFIC_TIME">Minute Candle Time (HH:MM)...</option>
                                 <option value="CURRENT_LTP">Current LTP (₹${Number(pos.ltp || 0).toFixed(1)})</option>
                                 <option value="CUSTOM">Custom Price...</option>
-                                <option value="SPECIFIC_TIME">09:16 Benchmark</option>
                             </select>
                         </div>
                     `;

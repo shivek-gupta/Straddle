@@ -17,6 +17,7 @@ import gzip
 import re
 import uuid
 import math
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 
@@ -310,6 +311,15 @@ class BaseBrokerAdapter:
 
     def get_funds(self) -> Dict[str, Any]:
         return {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
+
+    def get_historical_candles(
+        self,
+        instrument_key: str,
+        interval: str = "1min",
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        return []
 
     def get_live_quotes(self, instrument_tokens: List[str]) -> Dict[str, Any]:
         quotes = {}
@@ -676,6 +686,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 clean_ot = "SL"
             elif "MKT" in ot_raw or "MARKET" in ot_raw:
                 clean_ot = "MKT"
+            elif not order_type and trigger_price is not None and float(trigger_price) > 0:
+                clean_ot = "SL"
             else:
                 clean_ot = "L"
 
@@ -1383,6 +1395,76 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             logger.warning(f"[Kotak Neo] Exception fetching quotes: {e}")
             return {}
 
+    def get_historical_candles(
+        self,
+        instrument_key: str,
+        interval: str = "1min",
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve authentic 1-minute (or other interval) historical candle bars directly from Kotak Neo."""
+        client = self._get_client()
+        if not client:
+            return []
+        try:
+            today_s = datetime.now().strftime("%Y-%m-%d")
+            f_date = from_date or today_s
+            t_date = to_date or today_s
+
+            tok = instrument_key
+            seg = "nse_fo"
+            if "|" in instrument_key:
+                parts = instrument_key.split("|")
+                seg = parts[0].lower()
+                tok = parts[1]
+            elif "_" in instrument_key and not instrument_key.lower().startswith("nse_"):
+                parts = instrument_key.split("_")
+                seg = parts[0].lower()
+                tok = parts[1]
+
+            neosymbol = f"{seg}|{tok}"
+            res = client.historical_data(
+                neosymbol=neosymbol,
+                interval=interval,
+                from_date=f_date,
+                to_date=t_date,
+            )
+            if isinstance(res, dict):
+                data_block = res.get("data")
+                raw_candles = []
+                if isinstance(data_block, dict):
+                    raw_candles = data_block.get("candles") or []
+                elif isinstance(data_block, list):
+                    raw_candles = data_block
+                elif "candles" in res:
+                    raw_candles = res.get("candles") or []
+
+                candles = []
+                for c in raw_candles:
+                    if isinstance(c, (list, tuple)) and len(c) >= 5:
+                        candles.append({
+                            "time": str(c[0]),
+                            "open": float(c[1]),
+                            "high": float(c[2]),
+                            "low": float(c[3]),
+                            "close": float(c[4]),
+                            "volume": int(c[5]) if len(c) > 5 and c[5] is not None else 0,
+                        })
+                    elif isinstance(c, dict):
+                        candles.append({
+                            "time": str(c.get("time") or c.get("timestamp") or ""),
+                            "open": float(c.get("open") or c.get("op") or 0.0),
+                            "high": float(c.get("high") or c.get("h") or 0.0),
+                            "low": float(c.get("low") or c.get("lo") or 0.0),
+                            "close": float(c.get("close") or c.get("c") or 0.0),
+                            "volume": int(c.get("volume") or c.get("v") or 0),
+                        })
+                return candles
+            return []
+        except Exception as e:
+            logger.warning(f"[Kotak Neo] Exception fetching historical candles for {instrument_key}: {e}")
+            return []
+
     def get_margin_required(
         self,
         symbol: str,
@@ -1666,6 +1748,18 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 except Exception:
                     pass
         return quotes
+
+    def get_historical_candles(
+        self,
+        instrument_key: str,
+        interval: str = "1min",
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Paper trading delegates to live adapter for genuine historical candlestick parity."""
+        if _LIVE_ADAPTER:
+            return _LIVE_ADAPTER.get_historical_candles(instrument_key, interval, from_date, to_date)
+        return []
 
     def wait_for_order_fill(
         self,

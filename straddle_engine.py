@@ -646,6 +646,7 @@ class StraddleManager:
         self._benchmarks_file = config.DATA_DIR / "straddle_shadow_benchmarks.json"
         self._shadow_benchmarks: List[Dict[str, Any]] = self._load_shadow_benchmarks()
         self._active_underlying: str = "NIFTY"
+        self._minute_candles: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -5585,18 +5586,37 @@ class StraddleManager:
             ref_mode = "ENTRY_PRICE"
 
         ref_price = entry_price
+        ref_candle_time = None
         bm_pending = False
         now_str = now_ist_str()
 
-        if ref_mode == "SPECIFIC_TIME":
-            if now_str < bm_time:
-                # Early entry before benchmark (e.g. 09:15:58 vs 09:16:00):
-                # Use actual fill price for interim protection until benchmark tick arrives
-                ref_price = entry_price
-                bm_pending = True
+        if ref_mode == "ENTRY_CANDLE_CLOSE":
+            ent_hm = entry_time[:5]
+            ref_candle_time = ent_hm
+            c_close = self.get_minute_candle_close(contract.get("instrument_key", ""), ent_hm, contract_meta=contract)
+            if c_close is not None and c_close > 0:
+                ref_price = c_close
+                bm_pending = False
             else:
                 ref_price = entry_price
-                bm_pending = False
+                bm_pending = True
+                bm_time = ent_hm
+        elif ref_mode == "SPECIFIC_TIME":
+            bm_hm = bm_time[:5]
+            ref_candle_time = bm_hm
+            if now_str[:5] > bm_hm:
+                # Benchmark minute has already finished; fetch its authentic 1-minute close
+                c_close = self.get_minute_candle_close(contract.get("instrument_key", ""), bm_hm, contract_meta=contract)
+                if c_close is not None and c_close > 0:
+                    ref_price = c_close
+                    bm_pending = False
+                else:
+                    ref_price = entry_price
+                    bm_pending = False
+            else:
+                # Early entry before or during benchmark minute: use actual fill for interim protection
+                ref_price = entry_price
+                bm_pending = True
 
         target_price = 0.0
         if "TGT: %" in tgt_type or "%" in tgt_type:
@@ -5701,6 +5721,7 @@ class StraddleManager:
             "avg_ent_price": entry_price,
             "reference_price": ref_price,
             "reference_price_mode": ref_mode,
+            "reference_candle_time": ref_candle_time,
             "benchmark_time": bm_time,
             "benchmark_scope": bm_scope,
             "benchmark_pending": bm_pending,
@@ -5797,14 +5818,16 @@ class StraddleManager:
                 fill_p = float(fill_check.get("price") or 0.0)
                 if fill_p > 0:
                     pos_record["avg_ent_price"] = fill_p
-                    if "%" in tgt_type or "TGT: %" in tgt_type:
-                        pos_record["target_price"] = round_to_tick(
-                            fill_p * (1.0 - tgt_val / 100.0) if side == "SELL" else fill_p * (1.0 + tgt_val / 100.0)
-                        )
-                    if "%" in sl_type or "SL: %" in sl_type:
-                        pos_record["sl_price"] = round_to_tick(
-                            fill_p * (1.0 + sl_val / 100.0) if side == "SELL" else fill_p * (1.0 - sl_val / 100.0)
-                        )
+                    if pos_record.get("reference_price_mode", "ENTRY_PRICE") == "ENTRY_PRICE" and not pos_record.get("benchmark_pending"):
+                        pos_record["reference_price"] = fill_p
+                        if "%" in tgt_type or "TGT: %" in tgt_type:
+                            pos_record["target_price"] = round_to_tick(
+                                fill_p * (1.0 - tgt_val / 100.0) if side == "SELL" else fill_p * (1.0 + tgt_val / 100.0)
+                            )
+                        if "%" in sl_type or "SL: %" in sl_type:
+                            pos_record["sl_price"] = round_to_tick(
+                                fill_p * (1.0 + sl_val / 100.0) if side == "SELL" else fill_p * (1.0 - sl_val / 100.0)
+                            )
 
             sl_delay = int(adv.get("sl_placement_delay_sec", 0))
             if sl_delay > 0:
@@ -6804,10 +6827,14 @@ class StraddleManager:
                 # In Indian markets (NSE F&O), SL-Limit is preferred because NSE restricted SL-M on options.
                 # For a Buy SL (closing a short), limit price is placed with a buffer above trigger.
                 # For a Sell SL (closing a long), limit price is placed with a buffer below trigger.
+                adv_cfg = (self.get_strategy(pos.get("strategy_id")) or {}).get("advanced_settings") or (self.get_strategy(pos.get("strategy_id")) or {}).get("advanced") or {}
+                sl_buf_pct = float(adv_cfg.get("exit_buffer_val") or adv_cfg.get("exit_buffer_value") or 5.0)
+                if sl_buf_pct <= 0:
+                    sl_buf_pct = 5.0
                 if sl_side == "BUY":
-                    limit_sl_p = round_to_tick(max(sl_price + 0.05, sl_price * 1.05), 0.05)
+                    limit_sl_p = round_to_tick(max(sl_price + 0.05, sl_price * (1.0 + sl_buf_pct / 100.0)), 0.05)
                 else:
-                    limit_sl_p = round_to_tick(min(max(0.05, sl_price - 0.05), sl_price * 0.95), 0.05)
+                    limit_sl_p = round_to_tick(min(max(0.05, sl_price - 0.05), sl_price * (1.0 - sl_buf_pct / 100.0)), 0.05)
 
                 logger.info(f"[Advance SL] Placing advance SL-Limit order on broker for {sym} @ trigger ₹{sl_price:.2f}, limit ₹{limit_sl_p:.2f} (qty={qty})...")
                 res = broker.place_order(
@@ -6926,6 +6953,100 @@ class StraddleManager:
                 self._save_state()
             self._save_state()
 
+    def record_live_minute_tick(self, instrument_key: str, ltp: float):
+        """Record live tick into 1-minute OHLC bar cache for instant zero-delay candle close lookup."""
+        if not instrument_key or ltp <= 0:
+            return
+        now_t = now_ist()
+        hh_mm = now_t.strftime("%H:%M")
+        if instrument_key not in self._minute_candles:
+            self._minute_candles[instrument_key] = {}
+        bars = self._minute_candles[instrument_key]
+        if hh_mm not in bars:
+            bars[hh_mm] = {
+                "time": hh_mm,
+                "open": ltp,
+                "high": ltp,
+                "low": ltp,
+                "close": ltp,
+                "ts": time.time(),
+            }
+        else:
+            b = bars[hh_mm]
+            if ltp > b["high"]:
+                b["high"] = ltp
+            if ltp < b["low"]:
+                b["low"] = ltp
+            b["close"] = ltp
+            b["ts"] = time.time()
+
+    def get_minute_candle_close(
+        self,
+        instrument_key: str,
+        target_time_str: str,
+        contract_meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[float]:
+        """
+        Resolves exact 1-minute candle close price for an option contract at target_time_str (HH:MM or HH:MM:SS).
+        Checks:
+        1. In-memory live minute bar cache (0ms instant lookup)
+        2. Kotak Neo broker authentic 1-minute historical candle API
+        3. Upstox 1-minute candlestick pipeline
+        """
+        if not target_time_str or not instrument_key:
+            return None
+
+        hh_mm = target_time_str.strip()[:5]
+
+        # 1. Check in-memory minute bar cache
+        if instrument_key in self._minute_candles:
+            bars = self._minute_candles[instrument_key]
+            if hh_mm in bars and bars[hh_mm].get("close"):
+                return round(float(bars[hh_mm]["close"]), 2)
+
+        # 2. Check Kotak Neo authentic broker historical candles
+        mode = self._state.get("execution_mode", "LIVE_BROKER")
+        broker = get_broker_adapter(mode)
+        if hasattr(broker, "get_historical_candles"):
+            try:
+                candles = broker.get_historical_candles(instrument_key=instrument_key, interval="1min")
+                for c in candles:
+                    c_time = str(c.get("time", ""))
+                    if ("T" in c_time and c_time.split("T")[1][:5] == hh_mm) or (hh_mm in c_time):
+                        close_p = float(c.get("close") or 0.0)
+                        if close_p > 0:
+                            # Cache in-memory so subsequent checks are 0ms
+                            if instrument_key not in self._minute_candles:
+                                self._minute_candles[instrument_key] = {}
+                            self._minute_candles[instrument_key][hh_mm] = {
+                                "time": hh_mm,
+                                "open": float(c.get("open") or close_p),
+                                "high": float(c.get("high") or close_p),
+                                "low": float(c.get("low") or close_p),
+                                "close": close_p,
+                                "ts": time.time(),
+                            }
+                            return round(close_p, 2)
+            except Exception as e_k:
+                logger.debug(f"[Kotak Candle Lookup] Note for {instrument_key} @ {hh_mm}: {e_k}")
+
+        # 3. Check Upstox authentic pipeline
+        try:
+            import requests
+            u_url = f"https://api.upstox.com/v2/historical-candle/intraday/{instrument_key}/1minute"
+            r_u = requests.get(u_url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"}, timeout=2.5)
+            if r_u.status_code == 200:
+                raw_u = r_u.json().get("data", {}).get("candles", []) or []
+                for c in raw_u:
+                    if len(c) >= 5 and "T" in str(c[0]) and str(c[0]).split("T")[1][:5] == hh_mm:
+                        close_p = float(c[4])
+                        if close_p > 0:
+                            return round(close_p, 2)
+        except Exception:
+            pass
+
+        return None
+
     def _recalculate_pos_sl_target(self, strat: Dict[str, Any], pos: Dict[str, Any], broker: BaseBrokerAdapter, ref_price: float):
         """Recalculate SL and Target based on ref_price, update resting broker orders, and sync."""
         side = str(pos.get("side", "SELL")).upper()
@@ -6969,14 +7090,24 @@ class StraddleManager:
                     try:
                         time.sleep(0.12)
                         sl_side = "BUY" if side == "SELL" else "SELL"
-                        lim_p = round_to_tick(max(pos["sl_price"] + 0.05, pos["sl_price"] * 1.05) if sl_side == "BUY" else min(max(0.05, pos["sl_price"] - 0.05), pos["sl_price"] * 0.95), 0.05)
+                        adv_cfg = (strat.get("advanced_settings") or strat.get("advanced") or {}) if strat else {}
+                        sl_buf_pct = float(adv_cfg.get("exit_buffer_val") or adv_cfg.get("exit_buffer_value") or 5.0)
+                        if sl_buf_pct <= 0:
+                            sl_buf_pct = 5.0
+                        lim_p = round_to_tick(
+                            max(pos["sl_price"] + 0.05, pos["sl_price"] * (1.0 + sl_buf_pct / 100.0))
+                            if sl_side == "BUY"
+                            else min(max(0.05, pos["sl_price"] - 0.05), pos["sl_price"] * (1.0 - sl_buf_pct / 100.0)),
+                            0.05
+                        )
                         broker.modify_order(
                             order_id=str(adv_sl_oid),
+                            order_type="SL",
                             trigger_price=pos["sl_price"],
                             price=lim_p,
                             quantity=pos.get("quantity")
                         )
-                        logger.info(f"[Benchmark Sync] Modified broker SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}")
+                        logger.info(f"[Benchmark Sync] Modified broker SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}, limit to ₹{lim_p:.2f}")
                     except Exception as e_m:
                         logger.warning(f"[Benchmark Sync] Failed to modify broker SL order {adv_sl_oid}: {e_m}")
             threading.Thread(target=_modify_sl_bg, daemon=True).start()
@@ -6989,6 +7120,7 @@ class StraddleManager:
                         time.sleep(0.12)
                         broker.modify_order(
                             order_id=str(adv_tgt_oid),
+                            order_type="LIMIT",
                             price=pos["target_price"],
                             quantity=pos.get("quantity")
                         )
@@ -6998,9 +7130,17 @@ class StraddleManager:
             threading.Thread(target=_modify_tgt_bg, daemon=True).start()
 
     def _lock_benchmark_reference_price(self, strat: Dict[str, Any], pos: Dict[str, Any], broker: BaseBrokerAdapter, current_ltp: float):
-        """AlgoTest Backtest Parity: Lock in benchmark reference price (e.g. 09:16:00 tick) and update SL/Target."""
-        ref_price = round(float(current_ltp or pos.get("avg_ent_price") or 100.0), 2)
+        """AlgoTest Backtest Parity: Lock in benchmark 1-minute candle close and update SL/Target."""
+        bm_t = str(pos.get("benchmark_time") or "09:16:00").strip()
+        hh_mm = bm_t[:5]
+        c_close = self.get_minute_candle_close(pos.get("instrument_key", ""), hh_mm, contract_meta=pos.get("contract"))
+        if c_close is not None and c_close > 0:
+            ref_price = c_close
+        else:
+            ref_price = round(float(current_ltp or pos.get("avg_ent_price") or 100.0), 2)
+
         pos["reference_price"] = ref_price
+        pos["reference_candle_time"] = hh_mm
         pos["benchmark_pending"] = False
         pos["interim_protection_active"] = False
         pos["benchmark_applied_at"] = now_ist_str()
@@ -7008,18 +7148,17 @@ class StraddleManager:
         self._recalculate_pos_sl_target(strat, pos, broker, ref_price)
 
         sym = pos.get("symbol", "")
-        bm_t = pos.get("benchmark_time", "09:16:00")
         ent_p = float(pos.get("avg_ent_price", 0.0) or 0.0)
         self._log_event(
-            f"🎯 [AlgoTest Parity] Benchmark {bm_t} locked @ ₹{ref_price:.2f} for {sym} (Entry fill was ₹{ent_p:.2f}). "
+            f"🎯 [AlgoTest Parity] Benchmark {hh_mm} 1-min candle close locked @ ₹{ref_price:.2f} for {sym} (Entry fill was ₹{ent_p:.2f}). "
             f"Updated SL to ₹{pos.get('sl_price', 0):.2f}, Target to ₹{pos.get('target_price', 0):.2f}."
         )
         self._send_telegram_alert(
             f"🎯 *[AlgoTest Parity Locked]*\n"
             f"• Strategy: `{strat.get('name')}`\n"
             f"• Leg: `{sym}`\n"
-            f"• Benchmark Time: `{bm_t}`\n"
-            f"• Reference Price: *₹{ref_price:.2f}* (Entry: ₹{ent_p:.2f})\n"
+            f"• Benchmark Minute: `{hh_mm}`\n"
+            f"• Candle Close Ref Price: *₹{ref_price:.2f}* (Entry Fill: ₹{ent_p:.2f})\n"
             f"• New Stoploss: *₹{pos.get('sl_price', 0):.2f}*\n"
             f"• New Target: *₹{pos.get('target_price', 0):.2f}*"
         )
@@ -7059,40 +7198,94 @@ class StraddleManager:
             broker = get_broker_adapter(mode)
 
             ref_m = (reference_mode or "AVERAGE_ENTRY").upper()
+            msg_detail = ""
+
             if ref_m in ("AVERAGE_ENTRY", "ENTRY_PRICE", "AVG"):
                 ref_price = float(pos.get("avg_ent_price") or 0.0)
                 pos["reference_price"] = ref_price
                 pos["reference_price_mode"] = "ENTRY_PRICE"
+                pos["reference_candle_time"] = None
                 pos["benchmark_pending"] = False
                 pos["interim_protection_active"] = False
+                msg_detail = f"Actual Traded Fill Price (₹{ref_price:.2f})"
+
+            elif ref_m in ("ENTRY_CANDLE_CLOSE", "ENTRY_CANDLE"):
+                ent_t = str(pos.get("entry_time") or "09:37:00")
+                ent_hh_mm = ent_t[:5]
+                c_close = self.get_minute_candle_close(pos.get("instrument_key", ""), ent_hh_mm, contract_meta=pos.get("contract"))
+                if c_close is not None and c_close > 0:
+                    ref_price = c_close
+                    pos["reference_price"] = ref_price
+                    pos["reference_price_mode"] = "ENTRY_CANDLE_CLOSE"
+                    pos["reference_candle_time"] = ent_hh_mm
+                    pos["benchmark_pending"] = False
+                    pos["interim_protection_active"] = False
+                    msg_detail = f"Entry Candle Close ({ent_hh_mm} @ ₹{ref_price:.2f})"
+                else:
+                    ref_price = float(pos.get("avg_ent_price") or 0.0)
+                    pos["reference_price"] = ref_price
+                    pos["reference_price_mode"] = "ENTRY_CANDLE_CLOSE"
+                    pos["reference_candle_time"] = ent_hh_mm
+                    pos["benchmark_time"] = ent_hh_mm
+                    pos["benchmark_pending"] = True
+                    pos["interim_protection_active"] = True
+                    msg_detail = f"Entry Candle ({ent_hh_mm}) pending close. Interim active @ ₹{ref_price:.2f}"
+
+            elif ref_m in ("SPECIFIC_TIME", "BENCHMARK", "SPECIFIC_CANDLE_TIME", "CANDLE_TIME"):
+                bm_t = str(benchmark_time or pos.get("benchmark_time") or "09:16:00").strip()
+                hh_mm = bm_t[:5]
+                now_hm = now_ist_str()[:5]
+
+                # If the minute has already closed (now_hm > hh_mm):
+                if now_hm > hh_mm:
+                    c_close = self.get_minute_candle_close(pos.get("instrument_key", ""), hh_mm, contract_meta=pos.get("contract"))
+                    if c_close is not None and c_close > 0:
+                        ref_price = c_close
+                        pos["reference_price"] = ref_price
+                        pos["reference_price_mode"] = "SPECIFIC_TIME"
+                        pos["reference_candle_time"] = hh_mm
+                        pos["benchmark_time"] = bm_t
+                        pos["benchmark_pending"] = False
+                        pos["interim_protection_active"] = False
+                        msg_detail = f"1-Min Candle Close ({hh_mm} @ ₹{ref_price:.2f})"
+                    else:
+                        ref_price = float(pos.get("ltp") or pos.get("avg_ent_price") or 0.0)
+                        pos["reference_price"] = ref_price
+                        pos["reference_price_mode"] = "SPECIFIC_TIME"
+                        pos["reference_candle_time"] = hh_mm
+                        pos["benchmark_time"] = bm_t
+                        pos["benchmark_pending"] = False
+                        pos["interim_protection_active"] = False
+                        msg_detail = f"1-Min Candle ({hh_mm}) @ ₹{ref_price:.2f}"
+                else:
+                    ref_price = float(pos.get("reference_price") or pos.get("avg_ent_price") or 0.0)
+                    pos["reference_price_mode"] = "SPECIFIC_TIME"
+                    pos["reference_candle_time"] = hh_mm
+                    pos["benchmark_time"] = bm_t
+                    pos["benchmark_pending"] = True
+                    pos["interim_protection_active"] = True
+                    msg_detail = f"Candle {hh_mm} pending close. Interim protection active @ ₹{ref_price:.2f}"
+
             elif ref_m in ("CURRENT_LTP", "LTP"):
                 ref_price = float(pos.get("ltp") or pos.get("avg_ent_price") or 0.0)
                 pos["reference_price"] = ref_price
                 pos["reference_price_mode"] = "CURRENT_LTP"
+                pos["reference_candle_time"] = None
                 pos["benchmark_pending"] = False
                 pos["interim_protection_active"] = False
+                msg_detail = f"Current LTP (₹{ref_price:.2f})"
+
             elif ref_m == "CUSTOM":
                 if custom_price is None or float(custom_price) <= 0:
                     return {"success": False, "error": "Invalid custom reference price"}
                 ref_price = round(float(custom_price), 2)
                 pos["reference_price"] = ref_price
                 pos["reference_price_mode"] = "CUSTOM"
+                pos["reference_candle_time"] = None
                 pos["benchmark_pending"] = False
                 pos["interim_protection_active"] = False
-            elif ref_m in ("SPECIFIC_TIME", "BENCHMARK"):
-                bm_t = str(benchmark_time or pos.get("benchmark_time") or "09:16:00").strip()
-                pos["benchmark_time"] = bm_t
-                pos["reference_price_mode"] = "SPECIFIC_TIME"
-                now_t = now_ist_str()
-                if now_t >= bm_t:
-                    ref_price = float(pos.get("ltp") or pos.get("avg_ent_price") or 0.0)
-                    pos["reference_price"] = ref_price
-                    pos["benchmark_pending"] = False
-                    pos["interim_protection_active"] = False
-                else:
-                    ref_price = float(pos.get("reference_price") or pos.get("avg_ent_price") or 0.0)
-                    pos["benchmark_pending"] = True
-                    pos["interim_protection_active"] = True
+                msg_detail = f"Custom Price (₹{ref_price:.2f})"
+
             else:
                 return {"success": False, "error": f"Unknown reference mode: {reference_mode}"}
 
@@ -7102,14 +7295,20 @@ class StraddleManager:
             self._save_strategies()
             self._save_state(force=True)
 
+            self._log_event(
+                f"🎯 [Reference Price Updated] Strategy '{strat.get('name')}', Leg {pos.get('symbol')} "
+                f"updated basis to {msg_detail}. SL: ₹{pos.get('sl_price', 0):.2f}, Target: ₹{pos.get('target_price', 0):.2f}."
+            )
+
             return {
                 "success": True,
                 "reference_price": pos.get("reference_price"),
                 "reference_price_mode": pos.get("reference_price_mode"),
+                "reference_candle_time": pos.get("reference_candle_time"),
                 "target_price": pos.get("target_price"),
                 "sl_price": pos.get("sl_price"),
                 "benchmark_pending": pos.get("benchmark_pending"),
-                "message": f"Reference price updated to ₹{pos.get('reference_price', 0):.2f}"
+                "message": f"Reference price updated to {msg_detail}"
             }
 
     def set_leg_order_placement(
@@ -11486,12 +11685,14 @@ class StraddleManager:
                         or pos.get("ltp", pos.get("avg_ent_price", 100.0))
                     )
                     pos["ltp"] = ltp
+                    self.record_live_minute_tick(ikey, ltp)
 
                     # AlgoTest Parity: Check if benchmark reference price needs to be locked
                     if pos.get("status") == "OPEN" and pos.get("benchmark_pending"):
                         bm_time = str(pos.get("benchmark_time") or "09:16:00").strip()
-                        now_time = now_ist_str()
-                        if now_time >= bm_time:
+                        hh_mm = bm_time[:5]
+                        now_hm = now_ist_str()[:5]
+                        if now_hm > hh_mm or (len(bm_time) > 5 and now_ist_str() >= bm_time):
                             self._lock_benchmark_reference_price(strat, pos, broker, ltp)
 
                     side = pos.get("side", "SELL")
