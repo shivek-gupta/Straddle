@@ -826,12 +826,14 @@ def api_straddle_position_resend_to_broker():
         leg_id = data.get("leg_id")
         leg_idx = data.get("leg_index")
         order_type = data.get("order_type", "BOTH")
+        sym = data.get("symbol")
         mgr = get_straddle_manager()
         res = mgr.resend_advance_order_to_broker(
             strategy_id=sid,
             leg_id=leg_id,
             leg_index=leg_idx,
-            order_type=order_type
+            order_type=order_type,
+            symbol=sym
         )
         return jsonify(res)
     except Exception as e:

@@ -5323,7 +5323,17 @@ class StraddleManager:
         if prefetched_quotes:
             prices_map, quotes_map = prefetched_quotes
         else:
-            prices_map, quotes_map = self._fetch_live_quotes([contract["instrument_key"]])
+            # Check in-memory quote cache or minute candles first to achieve <50ms ultra-low latency!
+            inst_key = contract.get("instrument_key", "")
+            cached_ltp = 0.0
+            if inst_key in self._minute_candles and self._minute_candles[inst_key]:
+                last_bar = list(self._minute_candles[inst_key].values())[-1]
+                cached_ltp = float(last_bar.get("close") or last_bar.get("ltp") or 0.0)
+            if cached_ltp > 0:
+                prices_map = {inst_key: cached_ltp}
+                quotes_map = {inst_key: {"ltp": cached_ltp, "last_price": cached_ltp}}
+            else:
+                prices_map, quotes_map = self._fetch_live_quotes([contract["instrument_key"]])
         
         q = quotes_map.get(contract["instrument_key"], {})
         ltp = float(prices_map.get(contract["instrument_key"]) or q.get("last_price") or q.get("ltp") or 0.0)
@@ -5456,6 +5466,30 @@ class StraddleManager:
                 price=limit_price if effective_order_type == "LIMIT" else 0.0,
                 tag=f"{tag_prefix}_{leg_cfg.get('id', 'leg')[:4]}",
             )
+
+        # Live Broker fill synchronization and hedge guard
+        placed_oid = str(order_res.get("order_id") or "")
+        if order_res.get("success") and exec_mode == "LIVE_BROKER" and placed_oid and not placed_oid.startswith("PAPER_") and not placed_oid.startswith("ORD_"):
+            timeout_sec = 2.5 if is_buy_hedge else 1.2
+            fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.01)
+            if fill_res.get("filled"):
+                actual_traded_price = float(fill_res.get("price") or 0.0)
+                if actual_traded_price > 0:
+                    order_res["price"] = actual_traded_price
+                    order_res["status"] = "COMPLETE"
+            elif is_buy_hedge:
+                # INVIOLABLE HEDGE PROTECTION:
+                # If a BUY hedge order rests unfilled on the book, cancel it immediately so short entries
+                # never proceed unprotected and squaring off never generates an inverted short trade!
+                logger.warning(f"[Hedge Fill Guard] Hedge order {placed_oid} for {contract['trading_symbol']} did not fill within {timeout_sec}s. Cancelling resting order to protect capital.")
+                try:
+                    c_res = broker.cancel_order(placed_oid)
+                    logger.info(f"[Hedge Fill Guard] Cancelled resting hedge order {placed_oid}: {c_res}")
+                except Exception as e_c:
+                    logger.warning(f"[Hedge Fill Guard] Error cancelling resting hedge order: {e_c}")
+                order_res["success"] = False
+                order_res["status"] = "CANCELLED"
+                order_res["error"] = f"Hedge BUY order {placed_oid} for {contract['trading_symbol']} timed out without exchange fill. Cancelled to prevent inverted trade."
 
         entry_time = now_ist_str()
 
@@ -5737,6 +5771,7 @@ class StraddleManager:
             "quantity": total_qty,
             "entry_qty": total_qty,
             "avg_ent_price": entry_price,
+            "entry_candle_close": c_close if ('c_close' in locals() and c_close and c_close > 0) else entry_price,
             "reference_price": ref_price,
             "reference_price_mode": ref_mode,
             "reference_candle_time": ref_candle_time,
@@ -6825,7 +6860,7 @@ class StraddleManager:
         except Exception as e:
             logger.error(f"[Limit Timeout Watcher] Exception for {order_id}: {e}")
 
-    def _place_advance_sl_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0):
+    def _place_advance_sl_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0, force: bool = False):
         """Quantiply-parity: place Stoploss order with broker in advance after delay_sec."""
         # Strictly never place SL orders for hedges or Buy legs
         is_hedge = (
@@ -6848,8 +6883,10 @@ class StraddleManager:
             if pos.get("status") != "OPEN":
                 pos["sl_placement_error"] = f"Position status is {pos.get('status')} (must be OPEN)"
                 return
-            if pos.get("sl_broker_order_id"):
+            if pos.get("sl_broker_order_id") and not force:
                 return
+            if force:
+                pos["sl_broker_order_id"] = None
             sl_price = float(pos.get("sl_price") or 0.0)
             if sl_price <= 0:
                 pos["sl_placement_error"] = f"Invalid Stoploss price (₹{sl_price:.2f})"
@@ -6924,7 +6961,7 @@ class StraddleManager:
                 self._save_strategies()
                 self._save_state()
 
-    def _place_advance_target_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0):
+    def _place_advance_target_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0, force: bool = False):
         """Quantiply-parity: place Target (LIMIT) order with broker in advance after delay_sec."""
         # Strictly never place Target orders for hedges or Buy legs
         is_hedge = (
@@ -6947,8 +6984,10 @@ class StraddleManager:
             if pos.get("status") != "OPEN":
                 pos["target_placement_error"] = f"Position status is {pos.get('status')} (must be OPEN)"
                 return
-            if pos.get("target_broker_order_id"):
+            if pos.get("target_broker_order_id") and not force:
                 return
+            if force:
+                pos["target_broker_order_id"] = None
             tgt_price = float(pos.get("target_price") or 0.0)
             if tgt_price <= 0:
                 pos["target_placement_error"] = f"Invalid Target price (₹{tgt_price:.2f})"
@@ -7512,7 +7551,8 @@ class StraddleManager:
         strategy_id: Optional[str] = None,
         leg_id: Optional[str] = None,
         leg_index: Optional[int] = None,
-        order_type: str = "BOTH"
+        order_type: str = "BOTH",
+        symbol: Optional[str] = None
     ) -> Dict[str, Any]:
         """Re-send an advance order (SL, Target, or Both) to the broker matching engine."""
         with _ENGINE_LOCK:
@@ -7522,31 +7562,59 @@ class StraddleManager:
             positions = strat.get("positions", [])
             pos = None
             pos_idx = None
-            if leg_index is not None and 0 <= int(leg_index) < len(positions):
-                cand = positions[int(leg_index)]
-                if not leg_id or cand.get("id") == leg_id or cand.get("status") == "OPEN":
-                    pos = cand
-                    pos_idx = int(leg_index)
 
-            if not pos and leg_id:
-                # Prioritize OPEN leg
+            def _is_eligible_short(p):
+                if not p or p.get("status") != "OPEN":
+                    return False
+                if p.get("is_associated_hedge") or str(p.get("side", "")).upper() == "BUY":
+                    return False
+                if "hedge" in str(p.get("id", "")).lower() or bool(p.get("hedge_parent_type")):
+                    return False
+                return True
+
+            # 1. Match by symbol if provided
+            if symbol:
+                clean_sym = symbol.strip().upper()
                 for idx, p in enumerate(positions):
-                    if p.get("id") == leg_id and p.get("status") == "OPEN":
+                    if _is_eligible_short(p) and (clean_sym in str(p.get("symbol", "")).upper() or clean_sym in str(p.get("trading_symbol", "")).upper()):
                         pos = p
                         pos_idx = idx
                         break
-                if not pos:
+
+            # 2. Match by leg_index if valid
+            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
+                cand = positions[int(leg_index)]
+                if _is_eligible_short(cand):
+                    pos = cand
+                    pos_idx = int(leg_index)
+                elif cand.get("status") == "OPEN" and cand.get("parent_leg_id"):
+                    # If index pointed to an associated hedge, resolve to its parent short leg!
                     for idx, p in enumerate(positions):
-                        if p.get("id") == leg_id:
+                        if _is_eligible_short(p) and p.get("id") == cand.get("parent_leg_id"):
                             pos = p
                             pos_idx = idx
                             break
 
-            if not pos:
-                return {"success": False, "error": "Position not found in strategy"}
+            # 3. Match by leg_id
+            if not pos and leg_id:
+                for idx, p in enumerate(positions):
+                    if _is_eligible_short(p) and p.get("id") == leg_id:
+                        pos = p
+                        pos_idx = idx
+                        break
 
-            if pos.get("status") != "OPEN":
-                return {"success": False, "error": f"Position '{pos.get('symbol', '')}' is {pos.get('status')} (not OPEN). Advance orders can only be placed for active OPEN positions."}
+            # 4. Fallback: match any active open short leg
+            if not pos:
+                open_shorts = [(i, p) for i, p in enumerate(positions) if _is_eligible_short(p)]
+                if len(open_shorts) == 1:
+                    pos_idx, pos = open_shorts[0]
+                elif open_shorts:
+                    # Pick the one with cancelled or missing orders
+                    cand_match = next(((i, p) for i, p in open_shorts if p.get("sl_cancelled_unexpectedly") or p.get("target_cancelled_unexpectedly") or not p.get("sl_broker_order_id")), open_shorts[-1])
+                    pos_idx, pos = cand_match
+
+            if not pos:
+                return {"success": False, "error": "Active open short leg not found for advance order placement"}
 
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
@@ -7562,7 +7630,7 @@ class StraddleManager:
                 pos.pop("sl_cancel_notice", None)
                 pos.pop("sl_placement_error", None)
                 pos["sl_broker_order_id"] = None
-                self._place_advance_sl_order(broker, pos, delay_sec=0)
+                self._place_advance_sl_order(broker, pos, delay_sec=0, force=True)
                 if pos.get("sl_broker_order_id"):
                     placed_orders.append(f"SL #{pos['sl_broker_order_id']}")
 
@@ -7574,7 +7642,7 @@ class StraddleManager:
                 pos.pop("target_cancel_notice", None)
                 pos.pop("target_placement_error", None)
                 pos["target_broker_order_id"] = None
-                self._place_advance_target_order(broker, pos, delay_sec=0)
+                self._place_advance_target_order(broker, pos, delay_sec=0, force=True)
                 if pos.get("target_broker_order_id"):
                     placed_orders.append(f"Target #{pos['target_broker_order_id']}")
 
@@ -8028,9 +8096,31 @@ class StraddleManager:
         mode = self._state.get("execution_mode", "LIVE_BROKER")
         if mode == "LIVE_BROKER":
             try:
-                b_positions = broker.get_positions(force=False) or []
+                ent_oid = str(pos.get("order_id") or "")
                 sym_to_match = pos.get("symbol", "")
                 key_to_match = pos.get("instrument_key", "")
+
+                # CRITICAL INVIOLABLE SAFETY GUARD:
+                # If the entry order itself is still pending / resting on the exchange orderbook,
+                # CANCEL the entry order! Never place a counter exit order into an unfilled entry!
+                if ent_oid and not ent_oid.startswith("ORD_") and not ent_oid.startswith("PAPER_"):
+                    try:
+                        ord_st_res = broker.get_order_status(ent_oid)
+                        st_name = str(ord_st_res.get("status") or "").upper()
+                        if st_name in ("OPEN", "PENDING", "TRIGGER PENDING"):
+                            logger.warning(f"[Square-off Guard] Entry order {ent_oid} for {sym_to_match} is still {st_name} on broker. Cancelling entry order instead of sending naked counter order!")
+                            c_res = broker.cancel_order(ent_oid)
+                            self._log_event(f"Entry order {ent_oid} for {sym_to_match} was still pending on broker. Cancelled pending entry order (result: {c_res}). Position closed with 0 risk.", level="INFO")
+                            pos["status"] = "COMPLETE"
+                            pos["avg_exit_price"] = 0.0
+                            pos["exit_time"] = now_ist_str()
+                            pos["exit_reason"] = f"CANCELLED PENDING ENTRY ORDER #{ent_oid}"
+                            pos["_exit_in_progress"] = False
+                            return {"success": True, "order_id": ent_oid, "filled": True, "price": 0.0, "pos": pos}
+                    except Exception as e_st:
+                        logger.debug(f"Note checking entry order status on square-off: {e_st}")
+
+                b_positions = broker.get_positions(force=False) or []
                 broker_pos = None
                 for bp in b_positions:
                     bp_sym = bp.get("symbol") or bp.get("trading_symbol") or ""
@@ -8072,6 +8162,22 @@ class StraddleManager:
                         pos["mtm"] = pnl if pnl != 0.0 else float(pos.get("mtm", 0.0))
                         pos["_exit_in_progress"] = False
                         return {"success": True, "order_id": "", "filled": True, "price": pos["avg_exit_price"], "pos": pos}
+                    else:
+                        # Ensure exit quantity strictly matches broker actual open net quantity
+                        actual_open = abs(b_net_qty)
+                        if actual_open > 0 and actual_open != qty:
+                            logger.info(f"[Square-off Sync] Adjusting exit quantity for {sym_to_match} from {qty} to broker actual open net quantity {actual_open}")
+                            qty = actual_open
+                            pos["quantity"] = actual_open
+                else:
+                    # broker_pos is None: no trade or open position on broker for this symbol
+                    self._log_event(f"[Square-off Guard] No active open position found on broker for {sym_to_match} (net quantity 0). Marking COMPLETE without sending naked exit order.", level="INFO")
+                    pos["status"] = "COMPLETE"
+                    pos["avg_exit_price"] = 0.0
+                    pos["exit_time"] = now_ist_str()
+                    pos["exit_reason"] = f"{reason} (No open broker position)"
+                    pos["_exit_in_progress"] = False
+                    return {"success": True, "order_id": "", "filled": True, "price": 0.0, "pos": pos}
             except Exception as e:
                 logger.warning(f"Error checking broker open quantity before exit: {e}")
 
@@ -8513,8 +8619,8 @@ class StraddleManager:
                 bm_scope = str(adv.get("benchmark_scope", "INITIAL_ONLY")).strip().upper()
 
                 # Parity: Re-Execution timing
-                # If Re-Execute method is "Candle Close (Stockmock)" OR reference price mode is "ENTRY_CANDLE_CLOSE" with all entries scope
-                is_candle_close = ("candle" in re_method.lower()) or (ref_mode == "ENTRY_CANDLE_CLOSE" and bm_scope != "INITIAL_ONLY")
+                # If Re-Execute method is "Candle Close (Stockmock)" OR reference price mode is "ENTRY_CANDLE_CLOSE" with all entries scope or "CANDLE_CLOSE_ALL"
+                is_candle_close = ("candle" in re_method.lower()) or (ref_mode in ("CANDLE_CLOSE_ALL", "ENTRY_CANDLE_CLOSE") and bm_scope != "INITIAL_ONLY")
 
                 if is_candle_close:
                     now_dt = now_ist()
@@ -8816,15 +8922,27 @@ class StraddleManager:
                                 f"[Margin Auto-Release] Re-entry dispatched. Re-placing advance SL & Target orders on broker for all legs...",
                                 level="INFO"
                             )
+                            # Retry up to 3 times to ensure 100% placement with broker
+                            for attempt in range(1, 4):
+                                all_placed = True
+                                for item in unblocked_items:
+                                    p_cand = item["pos"]
+                                    if p_cand.get("status") == "OPEN":
+                                        if item.get("sl_order_id") and not p_cand.get("sl_broker_order_id"):
+                                            self._place_advance_sl_order(broker, p_cand, delay_sec=0, force=True)
+                                            if not p_cand.get("sl_broker_order_id"):
+                                                all_placed = False
+                                        if item.get("tgt_order_id") and not p_cand.get("target_broker_order_id"):
+                                            time.sleep(0.10)
+                                            self._place_advance_target_order(broker, p_cand, delay_sec=0, force=True)
+                                            if not p_cand.get("target_broker_order_id"):
+                                                all_placed = False
+                                if all_placed:
+                                    break
+                                time.sleep(0.15 * attempt)
+
                             for item in unblocked_items:
-                                p_cand = item["pos"]
-                                p_cand["_margin_relief_in_progress"] = False
-                                if p_cand.get("status") == "OPEN":
-                                    if item.get("sl_order_id"):
-                                        self._place_advance_sl_order(broker, p_cand, delay_sec=0)
-                                    if item.get("tgt_order_id"):
-                                        time.sleep(0.12)
-                                        self._place_advance_target_order(broker, p_cand, delay_sec=0)
+                                item["pos"]["_margin_relief_in_progress"] = False
                             self._save_strategies()
                             self._save_state(force=True)
 
@@ -9963,6 +10081,9 @@ class StraddleManager:
 
                 if naked_remaining_lots > 0:
                     u_req_margin += naked_remaining_lots * (base_span_lot + base_exp_lot * 0.5)
+
+                # Upfront option buying premium required to purchase hedge/long legs
+                u_req_margin += sum(u_buy_premiums)
 
             total_required_margin += max(0.0, u_req_margin)
 

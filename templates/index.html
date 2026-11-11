@@ -815,8 +815,8 @@
                             <button type="button" class="algo-filter-pill" data-filter="closed" onclick="setAlgoTradeFilter('closed')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#94a3b8;">Closed (<span id="algoCountClosed">0</span>)</button>
                             <button type="button" class="algo-filter-pill" data-filter="main" onclick="setAlgoTradeFilter('main')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#f59e0b;">Main/Short</button>
                             <button type="button" class="algo-filter-pill" data-filter="hedge" onclick="setAlgoTradeFilter('hedge')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#38bdf8;">Hedges</button>
-                            <button type="button" class="algo-filter-pill" data-filter="ce" onclick="setAlgoTradeFilter('ce')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#34d399;">CE</button>
-                            <button type="button" class="algo-filter-pill" data-filter="pe" onclick="setAlgoTradeFilter('pe')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#f87171;">PE</button>
+                            <button type="button" class="algo-filter-pill" data-filter="ce" onclick="setAlgoTradeFilter('ce')" style="padding:2px 8px; font-size:10.5px; font-weight:900; border:1px solid rgba(16,185,129,0.45); border-radius:4px; cursor:pointer; background:rgba(16,185,129,0.12); color:#10b981;">CE</button>
+                            <button type="button" class="algo-filter-pill" data-filter="pe" onclick="setAlgoTradeFilter('pe')" style="padding:2px 8px; font-size:10.5px; font-weight:900; border:1px solid rgba(239,68,68,0.45); border-radius:4px; cursor:pointer; background:rgba(239,68,68,0.12); color:#ef4444;">PE</button>
                         </div>
                     </div>
 
@@ -1512,6 +1512,7 @@
                                 <select id="cfgRefPriceMode" class="straddle-select">
                                     <option value="ENTRY_PRICE" selected>Average Entry Price (Standard)</option>
                                     <option value="ENTRY_CANDLE_CLOSE">Entry Minute Candle Close (AlgoTest Parity)</option>
+                                    <option value="CANDLE_CLOSE_ALL">Candle Close for All Entries & Re-Executions (Stockmock/AlgoTest Parity)</option>
                                     <option value="SPECIFIC_TIME">Specific Time Price (AlgoTest Parity)</option>
                                 </select>
                             </div>

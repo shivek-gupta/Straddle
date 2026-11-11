@@ -72,8 +72,8 @@ window.showStraddleToast = showStraddleToast;
 function formatSymbolColorCoded(symStr) {
     if (!symStr || typeof symStr !== "string") return symStr || "";
     return symStr
-        .replace(/\b(CE)\b/g, '<span style="color:#10b981; font-weight:900; background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.45); border-radius:3px; padding:1px 5px; display:inline-block; font-size:0.92em; letter-spacing:0.5px;">CE</span>')
-        .replace(/\b(PE)\b/g, '<span style="color:#f87171; font-weight:900; background:rgba(239,68,68,0.18); border:1px solid rgba(239,68,68,0.45); border-radius:3px; padding:1px 5px; display:inline-block; font-size:0.92em; letter-spacing:0.5px;">PE</span>');
+        .replace(/\b(CE|CALL)\b/g, '<span style="color:#10b981; font-weight:900; background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.45); border-radius:3px; padding:1px 5px; display:inline-block; font-size:0.92em; letter-spacing:0.5px;">$1</span>')
+        .replace(/\b(PE|PUT)\b/g, '<span style="color:#f87171; font-weight:900; background:rgba(239,68,68,0.18); border:1px solid rgba(239,68,68,0.45); border-radius:3px; padding:1px 5px; display:inline-block; font-size:0.92em; letter-spacing:0.5px;">$1</span>');
 }
 window.formatSymbolColorCoded = formatSymbolColorCoded;
 
@@ -3644,7 +3644,7 @@ async function changeLiveLegPlacementCombined(stratId, legId, legIndex, choice) 
 }
 window.changeLiveLegPlacementCombined = changeLiveLegPlacementCombined;
 
-async function resendLegOrderToBroker(stratId, legId, legIndex, orderType) {
+async function resendLegOrderToBroker(stratId, legId, legIndex, orderType, symbol) {
     const ot = (orderType || "BOTH").toUpperCase();
     showStraddleToast(`Placing ${ot} order on Broker...`, "info", 2000);
     try {
@@ -3652,7 +3652,8 @@ async function resendLegOrderToBroker(stratId, legId, legIndex, orderType) {
             strategy_id: stratId || window._straddleState?.activeStrategy?.strategy_id,
             leg_id: legId || null,
             leg_index: legIndex,
-            order_type: ot
+            order_type: ot,
+            symbol: symbol || null
         };
         const resp = await fetch("/api/straddle/position/resend_to_broker", {
             method: "POST",
@@ -3718,9 +3719,15 @@ async function changeLegReferenceBasis(stratId, legId, legIndex, choice) {
                 refBadge.innerHTML = `<span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;">🎯 ${modeT}: ₹${rp.toFixed(2)}</span>`;
             }
             const tgtSub = document.getElementById(`live_tgt_sub_${legIndex}`);
-            if (tgtSub && res.target_price) tgtSub.textContent = `TGT: ₹${Number(res.target_price).toFixed(2)}`;
+            if (tgtSub && res.target_price) {
+                const sp = tgtSub.querySelector("span") || tgtSub;
+                sp.textContent = `TGT: ₹${Number(res.target_price).toFixed(2)}`;
+            }
             const slSub = document.getElementById(`live_sl_sub_${legIndex}`);
-            if (slSub && res.sl_price) slSub.textContent = `SL: ₹${Number(res.sl_price).toFixed(2)}`;
+            if (slSub && res.sl_price) {
+                const sp = slSub.querySelector("span") || slSub;
+                sp.textContent = `SL: ₹${Number(res.sl_price).toFixed(2)}`;
+            }
             await fetchStraddleState();
             await loadStraddleOpenPositions();
         } else {
@@ -4261,6 +4268,9 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const rowTgtOid = row.getAttribute("data-tgt-broker-oid") || "";
             const rowSlCanc = row.getAttribute("data-sl-cancelled") === "true";
             const rowTgtCanc = row.getAttribute("data-tgt-cancelled") === "true";
+            const rowRefP = row.getAttribute("data-ref-price") || "";
+            const rowSlP = row.getAttribute("data-sl-price") || "";
+            const rowTgtP = row.getAttribute("data-tgt-price") || "";
 
             const posStatus = String(pos.status || "OPEN").toUpperCase();
             const posReason = String(pos.exit_reason || "");
@@ -4269,10 +4279,14 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const posTgtOid = String(pos.target_broker_order_id || "");
             const posSlCanc = !!pos.sl_cancelled_unexpectedly;
             const posTgtCanc = !!pos.target_cancelled_unexpectedly;
+            const posRefP = String(pos.reference_price || "");
+            const posSlP = String(pos.sl_price || "");
+            const posTgtP = String(pos.target_price || "");
 
             if (rowStatus !== posStatus || rowReason !== posReason || rowSym !== sym ||
                 rowSlOid !== posSlOid || rowTgtOid !== posTgtOid ||
-                rowSlCanc !== posSlCanc || rowTgtCanc !== posTgtCanc) {
+                rowSlCanc !== posSlCanc || rowTgtCanc !== posTgtCanc ||
+                rowRefP !== posRefP || rowSlP !== posSlP || rowTgtP !== posTgtP) {
                 anyStateMismatch = true;
                 break;
             }
@@ -4341,24 +4355,25 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const tgtSub = document.getElementById(`live_tgt_sub_${idx}`);
                 if (tgtSub && pos.target_price) {
                     const tv = pos.target_val || pos.target_value;
-                    tgtSub.textContent = tv ? `TGT: ${tv}% ₹${Number(pos.target_price).toFixed(2)}` : `TGT: ₹${Number(pos.target_price).toFixed(2)}`;
+                    const sp = tgtSub.querySelector("span") || tgtSub;
+                    sp.textContent = tv ? `TGT: ${tv}% ₹${Number(pos.target_price).toFixed(2)}` : `TGT: ₹${Number(pos.target_price).toFixed(2)}`;
                 }
                 const slSub = document.getElementById(`live_sl_sub_${idx}`);
                 if (slSub && pos.sl_price) {
                     const sv = pos.sl_val || pos.sl_value;
-                    slSub.textContent = sv ? `SL: -${sv}% ₹${Number(pos.sl_price).toFixed(2)}` : `SL: ₹${Number(pos.sl_price).toFixed(2)}`;
+                    const sp = slSub.querySelector("span") || slSub;
+                    sp.textContent = sv ? `SL: -${sv}% ₹${Number(pos.sl_price).toFixed(2)}` : `SL: ₹${Number(pos.sl_price).toFixed(2)}`;
                 }
                 // Persistent Reference Price Badge update in-place so it never disappears on tick/refresh
                 const refBadge = document.getElementById(`live_ref_badge_${idx}`);
                 if (refBadge) {
-                    const curRef = Number(pos.reference_price || 0);
+                    const curRef = Number(pos.reference_price || pos.entry_candle_close || pos.avg_ent_price || 0);
                     const curAvg = Number(pos.avg_ent_price || 0);
-                    const hasDiff = curRef > 0 && Math.abs(curRef - curAvg) > 0.01;
                     if (pos.benchmark_pending) {
                         const pendT = (pos.benchmark_time || pos.reference_candle_time || '09:16').substring(0, 5);
                         refBadge.innerHTML = `<span style="font-size:9px; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:1px 4px; font-weight:800; display:inline-block;" title="Interim protection active. Will lock to exact ${pendT} 1-min candle close price when complete.">⏳ Ref @ ${pendT} Close</span>`;
-                    } else if (curRef > 0 && (hasDiff || pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" || pos.reference_price_mode === "SPECIFIC_TIME" || pos.reference_price_mode === "CURRENT_LTP" || pos.reference_price_mode === "CUSTOM")) {
-                        let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : (pos.reference_price_mode === "CURRENT_LTP" ? "LTP Ref" : (pos.reference_price_mode === "CUSTOM" ? "Custom Ref" : "Ref"))));
+                    } else if (curRef > 0) {
+                        let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : (pos.reference_price_mode === "CURRENT_LTP" ? "LTP Ref" : (pos.reference_price_mode === "CUSTOM" ? "Custom Ref" : "Avg Fill"))));
                         refBadge.innerHTML = `<span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target and Stoploss calculated from ${modeTag} Price ₹${curRef.toFixed(2)} (Entry fill was ₹${curAvg.toFixed(2)})">🎯 ${modeTag}: ₹${curRef.toFixed(2)}</span>`;
                     } else {
                         refBadge.innerHTML = '';
@@ -4488,7 +4503,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 let hedgeTagHtml = "";
                 if (pos.is_associated_hedge) {
                     const pType = pos.hedge_parent_type || "MAIN";
-                    hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:4px; padding:1px 5px;">🛡️ HEDGE (${pType})</span></div>`;
+                    hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:4px; padding:1px 5px;">🛡️ HEDGE (${formatSymbolColorCoded(pType)})</span></div>`;
                 } else if (pos.has_associated_hedge || pos.associated_hedge_id) {
                     hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:1px 4px;" title="Protected with Dynamic Associated Hedge">🛡️ HEDGED</span></div>`;
                 }
@@ -4527,9 +4542,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
                 // Reference Price badges and basis selector (AlgoTest Parity)
                 let refPriceBadgeHtml = "";
-                const curRefPrice = Number(pos.reference_price || 0);
+                const curRefPrice = Number(pos.reference_price || pos.entry_candle_close || pos.avg_ent_price || 0);
                 const curAvgPrice = Number(pos.avg_ent_price || 0);
-                const hasDiffRef = curRefPrice > 0 && Math.abs(curRefPrice - curAvgPrice) > 0.01;
 
                 if (pos.benchmark_pending) {
                     const pendTime = (pos.benchmark_time || pos.reference_candle_time || '09:16').substring(0, 5);
@@ -4538,8 +4552,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             <span style="font-size:9px; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:1px 4px; font-weight:800; display:inline-block;" title="Interim protection active. Will lock to exact ${pendTime} 1-min candle close price when complete.">⏳ Ref @ ${pendTime} Close</span>
                         </div>
                     `;
-                } else if (curRefPrice > 0 && (hasDiffRef || pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" || pos.reference_price_mode === "SPECIFIC_TIME" || pos.reference_price_mode === "CURRENT_LTP" || pos.reference_price_mode === "CUSTOM")) {
-                    let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : (pos.reference_price_mode === "CURRENT_LTP" ? "LTP Ref" : (pos.reference_price_mode === "CUSTOM" ? "Custom Ref" : "Ref"))));
+                } else if (curRefPrice > 0) {
+                    let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : (pos.reference_price_mode === "CURRENT_LTP" ? "LTP Ref" : (pos.reference_price_mode === "CUSTOM" ? "Custom Ref" : "Avg Fill"))));
                     refPriceBadgeHtml = `
                         <div id="live_ref_badge_${idx}" style="margin-top:2px;">
                             <span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target and Stoploss calculated from ${modeTag} Price ₹${curRefPrice.toFixed(2)} (Entry fill was ₹${curAvgPrice.toFixed(2)})">🎯 ${modeTag}: ₹${curRefPrice.toFixed(2)}</span>
@@ -4553,7 +4567,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 if (isOpen) {
                     const curRefLabel = curRefPrice > 0 ? `₹${curRefPrice.toFixed(1)}` : 'Avg';
                     const entryMinStr = (pos.entry_time || '09:37:00').substring(0, 5);
-                    const cCloseVal = pos.entry_candle_close || (pos.reference_price_mode === 'ENTRY_CANDLE_CLOSE' && pos.reference_price ? pos.reference_price : null);
+                    const cCloseVal = pos.entry_candle_close || (pos.reference_price_mode === 'ENTRY_CANDLE_CLOSE' && pos.reference_price ? pos.reference_price : null) || pos.avg_ent_price || pos.reference_price;
                     const cCloseStr = (cCloseVal && Number(cCloseVal) > 0) ? ` - ₹${Number(cCloseVal).toFixed(2)}` : '';
                     refBasisSelectHtml = `
                         <div style="margin-top:3px;">
@@ -4576,7 +4590,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     tgtStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
                             <span style="font-size:9px; color:#f87171; font-weight:800; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target order was cancelled on broker! Algo has taken over and is monitoring on platform.">⚠️ CANCELLED ON BROKER</span>
-                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET')">🏦 Re-send to Broker</button>
+                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET', '${sym}')">🏦 Re-send to Broker</button>
                         </div>
                     `;
                 } else if (pos.target_broker_order_id) {
@@ -4587,7 +4601,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     tgtStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
                             <span style="font-size:9px; color:#f59e0b; font-weight:800; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="${pos.target_placement_error}">⚠️ BROKER PLACEMENT FAILED</span>
-                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET')">🏦 Retry Broker Placement</button>
+                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET', '${sym}')">🏦 Retry Broker Placement</button>
                         </div>
                     `;
                 } else if (isTgtBroker) {
@@ -4641,7 +4655,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     slStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
                             <span style="font-size:9px; color:#f87171; font-weight:800; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="Stoploss order was cancelled on broker! Algo has taken over and is monitoring on platform.">⚠️ CANCELLED ON BROKER</span>
-                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL')">🏦 Re-send to Broker</button>
+                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL', '${sym}')">🏦 Re-send to Broker</button>
                         </div>
                     `;
                 } else if (pos.sl_broker_order_id) {
@@ -4652,7 +4666,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     slStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
                             <span style="font-size:9px; color:#f59e0b; font-weight:800; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="${pos.sl_placement_error}">⚠️ BROKER PLACEMENT FAILED</span>
-                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL')">🏦 Retry Broker Placement</button>
+                            <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL', '${sym}')">🏦 Retry Broker Placement</button>
                         </div>
                     `;
                 } else if (isSlBroker) {
@@ -4796,7 +4810,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
 
                 html += `
-                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}">
+                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}" data-ref-price="${pos.reference_price || ''}" data-sl-price="${pos.sl_price || ''}" data-tgt-price="${pos.target_price || ''}">
                         <td style="text-align:center;">
                             <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
                         </td>
@@ -4857,17 +4871,17 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                     </div>
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         ${isBothCancelled || isSlCancelled ? `
-                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #0284c7, #0ea5e9); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(14,165,233,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'SL')" title="Place a fresh Stoploss order on broker for this leg">
+                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #0284c7, #0ea5e9); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(14,165,233,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'SL', '${sym}')" title="Place a fresh Stoploss order on broker for this leg">
                                                 🔄 RE-SEND SL ORDER
                                             </button>
                                         ` : ''}
                                         ${isBothCancelled || isTgtCancelled ? `
-                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #059669, #10b981); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(16,185,129,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'TARGET')" title="Place a fresh Target order on broker for this leg">
+                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #059669, #10b981); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(16,185,129,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'TARGET', '${sym}')" title="Place a fresh Target order on broker for this leg">
                                                 🔄 RE-SEND TARGET ORDER
                                             </button>
                                         ` : ''}
                                         ${isBothCancelled ? `
-                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #7c3aed, #8b5cf6); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(139,92,246,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'BOTH')" title="Place fresh Target and Stoploss orders on broker">
+                                            <button type="button" class="algo-btn-retry" style="background:linear-gradient(135deg, #7c3aed, #8b5cf6); color:#ffffff; font-weight:700; font-size:11px; padding:6px 12px; border-radius:5px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 2px 6px rgba(139,92,246,0.4);" onclick="resendLegOrderToBroker('${stratId}', '${legId}', ${idx}, 'BOTH', '${sym}')" title="Place fresh Target and Stoploss orders on broker">
                                                 🔄 RE-SEND BOTH
                                             </button>
                                         ` : ''}
@@ -5005,8 +5019,8 @@ function setAlgoTradeFilter(filter) {
             else if (f === "closed") btn.style.color = "#94a3b8";
             else if (f === "main") btn.style.color = "#f59e0b";
             else if (f === "hedge") btn.style.color = "#38bdf8";
-            else if (f === "ce") btn.style.color = "#34d399";
-            else if (f === "pe") btn.style.color = "#f87171";
+            else if (f === "ce") { btn.style.color = "#10b981"; btn.style.background = "rgba(16,185,129,0.12)"; }
+            else if (f === "pe") { btn.style.color = "#ef4444"; btn.style.background = "rgba(239,68,68,0.12)"; }
             else btn.style.color = "#cbd5e1";
         }
     });
