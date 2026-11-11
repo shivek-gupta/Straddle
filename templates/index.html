@@ -1478,6 +1478,28 @@
                         </div>
                     </div>
 
+                    <!-- Re-Execute Method & Order Delay (Quantiply Parity) -->
+                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-top:10px;">
+                        <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:10px;">Re-Entry / Re-Execute Method & Timing (Quantiply Parity)</div>
+                        <div class="straddle-grid-2col" style="display:grid; grid-template-columns: 1.2fr 1fr; gap:16px;">
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">Re-Execute method:</label>
+                                <select id="cfgReExecuteMethod" class="straddle-select" style="font-weight:700;">
+                                    <option value="Immediate" selected>Immediate</option>
+                                    <option value="Candle Close (Stockmock)">Candle Close (Stockmock)</option>
+                                </select>
+                            </div>
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">Re-execute order delay (seconds):</label>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <input type="number" id="cfgReExecuteOrderDelaySec" class="straddle-input" value="0" min="0" max="600" style="flex:1; font-weight:700;">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
+                                </div>
+                                <div style="font-size:10px; color:#64748b; font-style:italic; margin-top:2px;">min: 0; max: 600</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- SL & Target Benchmark Calculation Basis (AlgoTest Backtest Parity) -->
                     <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-top:10px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -1512,6 +1534,9 @@
                         </label>
                         <label class="straddle-checkbox-label" title="If any leg encounters a margin/RMS shortfall error during Entry, Re-Entry, or Re-Execute, the algo displays a 15-second grace countdown buffer with 'Square Off Now' & 'Cancel Auto-Exit' options before automatically squaring off all open positions to prevent naked exposure.">
                             <input type="checkbox" id="cfgAutoExitMargin"> Auto exit on margin error (Exit all open positions)
+                        </label>
+                        <label class="straddle-checkbox-label" title="When enabled: if resting SL/Target broker orders are blocking margin during re-entry, the algo temporarily cancels opposite legs' resting broker orders for a fraction of a second to release broker margin, executes the re-entry order, and immediately re-places advance SL/Target orders on the broker for all legs while maintaining continuous platform monitoring.">
+                            <input type="checkbox" id="cfgAutoReleaseMarginReEntry" checked> Auto-release margin for re-execution (Temporarily unblock broker margin during re-entry)
                         </label>
                     </div>
                 </div>

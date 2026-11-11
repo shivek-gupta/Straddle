@@ -506,6 +506,7 @@ DEFAULT_STRATEGIES = [
             "re_cost_activation": "Immediate",
             "auto_handling_sl_cancellation": True,
             "auto_exit_on_margin_error": False,
+            "auto_release_margin_reentry": True,
         },
     }
 ]
@@ -5604,6 +5605,13 @@ class StraddleManager:
             ent_hm = entry_time[:5]
             ref_candle_time = ent_hm
             c_close = self.get_minute_candle_close(contract.get("instrument_key", ""), ent_hm, contract_meta=contract)
+            if (c_close is None or c_close <= 0) and is_re_entry:
+                # Stockmock/AlgoTest parity: For re-entries executed at minute boundaries, use the just-closed minute's close
+                prev_hm = (now_ist() - datetime.timedelta(minutes=1)).strftime("%H:%M")
+                c_prev = self.get_minute_candle_close(contract.get("instrument_key", ""), prev_hm, contract_meta=contract)
+                if c_prev is not None and c_prev > 0:
+                    c_close = c_prev
+                    ref_candle_time = prev_hm
             if c_close is not None and c_close > 0:
                 ref_price = c_close
                 bm_pending = False
@@ -6826,17 +6834,25 @@ class StraddleManager:
             or bool(pos.get("hedge_parent_type"))
             or str(pos.get("side", "")).upper() == "BUY"
         )
-        if is_hedge or not self.is_broker_connected():
+        if is_hedge:
+            pos["sl_placement_error"] = "Advance SL not applicable to hedge or long buy positions"
+            return
+        if not self.is_broker_connected():
+            pos["sl_placement_error"] = "Kotak Neo broker disconnected in Settings"
             return
 
         if delay_sec > 0:
             time.sleep(delay_sec)
         with _ADVANCE_ORDER_LOCK:
             time.sleep(0.12)  # Micro-buffer between broker calls
-            if pos.get("status") != "OPEN" or pos.get("sl_broker_order_id"):
+            if pos.get("status") != "OPEN":
+                pos["sl_placement_error"] = f"Position status is {pos.get('status')} (must be OPEN)"
+                return
+            if pos.get("sl_broker_order_id"):
                 return
             sl_price = float(pos.get("sl_price") or 0.0)
             if sl_price <= 0:
+                pos["sl_placement_error"] = f"Invalid Stoploss price (₹{sl_price:.2f})"
                 return
             try:
                 sl_side = "BUY" if pos.get("side") == "SELL" else "SELL"
@@ -6917,17 +6933,25 @@ class StraddleManager:
             or bool(pos.get("hedge_parent_type"))
             or str(pos.get("side", "")).upper() == "BUY"
         )
-        if is_hedge or not self.is_broker_connected():
+        if is_hedge:
+            pos["target_placement_error"] = "Advance Target not applicable to hedge or long buy positions"
+            return
+        if not self.is_broker_connected():
+            pos["target_placement_error"] = "Kotak Neo broker disconnected in Settings"
             return
 
         if delay_sec > 0:
             time.sleep(delay_sec)
         with _ADVANCE_ORDER_LOCK:
             time.sleep(0.12)  # Micro-buffer between broker calls
-            if pos.get("status") != "OPEN" or pos.get("target_broker_order_id"):
+            if pos.get("status") != "OPEN":
+                pos["target_placement_error"] = f"Position status is {pos.get('status')} (must be OPEN)"
+                return
+            if pos.get("target_broker_order_id"):
                 return
             tgt_price = float(pos.get("target_price") or 0.0)
             if tgt_price <= 0:
+                pos["target_placement_error"] = f"Invalid Target price (₹{tgt_price:.2f})"
                 return
             try:
                 tgt_side = "BUY" if pos.get("side") == "SELL" else "SELL"
@@ -7521,8 +7545,14 @@ class StraddleManager:
             if not pos:
                 return {"success": False, "error": "Position not found in strategy"}
 
+            if pos.get("status") != "OPEN":
+                return {"success": False, "error": f"Position '{pos.get('symbol', '')}' is {pos.get('status')} (not OPEN). Advance orders can only be placed for active OPEN positions."}
+
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
+            if mode == "LIVE_BROKER" and not self.is_broker_connected():
+                return {"success": False, "error": "Kotak Neo broker is disconnected in settings. Please connect Kotak Neo first."}
+
             placed_orders = []
             ot = (order_type or "BOTH").upper()
 
@@ -7554,7 +7584,12 @@ class StraddleManager:
             if placed_orders:
                 return {"success": True, "message": f"Placed on broker: {', '.join(placed_orders)}", "order_id": ', '.join(placed_orders)}
             else:
-                err = pos.get("sl_placement_error") or pos.get("target_placement_error") or "Broker rejected order placement"
+                err_parts = []
+                if pos.get("sl_placement_error"):
+                    err_parts.append(f"SL: {pos['sl_placement_error']}")
+                if pos.get("target_placement_error"):
+                    err_parts.append(f"Target: {pos['target_placement_error']}")
+                err = " | ".join(err_parts) if err_parts else "Broker rejected order placement (check margin / order parameters)"
                 return {"success": False, "error": err}
 
     def detach_position(self, strategy_id: str, leg_id: Optional[str] = None, leg_index: Optional[int] = None) -> Dict[str, Any]:
@@ -8472,9 +8507,35 @@ class StraddleManager:
                     adv.update(strat["advanced"])
                 if isinstance(strat.get("advanced_settings"), dict):
                     adv.update(strat["advanced_settings"])
-                delay_sec = int(adv.get("re_execute_order_delay_sec", 0) or 0)
-                if delay_sec > 0:
-                    time.sleep(delay_sec)
+
+                re_method = str(adv.get("re_execute_method", "Immediate")).strip()
+                ref_mode = str(adv.get("reference_price_mode", "ENTRY_PRICE")).strip()
+                bm_scope = str(adv.get("benchmark_scope", "INITIAL_ONLY")).strip().upper()
+
+                # Parity: Re-Execution timing
+                # If Re-Execute method is "Candle Close (Stockmock)" OR reference price mode is "ENTRY_CANDLE_CLOSE" with all entries scope
+                is_candle_close = ("candle" in re_method.lower()) or (ref_mode == "ENTRY_CANDLE_CLOSE" and bm_scope != "INITIAL_ONLY")
+
+                if is_candle_close:
+                    now_dt = now_ist()
+                    # Sleep until second :00 of the next minute (close of current 1-minute candle)
+                    sec_left = 60.0 - now_dt.second - (now_dt.microsecond / 1_000_000.0)
+                    extra_delay = int(adv.get("re_execute_order_delay_sec", 0) or 0)
+                    total_wait = max(0.0, sec_left + extra_delay)
+                    if total_wait > 0:
+                        target_dt = now_dt + datetime.timedelta(seconds=total_wait)
+                        self._log_event(
+                            f"[{strat.get('name')}] Re-Execution 'Candle Close' active. Waiting {total_wait:.2f}s until 1-min candle close @ {target_dt.strftime('%H:%M:%S')}...",
+                            level="INFO"
+                        )
+                        time.sleep(total_wait)
+                else:
+                    delay_sec = int(adv.get("re_execute_order_delay_sec", 0) or 0)
+                    if delay_sec > 0:
+                        self._log_event(f"[{strat.get('name')}] Re-Execution 'Immediate' waiting {delay_sec}s delay...", level="INFO")
+                        time.sleep(delay_sec)
+                    else:
+                        self._log_event(f"[{strat.get('name')}] Re-Execution 'Immediate' (0s delay). Dispatching re-entry order immediately.", level="INFO")
 
                 chk_w2 = self.get_strategy_schedule_status(strat)
                 if not chk_w2["can_enter"] or not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
@@ -8700,7 +8761,75 @@ class StraddleManager:
                         )
                         return
 
-                new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat, is_re_entry=True)
+                # -----------------------------------------------------------------
+                # Margin Auto-Release for Re-Execution:
+                # Temporarily cancel resting advance broker orders on other open legs
+                # to release broker margin and avoid RMS margin shortfall rejection
+                # -----------------------------------------------------------------
+                auto_release_margin = bool(adv.get("auto_release_margin_reentry", True))
+                unblocked_items = []
+
+                if auto_release_margin and mode == "LIVE_BROKER" and self.is_broker_connected():
+                    with _ENGINE_LOCK:
+                        for p_cand in strat.get("positions", []):
+                            if p_cand.get("status") == "OPEN" and p_cand.get("id") != pos.get("id"):
+                                sl_oid = p_cand.get("sl_broker_order_id")
+                                tgt_oid = p_cand.get("target_broker_order_id")
+                                if sl_oid or tgt_oid:
+                                    unblocked_items.append({
+                                        "pos": p_cand,
+                                        "sl_order_id": sl_oid,
+                                        "tgt_order_id": tgt_oid,
+                                    })
+                                    p_cand["_margin_relief_in_progress"] = True
+
+                    if unblocked_items:
+                        self._log_event(
+                            f"[Margin Auto-Release] ⚡ Temporarily releasing broker margin on {len(unblocked_items)} opposite leg(s) by cancelling resting advance orders for Re-entry...",
+                            level="INFO"
+                        )
+                        for item in unblocked_items:
+                            p_cand = item["pos"]
+                            if item["sl_order_id"]:
+                                try:
+                                    c_res = broker.cancel_order(str(item["sl_order_id"]))
+                                    logger.info(f"[Margin Auto-Release] Cancelled broker SL {item['sl_order_id']} for {p_cand.get('symbol')}: {c_res}")
+                                except Exception as e_c:
+                                    logger.warning(f"[Margin Auto-Release] Error cancelling SL {item['sl_order_id']}: {e_c}")
+                                p_cand["sl_broker_order_id"] = None
+                            if item["tgt_order_id"]:
+                                try:
+                                    c_res = broker.cancel_order(str(item["tgt_order_id"]))
+                                    logger.info(f"[Margin Auto-Release] Cancelled broker Target {item['tgt_order_id']} for {p_cand.get('symbol')}: {c_res}")
+                                except Exception as e_c:
+                                    logger.warning(f"[Margin Auto-Release] Error cancelling Target {item['tgt_order_id']}: {e_c}")
+                                p_cand["target_broker_order_id"] = None
+
+                new_pos = None
+                try:
+                    new_pos = self._place_leg_entry_order(leg_cfg, contract, mult, broker, adv, strategy=strat, is_re_entry=True)
+                finally:
+                    if unblocked_items:
+                        def _restore_unblocked_orders():
+                            time.sleep(0.08)
+                            self._log_event(
+                                f"[Margin Auto-Release] Re-entry dispatched. Re-placing advance SL & Target orders on broker for all legs...",
+                                level="INFO"
+                            )
+                            for item in unblocked_items:
+                                p_cand = item["pos"]
+                                p_cand["_margin_relief_in_progress"] = False
+                                if p_cand.get("status") == "OPEN":
+                                    if item.get("sl_order_id"):
+                                        self._place_advance_sl_order(broker, p_cand, delay_sec=0)
+                                    if item.get("tgt_order_id"):
+                                        time.sleep(0.12)
+                                        self._place_advance_target_order(broker, p_cand, delay_sec=0)
+                            self._save_strategies()
+                            self._save_state(force=True)
+
+                        threading.Thread(target=_restore_unblocked_orders, daemon=True).start()
+
                 if new_pos:
                     new_pos["re_execute_count"] = new_count
                     new_pos["is_re_entry"] = True
@@ -11905,7 +12034,7 @@ class StraddleManager:
                                     pos["_tgt_cancel_notified"] = False
                                     pos["target_order_placement"] = "Advance Broker Target"
                                     self._log_event(f"Broker Target order {adv_tgt_oid} for {pos.get('symbol')} confirmed active on broker ({t_st}). Active monitoring notice cleared.", level="INFO")
-                            elif any(w in t_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN":
+                            elif any(w in t_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN" and not pos.get("_margin_relief_in_progress"):
                                 # Broker Target order was unexpectedly cancelled!
                                 pos["target_broker_order_id"] = None
                                 pos["target_cancelled_unexpectedly"] = True
@@ -11951,7 +12080,7 @@ class StraddleManager:
                                         pos["target_cancel_notice"] = None
                                         pos["_tgt_cancel_notified"] = False
                                         pos["target_order_placement"] = "Advance Broker Target"
-                                elif str(t_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN":
+                                elif str(t_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN" and not pos.get("_margin_relief_in_progress"):
                                     pos["target_broker_order_id"] = None
                                     pos["target_cancelled_unexpectedly"] = True
                                     pos["target_order_placement"] = "Keep with self"
@@ -12007,7 +12136,7 @@ class StraddleManager:
                                     pos["_sl_cancel_notified"] = False
                                     pos["sl_order_placement"] = "Advance Broker SL"
                                     self._log_event(f"Broker SL order {adv_sl_oid} for {pos.get('symbol')} confirmed active on broker ({s_st}). Active monitoring notice cleared.", level="INFO")
-                            elif any(w in s_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN":
+                            elif any(w in s_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN" and not pos.get("_margin_relief_in_progress"):
                                 # Broker Stoploss order was unexpectedly cancelled!
                                 adv_cfg = strat.get("advanced") or strat.get("advanced_settings") or {}
                                 auto_handle = adv_cfg.get("auto_handling_sl_cancellation") is not False
@@ -12056,7 +12185,7 @@ class StraddleManager:
                                         pos["sl_cancel_notice"] = None
                                         pos["_sl_cancel_notified"] = False
                                         pos["sl_order_placement"] = "Advance Broker SL"
-                                elif str(s_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN":
+                                elif str(s_stat.get("status", "")).upper() in ("CANCELLED", "CANCELED", "REJECTED") and pos.get("status") == "OPEN" and not pos.get("_margin_relief_in_progress"):
                                     adv_cfg = strat.get("advanced") or strat.get("advanced_settings") or {}
                                     auto_handle = adv_cfg.get("auto_handling_sl_cancellation") is not False
                                     if auto_handle:

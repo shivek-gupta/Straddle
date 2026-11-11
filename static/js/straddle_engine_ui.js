@@ -6187,6 +6187,13 @@ function populateStraddleSettingsForm(s) {
     const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
     if (tgtOrderEl) tgtOrderEl.value = adv.target_order_placement || "Place in advance";
 
+    const reMethodEl = document.getElementById("cfgReExecuteMethod");
+    if (reMethodEl) reMethodEl.value = adv.re_execute_method || "Immediate";
+    const reDelayEl = document.getElementById("cfgReExecuteOrderDelaySec");
+    if (reDelayEl) reDelayEl.value = (adv.re_execute_order_delay_sec !== undefined && adv.re_execute_order_delay_sec !== null) ? adv.re_execute_order_delay_sec : 0;
+    const autoRelMarginEl = document.getElementById("cfgAutoReleaseMarginReEntry");
+    if (autoRelMarginEl) autoRelMarginEl.checked = (adv.auto_release_margin_reentry !== false);
+
     const refModeEl = document.getElementById("cfgRefPriceMode");
     if (refModeEl) refModeEl.value = adv.reference_price_mode || "ENTRY_PRICE";
     const bmTimeEl = document.getElementById("cfgBenchmarkTime");
@@ -7251,9 +7258,12 @@ function serializeCurrentStrategySettings() {
             target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Place in advance",
             sl_placement_delay_sec: isNaN(parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgSlPlacementDelaySec")?.value, 10),
             mtm_sl_delay_sec: isNaN(parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10),
+            re_execute_method: document.getElementById("cfgReExecuteMethod")?.value || "Immediate",
+            re_execute_order_delay_sec: isNaN(parseInt(document.getElementById("cfgReExecuteOrderDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgReExecuteOrderDelaySec")?.value, 10),
             auto_handling_sl_cancellation: document.getElementById("cfgAutoHandlingSl")?.checked !== false,
             auto_exit_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
             auto_exit_on_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
+            auto_release_margin_reentry: document.getElementById("cfgAutoReleaseMarginReEntry") ? document.getElementById("cfgAutoReleaseMarginReEntry").checked : true,
             reference_price_mode: document.getElementById("cfgRefPriceMode")?.value || "ENTRY_PRICE",
             benchmark_time: document.getElementById("cfgBenchmarkTime")?.value || "09:16:00",
             benchmark_scope: document.getElementById("cfgBenchmarkInitialOnly")?.checked ? "INITIAL_ONLY" : "ALL_ENTRIES"

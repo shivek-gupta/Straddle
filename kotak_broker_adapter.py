@@ -472,7 +472,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 if st_code and int(st_code) != 200:
                     err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
                     # Auto-fallback: If broker rejects with error from core or market order disallowed
-                    if any(k in err_msg.lower() for k in ("error from core", "from core", "market order not allowed", "mkt not allowed", "price protection", "order type not allowed", "not allowed for option", "rms:rule")):
+                    is_adv_resting = str(tag or "").startswith("adv_") or clean_ot in ("SL", "SL-M")
+                    if not is_adv_resting and any(k in err_msg.lower() for k in ("error from core", "from core", "market order not allowed", "mkt not allowed", "price protection", "order type not allowed", "not allowed for option", "rms:rule")):
                         logger.info(f"[Kotak Neo] Order rejected with '{err_msg}'. Auto-retrying as aggressive Marketable Limit...")
                         mkt_price = float(price or 0.0)
                         if mkt_price <= 0:
