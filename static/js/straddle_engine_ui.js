@@ -192,8 +192,8 @@ async function initStraddlePlatform() {
     // Initialize local storage & fast ticker pollers immediately without blocking
     loadActiveBasketFromStorage();
     fetchLiveSpotTick();
-    window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 300);
-    window._straddleState.pollTimer = setInterval(pollStraddleCycle, 500);
+    window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 250);
+    window._straddleState.pollTimer = setInterval(pollStraddleCycle, 250);
 
     // Fetch initial state asynchronously without blocking spot tickers
     try {
@@ -226,8 +226,8 @@ async function initStraddlePlatform() {
             if (window._straddleState.spotTimer) clearInterval(window._straddleState.spotTimer);
             if (window._straddleState.pollTimer) clearInterval(window._straddleState.pollTimer);
 
-            window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 300);
-            window._straddleState.pollTimer = setInterval(pollStraddleCycle, 500);
+            window._straddleState.spotTimer = setInterval(fetchLiveSpotTick, 250);
+            window._straddleState.pollTimer = setInterval(pollStraddleCycle, 250);
 
             fetchLiveSpotTick();
             pollStraddleCycle();
@@ -734,8 +734,55 @@ function renderStraddleOpenPositionsTable() {
         return;
     }
 
-    let rowsHtml = "";
     const prevMap = window._straddleState.prevLtpMap || {};
+
+    // In-place DOM update for Open Positions: prevents flickering & high CPU
+    const existingPosRows = tbody.querySelectorAll("tr[data-pos-key]");
+    if (existingPosRows.length === filtered.length && filtered.length > 0) {
+        let keysMatch = true;
+        for (let i = 0; i < filtered.length; i++) {
+            const p = filtered[i];
+            const pKey = String(p.instrument_key || p.symbol || "");
+            const row = existingPosRows[i];
+            const isOp = (p.is_open !== false && (p.net_qty || p.quantity || 0) !== 0);
+            if (!row || row.getAttribute("data-pos-key") !== pKey || row.getAttribute("data-pos-status") !== (isOp ? 'OPEN' : 'CLOSED')) {
+                keysMatch = false;
+                break;
+            }
+        }
+        if (keysMatch) {
+            filtered.forEach((p, i) => {
+                const row = existingPosRows[i];
+                if (!row) return;
+                const sym = p.symbol || p.trading_symbol || "";
+                const isOpen = (p.is_open !== false && (p.net_qty || p.quantity || 0) !== 0);
+                const ltp = Number(p.ltp || p.last_price || (window._straddleState?.prevLtpMap && window._straddleState.prevLtpMap[sym]) || 0.0);
+                const prevLtp = prevMap[sym] || ltp;
+                let ltpClass = "";
+                if (isOpen && ltp > prevLtp) ltpClass = "straddle-ltp-up";
+                else if (isOpen && ltp < prevLtp) ltpClass = "straddle-ltp-down";
+                prevMap[sym] = ltp;
+
+                const ltpEl = row.querySelector(".straddle-ltp");
+                if (ltpEl) {
+                    ltpEl.textContent = ltp > 0 ? '₹' + ltp.toFixed(2) : '-';
+                    ltpEl.className = `straddle-ltp ${ltpClass}`;
+                }
+
+                const mtm = isOpen ? (p.mtm !== undefined ? p.mtm : (p.pnl || 0.0)) : (p.realised_pnl !== undefined ? p.realised_pnl : (p.pnl || 0.0));
+                const mtmClass = mtm >= 0 ? "straddle-mtm-pos" : "straddle-mtm-neg";
+                const mtmFormatted = (mtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const mtmEl = row.querySelector(".straddle-mtm");
+                if (mtmEl) {
+                    mtmEl.textContent = mtmFormatted;
+                    mtmEl.className = `straddle-mtm ${mtmClass}`;
+                }
+            });
+            return;
+        }
+    }
+
+    let rowsHtml = "";
 
     filtered.forEach(p => {
         const isOpen = (p.is_open !== false && (p.net_qty || p.quantity || 0) !== 0);
@@ -817,7 +864,7 @@ function renderStraddleOpenPositionsTable() {
             : `<span style="color:#64748b; font-size:11px;">-</span>`;
 
         rowsHtml += `
-            <tr>
+            <tr data-pos-key="${p.instrument_key || p.symbol || ''}" data-pos-status="${isOpen ? 'OPEN' : 'CLOSED'}">
                 <td>${statusPill}</td>
                 <td><span class="straddle-side-badge ${sideBadgeClass}">${side}</span></td>
                 <td>
@@ -4111,7 +4158,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
     if (!positions || positions.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="13" style="text-align:center; padding:36px 14px; color:#64748b;">
+                <td colspan="14" style="text-align:center; padding:36px 14px; color:#64748b;">
                     <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Active Positions</div>
                     <div style="font-size:11.5px; margin-bottom:8px;">Click <b>Settings</b> to configure legs and start trading, or hit <b>Start Algo</b>.</div>
                     <div>
@@ -4214,7 +4261,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
     if (displayPositions.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="13" style="text-align:center; padding:32px 14px; color:#64748b;">
+                <td colspan="14" style="text-align:center; padding:32px 14px; color:#64748b;">
                     <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Trades Match Current Filter</div>
                     <div style="font-size:12px; margin-bottom:8px;">${closedCount} closed trades hidden. Adjust filter or toggle below to view.</div>
                     <button type="button" class="straddle-btn btn-outline" onclick="window._straddleAlgoShowClosed=true; setAlgoTradeFilter('all');" style="border-color:#38bdf8; color:#38bdf8; font-size:11px; font-weight:700; padding:3px 10px;">👁️ Show All Trades</button>
@@ -4271,6 +4318,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const rowRefP = row.getAttribute("data-ref-price") || "";
             const rowSlP = row.getAttribute("data-sl-price") || "";
             const rowTgtP = row.getAttribute("data-tgt-price") || "";
+            const rowEntryR = row.getAttribute("data-entry-reason") || "";
 
             const posStatus = String(pos.status || "OPEN").toUpperCase();
             const posReason = String(pos.exit_reason || "");
@@ -4282,11 +4330,13 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const posRefP = String(pos.reference_price || "");
             const posSlP = String(pos.sl_price || "");
             const posTgtP = String(pos.target_price || "");
+            const posEntryR = String(pos.entry_reason || "");
 
             if (rowStatus !== posStatus || rowReason !== posReason || rowSym !== sym ||
                 rowSlOid !== posSlOid || rowTgtOid !== posTgtOid ||
                 rowSlCanc !== posSlCanc || rowTgtCanc !== posTgtCanc ||
-                rowRefP !== posRefP || rowSlP !== posSlP || rowTgtP !== posTgtP) {
+                rowRefP !== posRefP || rowSlP !== posSlP || rowTgtP !== posTgtP ||
+                rowEntryR !== posEntryR) {
                 anyStateMismatch = true;
                 break;
             }
@@ -4504,8 +4554,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 if (pos.is_associated_hedge) {
                     const pType = pos.hedge_parent_type || "MAIN";
                     hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:4px; padding:1px 5px;">🛡️ HEDGE (${formatSymbolColorCoded(pType)})</span></div>`;
-                } else if (pos.has_associated_hedge || pos.associated_hedge_id) {
-                    hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:1px 4px;" title="Protected with Dynamic Associated Hedge">🛡️ HEDGED</span></div>`;
+                } else if (pos.has_associated_hedge || pos.associated_hedge_id || side === "SELL") {
+                    hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:900; color:#ef4444; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.45); border-radius:4px; padding:1px 5px;" title="Main Trading Leg">🎯 MAIN</span></div>`;
                 }
 
                 if (canAdjustStrikeAndLots) {
@@ -4734,6 +4784,20 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     }
                 }
 
+                // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift)
+                let entryReasonHtml = "-";
+                if (pos.entry_reason && pos.entry_reason !== "-") {
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-reason-pill" style="font-size:10px; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); border-radius:4px; padding:2px 6px; display:inline-block; font-weight:600;">${pos.entry_reason}</span>`;
+                } else if (pos.is_associated_hedge) {
+                    const pType = pos.hedge_parent_type || "MAIN";
+                    entryReasonHtml = `<span class="straddle-reason-pill" style="font-size:10px; color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.25); border-radius:4px; padding:2px 6px; display:inline-block; font-weight:600;">HEDGE (${pType})</span>`;
+                } else if (pos.is_re_entry || (pos.re_execute_count || 0) > 0) {
+                    const reCount = pos.re_execute_count || 1;
+                    entryReasonHtml = `<span class="straddle-reason-pill" style="font-size:10px; color:#f59e0b; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); border-radius:4px; padding:2px 6px; display:inline-block; font-weight:600;">RE-EXECUTE #${reCount}</span>`;
+                } else {
+                    entryReasonHtml = `<span class="straddle-reason-pill" style="font-size:10px; color:#94a3b8; background:rgba(148,163,184,0.08); border:1px solid rgba(148,163,184,0.2); border-radius:4px; padding:2px 6px; display:inline-block; font-weight:600;">Initial Entry</span>`;
+                }
+
                 // Action buttons (Save on live change + Exit + Detach + Combined Placement)
                 let actionHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
                 if (isInteractiveRow) {
@@ -4810,7 +4874,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
 
                 html += `
-                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}" data-ref-price="${pos.reference_price || ''}" data-sl-price="${pos.sl_price || ''}" data-tgt-price="${pos.target_price || ''}">
+                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-entry-reason="${pos.entry_reason || ''}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}" data-ref-price="${pos.reference_price || ''}" data-sl-price="${pos.sl_price || ''}" data-tgt-price="${pos.target_price || ''}">
                         <td style="text-align:center;">
                             <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
                         </td>
@@ -4824,6 +4888,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             ${refPriceBadgeHtml}
                             ${refBasisSelectHtml}
                         </td>
+                        <td style="white-space:normal; min-width:130px; max-width:170px; word-break:break-word; line-height:1.25;">${entryReasonHtml}</td>
                         <td>${targetHtml}</td>
                         <td>${slHtml}</td>
                         <td>
@@ -4858,7 +4923,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
                     html += `
                         <tr class="straddle-error-banner-row">
-                            <td colspan="13">
+                            <td colspan="14">
                                 <div class="straddle-error-banner-cell" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; background:rgba(245, 158, 11, 0.12); border:1px solid rgba(245, 158, 11, 0.45); padding:10px 16px; border-radius:6px; margin: 4px 0;">
                                     <div style="flex:1; min-width:280px;">
                                         <div style="display:flex; align-items:center; gap:8px;">
@@ -4922,7 +4987,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
                     html += `
                         <tr class="straddle-error-banner-row" data-error-leg-index="${idx}">
-                            <td colspan="13">
+                            <td colspan="14">
                                 <div class="straddle-error-banner-cell" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); padding:10px 14px; border-radius:6px; margin: 4px 0;">
                                     <div style="display:flex; flex-direction:column; gap:3px; flex:1; min-width:260px;">
                                         <div style="display:flex; align-items:center; gap:8px;">
@@ -11086,13 +11151,19 @@ async function updateBasketMarginCalculation() {
     clearTimeout(_basketMarginDebounceTimer);
     _basketMarginDebounceTimer = setTimeout(async () => {
         const reqEl = document.getElementById("basketRequiredMarginText");
+        const finalEl = document.getElementById("basketFinalMarginText");
         const availEl = document.getElementById("basketAvailableMarginText");
         const chargesEl = document.getElementById("basketTotalChargesText");
+        const autoLotsEl = document.getElementById("basketAutoLotsCount");
+        const shortfallEl = document.getElementById("basketMarginShortfallWarning");
 
         const selected = window._basketOrders.filter(o => o.selected);
         if (selected.length === 0) {
             if (reqEl) reqEl.textContent = "0.00";
+            if (finalEl) finalEl.textContent = "0.00";
             if (chargesEl) chargesEl.textContent = "0.00";
+            if (autoLotsEl) autoLotsEl.textContent = "1";
+            if (shortfallEl) shortfallEl.style.display = "none";
             populateBasketChargesBreakdown(null);
             return;
         }
@@ -11108,9 +11179,28 @@ async function updateBasketMarginCalculation() {
             });
             const data = await resp.json();
             if (data.success) {
-                if (reqEl) reqEl.textContent = Number(data.required_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                if (availEl) availEl.textContent = Number(data.available_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                const reqVal = Number(data.required_margin || 0);
+                const finalVal = Number(data.final_margin || reqVal);
+                const availVal = Number(data.available_margin || 0);
+
+                if (reqEl) reqEl.textContent = reqVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                if (finalEl) finalEl.textContent = finalVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                if (availEl) availEl.textContent = availVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                 if (chargesEl) chargesEl.textContent = Number(data.total_charges || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+                // Auto Lots calculation
+                const maxSafeLots = Math.max(1, parseInt(data.max_tradeable_lots || 1, 10));
+                window._basketMaxSafeLots = maxSafeLots;
+                if (autoLotsEl) autoLotsEl.textContent = maxSafeLots;
+
+                // Check margin shortfall against available funds
+                if (shortfallEl) {
+                    if (reqVal > availVal && availVal > 0) {
+                        shortfallEl.style.display = "flex";
+                    } else {
+                        shortfallEl.style.display = "none";
+                    }
+                }
 
                 // Populate Angel One exact charges breakdown popover
                 if (data.charges_breakdown) {
@@ -11120,8 +11210,18 @@ async function updateBasketMarginCalculation() {
         } catch (e) {
             console.warn("Margin calculation update error:", e);
         }
-    }, 200);
+    }, 150);
 }
+
+function autoCalculateBasketLots() {
+    const safeLots = window._basketMaxSafeLots || 1;
+    window._basketMultiplier = safeLots;
+    const input = document.getElementById("basketMultiplierInput");
+    if (input) input.value = safeLots;
+    onBasketMultiplierChange(safeLots);
+    showStraddleToast(`⚡ Auto Lots set to ${safeLots} lots based on Available Margin.`, "success", 2500);
+}
+window.autoCalculateBasketLots = autoCalculateBasketLots;
 
 function populateBasketChargesBreakdown(b) {
     if (!b) return;

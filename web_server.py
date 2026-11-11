@@ -1350,8 +1350,9 @@ def api_straddle_sync_broker():
 @app.route("/api/straddle/open_positions", methods=["GET"])
 def api_straddle_open_positions():
     try:
+        force = request.args.get("force", "false").lower() in ("true", "1")
         mgr = get_straddle_manager()
-        res = mgr.get_all_open_positions()
+        res = mgr.get_all_open_positions(force=force)
         return jsonify(res)
     except Exception as e:
         logger.error(f"Error in api_straddle_open_positions: {e}")

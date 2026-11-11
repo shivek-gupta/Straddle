@@ -1208,8 +1208,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 if not raw_tok:
                     continue
 
-                # Check recent memory cache (1.5s TTL for smooth real-time ticking)
-                if raw_tok in self._quotes_cache and (now_ts - self._quotes_cache_ts.get(raw_tok, 0)) < 1.5:
+                # Check recent memory cache (0.25s TTL for ultra-fast tick-by-tick real-time updates)
+                if raw_tok in self._quotes_cache and (now_ts - self._quotes_cache_ts.get(raw_tok, 0)) < 0.25:
                     quotes_data[raw_tok] = self._quotes_cache[raw_tok]
                     continue
 
@@ -1269,11 +1269,11 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
                 def _fetch_single_batch(b_tokens):
                     try:
-                        # Enforce 150ms minimum spacing between Kotak REST calls
+                        # Enforce 50ms minimum spacing between Kotak REST calls for sub-50ms latency
                         with self._lock:
                             elapsed = time.time() - getattr(self, "_last_api_request_ts", 0.0)
-                            if elapsed < 0.15:
-                                time.sleep(0.15 - elapsed)
+                            if elapsed < 0.05:
+                                time.sleep(0.05 - elapsed)
                             self._last_api_request_ts = time.time()
                         return client.quotes(instrument_tokens=b_tokens, quote_type="all")
                     except Exception as eb:

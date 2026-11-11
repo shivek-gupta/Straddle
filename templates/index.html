@@ -849,6 +849,7 @@
                                 <th>SYMBOL</th>
                                 <th>QUANTITY</th>
                                 <th>AVG ENT PRICE</th>
+                                <th style="min-width:130px;">ENTRY REASON</th>
                                 <th>PER LEG TARGET</th>
                                 <th>PER LEG STOPLOSS</th>
                                 <th>AVG EXIT PRICE</th>
@@ -2725,7 +2726,7 @@
             <div style="padding:14px 20px; background:#070a13; border-top:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; gap:12px;">
                 <!-- Row 1: Margin Summary & Multiplier -->
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
-                    <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
                         <div style="font-size:13px; color:#cbd5e1;">
                             <span style="color:#94a3b8;">Available Margin:</span> 
                             <strong style="color:#10b981; font-family:var(--font-mono); font-size:14px; margin-left:4px;">₹ <span id="basketAvailableMarginText">--</span></strong>
@@ -2733,19 +2734,30 @@
                         <div style="font-size:13px; color:#cbd5e1;">
                             <span style="color:#94a3b8;">Required Margin:</span> 
                             <strong style="color:#38bdf8; font-family:var(--font-mono); font-size:14px; margin-left:4px;">₹ <span id="basketRequiredMarginText">0.00</span></strong>
-                            <span title="Calculated with SEBI Hedge Benefit: BUY positions discount SELL margin requirement" style="cursor:help; font-size:12px; color:#64748b; margin-left:4px;">ℹ️</span>
+                            <span title="Upfront margin required by Kotak Neo matching engine to place and accept all basket orders" style="cursor:help; font-size:12px; color:#64748b; margin-left:4px;">ℹ️</span>
+                        </div>
+                        <div style="font-size:13px; color:#cbd5e1;">
+                            <span style="color:#94a3b8;">Final Margin:</span> 
+                            <strong style="color:#a78bfa; font-family:var(--font-mono); font-size:14px; margin-left:4px;">₹ <span id="basketFinalMarginText">0.00</span></strong>
+                            <span title="Post-execution settled margin after SEBI exchange cross-hedging benefit is fully applied" style="cursor:help; font-size:12px; color:#64748b; margin-left:4px;">ℹ️</span>
                         </div>
                     </div>
 
-                    <!-- Lot / Quantity Multiplier Stepper (Screenshot 4) -->
-                    <div style="display:flex; align-items:center; gap:10px;">
-                        <span style="font-size:12px; color:#94a3b8; font-weight:700;">Lot/Quantity Multiplier</span>
+                    <!-- Lot / Quantity Multiplier Stepper + Auto Lots Button -->
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button type="button" id="btnBasketAutoLots" onclick="autoCalculateBasketLots()" class="straddle-btn btn-outline" style="padding:4px 9px; font-size:11px; font-weight:800; border-color:#0284c7; color:#38bdf8; background:rgba(2,132,199,0.15); border-radius:5px; cursor:pointer;" title="Automatically set multiplier to maximum safe tradeable lots based on Available Margin">⚡ Auto Lots (<span id="basketAutoLotsCount">1</span>)</button>
+                        <span style="font-size:12px; color:#94a3b8; font-weight:700;">Multiplier</span>
                         <div style="display:flex; align-items:center; background:#0b1120; border:1px solid #334155; border-radius:6px; overflow:hidden;">
                             <button type="button" onclick="stepBasketMultiplier(-1)" style="background:#1e293b; color:#cbd5e1; border:none; width:28px; height:28px; cursor:pointer; font-weight:800; font-size:14px;">-</button>
                             <input type="number" id="basketMultiplierInput" min="1" max="100" value="1" onchange="onBasketMultiplierChange(this.value)" style="width:42px; height:28px; background:transparent; border:none; text-align:center; font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:13px; outline:none;">
                             <button type="button" onclick="stepBasketMultiplier(1)" style="background:#1e293b; color:#cbd5e1; border:none; width:28px; height:28px; cursor:pointer; font-weight:800; font-size:14px;">+</button>
                         </div>
                     </div>
+                </div>
+
+                <div id="basketMarginShortfallWarning" style="display:none; color:#f87171; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.35); border-radius:5px; padding:6px 12px; font-size:11.5px; font-weight:700; align-items:center; gap:6px;">
+                    <span>⚠️</span>
+                    <span>Margin Shortfall: Required margin exceeds available funds! Click <b>Auto Lots</b> to fit safely.</span>
                 </div>
 
                 <!-- Row 2: Charges & Action Buttons (Screenshot 4) -->
