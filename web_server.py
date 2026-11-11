@@ -684,8 +684,9 @@ def api_straddle_square_off_leg():
     try:
         data = request.get_json(silent=True) or {}
         leg_idx = int(data.get("leg_index", -1))
+        sid = data.get("strategy_id")
         mgr = get_straddle_manager()
-        res = mgr.square_off_leg(leg_idx)
+        res = mgr.square_off_leg(leg_idx, strategy_id=sid)
         return jsonify(res)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

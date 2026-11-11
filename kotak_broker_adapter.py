@@ -1497,10 +1497,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 instrument_token=str(tok),
                 transaction_type=tt,
             )
-            if isinstance(res, dict) and res.get("stat") == "Ok":
-                d = res.get("data") or {}
-                ord_mrgn = float(d.get("ordMrgn") or d.get("totMrgnUsd") or 0.0)
-                return {"success": True, "margin_required": ord_mrgn, "data": d}
+            if isinstance(res, dict):
+                d = res.get("data") if isinstance(res.get("data"), dict) else res
+                stat = d.get("stat") or res.get("stat")
+                st_code = d.get("stCode") or res.get("stCode")
+                if stat == "Ok" or str(st_code) == "200":
+                    ord_mrgn = float(d.get("ordMrgn") or d.get("totMrgnUsd") or d.get("reqdMrgn") or 0.0)
+                    return {"success": True, "margin_required": ord_mrgn, "data": d}
         except Exception as e:
             logger.debug(f"[Kotak Neo] margin_required query note: {e}")
         return {"success": False, "margin_required": 0.0}

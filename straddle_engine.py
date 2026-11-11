@@ -878,11 +878,11 @@ class StraddleManager:
         tot_slip_inr = round(sum(slippages_inr), 2)
         avg_slip_pts = round(tot_slip_pts / len(history), 2) if history else 0.0
 
-        if avg_lat <= 200:
+        if avg_lat <= 50:
             health = "ULTRA_FAST"
-        elif avg_lat <= 500:
+        elif avg_lat <= 100:
             health = "GOOD"
-        elif avg_lat <= 1000:
+        elif avg_lat <= 200:
             health = "MODERATE"
         else:
             health = "HIGH_LATENCY"
@@ -4475,6 +4475,16 @@ class StraddleManager:
         if not strat:
             return []
         strat_positions = strat.get("positions", [])
+        now_hm = now_ist_str()[:5]
+        for p in strat_positions:
+            if not p.get("entry_candle_close") and p.get("entry_time"):
+                ent_hm = str(p.get("entry_time"))[:5]
+                if now_hm > ent_hm:
+                    inst_k = p.get("instrument_key") or (p.get("contract") or {}).get("instrument_key") or (p.get("contract") or {}).get("token") or p.get("token") or ""
+                    if inst_k:
+                        c_c = self.get_minute_candle_close(inst_k, ent_hm, contract_meta=p.get("contract"))
+                        if c_c and c_c > 0:
+                            p["entry_candle_close"] = c_c
         # Only return positions belonging to this strategy
         return strat_positions
 
@@ -4745,10 +4755,11 @@ class StraddleManager:
             self._save_state()
             return {"success": True, "message": "All positions squared off successfully and algorithm terminated."}
 
-    def square_off_leg(self, leg_index: int) -> Dict[str, Any]:
+    def square_off_leg(self, leg_index: int, strategy_id: Optional[str] = None) -> Dict[str, Any]:
         """Square off an individual selected leg position."""
         with _ENGINE_LOCK:
-            positions = self._state.get("positions", [])
+            strat = self.get_strategy(strategy_id) if strategy_id else (self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else None))
+            positions = strat.get("positions", []) if (strat and strat.get("positions")) else self._state.get("positions", [])
             if leg_index < 0 or leg_index >= len(positions):
                 return {"success": False, "error": "Invalid leg index"}
 
@@ -4756,16 +4767,15 @@ class StraddleManager:
             if pos.get("status") in ("COMPLETE", "CLOSED"):
                 return {"success": False, "error": f"Leg is already {pos.get('status')}"}
 
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            mode = (strat.get("execution_mode") if strat else None) or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
-            strat = self.get_strategy(pos.get("strategy_id") or self._active_strategy_id)
             pos["status"] = "OPEN"  # Allow square off attempt
             self._square_off_single_position(pos, broker, reason="MANUAL LEG EXIT")
             if strat and str(pos.get("side", "SELL")).upper() == "SELL":
                 self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Manual exit of {pos.get('symbol')}")
             self._save_state()
             self._save_strategies()
-            if pos.get("status") == "COMPLETE":
+            if pos.get("status") in ("COMPLETE", "CLOSED"):
                 return {"success": True, "position": pos}
             else:
                 err = pos.get("error_message") or pos.get("error") or "Exit order rejected by broker"
@@ -6397,15 +6407,24 @@ class StraddleManager:
             positions = strat.get("positions", [])
             pos = None
             pos_idx = None
-            if leg_id:
+            if leg_index is not None and 0 <= int(leg_index) < len(positions):
+                cand = positions[int(leg_index)]
+                if not leg_id or cand.get("id") == leg_id or cand.get("status") == "OPEN":
+                    pos = cand
+                    pos_idx = int(leg_index)
+
+            if not pos and leg_id:
                 for idx, p in enumerate(positions):
-                    if p.get("id") == leg_id:
+                    if p.get("id") == leg_id and p.get("status") == "OPEN":
                         pos = p
                         pos_idx = idx
                         break
-            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
-                pos = positions[int(leg_index)]
-                pos_idx = int(leg_index)
+                if not pos:
+                    for idx, p in enumerate(positions):
+                        if p.get("id") == leg_id:
+                            pos = p
+                            pos_idx = idx
+                            break
 
             if not pos:
                 return {"success": False, "error": f"Position not found for leg {leg_id or leg_index}"}
@@ -7182,15 +7201,26 @@ class StraddleManager:
             positions = strat.get("positions", [])
             pos = None
             pos_idx = None
-            if leg_id:
+            if leg_index is not None and 0 <= int(leg_index) < len(positions):
+                cand = positions[int(leg_index)]
+                if not leg_id or cand.get("id") == leg_id or cand.get("status") == "OPEN":
+                    pos = cand
+                    pos_idx = int(leg_index)
+
+            if not pos and leg_id:
+                # Match OPEN position first to avoid picking previously closed legs
                 for idx, p in enumerate(positions):
-                    if p.get("id") == leg_id:
+                    if p.get("id") == leg_id and p.get("status") == "OPEN":
                         pos = p
                         pos_idx = idx
                         break
-            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
-                pos = positions[int(leg_index)]
-                pos_idx = int(leg_index)
+                if not pos:
+                    for idx, p in enumerate(positions):
+                        if p.get("id") == leg_id:
+                            pos = p
+                            pos_idx = idx
+                            break
+
             if not pos:
                 return {"success": False, "error": "Position not found in strategy"}
 
@@ -7212,10 +7242,23 @@ class StraddleManager:
             elif ref_m in ("ENTRY_CANDLE_CLOSE", "ENTRY_CANDLE"):
                 ent_t = str(pos.get("entry_time") or "09:37:00")
                 ent_hh_mm = ent_t[:5]
-                c_close = self.get_minute_candle_close(pos.get("instrument_key", ""), ent_hh_mm, contract_meta=pos.get("contract"))
+                inst_k = pos.get("instrument_key") or (pos.get("contract") or {}).get("instrument_key") or (pos.get("contract") or {}).get("token") or pos.get("token") or ""
+                c_close = self.get_minute_candle_close(inst_k, ent_hh_mm, contract_meta=pos.get("contract"))
+                now_hm = now_ist_str()[:5]
                 if c_close is not None and c_close > 0:
                     ref_price = c_close
                     pos["reference_price"] = ref_price
+                    pos["entry_candle_close"] = c_close
+                    pos["reference_price_mode"] = "ENTRY_CANDLE_CLOSE"
+                    pos["reference_candle_time"] = ent_hh_mm
+                    pos["benchmark_pending"] = False
+                    pos["interim_protection_active"] = False
+                    msg_detail = f"Entry Candle Close ({ent_hh_mm} @ ₹{ref_price:.2f})"
+                elif now_hm > ent_hh_mm:
+                    # Minute candle has already closed; use fill price or LTP as fallback
+                    ref_price = float(pos.get("avg_ent_price") or pos.get("ltp") or 0.0)
+                    pos["reference_price"] = ref_price
+                    pos["entry_candle_close"] = ref_price
                     pos["reference_price_mode"] = "ENTRY_CANDLE_CLOSE"
                     pos["reference_candle_time"] = ent_hh_mm
                     pos["benchmark_pending"] = False
@@ -7235,13 +7278,15 @@ class StraddleManager:
                 bm_t = str(benchmark_time or pos.get("benchmark_time") or "09:16:00").strip()
                 hh_mm = bm_t[:5]
                 now_hm = now_ist_str()[:5]
+                inst_k = pos.get("instrument_key") or (pos.get("contract") or {}).get("instrument_key") or (pos.get("contract") or {}).get("token") or pos.get("token") or ""
 
                 # If the minute has already closed (now_hm > hh_mm):
                 if now_hm > hh_mm:
-                    c_close = self.get_minute_candle_close(pos.get("instrument_key", ""), hh_mm, contract_meta=pos.get("contract"))
+                    c_close = self.get_minute_candle_close(inst_k, hh_mm, contract_meta=pos.get("contract"))
                     if c_close is not None and c_close > 0:
                         ref_price = c_close
                         pos["reference_price"] = ref_price
+                        pos["reference_candle_close"] = ref_price
                         pos["reference_price_mode"] = "SPECIFIC_TIME"
                         pos["reference_candle_time"] = hh_mm
                         pos["benchmark_time"] = bm_t
@@ -7251,6 +7296,7 @@ class StraddleManager:
                     else:
                         ref_price = float(pos.get("ltp") or pos.get("avg_ent_price") or 0.0)
                         pos["reference_price"] = ref_price
+                        pos["reference_candle_close"] = ref_price
                         pos["reference_price_mode"] = "SPECIFIC_TIME"
                         pos["reference_candle_time"] = hh_mm
                         pos["benchmark_time"] = bm_t
@@ -7305,6 +7351,7 @@ class StraddleManager:
                 "reference_price": pos.get("reference_price"),
                 "reference_price_mode": pos.get("reference_price_mode"),
                 "reference_candle_time": pos.get("reference_candle_time"),
+                "entry_candle_close": pos.get("entry_candle_close"),
                 "target_price": pos.get("target_price"),
                 "sl_price": pos.get("sl_price"),
                 "benchmark_pending": pos.get("benchmark_pending"),
@@ -7328,15 +7375,26 @@ class StraddleManager:
             positions = strat.get("positions", [])
             pos = None
             pos_idx = None
-            if leg_id:
+            if leg_index is not None and 0 <= int(leg_index) < len(positions):
+                cand = positions[int(leg_index)]
+                if not leg_id or cand.get("id") == leg_id or cand.get("status") == "OPEN":
+                    pos = cand
+                    pos_idx = int(leg_index)
+
+            if not pos and leg_id:
+                # Prioritize OPEN leg
                 for idx, p in enumerate(positions):
-                    if p.get("id") == leg_id:
+                    if p.get("id") == leg_id and p.get("status") == "OPEN":
                         pos = p
                         pos_idx = idx
                         break
-            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
-                pos = positions[int(leg_index)]
-                pos_idx = int(leg_index)
+                if not pos:
+                    for idx, p in enumerate(positions):
+                        if p.get("id") == leg_id:
+                            pos = p
+                            pos_idx = idx
+                            break
+
             if not pos:
                 return {"success": False, "error": "Position not found in strategy"}
 
@@ -7439,10 +7497,27 @@ class StraddleManager:
                 return {"success": False, "error": f"Strategy {strategy_id} not found"}
             positions = strat.get("positions", [])
             pos = None
-            if leg_id:
-                pos = next((p for p in positions if p.get("id") == leg_id), None)
-            if not pos and leg_index is not None and 0 <= int(leg_index) < len(positions):
-                pos = positions[int(leg_index)]
+            pos_idx = None
+            if leg_index is not None and 0 <= int(leg_index) < len(positions):
+                cand = positions[int(leg_index)]
+                if not leg_id or cand.get("id") == leg_id or cand.get("status") == "OPEN":
+                    pos = cand
+                    pos_idx = int(leg_index)
+
+            if not pos and leg_id:
+                # Prioritize OPEN leg
+                for idx, p in enumerate(positions):
+                    if p.get("id") == leg_id and p.get("status") == "OPEN":
+                        pos = p
+                        pos_idx = idx
+                        break
+                if not pos:
+                    for idx, p in enumerate(positions):
+                        if p.get("id") == leg_id:
+                            pos = p
+                            pos_idx = idx
+                            break
+
             if not pos:
                 return {"success": False, "error": "Position not found in strategy"}
 
@@ -7493,15 +7568,24 @@ class StraddleManager:
             target_pos = None
             target_idx = -1
 
-            if leg_id:
+            if leg_index is not None and 0 <= int(leg_index) < len(positions):
+                cand = positions[int(leg_index)]
+                if not leg_id or cand.get("id") == leg_id or cand.get("status") == "OPEN":
+                    target_pos = cand
+                    target_idx = int(leg_index)
+
+            if target_pos is None and leg_id:
                 for idx, p in enumerate(positions):
-                    if p.get("id") == leg_id:
+                    if p.get("id") == leg_id and p.get("status") == "OPEN":
                         target_pos = p
                         target_idx = idx
                         break
-            if target_pos is None and leg_index is not None and 0 <= leg_index < len(positions):
-                target_pos = positions[leg_index]
-                target_idx = leg_index
+                if target_pos is None:
+                    for idx, p in enumerate(positions):
+                        if p.get("id") == leg_id:
+                            target_pos = p
+                            target_idx = idx
+                            break
 
             if not target_pos:
                 return {"success": False, "error": "Position not found in strategy."}
@@ -9690,31 +9774,53 @@ class StraddleManager:
                 # Buy-only basket for this underlying
                 u_req_margin = sum(u_buy_premiums)
             else:
+                # Calculate option premium credit collected across hedged spreads
+                ce_short_val = sum(s["price"] * s["qty"] for s in u_ce_shorts)
+                ce_long_val = sum(l["price"] * l["qty"] for l in u_ce_longs)
+                pe_short_val = sum(s["price"] * s["qty"] for s in u_pe_shorts)
+                pe_long_val = sum(l["price"] * l["qty"] for l in u_pe_longs)
+                
+                tot_ce_qty = sum(s["qty"] for s in u_ce_shorts)
+                tot_pe_qty = sum(s["qty"] for s in u_pe_shorts)
+                
+                ce_net_credit_pt = max(0.0, (ce_short_val - ce_long_val) / tot_ce_qty) if tot_ce_qty > 0 else 0.0
+                pe_net_credit_pt = max(0.0, (pe_short_val - pe_long_val) / tot_pe_qty) if tot_pe_qty > 0 else 0.0
+                tot_credit_pts = ce_net_credit_pt + pe_net_credit_pt
+
                 # A. Iron Condor / Iron Butterfly Component (where both CE and PE wings are hedged)
                 condor_lots = min(u_hedged_ce_lots, u_hedged_pe_lots)
                 if condor_lots > 0:
                     has_hedge_benefit = True
-                    ce_condor_risk = (u_ce_wing_risk / max(1, u_hedged_ce_lots)) * condor_lots
-                    pe_condor_risk = (u_pe_wing_risk / max(1, u_hedged_pe_lots)) * condor_lots
-                    span_condor = max(ce_condor_risk, pe_condor_risk)
-                    exp_condor = base_exp_lot * condor_lots
-                    u_req_margin += (span_condor + exp_condor)
+                    ce_wing_per_lot = u_ce_wing_risk / max(1, u_hedged_ce_lots)
+                    pe_wing_per_lot = u_pe_wing_risk / max(1, u_hedged_pe_lots)
+
+                    # Defined-risk principle (SEBI SPAN): Max Loss = Wing Width * Lot Size - Net Premium Received
+                    ce_max_loss_lot = max(100.0 * curr_lot_size, ce_wing_per_lot - (tot_credit_pts * curr_lot_size))
+                    pe_max_loss_lot = max(100.0 * curr_lot_size, pe_wing_per_lot - (tot_credit_pts * curr_lot_size))
+                    span_condor = max(ce_max_loss_lot, pe_max_loss_lot) * condor_lots
+
+                    # SEBI Extreme Loss Margin (ELM) for hedged spread is 2% of strike spread or max 10% of base exposure
+                    exp_condor = min(base_exp_lot * 0.15, max(1500.0, span_condor * 0.05)) * condor_lots
+                    # Exchange spread floor approx ₹25,000 per lot
+                    u_req_margin += max(25000.0 * condor_lots, span_condor + exp_condor)
 
                 # B. Excess Hedged CE (Bear Call Credit Spread)
                 excess_ce_hedged_lots = u_hedged_ce_lots - condor_lots
                 if excess_ce_hedged_lots > 0:
                     has_hedge_benefit = True
-                    ce_excess_risk = (u_ce_wing_risk / max(1, u_hedged_ce_lots)) * excess_ce_hedged_lots
-                    exp_spread = base_exp_lot * 0.5 * excess_ce_hedged_lots
-                    u_req_margin += (ce_excess_risk + exp_spread)
+                    ce_wing_per_lot = u_ce_wing_risk / max(1, u_hedged_ce_lots)
+                    ce_net_loss_lot = max(100.0 * curr_lot_size, ce_wing_per_lot - (ce_net_credit_pt * curr_lot_size))
+                    exp_spread = min(base_exp_lot * 0.15, max(1500.0, ce_net_loss_lot * 0.05))
+                    u_req_margin += max(25000.0, ce_net_loss_lot + exp_spread) * excess_ce_hedged_lots
 
                 # C. Excess Hedged PE (Bull Put Credit Spread)
                 excess_pe_hedged_lots = u_hedged_pe_lots - condor_lots
                 if excess_pe_hedged_lots > 0:
                     has_hedge_benefit = True
-                    pe_excess_risk = (u_pe_wing_risk / max(1, u_hedged_pe_lots)) * excess_pe_hedged_lots
-                    exp_spread = base_exp_lot * 0.5 * excess_pe_hedged_lots
-                    u_req_margin += (pe_excess_risk + exp_spread)
+                    pe_wing_per_lot = u_pe_wing_risk / max(1, u_hedged_pe_lots)
+                    pe_net_loss_lot = max(100.0 * curr_lot_size, pe_wing_per_lot - (pe_net_credit_pt * curr_lot_size))
+                    exp_spread = min(base_exp_lot * 0.15, max(1500.0, pe_net_loss_lot * 0.05))
+                    u_req_margin += max(25000.0, pe_net_loss_lot + exp_spread) * excess_pe_hedged_lots
 
                 # D. Unhedged Short Legs (Straddles/Strangles or Naked Shorts)
                 unhedged_straddle_lots = min(u_unhedged_ce_lots, u_unhedged_pe_lots)

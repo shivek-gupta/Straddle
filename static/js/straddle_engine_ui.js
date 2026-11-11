@@ -69,6 +69,14 @@ function showStraddleToast(message, type = 'info', duration = 2500) {
 }
 window.showStraddleToast = showStraddleToast;
 
+function formatSymbolColorCoded(symStr) {
+    if (!symStr || typeof symStr !== "string") return symStr || "";
+    return symStr
+        .replace(/\b(CE)\b/g, '<span style="color:#10b981; font-weight:900; background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.45); border-radius:3px; padding:1px 5px; display:inline-block; font-size:0.92em; letter-spacing:0.5px;">CE</span>')
+        .replace(/\b(PE)\b/g, '<span style="color:#f87171; font-weight:900; background:rgba(239,68,68,0.18); border:1px solid rgba(239,68,68,0.45); border-radius:3px; padding:1px 5px; display:inline-block; font-size:0.92em; letter-spacing:0.5px;">PE</span>');
+}
+window.formatSymbolColorCoded = formatSymbolColorCoded;
+
 function showStraddleRejectedToast(opts = {}) {
     let container = document.getElementById("straddleToastContainer");
     if (!container) {
@@ -814,7 +822,7 @@ function renderStraddleOpenPositionsTable() {
                 <td><span class="straddle-side-badge ${sideBadgeClass}">${side}</span></td>
                 <td>
                     <div class="straddle-sym-card ${symAccentClass}">
-                        <div class="straddle-sym-title">${p.symbol || p.trading_symbol}</div>
+                        <div class="straddle-sym-title">${formatSymbolColorCoded(p.symbol || p.trading_symbol)}</div>
                         <div class="straddle-sym-sub">${p.instrument_key || ''}</div>
                     </div>
                 </td>
@@ -3703,6 +3711,16 @@ async function changeLegReferenceBasis(stratId, legId, legIndex, choice) {
         const res = await resp.json();
         if (res.success) {
             showStraddleToast(res.message || "Reference price updated successfully!", "success", 3000);
+            const refBadge = document.getElementById(`live_ref_badge_${legIndex}`);
+            if (refBadge && res.reference_price) {
+                const rp = Number(res.reference_price);
+                const modeT = res.reference_candle_time ? `${res.reference_candle_time} Close` : (res.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : "Ref");
+                refBadge.innerHTML = `<span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;">🎯 ${modeT}: ₹${rp.toFixed(2)}</span>`;
+            }
+            const tgtSub = document.getElementById(`live_tgt_sub_${legIndex}`);
+            if (tgtSub && res.target_price) tgtSub.textContent = `TGT: ₹${Number(res.target_price).toFixed(2)}`;
+            const slSub = document.getElementById(`live_sl_sub_${legIndex}`);
+            if (slSub && res.sl_price) slSub.textContent = `SL: ₹${Number(res.sl_price).toFixed(2)}`;
             await fetchStraddleState();
             await loadStraddleOpenPositions();
         } else {
@@ -4321,9 +4339,38 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             } else if (!isFocusedInRow) {
                 if (btnSave) btnSave.style.display = "none";
                 const tgtSub = document.getElementById(`live_tgt_sub_${idx}`);
-                if (tgtSub && pos.target_price) tgtSub.textContent = `TGT: ₹${Number(pos.target_price).toFixed(2)}`;
+                if (tgtSub && pos.target_price) {
+                    const tv = pos.target_val || pos.target_value;
+                    tgtSub.textContent = tv ? `TGT: ${tv}% ₹${Number(pos.target_price).toFixed(2)}` : `TGT: ₹${Number(pos.target_price).toFixed(2)}`;
+                }
                 const slSub = document.getElementById(`live_sl_sub_${idx}`);
-                if (slSub && pos.sl_price) slSub.textContent = `SL: ₹${Number(pos.sl_price).toFixed(2)}`;
+                if (slSub && pos.sl_price) {
+                    const sv = pos.sl_val || pos.sl_value;
+                    slSub.textContent = sv ? `SL: -${sv}% ₹${Number(pos.sl_price).toFixed(2)}` : `SL: ₹${Number(pos.sl_price).toFixed(2)}`;
+                }
+                // Persistent Reference Price Badge update in-place so it never disappears on tick/refresh
+                const refBadge = document.getElementById(`live_ref_badge_${idx}`);
+                if (refBadge) {
+                    const curRef = Number(pos.reference_price || 0);
+                    const curAvg = Number(pos.avg_ent_price || 0);
+                    const hasDiff = curRef > 0 && Math.abs(curRef - curAvg) > 0.01;
+                    if (pos.benchmark_pending) {
+                        const pendT = (pos.benchmark_time || pos.reference_candle_time || '09:16').substring(0, 5);
+                        refBadge.innerHTML = `<span style="font-size:9px; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:1px 4px; font-weight:800; display:inline-block;" title="Interim protection active. Will lock to exact ${pendT} 1-min candle close price when complete.">⏳ Ref @ ${pendT} Close</span>`;
+                    } else if (curRef > 0 && (hasDiff || pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" || pos.reference_price_mode === "SPECIFIC_TIME" || pos.reference_price_mode === "CURRENT_LTP" || pos.reference_price_mode === "CUSTOM")) {
+                        let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : (pos.reference_price_mode === "CURRENT_LTP" ? "LTP Ref" : (pos.reference_price_mode === "CUSTOM" ? "Custom Ref" : "Ref"))));
+                        refBadge.innerHTML = `<span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target and Stoploss calculated from ${modeTag} Price ₹${curRef.toFixed(2)} (Entry fill was ₹${curAvg.toFixed(2)})">🎯 ${modeTag}: ₹${curRef.toFixed(2)}</span>`;
+                    } else {
+                        refBadge.innerHTML = '';
+                    }
+                }
+                const refSel = document.getElementById(`live_ref_select_${idx}`);
+                if (refSel && !isFocusedInRow) {
+                    const curRef = Number(pos.reference_price || 0);
+                    const curRefLabel = curRef > 0 ? `₹${curRef.toFixed(1)}` : 'Avg';
+                    const firstOpt = refSel.querySelector("option[disabled]");
+                    if (firstOpt) firstOpt.textContent = `Ref: ${curRefLabel} ▾`;
+                }
             }
         });
     } else {
@@ -4449,7 +4496,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 if (canAdjustStrikeAndLots) {
                     symHtml = `
                         <div class="straddle-sym-card ${symAccentClass}">
-                            <div class="straddle-sym-title">${sym}</div>
+                            <div class="straddle-sym-title">${formatSymbolColorCoded(sym)}</div>
                             <div class="straddle-sym-sub">${expiryText}</div>
                             ${hedgeTagHtml}
                             <div style="display:flex; align-items:center; gap:4px; margin-top:4px;">
@@ -4467,7 +4514,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 } else {
                     symHtml = `
                         <div class="straddle-sym-card ${symAccentClass}">
-                            <div class="straddle-sym-title">${sym}</div>
+                            <div class="straddle-sym-title">${formatSymbolColorCoded(sym)}</div>
                             <div class="straddle-sym-sub">${expiryText}</div>
                             ${hedgeTagHtml}
                         </div>
@@ -4487,29 +4534,33 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 if (pos.benchmark_pending) {
                     const pendTime = (pos.benchmark_time || pos.reference_candle_time || '09:16').substring(0, 5);
                     refPriceBadgeHtml = `
-                        <div style="margin-top:2px;">
+                        <div id="live_ref_badge_${idx}" style="margin-top:2px;">
                             <span style="font-size:9px; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:1px 4px; font-weight:800; display:inline-block;" title="Interim protection active. Will lock to exact ${pendTime} 1-min candle close price when complete.">⏳ Ref @ ${pendTime} Close</span>
                         </div>
                     `;
-                } else if (hasDiffRef || pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" || pos.reference_price_mode === "SPECIFIC_TIME") {
-                    let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : "Ref"));
+                } else if (curRefPrice > 0 && (hasDiffRef || pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" || pos.reference_price_mode === "SPECIFIC_TIME" || pos.reference_price_mode === "CURRENT_LTP" || pos.reference_price_mode === "CUSTOM")) {
+                    let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : (pos.reference_price_mode === "CURRENT_LTP" ? "LTP Ref" : (pos.reference_price_mode === "CUSTOM" ? "Custom Ref" : "Ref"))));
                     refPriceBadgeHtml = `
-                        <div style="margin-top:2px;">
+                        <div id="live_ref_badge_${idx}" style="margin-top:2px;">
                             <span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target and Stoploss calculated from ${modeTag} Price ₹${curRefPrice.toFixed(2)} (Entry fill was ₹${curAvgPrice.toFixed(2)})">🎯 ${modeTag}: ₹${curRefPrice.toFixed(2)}</span>
                         </div>
                     `;
+                } else {
+                    refPriceBadgeHtml = `<div id="live_ref_badge_${idx}" style="margin-top:2px;"></div>`;
                 }
 
                 let refBasisSelectHtml = "";
                 if (isOpen) {
                     const curRefLabel = curRefPrice > 0 ? `₹${curRefPrice.toFixed(1)}` : 'Avg';
                     const entryMinStr = (pos.entry_time || '09:37:00').substring(0, 5);
+                    const cCloseVal = pos.entry_candle_close || (pos.reference_price_mode === 'ENTRY_CANDLE_CLOSE' && pos.reference_price ? pos.reference_price : null);
+                    const cCloseStr = (cCloseVal && Number(cCloseVal) > 0) ? ` - ₹${Number(cCloseVal).toFixed(2)}` : '';
                     refBasisSelectHtml = `
                         <div style="margin-top:3px;">
-                            <select class="straddle-select" style="padding:1px 2px; font-size:8.5px; height:18px; font-weight:700; color:#38bdf8; background:#0b1120; border-color:#0284c7; border-radius:3px; cursor:pointer;" onchange="changeLegReferenceBasis('${stratId}', '${pos.id || ''}', ${idx}, this.value)" title="Choose basis for Target & Stoploss: Entry Fill Price, Entry Candle Close, Specific Minute Candle (e.g. 10:20), Current LTP, or Custom Price">
+                            <select id="live_ref_select_${idx}" class="straddle-select" style="padding:1px 2px; font-size:8.5px; height:18px; font-weight:700; color:#38bdf8; background:#0b1120; border-color:#0284c7; border-radius:3px; cursor:pointer;" onchange="changeLegReferenceBasis('${stratId}', '${pos.id || ''}', ${idx}, this.value)" title="Choose basis for Target & Stoploss: Entry Fill Price, Entry Candle Close, Specific Minute Candle (e.g. 10:20), Current LTP, or Custom Price">
                                 <option value="" disabled selected>Ref: ${curRefLabel} ▾</option>
                                 <option value="AVERAGE_ENTRY">Avg Fill (₹${avgEntPrice})</option>
-                                <option value="ENTRY_CANDLE_CLOSE">Entry Candle Close (${entryMinStr})</option>
+                                <option value="ENTRY_CANDLE_CLOSE">Entry Candle Close (${entryMinStr}${cCloseStr})</option>
                                 <option value="SPECIFIC_TIME">Minute Candle Time (HH:MM)...</option>
                                 <option value="CURRENT_LTP">Current LTP (₹${Number(pos.ltp || 0).toFixed(1)})</option>
                                 <option value="CUSTOM">Custom Price...</option>
@@ -10602,7 +10653,7 @@ function renderBasketOrdersTable() {
                 <!-- Scrip & Expiry (Merged for compact layout, no horizontal scrollbar) -->
                 <td style="padding:6px 8px;">
                     <div style="display:flex; align-items:center; gap:6px;">
-                        <span class="basket-row-sym" style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${o.symbol}</span>
+                        <span class="basket-row-sym" style="font-weight:800; color:#f8fafc; font-size:12.5px; font-family:var(--font-mono);">${formatSymbolColorCoded(o.symbol)}</span>
                         <span title="Duplicate order" style="cursor:pointer; color:#64748b; font-size:11px;" onclick="duplicateBasketOrder(${idx})">📋</span>
                         <span title="Remove from basket" style="cursor:pointer; color:#ef4444; font-size:11px;" onclick="removeBasketOrder(${idx})">🗑️</span>
                     </div>
@@ -11033,9 +11084,9 @@ async function updateBasketMarginCalculation() {
             });
             const data = await resp.json();
             if (data.success) {
-                if (reqEl) reqEl.textContent = Number(data.required_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
-                if (availEl) availEl.textContent = Number(data.available_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
-                if (chargesEl) chargesEl.textContent = Number(data.total_charges || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+                if (reqEl) reqEl.textContent = Number(data.required_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                if (availEl) availEl.textContent = Number(data.available_margin || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                if (chargesEl) chargesEl.textContent = Number(data.total_charges || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
                 // Populate Angel One exact charges breakdown popover
                 if (data.charges_breakdown) {
@@ -13925,16 +13976,16 @@ function renderExecutionBenchmarkData(bmk) {
     if (elGrade) {
         const g = bmk.health_grade || "GOOD";
         if (g === "ULTRA_FAST") {
-            elGrade.textContent = "⚡ ULTRA-FAST (<200ms)";
+            elGrade.textContent = "⚡ ULTRA-FAST (<50ms)";
             elGrade.style.color = "#38bdf8";
         } else if (g === "GOOD") {
-            elGrade.textContent = "🟢 GOOD (200-500ms)";
+            elGrade.textContent = "🟢 GOOD (50-100ms)";
             elGrade.style.color = "#10b981";
         } else if (g === "MODERATE") {
-            elGrade.textContent = "🟡 MODERATE (500-1000ms)";
+            elGrade.textContent = "🟡 MODERATE (100-200ms)";
             elGrade.style.color = "#fbbf24";
         } else {
-            elGrade.textContent = "🔴 HIGH LATENCY (>1000ms)";
+            elGrade.textContent = "🔴 HIGH LATENCY (>200ms)";
             elGrade.style.color = "#f43f5e";
         }
     }
@@ -13958,7 +14009,7 @@ function renderExecutionBenchmarkData(bmk) {
         html += `
             <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
                 <td style="padding:6px 4px; color:#94a3b8;">${o.dispatch_time || '-'}</td>
-                <td style="padding:6px 4px; font-weight:700; color:#f8fafc;">${o.symbol}</td>
+                <td style="padding:6px 4px; font-weight:700; color:#f8fafc;">${formatSymbolColorCoded(o.symbol)}</td>
                 <td style="padding:6px 4px;"><span style="color:${sideColor}; font-weight:800;">${o.side}</span></td>
                 <td style="padding:6px 4px; color:#cbd5e1;">${o.action || 'ENTRY'}</td>
                 <td style="padding:6px 4px; text-align:right; color:#94a3b8;">₹${Number(o.paper_price || 0).toFixed(2)}</td>

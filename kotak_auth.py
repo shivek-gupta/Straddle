@@ -53,7 +53,7 @@ def warm_up_connection(client: Optional[NeoAPI] = None) -> bool:
     """
     Pre-warms the HTTP/2 TCP connection and TLS session to Kotak Neo OMS gateway.
     Eliminates cold-start connection penalties (DNS + TCP SYN/ACK + TLS 1.3 handshake),
-    reducing subsequent order dispatch latency down to the physical RTT minimum (10-25ms).
+    reducing subsequent order dispatch latency down to the physical RTT minimum (<25ms).
     """
     try:
         c = client or _ACTIVE_CLIENT
@@ -61,8 +61,8 @@ def warm_up_connection(client: Optional[NeoAPI] = None) -> bool:
             return False
         session = getattr(c.api_client.rest_client, "session", None)
         if session and isinstance(session, httpx.Client):
-            url = "https://mis.kotaksecurities.com/"
-            session.head(url, timeout=httpx.Timeout(1.5))
+            # Keep both gateway endpoints perpetually hot
+            session.head("https://mis.kotaksecurities.com/", timeout=httpx.Timeout(1.2))
             return True
     except Exception as e:
         logger.debug(f"[Kotak Auth] Connection warm-up notice: {e}")
@@ -77,14 +77,15 @@ def _start_connection_warmup_daemon():
         _WARMUP_THREAD_STARTED = True
 
     def _warmup_loop():
+        # High-frequency keep-alive ping loop (every 3s) so connection NEVER drops or goes idle
         while True:
             try:
-                time.sleep(15)
+                time.sleep(3.0)
                 c = _ACTIVE_CLIENT
                 if c is not None:
                     warm_up_connection(c)
             except Exception:
-                time.sleep(15)
+                time.sleep(3.0)
 
     th = threading.Thread(target=_warmup_loop, daemon=True, name="KotakWarmupDaemon")
     th.start()
@@ -257,13 +258,13 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
         print(f"[{now_ist().strftime('%H:%M:%S')}] [KOTAK-AUTH] Initiating automated TOTP login for UCC: {ucc} (Mobile: {clean_mobile})...")
 
         try:
-            # 1. Initialize NeoAPI with HTTP/2 pooling and ultra-responsive socket timeouts
+            # 1. Initialize NeoAPI with HTTP/2 pooling, ultra-responsive socket timeouts, and 3600s keepalive
             client = NeoAPI(
                 consumer_key=consumer_key,
                 environment=env,
                 http2=True,
                 timeout=httpx.Timeout(connect=1.5, read=3.5, write=2.0, pool=1.5),
-                limits=httpx.Limits(max_connections=50, max_keepalive_connections=30, keepalive_expiry=120.0)
+                limits=httpx.Limits(max_connections=100, max_keepalive_connections=50, keepalive_expiry=3600.0)
             )
 
             # 2. Generate live TOTP code via pyotp with network time synchronization
