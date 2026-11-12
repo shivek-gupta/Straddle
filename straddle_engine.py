@@ -4961,9 +4961,16 @@ class StraddleManager:
             if strat.get("_entry_in_progress"):
                 return
             strat_positions = strat.get("positions", [])
-            if strat_positions:
-                open_legs = [p for p in strat_positions if p.get("status") == "OPEN"]
-                if open_legs:
+            legs_cfg = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
+            if strat_positions and legs_cfg:
+                open_main_legs = [
+                    p for p in strat_positions 
+                    if p.get("status") in ("OPEN", "COMPLETE") 
+                    and not p.get("is_associated_hedge") 
+                    and not str(p.get("id", "")).startswith("hedge_")
+                ]
+                if len(open_main_legs) >= len(legs_cfg):
+                    strat["_entry_in_progress"] = False
                     return
 
             chk = self.get_strategy_schedule_status(strat)
@@ -5020,8 +5027,31 @@ class StraddleManager:
             buy_legs = []
             sell_legs = []
             all_leg_keys = []
+            new_positions = []
 
             for leg in legs_cfg:
+                # Check if this main leg already has an OPEN or COMPLETE position in strat_positions
+                already_open_main = next(
+                    (p for p in strat_positions 
+                     if p.get("status") in ("OPEN", "COMPLETE") 
+                     and not p.get("is_associated_hedge") 
+                     and (p.get("id") == leg.get("id") or p.get("leg_id") == leg.get("id"))),
+                    None
+                )
+                if already_open_main:
+                    if already_open_main not in new_positions:
+                        new_positions.append(already_open_main)
+                    # Also keep its active hedge if present
+                    associated_h = next(
+                        (p for p in strat_positions 
+                         if p.get("status") in ("OPEN", "COMPLETE") 
+                         and (p.get("parent_leg_id") == leg.get("id") or (p.get("is_associated_hedge") and p.get("hedge_parent_type") == leg.get("option_type")))),
+                        None
+                    )
+                    if associated_h and associated_h not in new_positions:
+                        new_positions.append(associated_h)
+                    continue
+
                 contract = self.resolve_strike_and_contract(
                     underlying=und,
                     strike_selection=leg.get("strike_selection", "ATM"),
@@ -5044,77 +5074,92 @@ class StraddleManager:
                     is_hedge_enabled = True if strat_dyn_hedge else bool(h_cfg.get("enabled"))
 
                     if is_hedge_enabled:
-                        init_otm = int(h_cfg.get("initial_otm") or 20)
-                        h_opt_type = leg.get("option_type", "CE")
-                        short_strike = float(contract.get("strike_price", 0.0))
-                        short_expiry_ms = contract.get("expiry_ms") or contract.get("expiry") or leg.get("custom_expiry_ms")
-
-                        h_contract = self._resolve_exact_hedge_contract(
-                            underlying=und,
-                            short_strike=short_strike,
-                            init_otm=init_otm,
-                            option_type=h_opt_type,
-                            expiry_type=leg.get("expiry", "Weekly"),
-                            custom_expiry_ms=short_expiry_ms,
+                        # Check if associated hedge is ALREADY open in strat_positions!
+                        existing_open_hedge = next(
+                            (p for p in strat_positions 
+                             if p.get("status") in ("OPEN", "COMPLETE") 
+                             and (p.get("parent_leg_id") == leg.get("id") or (p.get("is_associated_hedge") and p.get("hedge_parent_type") == leg.get("option_type")))),
+                            None
                         )
+                        if existing_open_hedge:
+                            leg["associated_hedge_id"] = existing_open_hedge.get("id")
+                            leg["has_associated_hedge"] = True
+                            if existing_open_hedge not in new_positions:
+                                new_positions.append(existing_open_hedge)
+                            self._log_event(
+                                f"[{strat.get('name')}] Associated Hedge already OPEN for {leg.get('id')} ({existing_open_hedge.get('symbol')}). Re-using existing hedge."
+                            )
+                        else:
+                            init_otm = int(h_cfg.get("initial_otm") or 20)
+                            h_opt_type = leg.get("option_type", "CE")
+                            short_strike = float(contract.get("strike_price", 0.0))
+                            short_expiry_ms = contract.get("expiry_ms") or contract.get("expiry") or leg.get("custom_expiry_ms")
 
-                        if not h_contract:
-                            # Secondary fallback: try 10 OTM
                             h_contract = self._resolve_exact_hedge_contract(
                                 underlying=und,
                                 short_strike=short_strike,
-                                init_otm=10,
+                                init_otm=init_otm,
                                 option_type=h_opt_type,
                                 expiry_type=leg.get("expiry", "Weekly"),
                                 custom_expiry_ms=short_expiry_ms,
                             )
 
-                        if h_contract:
-                            all_leg_keys.append(h_contract["instrument_key"])
-                            h_leg_cfg = {
-                                "id": f"hedge_{leg.get('id', 'leg')}",
-                                "side": "Buy",
-                                "product": leg.get("product", "NRML"),
-                                "strike_selection": f"OTM {init_otm}",
-                                "option_type": h_opt_type,
-                                "lots": leg.get("lots", 1),
-                                "target_type": "None",
-                                "target_value": 0.0,
-                                "target_re_execute_count": 0,
-                                "sl_type": "None",
-                                "sl_value": 0.0,
-                                "sl_re_execute_count": 0,
-                                "tsl_type": "None",
-                                "action": "Square off leg",
-                                "underlying": und,
-                                "expiry": leg.get("expiry", "Weekly"),
-                                "is_associated_hedge": True,
-                                "parent_leg_id": leg.get("id"),
-                                "hedge_parent_type": h_opt_type,
-                            }
-                            buy_legs.append({"cfg": h_leg_cfg, "contract": h_contract})
-                            leg["associated_hedge_id"] = f"hedge_{leg.get('id', 'leg')}"
-                            leg["has_associated_hedge"] = True
-                            self._log_event(
-                                f"[{strat.get('name')}] Associated Hedge configured for {leg.get('id')} ({h_opt_type}): Buying OTM {init_otm} ({h_contract['trading_symbol']}) first for SPAN margin reduction."
-                            )
-                        else:
-                            # INVIOLABLE SAFETY GUARD: If dynamic hedge is enabled but contract resolution fails,
-                            # STRICTLY ABORT ENTRY! Never punch naked sell legs which cause RMS Margin Exceeds.
-                            err_msg = f"Dynamic hedge contract could not be resolved for {short_strike} {h_opt_type}. Naked sell blocked to protect margin."
-                            self._log_event(f"[{strat.get('name')}] ERROR: {err_msg}", level="ERROR")
-                            strat["entry_error"] = err_msg
-                            strat["status"] = "ENTRY_FAILED"
-                            strat["_entry_in_progress"] = False
-                            self._save_strategies()
-                            self._save_state()
-                            return
+                            if not h_contract:
+                                # Secondary fallback: try 10 OTM
+                                h_contract = self._resolve_exact_hedge_contract(
+                                    underlying=und,
+                                    short_strike=short_strike,
+                                    init_otm=10,
+                                    option_type=h_opt_type,
+                                    expiry_type=leg.get("expiry", "Weekly"),
+                                    custom_expiry_ms=short_expiry_ms,
+                                )
+
+                            if h_contract:
+                                all_leg_keys.append(h_contract["instrument_key"])
+                                h_leg_cfg = {
+                                    "id": f"hedge_{leg.get('id', 'leg')}",
+                                    "side": "Buy",
+                                    "product": leg.get("product", "NRML"),
+                                    "strike_selection": f"OTM {init_otm}",
+                                    "option_type": h_opt_type,
+                                    "lots": leg.get("lots", 1),
+                                    "target_type": "None",
+                                    "target_value": 0.0,
+                                    "target_re_execute_count": 0,
+                                    "sl_type": "None",
+                                    "sl_value": 0.0,
+                                    "sl_re_execute_count": 0,
+                                    "tsl_type": "None",
+                                    "action": "Square off leg",
+                                    "underlying": und,
+                                    "expiry": leg.get("expiry", "Weekly"),
+                                    "is_associated_hedge": True,
+                                    "parent_leg_id": leg.get("id"),
+                                    "hedge_parent_type": h_opt_type,
+                                }
+                                buy_legs.append({"cfg": h_leg_cfg, "contract": h_contract})
+                                leg["associated_hedge_id"] = f"hedge_{leg.get('id', 'leg')}"
+                                leg["has_associated_hedge"] = True
+                                self._log_event(
+                                    f"[{strat.get('name')}] Associated Hedge configured for {leg.get('id')} ({h_opt_type}): Buying OTM {init_otm} ({h_contract['trading_symbol']}) first for SPAN margin reduction."
+                                )
+                            else:
+                                # INVIOLABLE SAFETY GUARD: If dynamic hedge is enabled but contract resolution fails,
+                                # STRICTLY ABORT ENTRY! Never punch naked sell legs which cause RMS Margin Exceeds.
+                                err_msg = f"Dynamic hedge contract could not be resolved for {short_strike} {h_opt_type}. Naked sell blocked to protect margin."
+                                self._log_event(f"[{strat.get('name')}] ERROR: {err_msg}", level="ERROR")
+                                strat["entry_error"] = err_msg
+                                strat["status"] = "ENTRY_FAILED"
+                                strat["_entry_in_progress"] = False
+                                self._save_strategies()
+                                self._save_state()
+                                return
                     sell_legs.append({"cfg": leg, "contract": contract})
 
             # Batch 2: Pre-fetch quotes for all legs in a single high-speed call
             cached_prices, cached_quotes = self._fetch_live_quotes(all_leg_keys) if all_leg_keys else ({}, {})
 
-            new_positions = []
             strat["entry_error"] = "-"
 
             # Helper for single leg execution
@@ -5157,6 +5202,27 @@ class StraddleManager:
                     strat["entry_error"] = f"Hedge Buy Order Failed: {err_msg}"
                     strat["status"] = "ENTRY_FAILED"
                     strat["enabled"] = False
+                    # Preserve unplaced sell legs as ERROR so they appear in UI and can be retried cleanly!
+                    for s_item in sell_legs:
+                        s_cfg = s_item["cfg"]
+                        s_contract = s_item["contract"]
+                        if not any(p.get("id") == s_cfg.get("id") and not p.get("is_associated_hedge") for p in new_positions):
+                            new_positions.append({
+                                "id": s_cfg.get("id"),
+                                "symbol": s_contract.get("trading_symbol"),
+                                "instrument_key": s_contract.get("instrument_key"),
+                                "side": s_cfg.get("side", "Sell").upper(),
+                                "product": s_cfg.get("product", "NRML"),
+                                "lots": int(s_cfg.get("lots", 1)),
+                                "strike_price": float(s_contract.get("strike_price", 0.0)),
+                                "option_type": s_cfg.get("option_type", "CE"),
+                                "status": "ERROR",
+                                "error": f"Sell leg held: prerequisite hedge order failed ({err_msg})",
+                                "error_message": f"Prerequisite hedge failed ({err_msg})",
+                                "action": s_cfg.get("action", "Square off leg"),
+                                "underlying": und,
+                                "expiry": s_cfg.get("expiry", "Weekly"),
+                            })
                     strat["positions"] = new_positions
                     self._log_event(f"[{strat.get('name')}] Cancelled Sell entry: Buy hedge order failed ({err_msg})", level="ERROR")
                     self._save_strategies()
@@ -5401,8 +5467,17 @@ class StraddleManager:
         if is_buy_hedge:
             # Always execute hedges as aggressive Marketable Limit for zero-delay fill & 100% Kotak Neo acceptance
             effective_order_type = "LIMIT"
-            marketable_buf = max(ltp * 0.50, 2.50, 4.0 - ltp if ltp < 4.0 else 0.50)
-            limit_price = round_to_tick(ltp + marketable_buf, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+            if ltp <= 0.0:
+                limit_price = 5.0
+            elif ltp < 1.0:
+                # Sub-rupee options: buffer of 0.35 to 0.50 max so it matches Ask without breaching exchange circuit limits
+                limit_price = round_to_tick(ltp + max(0.35, ltp * 0.50), symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+            elif ltp < 5.0:
+                # Cheap options (1 to 5 rs): buffer of max(1.50, ltp * 0.35)
+                limit_price = round_to_tick(ltp + max(1.50, ltp * 0.35), symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+            else:
+                # Normal options: buffer of max(2.50, ltp * 0.25)
+                limit_price = round_to_tick(ltp + max(2.50, ltp * 0.25), symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
         else:
             effective_order_type = "LIMIT" if "Limit" in order_type_cfg else "MARKET"
             if effective_order_type == "LIMIT":
@@ -5519,6 +5594,11 @@ class StraddleManager:
                 if actual_traded_price > 0:
                     order_res["price"] = actual_traded_price
                     order_res["status"] = "COMPLETE"
+            elif fill_res.get("status") in ("REJECTED", "CANCELLED") or (fill_res.get("error") and "timeout" not in str(fill_res.get("error")).lower()):
+                rej_err = fill_res.get("error") or f"Order {fill_res.get('status', 'rejected')}"
+                order_res["success"] = False
+                order_res["status"] = fill_res.get("status", "REJECTED").upper()
+                order_res["error"] = f"[BROKER REJECTED] {rej_err}"
             elif is_buy_hedge:
                 # INVIOLABLE HEDGE PROTECTION:
                 # If a BUY hedge order rests unfilled on the book, cancel it immediately so short entries
@@ -6189,6 +6269,35 @@ class StraddleManager:
                             parent_cfg["has_associated_hedge"] = True
                         retried_success.append(f"{new_h_pos.get('symbol')} (Hedge)")
                         self._log_event(f"[{strat.get('name')}] Hedge order successfully placed: {new_h_pos.get('symbol')}", level="SUCCESS")
+
+                        # INVIOLABLE STRATEGY COMPLETION:
+                        # Prerequisite hedge is now active. Immediately check and place the parent short leg!
+                        if parent_cfg:
+                            p_pos_idx = next(
+                                (i for i, p in enumerate(positions) 
+                                 if not p.get("is_associated_hedge") 
+                                 and (p.get("id") == parent_cfg.get("id") or p.get("symbol") == p_contract.get("trading_symbol"))),
+                                None
+                            )
+                            if p_pos_idx is None or positions[p_pos_idx].get("status") != "OPEN":
+                                self._log_event(
+                                    f"[{strat.get('name')}] Hedge secured! Placing parent short leg '{p_contract['trading_symbol']}'...",
+                                    level="INFO"
+                                )
+                                parent_leg_pos = self._place_leg_entry_order(
+                                    parent_cfg, p_contract, mult, broker, adv,
+                                    strategy=strat, entry_reason="Parent Short Entry (Hedge Secured)"
+                                )
+                                if parent_leg_pos:
+                                    if p_pos_idx is not None:
+                                        positions[p_pos_idx] = parent_leg_pos
+                                    else:
+                                        positions.append(parent_leg_pos)
+                                    if parent_leg_pos.get("status") == "OPEN":
+                                        retried_success.append(f"{parent_leg_pos.get('symbol')} (Short)")
+                                        self._log_event(f"[{strat.get('name')}] Parent short leg placed successfully: {parent_leg_pos.get('symbol')}", level="SUCCESS")
+                                    else:
+                                        retried_failed.append((parent_leg_pos.get("symbol", "Short Leg"), parent_leg_pos.get("error", "Short entry failed")))
                     else:
                         err_text = new_h_pos.get("error") if new_h_pos else "Order placement failed"
                         if new_h_pos:
@@ -6335,6 +6444,55 @@ class StraddleManager:
                         else:
                             positions.append(new_pos)
                         retried_failed.append((new_pos.get("symbol", "Leg"), new_pos.get("error", "Order rejected")))
+
+            # FINAL SWEEP: Check if any configured leg from strat["legs"] is missing from positions!
+            for l_cfg in legs_cfg:
+                l_id = l_cfg.get("id")
+                has_active = any(
+                    (p.get("id") == l_id or p.get("leg_id") == l_id) 
+                    and not p.get("is_associated_hedge") 
+                    and p.get("status") in ("OPEN", "COMPLETE")
+                    for p in positions
+                )
+                if not has_active:
+                    opt_t = l_cfg.get("option_type", "CE")
+                    # Check if this leg requires a hedge
+                    h_cfg = l_cfg.get("associated_hedge") or {}
+                    is_h_on = bool(h_cfg.get("enabled")) or bool(strat.get("dynamic_hedging"))
+                    h_open = next(
+                        (p for p in positions 
+                         if p.get("status") == "OPEN" 
+                         and (p.get("parent_leg_id") == l_id or (p.get("is_associated_hedge") and p.get("hedge_parent_type") == opt_t))),
+                        None
+                    )
+                    if is_h_on and not h_open:
+                        # Prerequisite hedge is not open yet; cannot safely punch naked short
+                        continue
+
+                    c_missing = self.resolve_strike_and_contract(
+                        underlying=und,
+                        strike_selection=l_cfg.get("strike_selection", "ATM"),
+                        option_type=opt_t,
+                        expiry_type=l_cfg.get("expiry", "Weekly"),
+                        multiple_strike_selection=l_cfg.get("multiple_strike_selection", "none")
+                    )
+                    if c_missing:
+                        self._log_event(f"[{strat.get('name')}] Placing missing leg '{c_missing['trading_symbol']}' ({l_cfg.get('side', 'Sell')})...", level="INFO")
+                        m_pos = self._place_leg_entry_order(
+                            l_cfg, c_missing, mult, broker, adv,
+                            strategy=strat, entry_reason=f"Missing Leg Entry ({l_cfg.get('side', 'Sell')})"
+                        )
+                        if m_pos:
+                            m_idx = next((i for i, p in enumerate(positions) if p.get("id") == l_id and not p.get("is_associated_hedge")), None)
+                            if m_idx is not None:
+                                positions[m_idx] = m_pos
+                            else:
+                                positions.append(m_pos)
+                            if m_pos.get("status") == "OPEN":
+                                retried_success.append(f"{m_pos.get('symbol')} ({l_cfg.get('side', 'Sell')})")
+                                self._log_event(f"[{strat.get('name')}] Missing leg placed successfully: {m_pos.get('symbol')}", level="SUCCESS")
+                            else:
+                                retried_failed.append((m_pos.get("symbol", "Leg"), m_pos.get("error", "Placement failed")))
 
             has_error_left = any(p.get("status") == "ERROR" for p in positions)
             if not has_error_left:
