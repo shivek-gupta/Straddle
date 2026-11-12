@@ -417,7 +417,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         trigger_price: float = 0.0,
         tag: str = "straddle_algo",
         segment: str = "nse_fo",
-        tick_size: float = 0.05
+        tick_size: float = 0.05,
+        retry_depth: int = 0
     ) -> Dict[str, Any]:
         """Places a single slice order with Kotak Neo API and confirms RMS status."""
         clean_tt = "B" if transaction_type.upper() in ("BUY", "B") else "S"
@@ -432,12 +433,14 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             clean_ot = "L"
             p_flt = float(price or 0.0)
             if clean_tt == "B":
-                # Buy: ceiling above Ask to match lowest ask on book immediately (<10ms)
-                mkt_price = max(p_flt * 1.50, p_flt + 2.50, 5.0) if p_flt > 0 else 5.0
+                # Buy: tight ceiling above Ask to match lowest ask on book immediately (<10ms) without breaching LPP
+                buf = max(0.30, min(1.50, p_flt * 0.03)) if p_flt > 0 else 0.50
+                mkt_price = p_flt + buf if p_flt > 0 else 5.0
                 clean_price = str(round_to_tick(mkt_price, tick_size=tick_size))
             else:
-                # Sell: floor below Bid to match highest bid on book immediately (<10ms)
-                mkt_price = max(0.05, p_flt * 0.70) if p_flt > 0 else 0.05
+                # Sell: tight floor below Bid to match highest bid on book immediately (<10ms) without breaching LPP
+                buf = max(0.30, min(1.50, p_flt * 0.03)) if p_flt > 0 else 0.50
+                mkt_price = max(0.05, p_flt - buf) if p_flt > 0 else 0.05
                 clean_price = str(round_to_tick(mkt_price, tick_size=tick_size))
         else:
             clean_price = str(round_to_tick(price, tick_size=tick_size)) if clean_ot in ("L", "SL") else "0"
@@ -471,14 +474,62 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 st_code = res.get("stCode")
                 if st_code and int(st_code) != 200:
                     err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
-                    # Auto-fallback: If broker rejects with error from core or market order disallowed
+
+                    # 1. Specialized LPP (Limit Price Protection / Circuit Limit) auto-clamp & instant retry:
+                    high_lpp_m = re.search(r"HIGH\s+LPP\s*:\s*(\d+(?:\.\d+)?)", err_msg, re.IGNORECASE)
+                    low_lpp_m = re.search(r"LOW\s+LPP\s*:\s*(\d+(?:\.\d+)?)", err_msg, re.IGNORECASE)
+                    if high_lpp_m and clean_tt == "B" and retry_depth < 2:
+                        high_lpp = float(high_lpp_m.group(1))
+                        clamped_p = round_to_tick(max(0.05, high_lpp - tick_size), tick_size=tick_size)
+                        logger.warning(
+                            f"[Kotak Neo] RMS LPP breach on BUY: OrderPrice {clean_price} exceeded HIGH LPP {high_lpp}. "
+                            f"Auto-clamping price to safe exchange limit ₹{clamped_p:.2f} and retrying immediately..."
+                        )
+                        return self._place_single_order(
+                            client=client,
+                            canonical_symbol=canonical_symbol,
+                            transaction_type=transaction_type,
+                            quantity=quantity,
+                            product=product,
+                            order_type="LIMIT",
+                            price=clamped_p,
+                            trigger_price=trigger_price,
+                            tag=tag,
+                            segment=segment,
+                            tick_size=tick_size,
+                            retry_depth=retry_depth + 1
+                        )
+                    elif low_lpp_m and clean_tt == "S" and retry_depth < 2:
+                        low_lpp = float(low_lpp_m.group(1))
+                        clamped_p = round_to_tick(low_lpp + tick_size, tick_size=tick_size)
+                        logger.warning(
+                            f"[Kotak Neo] RMS LPP breach on SELL: OrderPrice {clean_price} breached LOW LPP {low_lpp}. "
+                            f"Auto-clamping price to safe exchange limit ₹{clamped_p:.2f} and retrying immediately..."
+                        )
+                        return self._place_single_order(
+                            client=client,
+                            canonical_symbol=canonical_symbol,
+                            transaction_type=transaction_type,
+                            quantity=quantity,
+                            product=product,
+                            order_type="LIMIT",
+                            price=clamped_p,
+                            trigger_price=trigger_price,
+                            tag=tag,
+                            segment=segment,
+                            tick_size=tick_size,
+                            retry_depth=retry_depth + 1
+                        )
+
+                    # 2. General market order disallowance fallback (e.g. error from core on pure MKT):
                     is_adv_resting = str(tag or "").startswith("adv_") or clean_ot in ("SL", "SL-M")
-                    if not is_adv_resting and any(k in err_msg.lower() for k in ("error from core", "from core", "market order not allowed", "mkt not allowed", "price protection", "order type not allowed", "not allowed for option", "rms:rule")):
-                        logger.info(f"[Kotak Neo] Order rejected with '{err_msg}'. Auto-retrying as aggressive Marketable Limit...")
+                    if not is_adv_resting and retry_depth < 1 and any(k in err_msg.lower() for k in ("error from core", "from core", "market order not allowed", "mkt not allowed", "price protection", "order type not allowed", "not allowed for option")):
+                        logger.info(f"[Kotak Neo] Order rejected with '{err_msg}'. Auto-retrying as tight Marketable Limit...")
                         mkt_price = float(price or 0.0)
                         if mkt_price <= 0:
                             mkt_price = 5.0
-                        limit_alt_price = round_to_tick(max(mkt_price * 1.5, mkt_price + 2.5), tick_size=tick_size) if clean_tt == "B" else round_to_tick(max(0.05, mkt_price * 0.7), tick_size=tick_size)
+                        buf = max(0.30, min(1.50, mkt_price * 0.03))
+                        limit_alt_price = round_to_tick(mkt_price + buf, tick_size=tick_size) if clean_tt == "B" else round_to_tick(max(0.05, mkt_price - buf), tick_size=tick_size)
                         return self._place_single_order(
                             client=client,
                             canonical_symbol=canonical_symbol,
@@ -490,7 +541,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             trigger_price=trigger_price,
                             tag=tag,
                             segment=segment,
-                            tick_size=tick_size
+                            tick_size=tick_size,
+                            retry_depth=retry_depth + 1
                         )
                     logger.warning(f"[Kotak Neo] Order slice rejected: {err_msg} (res: {res})")
                     return {"success": False, "error": err_msg, "data": res}

@@ -5467,17 +5467,33 @@ class StraddleManager:
         if is_buy_hedge:
             # Always execute hedges as aggressive Marketable Limit for zero-delay fill & 100% Kotak Neo acceptance
             effective_order_type = "LIMIT"
-            if ltp <= 0.0:
-                limit_price = 5.0
-            elif ltp < 1.0:
-                # Sub-rupee options: buffer of 0.35 to 0.50 max so it matches Ask without breaching exchange circuit limits
-                limit_price = round_to_tick(ltp + max(0.35, ltp * 0.50), symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
-            elif ltp < 5.0:
-                # Cheap options (1 to 5 rs): buffer of max(1.50, ltp * 0.35)
-                limit_price = round_to_tick(ltp + max(1.50, ltp * 0.35), symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+            # Use real-time best Ask from market depth if available, otherwise LTP
+            best_ask = float(q.get("ask") or 0.0)
+            base_p = best_ask if best_ask > 0.0 else ltp
+            if base_p <= 0.0:
+                base_p = 5.0
+
+            # Controlled marketable buffer to cross the spread and fill instantaneously (<10ms)
+            # while strictly staying within exchange Limit Price Protection (LPP) bands
+            if base_p < 1.0:
+                buf = 0.15
+            elif base_p < 5.0:
+                buf = 0.30
+            elif base_p < 20.0:
+                buf = 0.50
+            elif base_p < 50.0:
+                buf = 1.00
             else:
-                # Normal options: buffer of max(2.50, ltp * 0.25)
-                limit_price = round_to_tick(ltp + max(2.50, ltp * 0.25), symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+                buf = max(1.00, min(2.50, base_p * 0.025))
+
+            raw_limit = base_p + buf
+
+            # Clamp against exchange Daily Price Range / upper circuit limit if returned in quote
+            high_range = float(q.get("high_price_range") or q.get("upper_circuit_limit") or 0.0)
+            if high_range > 0 and raw_limit >= high_range:
+                raw_limit = max(0.05, high_range - 0.05)
+
+            limit_price = round_to_tick(raw_limit, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
         else:
             effective_order_type = "LIMIT" if "Limit" in order_type_cfg else "MARKET"
             if effective_order_type == "LIMIT":
@@ -5491,7 +5507,8 @@ class StraddleManager:
                 limit_price = round_to_tick(raw_limit, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
             else:
                 effective_order_type = "LIMIT"
-                marketable_buf = max(ltp * 0.20, 2.0)
+                # For Market orders in F&O, use controlled buffer to cross the spread without blowing LPP
+                marketable_buf = max(0.50, min(3.0, ltp * 0.03))
                 limit_price = round_to_tick(ltp - marketable_buf if side == "SELL" else ltp + marketable_buf, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
 
         tag_prefix = "re" if is_re_entry else "ent"
@@ -5587,7 +5604,7 @@ class StraddleManager:
         # Live Broker fill synchronization and hedge guard
         placed_oid = str(order_res.get("order_id") or "")
         if order_res.get("success") and exec_mode == "LIVE_BROKER" and placed_oid and not placed_oid.startswith("PAPER_") and not placed_oid.startswith("ORD_"):
-            timeout_sec = 2.5 if is_buy_hedge else 1.2
+            timeout_sec = 4.5 if is_buy_hedge else 2.5
             fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.01)
             if fill_res.get("filled"):
                 actual_traded_price = float(fill_res.get("price") or 0.0)
@@ -5596,9 +5613,81 @@ class StraddleManager:
                     order_res["status"] = "COMPLETE"
             elif fill_res.get("status") in ("REJECTED", "CANCELLED") or (fill_res.get("error") and "timeout" not in str(fill_res.get("error")).lower()):
                 rej_err = fill_res.get("error") or f"Order {fill_res.get('status', 'rejected')}"
-                order_res["success"] = False
-                order_res["status"] = fill_res.get("status", "REJECTED").upper()
-                order_res["error"] = f"[BROKER REJECTED] {rej_err}"
+
+                # Auto-recovery for exchange Limit Price Protection (LPP) breaches:
+                high_lpp_m = re.search(r"HIGH\s+LPP\s*:\s*(\d+(?:\.\d+)?)", rej_err, re.IGNORECASE)
+                low_lpp_m = re.search(r"LOW\s+LPP\s*:\s*(\d+(?:\.\d+)?)", rej_err, re.IGNORECASE)
+
+                if high_lpp_m and side == "BUY":
+                    high_lpp = float(high_lpp_m.group(1))
+                    clamped_p = round_to_tick(max(0.05, high_lpp - 0.05), symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+                    self._log_event(f"⚠️ [LPP AUTO-CLAMP] Kotak Neo reported HIGH LPP breach ({high_lpp}). Auto-retrying {contract['trading_symbol']} BUY @ safe exchange limit ₹{clamped_p:.2f}...", level="WARNING")
+                    retry_res = broker.place_order(
+                        symbol=contract["trading_symbol"],
+                        instrument_key=contract["instrument_key"],
+                        transaction_type=side,
+                        quantity=total_qty,
+                        product=prod,
+                        order_type="LIMIT",
+                        price=clamped_p,
+                        tag=f"{tag_prefix}_{leg_cfg.get('id', 'leg')[:4]}",
+                    )
+                    r_oid = str(retry_res.get("order_id") or "")
+                    if retry_res.get("success") and r_oid and not r_oid.startswith("PAPER_") and not r_oid.startswith("ORD_"):
+                        r_fill = broker.wait_for_order_fill(r_oid, timeout_sec=timeout_sec, poll_interval_sec=0.01)
+                        if r_fill.get("filled"):
+                            order_res["order_id"] = r_oid
+                            order_res["price"] = float(r_fill.get("price") or clamped_p)
+                            order_res["status"] = "COMPLETE"
+                            order_res["success"] = True
+                            order_res.pop("error", None)
+                            fill_res = r_fill
+                        else:
+                            rej_err = r_fill.get("error") or f"Order {r_fill.get('status', 'rejected')}"
+                            order_res["success"] = False
+                            order_res["status"] = r_fill.get("status", "REJECTED").upper()
+                            order_res["error"] = f"[BROKER REJECTED] {rej_err}"
+                    else:
+                        order_res["success"] = False
+                        order_res["status"] = "REJECTED"
+                        order_res["error"] = f"[BROKER REJECTED] {retry_res.get('error', rej_err)}"
+                elif low_lpp_m and side == "SELL":
+                    low_lpp = float(low_lpp_m.group(1))
+                    clamped_p = round_to_tick(low_lpp + 0.05, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+                    self._log_event(f"⚠️ [LPP AUTO-CLAMP] Kotak Neo reported LOW LPP breach ({low_lpp}). Auto-retrying {contract['trading_symbol']} SELL @ safe exchange limit ₹{clamped_p:.2f}...", level="WARNING")
+                    retry_res = broker.place_order(
+                        symbol=contract["trading_symbol"],
+                        instrument_key=contract["instrument_key"],
+                        transaction_type=side,
+                        quantity=total_qty,
+                        product=prod,
+                        order_type="LIMIT",
+                        price=clamped_p,
+                        tag=f"{tag_prefix}_{leg_cfg.get('id', 'leg')[:4]}",
+                    )
+                    r_oid = str(retry_res.get("order_id") or "")
+                    if retry_res.get("success") and r_oid and not r_oid.startswith("PAPER_") and not r_oid.startswith("ORD_"):
+                        r_fill = broker.wait_for_order_fill(r_oid, timeout_sec=timeout_sec, poll_interval_sec=0.01)
+                        if r_fill.get("filled"):
+                            order_res["order_id"] = r_oid
+                            order_res["price"] = float(r_fill.get("price") or clamped_p)
+                            order_res["status"] = "COMPLETE"
+                            order_res["success"] = True
+                            order_res.pop("error", None)
+                            fill_res = r_fill
+                        else:
+                            rej_err = r_fill.get("error") or f"Order {r_fill.get('status', 'rejected')}"
+                            order_res["success"] = False
+                            order_res["status"] = r_fill.get("status", "REJECTED").upper()
+                            order_res["error"] = f"[BROKER REJECTED] {rej_err}"
+                    else:
+                        order_res["success"] = False
+                        order_res["status"] = "REJECTED"
+                        order_res["error"] = f"[BROKER REJECTED] {retry_res.get('error', rej_err)}"
+                else:
+                    order_res["success"] = False
+                    order_res["status"] = fill_res.get("status", "REJECTED").upper()
+                    order_res["error"] = f"[BROKER REJECTED] {rej_err}"
             elif is_buy_hedge:
                 # INVIOLABLE HEDGE PROTECTION:
                 # If a BUY hedge order rests unfilled on the book, cancel it immediately so short entries
@@ -6306,6 +6395,10 @@ class StraddleManager:
                     continue
 
                 # Normal leg retry (Sell or Buy main leg):
+                if 0 <= idx < len(positions) and positions[idx].get("status") == "OPEN":
+                    # Already successfully opened (e.g. parent short leg placed when hedge completed)
+                    continue
+
                 leg_cfg = next((l for l in legs_cfg if l.get("id") == pos.get("id")), None)
                 if not leg_cfg and 0 <= idx < len(legs_cfg):
                     leg_cfg = legs_cfg[idx]
@@ -6353,7 +6446,7 @@ class StraddleManager:
                     # Check if hedge already exists in OPEN positions
                     open_h = next((p for p in positions if p.get("status") == "OPEN" and (
                         p.get("parent_leg_id") == leg_cfg.get("id") or
-                        (p.get("is_associated_hedge") and p.get("hedge_parent_type") == leg_cfg.get("option_type"))
+                        ((p.get("is_associated_hedge") or str(p.get("id", "")).startswith("hedge_")) and (p.get("hedge_parent_type") == leg_cfg.get("option_type") or p.get("option_type") == leg_cfg.get("option_type")))
                     )), None)
                     if not open_h:
                         init_otm = int(h_cfg.get("initial_otm") or 20)
@@ -6462,7 +6555,7 @@ class StraddleManager:
                     h_open = next(
                         (p for p in positions 
                          if p.get("status") == "OPEN" 
-                         and (p.get("parent_leg_id") == l_id or (p.get("is_associated_hedge") and p.get("hedge_parent_type") == opt_t))),
+                         and (p.get("parent_leg_id") == l_id or ((p.get("is_associated_hedge") or str(p.get("id", "")).startswith("hedge_")) and (p.get("hedge_parent_type") == opt_t or p.get("option_type") == opt_t)))),
                         None
                     )
                     if is_h_on and not h_open:
