@@ -5008,15 +5008,29 @@ class StraddleManager:
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
-            if mode == "LIVE_BROKER" and not self.is_broker_connected():
-                self._log_event(
-                    f"[{strat.get('name')}] Strategy entry blocked: Kotak Neo is DISCONNECTED in Settings.",
-                    level="WARNING"
-                )
-                strat["entry_error"] = "Kotak Neo is DISCONNECTED in Settings"
-                strat["_entry_in_progress"] = False
-                self._save_strategies()
-                return
+            if mode == "LIVE_BROKER":
+                if not self.is_broker_connected():
+                    self._log_event(
+                        f"[{strat.get('name')}] Strategy entry blocked: Kotak Neo is DISCONNECTED in Settings.",
+                        level="WARNING"
+                    )
+                    strat["entry_error"] = "Kotak Neo is DISCONNECTED in Settings"
+                    strat["_entry_in_progress"] = False
+                    self._save_strategies()
+                    return
+
+                # Pre-flight check: ensure active, unexpired Kotak Neo session before dispatching orders
+                cli = kotak_auth.get_authenticated_client(force=False)
+                if cli is None:
+                    cli = kotak_auth.get_authenticated_client(force=True)
+                if cli is None:
+                    auth_err = kotak_auth.get_last_auth_error() or "Kotak Neo authentication failed. Please check credentials in Settings."
+                    self._log_event(f"[{strat.get('name')}] Strategy entry aborted: {auth_err}", level="ERROR")
+                    strat["entry_error"] = auth_err
+                    strat["status"] = "ENTRY_FAILED"
+                    strat["_entry_in_progress"] = False
+                    self._save_strategies()
+                    return
 
             legs_cfg = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
             if not legs_cfg:
@@ -5510,6 +5524,10 @@ class StraddleManager:
                 # For Market orders in F&O, use controlled buffer to cross the spread without blowing LPP
                 marketable_buf = max(0.50, min(3.0, ltp * 0.03))
                 limit_price = round_to_tick(ltp - marketable_buf if side == "SELL" else ltp + marketable_buf, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
+
+        # Guarantee strict positive price floor for Limit orders to eliminate any 0-price rejection
+        if effective_order_type == "LIMIT":
+            limit_price = round_to_tick(max(0.05, float(limit_price or 0.05)), symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
 
         tag_prefix = "re" if is_re_entry else "ent"
         und_name = contract.get("underlying") or leg_cfg.get("underlying") or "NIFTY"
@@ -6200,6 +6218,17 @@ class StraddleManager:
 
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
+
+            if mode == "LIVE_BROKER":
+                if not self.is_broker_connected():
+                    return {"success": False, "error": "Kotak Neo is DISCONNECTED in Settings"}
+                cli = kotak_auth.get_authenticated_client(force=False)
+                if cli is None:
+                    cli = kotak_auth.get_authenticated_client(force=True)
+                if cli is None:
+                    auth_err = kotak_auth.get_last_auth_error() or "Kotak Neo authentication failed. Please check credentials in Settings."
+                    return {"success": False, "error": auth_err}
+
             adv = {}
             if isinstance(strat.get("advanced"), dict):
                 adv.update(strat["advanced"])

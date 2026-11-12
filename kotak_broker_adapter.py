@@ -436,14 +436,19 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 # Buy: tight ceiling above Ask to match lowest ask on book immediately (<10ms) without breaching LPP
                 buf = max(0.30, min(1.50, p_flt * 0.03)) if p_flt > 0 else 0.50
                 mkt_price = p_flt + buf if p_flt > 0 else 5.0
-                clean_price = str(round_to_tick(mkt_price, tick_size=tick_size))
+                clean_price = str(round_to_tick(max(0.05, mkt_price), tick_size=tick_size))
             else:
                 # Sell: tight floor below Bid to match highest bid on book immediately (<10ms) without breaching LPP
                 buf = max(0.30, min(1.50, p_flt * 0.03)) if p_flt > 0 else 0.50
                 mkt_price = max(0.05, p_flt - buf) if p_flt > 0 else 0.05
-                clean_price = str(round_to_tick(mkt_price, tick_size=tick_size))
+                clean_price = str(round_to_tick(max(0.05, mkt_price), tick_size=tick_size))
+        elif clean_ot in ("L", "SL"):
+            p_flt = float(price or 0.0)
+            if p_flt <= 0:
+                p_flt = 5.0 if clean_tt == "B" else 0.05
+            clean_price = str(round_to_tick(max(0.05, p_flt), tick_size=tick_size))
         else:
-            clean_price = str(round_to_tick(price, tick_size=tick_size)) if clean_ot in ("L", "SL") else "0"
+            clean_price = "0"
 
         clean_trig = str(round_to_tick(trigger_price, tick_size=tick_size)) if trigger_price and trigger_price > 0 else "0"
         clean_qty = str(int(quantity))
@@ -470,120 +475,195 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             )
             logger.info(f"[Kotak Neo] Order slice ({clean_qty} qty) response: {res}")
 
-            if isinstance(res, dict):
-                st_code = res.get("stCode")
-                if st_code and int(st_code) != 200:
-                    err_msg = res.get("errMsg") or res.get("message") or f"Broker rejected with code {st_code}"
-
-                    # 1. Specialized LPP (Limit Price Protection / Circuit Limit) auto-clamp & instant retry:
-                    high_lpp_m = re.search(r"HIGH\s+LPP\s*:\s*(\d+(?:\.\d+)?)", err_msg, re.IGNORECASE)
-                    low_lpp_m = re.search(r"LOW\s+LPP\s*:\s*(\d+(?:\.\d+)?)", err_msg, re.IGNORECASE)
-                    if high_lpp_m and clean_tt == "B" and retry_depth < 2:
-                        high_lpp = float(high_lpp_m.group(1))
-                        clamped_p = round_to_tick(max(0.05, high_lpp - tick_size), tick_size=tick_size)
-                        logger.warning(
-                            f"[Kotak Neo] RMS LPP breach on BUY: OrderPrice {clean_price} exceeded HIGH LPP {high_lpp}. "
-                            f"Auto-clamping price to safe exchange limit ₹{clamped_p:.2f} and retrying immediately..."
-                        )
-                        return self._place_single_order(
-                            client=client,
-                            canonical_symbol=canonical_symbol,
-                            transaction_type=transaction_type,
-                            quantity=quantity,
-                            product=product,
-                            order_type="LIMIT",
-                            price=clamped_p,
-                            trigger_price=trigger_price,
-                            tag=tag,
-                            segment=segment,
-                            tick_size=tick_size,
-                            retry_depth=retry_depth + 1
-                        )
-                    elif low_lpp_m and clean_tt == "S" and retry_depth < 2:
-                        low_lpp = float(low_lpp_m.group(1))
-                        clamped_p = round_to_tick(low_lpp + tick_size, tick_size=tick_size)
-                        logger.warning(
-                            f"[Kotak Neo] RMS LPP breach on SELL: OrderPrice {clean_price} breached LOW LPP {low_lpp}. "
-                            f"Auto-clamping price to safe exchange limit ₹{clamped_p:.2f} and retrying immediately..."
-                        )
-                        return self._place_single_order(
-                            client=client,
-                            canonical_symbol=canonical_symbol,
-                            transaction_type=transaction_type,
-                            quantity=quantity,
-                            product=product,
-                            order_type="LIMIT",
-                            price=clamped_p,
-                            trigger_price=trigger_price,
-                            tag=tag,
-                            segment=segment,
-                            tick_size=tick_size,
-                            retry_depth=retry_depth + 1
-                        )
-
-                    # 2. General market order disallowance fallback (e.g. error from core on pure MKT):
-                    is_adv_resting = str(tag or "").startswith("adv_") or clean_ot in ("SL", "SL-M")
-                    if not is_adv_resting and retry_depth < 1 and any(k in err_msg.lower() for k in ("error from core", "from core", "market order not allowed", "mkt not allowed", "price protection", "order type not allowed", "not allowed for option")):
-                        logger.info(f"[Kotak Neo] Order rejected with '{err_msg}'. Auto-retrying as tight Marketable Limit...")
-                        mkt_price = float(price or 0.0)
-                        if mkt_price <= 0:
-                            mkt_price = 5.0
-                        buf = max(0.30, min(1.50, mkt_price * 0.03))
-                        limit_alt_price = round_to_tick(mkt_price + buf, tick_size=tick_size) if clean_tt == "B" else round_to_tick(max(0.05, mkt_price - buf), tick_size=tick_size)
-                        return self._place_single_order(
-                            client=client,
-                            canonical_symbol=canonical_symbol,
-                            transaction_type=transaction_type,
-                            quantity=quantity,
-                            product=product,
-                            order_type="LIMIT",
-                            price=limit_alt_price,
-                            trigger_price=trigger_price,
-                            tag=tag,
-                            segment=segment,
-                            tick_size=tick_size,
-                            retry_depth=retry_depth + 1
-                        )
-                    logger.warning(f"[Kotak Neo] Order slice rejected: {err_msg} (res: {res})")
-                    return {"success": False, "error": err_msg, "data": res}
-
             order_id = None
             if isinstance(res, dict):
                 order_id = res.get("nOrdNo") or res.get("order_id") or (res.get("data") or {}).get("nOrdNo")
 
-            if order_id:
-                # Ultra-low latency execution: Return immediately upon OMS order_id acknowledgment (~50-80ms)
-                # Background worker verifies asynchronous RMS status without stalling order dispatch
-                def _async_verify_rms(oid, cli):
-                    try:
-                        time.sleep(0.15)
-                        hist = cli.order_history(order_id=str(oid))
-                        d = hist.get("data", {}) if isinstance(hist, dict) else {}
-                        items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
-                        if items and isinstance(items, list):
-                            latest = items[0]
-                            st = str(latest.get("ordSt", "")).lower()
-                            if st in ("rejected", "cancelled"):
-                                rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
-                                logger.warning(f"[Kotak Neo] Async RMS notice: Order {oid} rejected: {rej_msg}")
-                    except Exception as e_bg:
-                        logger.debug(f"[Kotak Neo] Async RMS check note: {e_bg}")
+            # Check if order was successfully acknowledged by OMS
+            st_code = res.get("stCode") if isinstance(res, dict) else None
+            stat = str(res.get("stat", "")).lower() if isinstance(res, dict) else ""
+            is_error_response = (not order_id) or (st_code and int(st_code) != 200) or (stat in ("not_ok", "error", "failed"))
 
-                threading.Thread(target=_async_verify_rms, args=(order_id, client), daemon=True).start()
+            if is_error_response:
+                # Extract detailed error message across all Kotak Neo JSON schemas
+                err_msg = ""
+                if isinstance(res, dict):
+                    err_msg = res.get("errMsg") or res.get("message")
+                    if not err_msg and "error" in res:
+                        err_items = res.get("error")
+                        if isinstance(err_items, list):
+                            err_msg = "; ".join([e.get("message", str(e)) for e in err_items if isinstance(e, dict)])
+                        else:
+                            err_msg = str(err_items)
+                    if not err_msg and "fault" in res:
+                        err_msg = str(res.get("fault"))
+                    if not err_msg and st_code:
+                        err_msg = f"Broker rejected with code {st_code}"
+                    if not err_msg and stat == "not_ok":
+                        err_msg = "error from core"
+                    if not err_msg:
+                        err_msg = str(res)
+                else:
+                    err_msg = str(res)
 
-                return {
-                    "success": True,
-                    "status": "OPEN",
-                    "order_id": str(order_id),
-                    "data": res,
-                    "quantity": int(quantity)
-                }
+                # 1. Specialized Auto-Re-Authentication on Session Expiry or Core Rejection:
+                is_auth_core_err = any(k in err_msg.lower() for k in (
+                    "error from core", "from core", "unauthorized", "session expired",
+                    "token expired", "invalid token", "jwt expired", "100008", "session invalid"
+                ))
+                if is_auth_core_err and retry_depth < 2:
+                    logger.warning(
+                        f"[Kotak Neo] Broker reported session/core error: '{err_msg}'. "
+                        f"Auto-invalidating session and re-authenticating with fresh TOTP..."
+                    )
+                    kotak_auth.invalidate_session()
+                    fresh_client = kotak_auth.get_authenticated_client(force=True)
+                    if fresh_client is not None:
+                        logger.info("[Kotak Neo] Fresh session verified. Re-attempting order slice dispatch immediately...")
+                        return self._place_single_order(
+                            client=fresh_client,
+                            canonical_symbol=canonical_symbol,
+                            transaction_type=transaction_type,
+                            quantity=quantity,
+                            product=product,
+                            order_type=order_type,
+                            price=price,
+                            trigger_price=trigger_price,
+                            tag=tag,
+                            segment=segment,
+                            tick_size=tick_size,
+                            retry_depth=retry_depth + 1
+                        )
 
-            err_msg = str(res.get("errMsg") or res.get("message") or res.get("error") or res)
-            return {"success": False, "error": err_msg, "data": res}
+                # 2. Specialized LPP (Limit Price Protection / Circuit Limit) auto-clamp & instant retry:
+                high_lpp_m = re.search(r"HIGH\s+LPP\s*:\s*(\d+(?:\.\d+)?)", err_msg, re.IGNORECASE)
+                low_lpp_m = re.search(r"LOW\s+LPP\s*:\s*(\d+(?:\.\d+)?)", err_msg, re.IGNORECASE)
+                if high_lpp_m and clean_tt == "B" and retry_depth < 2:
+                    high_lpp = float(high_lpp_m.group(1))
+                    clamped_p = round_to_tick(max(0.05, high_lpp - tick_size), tick_size=tick_size)
+                    logger.warning(
+                        f"[Kotak Neo] RMS LPP breach on BUY: OrderPrice {clean_price} exceeded HIGH LPP {high_lpp}. "
+                        f"Auto-clamping price to safe exchange limit ₹{clamped_p:.2f} and retrying immediately..."
+                    )
+                    return self._place_single_order(
+                        client=client,
+                        canonical_symbol=canonical_symbol,
+                        transaction_type=transaction_type,
+                        quantity=quantity,
+                        product=product,
+                        order_type="LIMIT",
+                        price=clamped_p,
+                        trigger_price=trigger_price,
+                        tag=tag,
+                        segment=segment,
+                        tick_size=tick_size,
+                        retry_depth=retry_depth + 1
+                    )
+                elif low_lpp_m and clean_tt == "S" and retry_depth < 2:
+                    low_lpp = float(low_lpp_m.group(1))
+                    clamped_p = round_to_tick(low_lpp + tick_size, tick_size=tick_size)
+                    logger.warning(
+                        f"[Kotak Neo] RMS LPP breach on SELL: OrderPrice {clean_price} breached LOW LPP {low_lpp}. "
+                        f"Auto-clamping price to safe exchange limit ₹{clamped_p:.2f} and retrying immediately..."
+                    )
+                    return self._place_single_order(
+                        client=client,
+                        canonical_symbol=canonical_symbol,
+                        transaction_type=transaction_type,
+                        quantity=quantity,
+                        product=product,
+                        order_type="LIMIT",
+                        price=clamped_p,
+                        trigger_price=trigger_price,
+                        tag=tag,
+                        segment=segment,
+                        tick_size=tick_size,
+                        retry_depth=retry_depth + 1
+                    )
+
+                # 3. General market order disallowance fallback (e.g. error from core on pure MKT):
+                is_adv_resting = str(tag or "").startswith("adv_") or clean_ot in ("SL", "SL-M")
+                if not is_adv_resting and retry_depth < 2 and any(k in err_msg.lower() for k in (
+                    "market order not allowed", "mkt not allowed", "price protection",
+                    "order type not allowed", "not allowed for option"
+                )):
+                    logger.info(f"[Kotak Neo] Order rejected with '{err_msg}'. Auto-retrying as tight Marketable Limit...")
+                    mkt_price = float(price or 0.0)
+                    if mkt_price <= 0:
+                        mkt_price = 5.0
+                    buf = max(0.30, min(1.50, mkt_price * 0.03))
+                    limit_alt_price = round_to_tick(mkt_price + buf, tick_size=tick_size) if clean_tt == "B" else round_to_tick(max(0.05, mkt_price - buf), tick_size=tick_size)
+                    return self._place_single_order(
+                        client=client,
+                        canonical_symbol=canonical_symbol,
+                        transaction_type=transaction_type,
+                        quantity=quantity,
+                        product=product,
+                        order_type="LIMIT",
+                        price=limit_alt_price,
+                        trigger_price=trigger_price,
+                        tag=tag,
+                        segment=segment,
+                        tick_size=tick_size,
+                        retry_depth=retry_depth + 1
+                    )
+
+                logger.warning(f"[Kotak Neo] Order slice rejected: {err_msg} (res: {res})")
+                return {"success": False, "error": err_msg, "data": res}
+
+            # Ultra-low latency execution: Return immediately upon OMS order_id acknowledgment (~50-80ms)
+            # Background worker verifies asynchronous RMS status without stalling order dispatch
+            def _async_verify_rms(oid, cli):
+                try:
+                    time.sleep(0.15)
+                    hist = cli.order_history(order_id=str(oid))
+                    d = hist.get("data", {}) if isinstance(hist, dict) else {}
+                    items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
+                    if items and isinstance(items, list):
+                        latest = items[0]
+                        st = str(latest.get("ordSt", "")).lower()
+                        if st in ("rejected", "cancelled"):
+                            rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
+                            logger.warning(f"[Kotak Neo] Async RMS notice: Order {oid} rejected: {rej_msg}")
+                except Exception as e_bg:
+                    logger.debug(f"[Kotak Neo] Async RMS check note: {e_bg}")
+
+            threading.Thread(target=_async_verify_rms, args=(order_id, client), daemon=True).start()
+
+            return {
+                "success": True,
+                "status": "OPEN",
+                "order_id": str(order_id),
+                "data": res,
+                "quantity": int(quantity)
+            }
         except Exception as e:
-            logger.error(f"[Kotak Neo] Exception placing order slice: {e}")
-            return {"success": False, "error": str(e)}
+            err_str = str(e)
+            logger.error(f"[Kotak Neo] Exception placing order slice: {err_str}")
+            is_auth_core_err = any(k in err_str.lower() for k in (
+                "error from core", "from core", "unauthorized", "session expired",
+                "token expired", "invalid token", "jwt expired", "100008"
+            ))
+            if is_auth_core_err and retry_depth < 2:
+                logger.warning(f"[Kotak Neo] Exception indicates session/core error. Auto-reauthenticating and retrying...")
+                kotak_auth.invalidate_session()
+                fresh_client = kotak_auth.get_authenticated_client(force=True)
+                if fresh_client is not None:
+                    return self._place_single_order(
+                        client=fresh_client,
+                        canonical_symbol=canonical_symbol,
+                        transaction_type=transaction_type,
+                        quantity=quantity,
+                        product=product,
+                        order_type=order_type,
+                        price=price,
+                        trigger_price=trigger_price,
+                        tag=tag,
+                        segment=segment,
+                        tick_size=tick_size,
+                        retry_depth=retry_depth + 1
+                    )
+            return {"success": False, "error": err_str}
 
     def place_order(
         self,
