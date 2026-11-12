@@ -3550,6 +3550,22 @@ function syncStrategyLegChange(rowId) {
     legObj.option_type = tr.querySelector(".leg-type")?.value || legObj.option_type || "CE";
     legObj.underlying = tr.querySelector(".leg-underlying")?.value || window._straddleState.activeStrategy.underlying || "NIFTY";
     legObj.expiry = tr.querySelector(".leg-expiry")?.value || "Weekly";
+
+    // Target, SL & Re-execution fields
+    legObj.target_type = tr.querySelector(".leg-tgt-type")?.value || "TGT: %";
+    legObj.target_value = parseFloat(tr.querySelector(".leg-tgt-val")?.value) || 25.0;
+    legObj.target_order_placement = tr.querySelector(".leg-tgt-placement")?.value || "Place in advance";
+    legObj.target_re_execute_type = tr.querySelector(".leg-tgt-re-type")?.value || "RE EXECUTE";
+    legObj.target_re_execute_count = parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value, 10) || 5;
+
+    legObj.sl_type = tr.querySelector(".leg-sl-type")?.value || "SL: -%";
+    legObj.sl_value = parseFloat(tr.querySelector(".leg-sl-val")?.value) || 25.0;
+    legObj.sl_order_placement = tr.querySelector(".leg-sl-placement")?.value || "Place in advance";
+    legObj.tsl_type = tr.querySelector(".leg-tsl-type")?.value || "None";
+    legObj.sl_re_execute_type = tr.querySelector(".leg-sl-re-type")?.value || "RE EXECUTE";
+    legObj.sl_re_execute_count = parseInt(tr.querySelector(".leg-sl-re-cnt")?.value, 10) || 2;
+    legObj.action = tr.querySelector(".leg-action")?.value || "Square off leg";
+
     const hChk = tr.querySelector(".leg-hedge-enabled");
     const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
     const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
@@ -6393,7 +6409,7 @@ function addStraddleLegRow(leg = null) {
     const tbody = document.getElementById("straddleLegsBuilderBody");
     if (!tbody) return;
 
-    const rowId = "leg_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+    const rowId = (leg && leg.id) ? leg.id : ("leg_" + Date.now() + "_" + Math.floor(Math.random() * 1000));
     const l = leg || {
         id: rowId,
         side: "Sell",
@@ -6612,10 +6628,10 @@ function addStraddleLegRow(leg = null) {
         <td>
             <div style="display:flex; flex-direction:column; gap:3px;">
                 <div style="display:flex; gap:2px;">
-                    <select class="straddle-select leg-tgt-type" style="width:85px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
+                    <select class="straddle-select leg-tgt-type" style="width:85px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
                         ${tgtOptionsHtml}
                     </select>
-                    <input type="number" class="straddle-input leg-tgt-val" style="width:50px;" value="${l.target_value !== undefined ? l.target_value : 45}">
+                    <input type="number" class="straddle-input leg-tgt-val" style="width:50px;" value="${l.target_value !== undefined ? l.target_value : 45}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
                 </div>
                 <select class="straddle-select leg-tgt-placement" style="font-size:10px; padding:1px 3px; background:#0b1120; border-color:#334155; color:${isTgtAdv ? '#10b981' : '#94a3b8'}; font-weight:700;" onchange="this.style.color = (this.value === 'Place in advance' ? '#10b981' : '#94a3b8'); syncStrategyLegChange('${rowId}');" title="Target Order Placement: Keep with self (monitored by software) vs Place with broker (advance LIMIT order on exchange)">
                     <option value="Keep with self" ${!isTgtAdv ? "selected" : ""}>💻 With Self</option>
@@ -6625,19 +6641,19 @@ function addStraddleLegRow(leg = null) {
         </td>
         <td>
             <div style="display:flex; gap:2px;">
-                <select class="straddle-select leg-tgt-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
+                <select class="straddle-select leg-tgt-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
                     ${tgtReOptionsHtml}
                 </select>
-                <input type="number" class="straddle-input leg-tgt-re-cnt" style="width:40px;" value="${l.target_re_execute_count || 6}">
+                <input type="number" class="straddle-input leg-tgt-re-cnt" style="width:40px;" value="${l.target_re_execute_count || 6}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
             </div>
         </td>
         <td>
             <div style="display:flex; flex-direction:column; gap:3px;">
                 <div style="display:flex; gap:2px;">
-                    <select class="straddle-select leg-sl-type" style="width:80px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
+                    <select class="straddle-select leg-sl-type" style="width:80px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
                         ${slOptionsHtml}
                     </select>
-                    <input type="number" class="straddle-input leg-sl-val" style="width:50px;" value="${l.sl_value !== undefined ? l.sl_value : 66}">
+                    <input type="number" class="straddle-input leg-sl-val" style="width:50px;" value="${l.sl_value !== undefined ? l.sl_value : 66}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
                 </div>
                 <select class="straddle-select leg-sl-placement" style="font-size:10px; padding:1px 3px; background:#0b1120; border-color:#334155; color:${isSlAdv ? '#10b981' : '#94a3b8'}; font-weight:700;" onchange="this.style.color = (this.value === 'Place in advance' ? '#10b981' : '#94a3b8'); syncStrategyLegChange('${rowId}');" title="Stoploss Order Placement: Keep with self (monitored by software) vs Place with broker (advance SL-L order on exchange)">
                     <option value="Keep with self" ${!isSlAdv ? "selected" : ""}>💻 With Self</option>
@@ -6646,7 +6662,7 @@ function addStraddleLegRow(leg = null) {
             </div>
         </td>
         <td>
-            <select class="straddle-select leg-tsl-type" style="width:80px;">
+            <select class="straddle-select leg-tsl-type" style="width:80px;" onchange="syncStrategyLegChange('${rowId}')">
                 <option value="None" ${l.tsl_type === "None" ? "selected" : ""}>None</option>
                 <option value="TSL: %" ${l.tsl_type === "TSL: %" ? "selected" : ""}>TSL: %</option>
                 <option value="TSL: pts" ${l.tsl_type === "TSL: pts" ? "selected" : ""}>TSL: pts</option>
@@ -6654,14 +6670,14 @@ function addStraddleLegRow(leg = null) {
         </td>
         <td>
             <div style="display:flex; gap:2px;">
-                <select class="straddle-select leg-sl-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr'))">
+                <select class="straddle-select leg-sl-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
                     ${slReOptionsHtml}
                 </select>
-                <input type="number" class="straddle-input leg-sl-re-cnt" style="width:40px;" value="${l.sl_re_execute_count || 1}">
+                <input type="number" class="straddle-input leg-sl-re-cnt" style="width:40px;" value="${l.sl_re_execute_count || 1}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
             </div>
         </td>
         <td>
-            <select class="straddle-select leg-action" style="width:110px;">
+            <select class="straddle-select leg-action" style="width:110px;" onchange="syncStrategyLegChange('${rowId}')">
                 <option value="Square off leg" ${l.action === "Square off leg" ? "selected" : ""}>Square off leg</option>
                 <option value="Square off all" ${l.action === "Square off all" ? "selected" : ""}>Square off all</option>
             </select>

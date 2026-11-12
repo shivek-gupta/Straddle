@@ -1124,7 +1124,13 @@ class StraddleManager:
                 trade_type = "PAPER"
             elif det.get("mode") == "PAPER" or det.get("broker") == "PAPER" or det.get("paper"):
                 trade_type = "PAPER"
-            elif any(k in msg_u for k in ("ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS ORDER", "TARGET ORDER", "RE-EXECUTE", "HEDGE EXIT", "OCO", "FILLED ON BROKER", "ORDER REJECTED", "BROKER SL")):
+            elif any(k in msg_u for k in (
+                "ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS ORDER", "TARGET ORDER",
+                "RE-EXECUTE", "RE EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST",
+                "RE-ENTRIES", "TRIGGERING RE", "ORPHAN HEDGE", "HEDGE EXIT", "OCO",
+                "FILLED ON BROKER", "ORDER REJECTED", "BROKER SL", "HEDGE AUTO-EXIT",
+                "RE-ENTRY MARGIN GUARD", "MARGIN AUTO-RELEASE", "HEDGE SHIFT"
+            )):
                 mode = self._state.get("execution_mode", "LIVE_BROKER")
                 trade_type = "PAPER" if mode == "PAPER" else "LIVE"
             else:
@@ -1186,7 +1192,13 @@ class StraddleManager:
                     msg_u = str(l_copy.get("message", "")).upper()
                     if any(k in msg_u for k in ("[PAPER", "PAPER BENCHMARK", "PAPER FILL", "PAPER TRADE")):
                         l_copy["trade_type"] = "PAPER"
-                    elif any(k in msg_u for k in ("ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS ORDER", "TARGET ORDER", "RE-EXECUTE", "HEDGE EXIT", "OCO", "FILLED ON BROKER", "ORDER REJECTED", "BROKER SL")):
+                    elif any(k in msg_u for k in (
+                "ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS ORDER", "TARGET ORDER",
+                "RE-EXECUTE", "RE EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST",
+                "RE-ENTRIES", "TRIGGERING RE", "ORPHAN HEDGE", "HEDGE EXIT", "OCO",
+                "FILLED ON BROKER", "ORDER REJECTED", "BROKER SL", "HEDGE AUTO-EXIT",
+                "RE-ENTRY MARGIN GUARD", "MARGIN AUTO-RELEASE", "HEDGE SHIFT"
+            )):
                         l_copy["trade_type"] = "LIVE"
                     else:
                         l_copy["trade_type"] = "SYSTEM"
@@ -3366,7 +3378,11 @@ class StraddleManager:
                 strat_dict["end_time"] = normalize_time_str(strat_dict.get("end_time"), "15:29:50")
                 self._strategies.append(strat_dict)
 
+            if self._active_strategy_id and str(self._active_strategy_id).strip() == str(sid).strip():
+                self._state["active_strategy"] = strat_dict
+
             self._save_strategies()
+            self._save_state()
             self._log_event(f"Strategy '{strat_dict.get('name', sid)}' ({und}) saved successfully.")
             return {"success": True, "strategy_id": sid, "strategy": strat_dict}
 
@@ -5822,7 +5838,11 @@ class StraddleManager:
             "mtm": 0.0,
             "order_id": order_id,
             "exit_order_id": None,
-            "re_execute_count": 0,
+            "re_execute_count": int(leg_cfg.get("re_execute_count") or 0),
+            "target_re_execute_type": leg_cfg.get("target_re_execute_type", "RE EXECUTE"),
+            "target_re_execute_count": int(leg_cfg.get("target_re_execute_count") if leg_cfg.get("target_re_execute_count") is not None else 5),
+            "sl_re_execute_type": leg_cfg.get("sl_re_execute_type", "RE EXECUTE"),
+            "sl_re_execute_count": int(leg_cfg.get("sl_re_execute_count") if leg_cfg.get("sl_re_execute_count") is not None else 2),
             "strategy_id": strat_id,
             "strategy_name": strat_name,
             "date": today_ist_str(),
@@ -8524,12 +8544,21 @@ class StraddleManager:
         if is_pos_hedge:
             logger.info(f"[Hedge Re-entry Guard] Position '{pos.get('symbol')}' is a hedge or buy leg. Skipping re-entry attempt.")
             return
-        legs_cfg = strat.get("legs", [])
-        leg_cfg = next((l for l in legs_cfg if l.get("id") == pos.get("id")), None)
+        # Resolve authoritative strategy configuration
+        strat_id = strat.get("strategy_id") or strat.get("id") or self._active_strategy_id
+        authoritative_strat = self.get_strategy(strat_id) if strat_id else None
+        if not authoritative_strat:
+            authoritative_strat = self._state.get("active_strategy") or strat
+
+        legs_cfg = authoritative_strat.get("legs") or authoritative_strat.get("strategy", {}).get("legs") or strat.get("legs") or strat.get("strategy", {}).get("legs") or []
+        leg_cfg = next((l for l in legs_cfg if l.get("id") and l.get("id") == pos.get("id")), None)
         if not leg_cfg:
             pos_opt = (pos.get("option_type") or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")).upper()
             pos_side = str(pos.get("side", "SELL")).upper()
             leg_cfg = next((l for l in legs_cfg if str(l.get("option_type", "")).upper() == pos_opt and str(l.get("side", "")).upper() == pos_side), None)
+        if not leg_cfg and legs_cfg:
+            pos_opt = (pos.get("option_type") or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")).upper()
+            leg_cfg = next((l for l in legs_cfg if str(l.get("option_type", "")).upper() == pos_opt), None)
 
         if not leg_cfg:
             # Fallback configuration built directly from pos
@@ -8542,14 +8571,14 @@ class StraddleManager:
                 "lot_size": pos.get("lot_size", 65),
                 "product": pos.get("product", "NRML"),
                 "strike_selection": str(int(pos.get("strike_price"))) if pos.get("strike_price") else "ATM",
-                "sl_re_execute_type": pos.get("sl_re_execute_type", "NONE"),
-                "sl_re_execute_count": pos.get("sl_re_execute_count", 0),
-                "target_re_execute_type": pos.get("target_re_execute_type", "NONE"),
-                "target_re_execute_count": pos.get("target_re_execute_count", 0),
+                "sl_re_execute_type": pos.get("sl_re_execute_type", "RE EXECUTE"),
+                "sl_re_execute_count": pos.get("sl_re_execute_count", 2),
+                "target_re_execute_type": pos.get("target_re_execute_type", "RE EXECUTE"),
+                "target_re_execute_count": pos.get("target_re_execute_count", 5),
                 "target_type": pos.get("target_type", "TGT: %"),
                 "target_value": pos.get("target_value", 25.0),
                 "sl_type": pos.get("sl_type", "SL: -%"),
-                "sl_value": pos.get("sl_value", 15.0),
+                "sl_value": pos.get("sl_value", 25.0),
                 "tsl_profit_pts": pos.get("tsl_profit_pts", 0.0),
                 "tsl_trail_pts": pos.get("tsl_trail_pts", 0.0),
             }
@@ -8557,28 +8586,38 @@ class StraddleManager:
         if trigger.upper() == "STOPLOSS":
             raw_re_type = pos.get("sl_re_execute_type")
             if not raw_re_type or str(raw_re_type).upper() == "NONE":
-                raw_re_type = leg_cfg.get("sl_re_execute_type", "NONE")
-            re_type = str(raw_re_type or "NONE")
+                raw_re_type = leg_cfg.get("sl_re_execute_type", "RE EXECUTE")
+            re_type = str(raw_re_type or "RE EXECUTE")
 
             c_val = pos.get("sl_re_execute_count")
-            if c_val is None or c_val == "":
-                c_val = leg_cfg.get("sl_re_execute_count", 0)
-            re_max = int(c_val or 0)
+            if c_val is None or c_val == "" or (isinstance(c_val, (int, float)) and c_val <= 0 and str(raw_re_type).upper() != "NONE"):
+                c_val = leg_cfg.get("sl_re_execute_count", 2)
+            try:
+                re_max = int(c_val)
+            except Exception:
+                re_max = 2
         else:
             raw_re_type = pos.get("target_re_execute_type")
             if not raw_re_type or str(raw_re_type).upper() == "NONE":
-                raw_re_type = leg_cfg.get("target_re_execute_type", "NONE")
-            re_type = str(raw_re_type or "NONE")
+                raw_re_type = leg_cfg.get("target_re_execute_type", "RE EXECUTE")
+            re_type = str(raw_re_type or "RE EXECUTE")
 
             c_val = pos.get("target_re_execute_count")
-            if c_val is None or c_val == "":
-                c_val = leg_cfg.get("target_re_execute_count", 0)
-            re_max = int(c_val or 0)
+            if c_val is None or c_val == "" or (isinstance(c_val, (int, float)) and c_val <= 0 and str(raw_re_type).upper() != "NONE"):
+                c_val = leg_cfg.get("target_re_execute_count", 5)
+            try:
+                re_max = int(c_val)
+            except Exception:
+                re_max = 5
 
         cur_count = int(pos.get("re_execute_count", 0))
 
         re_type_u = str(re_type or "").upper()
         is_re_enabled = any(k in re_type_u for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY"))
+
+        self._log_event(
+            f"[{strat.get('name')}] Re-Execution evaluation for {pos.get('symbol')} ({trigger} hit): re_type='{re_type_u}', count={cur_count}/{re_max}, enabled={is_re_enabled}"
+        )
 
         chk = self.get_strategy_schedule_status(strat)
         if not chk["can_enter"]:
@@ -8591,6 +8630,7 @@ class StraddleManager:
         if is_re_enabled and cur_count < re_max:
             new_count = cur_count + 1
             pos["_re_entry_in_progress"] = True
+            strat["_re_entry_in_progress"] = True
             self._log_event(f"Triggering {re_type_u} #{new_count}/{re_max} for leg '{pos.get('symbol')}' ({trigger} hit)...")
 
             target_exit_order_id = exit_order_id or pos.get("exit_order_id")
@@ -9037,6 +9077,7 @@ class StraddleManager:
                     _re_entry_worker()
                 finally:
                     pos["_re_entry_in_progress"] = False
+                    strat["_re_entry_in_progress"] = False
 
             threading.Thread(target=_runner_wrapper, daemon=True).start()
         else:
@@ -9172,18 +9213,54 @@ class StraddleManager:
                     ]
 
                     # Check pending re-entry strictly for this hedge's parent / option type
-                    has_pending_re_entry = any(
-                        p.get("_re_entry_in_progress")
-                        for p in strat_positions
-                        if (
-                            (h_parent_id and (str(p.get("id", "")) == h_parent_id or str(p.get("leg_id", "")) == h_parent_id))
-                            or (h_opt and (str(p.get("option_type", "")).upper() == h_opt or h_opt in str(p.get("symbol", "")).upper()))
+                    has_pending_re_entry = (
+                        bool(strat.get("_re_entry_in_progress"))
+                        or any(
+                            p.get("_re_entry_in_progress")
+                            for p in strat_positions
+                            if (
+                                (h_parent_id and (str(p.get("id", "")) == h_parent_id or str(p.get("leg_id", "")) == h_parent_id))
+                                or (h_opt and (str(p.get("option_type", "")).upper() == h_opt or h_opt in str(p.get("symbol", "")).upper()))
+                            )
                         )
                     )
 
-                    if not matching_open and not has_pending_re_entry:
+                    # Check if any short leg of this option type still has remaining re-entries
+                    has_remaining_re_entries = False
+                    strat_legs = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
+                    chk_sched = self.get_strategy_schedule_status(strat)
+                    if chk_sched.get("can_enter", True) and self._state.get("algo_running"):
+                        for p in strat_positions:
+                            p_opt = (p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper()
+                            if p_opt == h_opt and str(p.get("side", "SELL")).upper() == "SELL" and not p.get("is_associated_hedge"):
+                                c_cnt = int(p.get("re_execute_count", 0))
+                                tgt_max = int(p.get("target_re_execute_count", 5))
+                                sl_max = int(p.get("sl_re_execute_count", 2))
+                                tgt_re = str(p.get("target_re_execute_type", "RE EXECUTE")).upper()
+                                sl_re = str(p.get("sl_re_execute_type", "RE EXECUTE")).upper()
+                                has_t = any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_cnt < tgt_max
+                                has_s = any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_cnt < sl_max
+                                if has_t or has_s:
+                                    has_remaining_re_entries = True
+                                    break
+                        if not has_remaining_re_entries:
+                            for l_cfg in strat_legs:
+                                l_opt = str(l_cfg.get("option_type", "")).upper()
+                                if l_opt == h_opt and str(l_cfg.get("side", "SELL")).upper() == "SELL":
+                                    tgt_re = str(l_cfg.get("target_re_execute_type", "RE EXECUTE")).upper()
+                                    sl_re = str(l_cfg.get("sl_re_execute_type", "RE EXECUTE")).upper()
+                                    has_t = any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY"))
+                                    has_s = any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY"))
+                                    if has_t or has_s:
+                                        total_exits = sum(1 for p in strat_positions if (p.get("option_type") or "").upper() == h_opt and str(p.get("side", "")).upper() == "SELL" and p.get("status") in ("COMPLETE", "CLOSED"))
+                                        max_allowed = max(int(l_cfg.get("target_re_execute_count", 5)), int(l_cfg.get("sl_re_execute_count", 2))) + 1
+                                        if total_exits < max_allowed:
+                                            has_remaining_re_entries = True
+                                            break
+
+                    if not matching_open and not has_pending_re_entry and not has_remaining_re_entries:
                         self._log_event(
-                            f"[Orphan Hedge Cleanup] ⚡ Auto-exiting orphaned hedge '{h.get('symbol')}' (no open short leg of {h_opt} remains in strategy '{strat.get('name')}')...",
+                            f"[Orphan Hedge Cleanup] ⚡ Auto-exiting orphaned hedge '{h.get('symbol')}' (no open short leg of {h_opt} remains and re-entries exhausted in strategy '{strat.get('name')}')...",
                             level="INFO"
                         )
                         self._square_off_single_position(h, broker, reason="ORPHAN HEDGE AUTO-EXIT (Parent short leg completed)")
