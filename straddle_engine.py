@@ -3386,6 +3386,12 @@ class StraddleManager:
                 strat_dict["end_time"] = normalize_time_str(strat_dict.get("end_time"), "15:29:50")
                 self._strategies.append(strat_dict)
 
+            # Calculate and store accurate required broker margin per lot and effective multiplier
+            broker_margin = self.calculate_strategy_margin_per_lot(strat_dict)
+            eff_mult = self.get_effective_multiplier(strat_dict)
+            strat_dict["broker_margin_per_lot"] = broker_margin
+            strat_dict["effective_multiplier"] = eff_mult
+
             if self._active_strategy_id and str(self._active_strategy_id).strip() == str(sid).strip():
                 self._state["active_strategy"] = strat_dict
 
@@ -3404,7 +3410,7 @@ class StraddleManager:
             return 125174.14
 
         und = str(strat.get("underlying") or "NIFTY").upper()
-        spot = 23150.0
+        spot = 0.0
         try:
             feed = getattr(self, "_active_feed", None)
             if feed and hasattr(feed, "get_spot_price"):
@@ -3416,10 +3422,19 @@ class StraddleManager:
         except Exception:
             pass
 
+        if spot <= 0 or spot == 23150.0:
+            live_sp = float(self._get_underlying_spot_price(und) or 0.0)
+            if live_sp > 0:
+                spot = live_sp
+            else:
+                spot = 25300.0 if und == "NIFTY" else 52000.0
+
         step = float(STRIKE_STEPS.get(und, 50.0))
         atm_strike = round(spot / step) * step
 
         sim_orders = []
+        strat_dyn_hedge = bool(strat.get("dynamic_hedging")) or bool(strat.get("toggles", {}).get("dynamic_hedging"))
+
         for idx, leg in enumerate(legs):
             side = str(leg.get("side") or "Sell").upper()
             opt_type = str(leg.get("option_type") or "CE").upper()
@@ -3442,7 +3457,7 @@ class StraddleManager:
                 except Exception:
                     strike = atm_strike
 
-            est_price = 50.0 if abs(strike - atm_strike) <= step else (5.0 if abs(strike - atm_strike) <= 5 * step else 1.0)
+            est_price = 180.0 if abs(strike - atm_strike) <= step else (50.0 if abs(strike - atm_strike) <= 5 * step else 10.0)
             sim_orders.append({
                 "underlying": und,
                 "strike": strike,
@@ -3451,6 +3466,23 @@ class StraddleManager:
                 "lots": 1,
                 "price": est_price
             })
+
+            # Check if associated dynamic hedge is enabled for this sell leg
+            if side == "SELL":
+                h_cfg = leg.get("associated_hedge") or {}
+                is_hedge_enabled = True if strat_dyn_hedge else bool(h_cfg.get("enabled", False))
+                if is_hedge_enabled:
+                    init_otm = int(h_cfg.get("initial_otm") or 20)
+                    h_strike = (strike + init_otm * step) if opt_type == "CE" else (strike - init_otm * step)
+                    h_est_price = 6.0
+                    sim_orders.append({
+                        "underlying": und,
+                        "strike": h_strike,
+                        "opt_type": opt_type,
+                        "side": "BUY",
+                        "lots": 1,
+                        "price": h_est_price
+                    })
 
         res = self.calculate_basket_margin(sim_orders, multiplier=1)
         fallback_margin = float(getattr(config, "DEFAULT_MARGIN_PER_LOT", {}).get(und, 125174.14))

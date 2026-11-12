@@ -454,6 +454,9 @@ async function fetchStraddleState() {
                 window._straddleMargin = s.margin;
                 if (typeof updateFormAutoMultiplierPreview === "function") {
                     updateFormAutoMultiplierPreview();
+    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+        scheduleAutoMultiplierLiveRecalc();
+    }
                 }
             }
 
@@ -1399,9 +1402,18 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         const isManual = (multType !== "AUTO");
         const multiplier = s.multiplier || 1;
         const cushionMargin = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? s.cushion_margin : 15000;
-        const brokerMargin = s.broker_margin_per_lot || 125174.14;
+        const brokerMargin = s.broker_margin_per_lot || 130750.0;
         const totalMarginPerLot = brokerMargin + cushionMargin;
-        const effMult = s.effective_multiplier || (isManual ? multiplier : Math.max(1, Math.floor(1400000 / Math.max(1, totalMarginPerLot))));
+        let liveAvailCap = 0.0;
+        if (window._straddleState?.margin?.available_margin !== undefined && window._straddleState?.margin?.available_margin !== null) {
+            liveAvailCap = parseFloat(window._straddleState.margin.available_margin);
+        } else if (window._straddleMargin?.available_margin !== undefined && window._straddleMargin?.available_margin !== null) {
+            liveAvailCap = parseFloat(window._straddleMargin.available_margin);
+        } else if (window._straddleState?.margin?.available_cash !== undefined && window._straddleState?.margin?.available_cash !== null) {
+            liveAvailCap = parseFloat(window._straddleState.margin.available_cash);
+        }
+        if (liveAvailCap <= 0) liveAvailCap = 200000.0;
+        const effMult = s.effective_multiplier || (isManual ? multiplier : Math.max(1, Math.floor(liveAvailCap / Math.max(1, totalMarginPerLot))));
 
         const mtm = s.mtm || 0.0;
         const mtmClass = mtm >= 0 ? "color:#10b981;" : "color:#f43f5e;";
@@ -1733,6 +1745,9 @@ async function onChangeAlgoCushionMargin(strategyId, val) {
         const formInput = document.getElementById("cfgCushionMargin");
         if (formInput && parseFloat(formInput.value) !== cushion) formInput.value = cushion;
         updateFormAutoMultiplierPreview();
+    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+        scheduleAutoMultiplierLiveRecalc();
+    }
     }
 
     renderStraddleAlgosTable(true);
@@ -3575,6 +3590,10 @@ function syncStrategyLegChange(rowId) {
     legObj.associated_hedge.initial_otm = hInitVal;
     legObj.associated_hedge.max_distance_threshold = hThreshVal;
     legObj.associated_hedge.reset_otm = hResetVal;
+
+    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+        scheduleAutoMultiplierLiveRecalc();
+    }
 }
 window.syncStrategyLegChange = syncStrategyLegChange;
 
@@ -6226,6 +6245,9 @@ function populateStraddleSettingsForm(s) {
         cushionInput.value = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? s.cushion_margin : 15000;
     }
     updateFormAutoMultiplierPreview();
+    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+        scheduleAutoMultiplierLiveRecalc();
+    }
     const curUnd = (s.underlying || "NIFTY").toUpperCase();
     const isComm = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(curUnd);
     const defaultSt = isComm ? "09:00:00" : "09:15:56";
@@ -6698,6 +6720,9 @@ function addStraddleLegRow(leg = null) {
     `;
     tbody.appendChild(tr);
     syncLegRowDisabledFields(tr);
+    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+        scheduleAutoMultiplierLiveRecalc();
+    }
 }
 
 function removeStraddleLegRow(rowId) {
@@ -6714,6 +6739,9 @@ function removeStraddleLegRow(rowId) {
             } else if (rowIdx >= 0 && rowIdx < legs.length) {
                 legs.splice(rowIdx, 1);
             }
+        }
+        if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+            scheduleAutoMultiplierLiveRecalc();
         }
     }
 }
@@ -7066,6 +7094,9 @@ function onStrategyUnderlyingChange(newUnd) {
 
     // 5. Refresh live margin preview and auto multiplier preview
     updateFormAutoMultiplierPreview();
+    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+        scheduleAutoMultiplierLiveRecalc();
+    }
     if (typeof renderStrategyMarginEstimate === "function") {
         renderStrategyMarginEstimate();
     }
@@ -7513,6 +7544,13 @@ async function saveStraddleStrategySettings() {
         const res = await resp.json();
         if (res.success) {
             showStraddleToast(`💾 Strategy '${strat.name}' saved successfully!`, "success", 2000);
+            if (res.strategy) {
+                if (window._straddleState) window._straddleState.activeStrategy = res.strategy;
+                if (res.strategy.broker_margin_per_lot) {
+                    window._formSimulatedMarginPerLot = res.strategy.broker_margin_per_lot;
+                    updateFormAutoMultiplierPreview(res.strategy.broker_margin_per_lot);
+                }
+            }
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
         } else {
@@ -11521,6 +11559,9 @@ function setFormMultiplierMode(mode, syncToServer = true) {
     if (grpAuto) grpAuto.style.display = !isManual ? "block" : "none";
 
     updateFormAutoMultiplierPreview();
+    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+        scheduleAutoMultiplierLiveRecalc();
+    }
 
     const activeStrat = window._straddleState?.activeStrategy;
     if (activeStrat) {
@@ -11544,7 +11585,108 @@ function setFormMultiplierMode(mode, syncToServer = true) {
 }
 window.setFormMultiplierMode = setFormMultiplierMode;
 
-function updateFormAutoMultiplierPreview() {
+let _autoMultiplierRecalcTimer = null;
+function scheduleAutoMultiplierLiveRecalc() {
+    clearTimeout(_autoMultiplierRecalcTimer);
+    _autoMultiplierRecalcTimer = setTimeout(async () => {
+        try {
+            const badge = document.getElementById("cfgAutoMultBadge");
+            if (!badge) return;
+
+            let strat = null;
+            if (typeof serializeCurrentStrategySettings === "function") {
+                try {
+                    strat = serializeCurrentStrategySettings();
+                } catch (e) {
+                    strat = window._straddleState?.activeStrategy;
+                }
+            } else {
+                strat = window._straddleState?.activeStrategy;
+            }
+            if (!strat) return;
+
+            const und = (strat.underlying || document.getElementById("cfgStrategyUnderlying")?.value || "NIFTY").toUpperCase();
+            const step = (und === "BANKNIFTY") ? 100 : ((und === "MIDCPNIFTY") ? 25 : 50);
+
+            let spot = 25300.0;
+            if (window._straddleState?.underlying_spot) {
+                spot = parseFloat(window._straddleState.underlying_spot) || spot;
+            }
+            const atmStrike = Math.round(spot / step) * step;
+
+            const simOrders = [];
+            const legs = strat.legs || [];
+            const dynHedgeChecked = strat.toggles?.dynamic_hedging || strat.dynamic_hedging || (document.getElementById("cfgToggleDynamicHedges") ? document.getElementById("cfgToggleDynamicHedges").checked : true);
+
+            legs.forEach(leg => {
+                const side = (leg.side || "Sell").toUpperCase();
+                const optType = (leg.option_type || leg.type || "CE").toUpperCase();
+                let strike = atmStrike;
+                const sel = String(leg.strike_selection || "ATM STRIKE").toUpperCase();
+                if (sel.includes("OTM") || sel.includes("ITM")) {
+                    const match = sel.match(/(OTM|ITM)\s*(\d+)/i);
+                    const offset = match ? parseInt(match[2], 10) : 0;
+                    if (sel.includes("OTM")) {
+                        strike = (optType === "CE") ? atmStrike + (offset * step) : atmStrike - (offset * step);
+                    } else {
+                        strike = (optType === "CE") ? atmStrike - (offset * step) : atmStrike + (offset * step);
+                    }
+                }
+
+                const estPrice = Math.abs(strike - atmStrike) <= step ? 180.0 : (Math.abs(strike - atmStrike) <= 5 * step ? 50.0 : 10.0);
+                simOrders.push({
+                    underlying: und,
+                    strike: strike,
+                    opt_type: optType,
+                    side: side,
+                    lots: 1,
+                    price: estPrice,
+                    selected: true
+                });
+
+                if (side === "SELL") {
+                    const hCfg = leg.associated_hedge || {};
+                    const isHedgeOn = dynHedgeChecked || !!hCfg.enabled;
+                    if (isHedgeOn) {
+                        const initOtm = parseInt(hCfg.initial_otm, 10) || 20;
+                        const hStrike = (optType === "CE") ? (strike + initOtm * step) : (strike - initOtm * step);
+                        simOrders.push({
+                            underlying: und,
+                            strike: hStrike,
+                            opt_type: optType,
+                            side: "BUY",
+                            lots: 1,
+                            price: 6.0,
+                            selected: true
+                        });
+                    }
+                }
+            });
+
+            if (simOrders.length === 0) return;
+
+            const resp = await fetch("/api/straddle/basket/margin", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    orders: simOrders,
+                    multiplier: 1
+                })
+            });
+            const data = await resp.json();
+            if (data.success && data.required_margin > 0) {
+                window._formSimulatedMarginPerLot = Number(data.required_margin);
+                window._formSimulatedMarginUnderlying = und;
+                updateFormAutoMultiplierPreview(Number(data.required_margin));
+            }
+        } catch (e) {
+            console.warn("Live auto multiplier recalc error:", e);
+        }
+    }, 150);
+}
+window.scheduleAutoMultiplierLiveRecalc = scheduleAutoMultiplierLiveRecalc;
+
+function updateFormAutoMultiplierPreview(overrideMargin) {
     const cushionVal = parseFloat(document.getElementById("cfgCushionMargin")?.value) || 0;
     const badge = document.getElementById("cfgAutoMultBadge");
     if (!badge) return;
@@ -11552,7 +11694,7 @@ function updateFormAutoMultiplierPreview() {
     const strat = window._straddleState?.activeStrategy;
     const und = (document.getElementById("cfgStrategyUnderlying")?.value || strat?.underlying || "NIFTY").toUpperCase();
     const defaultMarginTable = {
-        "NIFTY": 125174.14,
+        "NIFTY": 130750.0,
         "BANKNIFTY": 140000.0,
         "FINNIFTY": 120000.0,
         "MIDCPNIFTY": 110000.0,
@@ -11568,8 +11710,27 @@ function updateFormAutoMultiplierPreview() {
         "SILVERM": 65000.0,
         "COPPER": 220000.0
     };
-    const defaultMargin = defaultMarginTable[und] || 125174.14;
-    const brokerMargin = (strat && strat.broker_margin_per_lot && (strat.underlying || "NIFTY").toUpperCase() === und) ? strat.broker_margin_per_lot : defaultMargin;
+
+    const dynHedgeChecked = document.getElementById("cfgToggleDynamicHedges") ? document.getElementById("cfgToggleDynamicHedges").checked : (strat?.dynamic_hedging || strat?.toggles?.dynamic_hedging);
+    const hasLegHedges = !!document.querySelector(".leg-hedge-enabled:checked");
+    const isHedged = (dynHedgeChecked !== false && hasLegHedges) || !!dynHedgeChecked;
+
+    let defaultMargin = defaultMarginTable[und] || 130750.0;
+    if (!isHedged && und === "NIFTY") {
+        defaultMargin = 145492.0;
+    }
+
+    let brokerMargin = defaultMargin;
+    if (typeof overrideMargin === "number" && overrideMargin > 0) {
+        brokerMargin = overrideMargin;
+        window._formSimulatedMarginPerLot = overrideMargin;
+        window._formSimulatedMarginUnderlying = und;
+    } else if (window._formSimulatedMarginPerLot && window._formSimulatedMarginUnderlying === und) {
+        brokerMargin = window._formSimulatedMarginPerLot;
+    } else if (strat && strat.broker_margin_per_lot && (strat.underlying || "NIFTY").toUpperCase() === und) {
+        brokerMargin = strat.broker_margin_per_lot;
+    }
+
     const totalPerLot = brokerMargin + cushionVal;
 
     let avail = 0.0;
@@ -11607,6 +11768,9 @@ window.onFormManualMultiplierChange = onFormManualMultiplierChange;
 
 function onFormCushionMarginChange(val) {
     updateFormAutoMultiplierPreview();
+    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+        scheduleAutoMultiplierLiveRecalc();
+    }
     const activeStrat = window._straddleState?.activeStrategy;
     if (activeStrat && activeStrat.strategy_id) {
         onChangeAlgoCushionMargin(activeStrat.strategy_id, val);
