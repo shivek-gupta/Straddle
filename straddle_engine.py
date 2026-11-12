@@ -1127,9 +1127,13 @@ class StraddleManager:
             elif any(k in msg_u for k in (
                 "ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS ORDER", "TARGET ORDER",
                 "RE-EXECUTE", "RE EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST",
-                "RE-ENTRIES", "TRIGGERING RE", "ORPHAN HEDGE", "HEDGE EXIT", "OCO",
+                "RE-ENTRIES", "RE ENTRIES", "RE-EXECUTION", "RE EXECUTION", "RE-ENTER", "RE ENTER",
+                "TRIGGERING RE", "ORPHAN HEDGE", "HEDGE EXIT", "OCO", "HEDGE RETAINED",
+                "HEDGE AUTO SQUARE-OFF", "HEDGE CHECK", "STOPLOSS HIT", "TARGET HIT",
+                "SL CANCELLED", "TARGET CANCELLED", "RE-ENTRY ABORTED", "RE-ENTRY BLOCKED",
                 "FILLED ON BROKER", "ORDER REJECTED", "BROKER SL", "HEDGE AUTO-EXIT",
-                "RE-ENTRY MARGIN GUARD", "MARGIN AUTO-RELEASE", "HEDGE SHIFT"
+                "RE-ENTRY MARGIN GUARD", "MARGIN AUTO-RELEASE", "HEDGE SHIFT", "MARGIN RELIEF",
+                "RE-ENTRY WORKER"
             )):
                 mode = self._state.get("execution_mode", "LIVE_BROKER")
                 trade_type = "PAPER" if mode == "PAPER" else "LIVE"
@@ -1195,9 +1199,13 @@ class StraddleManager:
                     elif any(k in msg_u for k in (
                 "ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS ORDER", "TARGET ORDER",
                 "RE-EXECUTE", "RE EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST",
-                "RE-ENTRIES", "TRIGGERING RE", "ORPHAN HEDGE", "HEDGE EXIT", "OCO",
+                "RE-ENTRIES", "RE ENTRIES", "RE-EXECUTION", "RE EXECUTION", "RE-ENTER", "RE ENTER",
+                "TRIGGERING RE", "ORPHAN HEDGE", "HEDGE EXIT", "OCO", "HEDGE RETAINED",
+                "HEDGE AUTO SQUARE-OFF", "HEDGE CHECK", "STOPLOSS HIT", "TARGET HIT",
+                "SL CANCELLED", "TARGET CANCELLED", "RE-ENTRY ABORTED", "RE-ENTRY BLOCKED",
                 "FILLED ON BROKER", "ORDER REJECTED", "BROKER SL", "HEDGE AUTO-EXIT",
-                "RE-ENTRY MARGIN GUARD", "MARGIN AUTO-RELEASE", "HEDGE SHIFT"
+                "RE-ENTRY MARGIN GUARD", "MARGIN AUTO-RELEASE", "HEDGE SHIFT", "MARGIN RELIEF",
+                "RE-ENTRY WORKER"
             )):
                         l_copy["trade_type"] = "LIVE"
                     else:
@@ -5675,7 +5683,7 @@ class StraddleManager:
             c_close = self.get_minute_candle_close(contract.get("instrument_key", ""), ent_hm, contract_meta=contract)
             if (c_close is None or c_close <= 0) and is_re_entry:
                 # Stockmock/AlgoTest parity: For re-entries executed at minute boundaries, use the just-closed minute's close
-                prev_hm = (now_ist() - datetime.timedelta(minutes=1)).strftime("%H:%M")
+                prev_hm = (now_ist() - timedelta(minutes=1)).strftime("%H:%M")
                 c_prev = self.get_minute_candle_close(contract.get("instrument_key", ""), prev_hm, contract_meta=contract)
                 if c_prev is not None and c_prev > 0:
                     c_close = c_prev
@@ -8620,7 +8628,9 @@ class StraddleManager:
         )
 
         chk = self.get_strategy_schedule_status(strat)
-        if not chk["can_enter"]:
+        strat_active = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
+        can_proceed = (chk.get("can_enter", False) or (strat_active and not chk.get("is_after_end", False) and chk.get("is_day_scheduled", True))) and self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED")
+        if not can_proceed:
             self._log_event(f"[{strat.get('name')}] Re-entry not triggered: {chk['reason']}", level="INFO")
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
@@ -8637,7 +8647,9 @@ class StraddleManager:
 
             def _re_entry_worker():
                 chk_w = self.get_strategy_schedule_status(strat)
-                if not chk_w["can_enter"] or not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
+                strat_active_w = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
+                can_enter_w = (chk_w.get("can_enter", False) or (strat_active_w and not chk_w.get("is_after_end", False) and chk_w.get("is_day_scheduled", True)))
+                if not can_enter_w or not self._state.get("algo_running") or self._state.get("status") in ("TERMINATED", "STOPPED"):
                     self._log_event(f"[{strat.get('name')}] Re-entry worker aborted: {chk_w['reason']}", level="INFO")
                     mode = self._state.get("execution_mode", "LIVE_BROKER")
                     broker = get_broker_adapter(mode)
@@ -8703,7 +8715,7 @@ class StraddleManager:
                     extra_delay = int(adv.get("re_execute_order_delay_sec", 0) or 0)
                     total_wait = max(0.0, sec_left + extra_delay)
                     if total_wait > 0:
-                        target_dt = now_dt + datetime.timedelta(seconds=total_wait)
+                        target_dt = now_dt + timedelta(seconds=total_wait)
                         self._log_event(
                             f"[{strat.get('name')}] Re-Execution 'Candle Close' active. Waiting {total_wait:.2f}s until 1-min candle close @ {target_dt.strftime('%H:%M:%S')}...",
                             level="INFO"
@@ -8718,7 +8730,9 @@ class StraddleManager:
                         self._log_event(f"[{strat.get('name')}] Re-Execution 'Immediate' (0s delay). Dispatching re-entry order immediately.", level="INFO")
 
                 chk_w2 = self.get_strategy_schedule_status(strat)
-                if not chk_w2["can_enter"] or not self._state.get("algo_running") or self._state.get("status") == "TERMINATED":
+                strat_active_w2 = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
+                can_enter_w2 = (chk_w2.get("can_enter", False) or (strat_active_w2 and not chk_w2.get("is_after_end", False) and chk_w2.get("is_day_scheduled", True)))
+                if not can_enter_w2 or not self._state.get("algo_running") or self._state.get("status") in ("TERMINATED", "STOPPED"):
                     self._log_event(f"[{strat.get('name')}] Re-entry aborted after delay: {chk_w2['reason']}", level="INFO")
                     return
 
@@ -9075,6 +9089,9 @@ class StraddleManager:
             def _runner_wrapper():
                 try:
                     _re_entry_worker()
+                except Exception as e_run:
+                    logger.exception(f"[RE-ENTRY WORKER CRASH] Unexpected error in re-entry worker for {pos.get('symbol')}: {e_run}")
+                    self._log_event(f"[RE-ENTRY WORKER ERROR] Failed executing re-entry for {pos.get('symbol')}: {e_run}", level="ERROR")
                 finally:
                     pos["_re_entry_in_progress"] = False
                     strat["_re_entry_in_progress"] = False
@@ -9095,6 +9112,12 @@ class StraddleManager:
         reason: str = "PARENT SHORT COMPLETED",
     ):
         """Squares off the associated hedge leg when parent short leg completes or exhausts all re-entries."""
+        if not self._state.get("algo_running") or self._state.get("status") in ("TERMINATED", "STOPPED"):
+            self._log_event(f"[Hedge Retained] Algo is stopped/terminated. Skipping auto hedge square-off for '{pos.get('symbol')}'.")
+            return
+        if not strat.get("enabled", False) or strat.get("status") in ("TERMINATED", "STOPPED"):
+            self._log_event(f"[Hedge Retained] Strategy '{strat.get('name')}' is stopped/disabled. Skipping auto hedge square-off for '{pos.get('symbol')}'.")
+            return
         if not broker:
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
@@ -9175,8 +9198,12 @@ class StraddleManager:
 
     def _cleanup_orphan_hedges(self, broker: BaseBrokerAdapter):
         """Scans for open hedge positions that have no active open short legs and no pending re-entries."""
+        if not self._state.get("algo_running") or self._state.get("status") in ("TERMINATED", "STOPPED"):
+            return
         try:
             for strat in self._strategies:
+                if not strat.get("enabled", False) or strat.get("status") in ("TERMINATED", "STOPPED"):
+                    continue
                 if strat.get("_entry_in_progress") or strat.get("status") == "ENTERING":
                     continue
                 strat_positions = strat.get("positions", [])
@@ -9229,7 +9256,9 @@ class StraddleManager:
                     has_remaining_re_entries = False
                     strat_legs = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
                     chk_sched = self.get_strategy_schedule_status(strat)
-                    if chk_sched.get("can_enter", True) and self._state.get("algo_running"):
+                    strat_is_active = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
+                    sched_ok = (chk_sched.get("can_enter", False) or (strat_is_active and not chk_sched.get("is_after_end", False) and chk_sched.get("is_day_scheduled", True)))
+                    if sched_ok and self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED"):
                         for p in strat_positions:
                             p_opt = (p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper()
                             if p_opt == h_opt and str(p.get("side", "SELL")).upper() == "SELL" and not p.get("is_associated_hedge"):
@@ -11951,10 +11980,11 @@ class StraddleManager:
                 self._last_reconcile_ts = now_ts
                 self._reconcile_broker_positions(broker)
 
-            # Periodic orphan hedge cleanup (every 2 seconds)
-            if (now_ts - getattr(self, "_last_orphan_hedge_check_ts", 0)) > 2.0:
-                self._last_orphan_hedge_check_ts = now_ts
-                self._cleanup_orphan_hedges(broker)
+            # Periodic orphan hedge cleanup (every 2 seconds) - strictly only when algo is actively running
+            if self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED"):
+                if (now_ts - getattr(self, "_last_orphan_hedge_check_ts", 0)) > 2.0:
+                    self._last_orphan_hedge_check_ts = now_ts
+                    self._cleanup_orphan_hedges(broker)
 
             active_strat = self.get_strategy(self._active_strategy_id)
             und = self.get_active_underlying()
