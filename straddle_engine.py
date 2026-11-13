@@ -3363,6 +3363,10 @@ class StraddleManager:
             elif "advanced" in strat_dict and isinstance(strat_dict["advanced"], dict):
                 strat_dict["advanced_settings"] = dict(strat_dict["advanced"])
 
+            # Strictly normalize start_time and end_time strings for both new and updated strategies
+            strat_dict["start_time"] = normalize_time_str(strat_dict.get("start_time"), "09:15:56")
+            strat_dict["end_time"] = normalize_time_str(strat_dict.get("end_time"), "15:29:50")
+
             idx = next((i for i, s in enumerate(self._strategies) if s.get("strategy_id") == sid), -1)
             if idx >= 0:
                 # Merge existing runtime properties (e.g. positions, status, mtm)
@@ -3373,6 +3377,23 @@ class StraddleManager:
                     strat_dict["status"] = existing["status"]
                 if "mtm" not in strat_dict and "mtm" in existing:
                     strat_dict["mtm"] = existing["mtm"]
+
+                # If user updated schedule / times:
+                chk = self.get_strategy_schedule_status(strat_dict)
+                has_open = any(p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0 for p in strat_dict.get("positions", []))
+                if not chk.get("is_after_end", False):
+                    # End time is in the future!
+                    if has_open:
+                        strat_dict["status"] = "TRADE_ACTIVE"
+                        strat_dict["entry_error"] = "-"
+                    elif strat_dict.get("enabled"):
+                        if strat_dict.get("status") in ("TERMINATED", "STOPPED"):
+                            strat_dict["status"] = "READY"
+                            strat_dict["entry_error"] = "-"
+                elif has_open and chk.get("is_after_end", False):
+                    # End time is already in past and positions are open - flag ready for immediate cycle square-off!
+                    strat_dict["entry_error"] = f"Trading hours ended ({strat_dict['end_time']})"
+
                 self._strategies[idx] = strat_dict
             else:
                 raw_name = (strat_dict.get("name") or "Strategy").strip()
@@ -3389,8 +3410,6 @@ class StraddleManager:
                     strat_dict["positions"] = []
                 if "status" not in strat_dict:
                     strat_dict["status"] = "READY"
-                strat_dict["start_time"] = normalize_time_str(strat_dict.get("start_time"), "09:15:56")
-                strat_dict["end_time"] = normalize_time_str(strat_dict.get("end_time"), "15:29:50")
                 self._strategies.append(strat_dict)
 
             # Calculate and store accurate required broker margin per lot and effective multiplier
@@ -8534,7 +8553,7 @@ class StraddleManager:
         broker: BaseBrokerAdapter,
         reason: str = "TARGET HIT",
     ) -> Dict[str, Any]:
-        if pos.get("status") not in ("OPEN", "EXIT_PENDING"):
+        if pos.get("status") not in ("OPEN", "EXIT_PENDING", "ERROR") or int(pos.get("quantity") or 0) <= 0:
             return {"success": False, "error": "Position is not OPEN"}
 
         mode = self._state.get("execution_mode", "LIVE_BROKER")
@@ -8630,14 +8649,12 @@ class StraddleManager:
                             qty = actual_open
                             pos["quantity"] = actual_open
                 else:
-                    # broker_pos is None: no trade or open position on broker for this symbol
-                    self._log_event(f"[Square-off Guard] No active open position found on broker for {sym_to_match} (net quantity 0). Marking COMPLETE without sending naked exit order.", level="INFO")
-                    pos["status"] = "COMPLETE"
-                    pos["avg_exit_price"] = 0.0
-                    pos["exit_time"] = now_ist_str()
-                    pos["exit_reason"] = f"{reason} (No open broker position)"
-                    pos["_exit_in_progress"] = False
-                    return {"success": True, "order_id": "", "filled": True, "price": 0.0, "pos": pos}
+                    # broker_pos is None: position was not found in cached positions report.
+                    # INVIOLABLE SAFETY DIRECTIVE:
+                    # Never suppress the exit order if algo tracks this position as OPEN!
+                    # Suppressing exit orders causes positions to be abandoned open on the exchange.
+                    # Dispatch the exit order directly to the broker to guarantee square-off.
+                    logger.info(f"[Square-off Guard] Position {sym_to_match} not found in broker positions cache. Dispatching {exit_side} MARKET exit order to exchange to ensure square-off.")
             except Exception as e:
                 logger.warning(f"Error checking broker open quantity before exit: {e}")
 
@@ -9694,9 +9711,7 @@ class StraddleManager:
                     has_remaining_re_entries = False
                     strat_legs = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
                     chk_sched = self.get_strategy_schedule_status(strat)
-                    strat_is_active = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
-                    sched_ok = (chk_sched.get("can_enter", False) or (strat_is_active and not chk_sched.get("is_after_end", False) and chk_sched.get("is_day_scheduled", True)))
-                    if sched_ok and self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED"):
+                    if chk_sched.get("can_enter") or (strat.get("status") == "TRADE_ACTIVE" and not chk_sched.get("is_after_end")):
                         for p in strat_positions:
                             p_opt = (p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper()
                             if p_opt == h_opt and str(p.get("side", "SELL")).upper() == "SELL" and not p.get("is_associated_hedge"):
@@ -12262,6 +12277,7 @@ class StraddleManager:
                     
                     et_sec_m = parse_time_to_seconds(matched_strat.get("end_time", "15:29:50"), 15 * 3600 + 29 * 60 + 50)
                     now_sec_m = parse_time_to_seconds(now_ist_str())
+                    has_open_in_strat = any(p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0 for p in matched_strat.get("positions", []))
                     if now_sec_m < et_sec_m:
                         matched_strat["status"] = "TRADE_ACTIVE"
                         if "enabled" not in matched_strat:
@@ -12269,7 +12285,9 @@ class StraddleManager:
                         matched_strat["_manual_reset"] = False
                         matched_strat["entry_error"] = "-"
                     else:
-                        if matched_strat.get("status") not in ("TERMINATED", "EXIT_FAILED"):
+                        # Strictly do NOT terminate strategy if positions are still open!
+                        # Let _evaluate_cycle auto square-off execute and confirm complete closure.
+                        if not has_open_in_strat and matched_strat.get("status") not in ("TERMINATED", "EXIT_FAILED"):
                             matched_strat["status"] = "TERMINATED"
                     matched_strat["repair_needed"] = False
                     changes_made = True
@@ -12505,7 +12523,7 @@ class StraddleManager:
 
             # Check if any strategy has open positions
             has_any_open = any(
-                any(p.get("status") == "OPEN" for p in s.get("positions", []))
+                any(p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0 for p in s.get("positions", []))
                 for s in self._strategies
             )
 
@@ -12560,7 +12578,7 @@ class StraddleManager:
                         strat_positions = []
                     strat["last_trade_date"] = today_s
 
-                has_open_positions = any(p.get("status") == "OPEN" for p in strat_positions)
+                has_open_positions = any(p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0 for p in strat_positions)
                 has_completed_positions = any(p.get("status") == "COMPLETE" for p in strat_positions)
 
                 # UNCONDITIONAL SAFETY RULE 1: If Strategy has OPEN positions and End Time is reached (now_sec >= et_sec),
@@ -12568,9 +12586,8 @@ class StraddleManager:
                 if has_open_positions and is_after_end:
                     if not strat.get("_exit_in_progress"):
                         strat["_exit_in_progress"] = True
-                        strat["status"] = "TERMINATED"
                         strat["entry_error"] = f"Trading hours ended ({et})"
-                        self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off.")
+                        self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off all open positions immediately.")
                         self._save_strategies()
                         self._square_off_strategy_positions(strat, broker, reason=f"AUTO END TIME ({et})")
                         strat["_exit_in_progress"] = False
@@ -13165,19 +13182,19 @@ class StraddleManager:
         adv = strat.get("advanced_settings") or strat.get("advanced") or {}
         exit_delay_sec = int(adv.get("exit_delay_sec") or adv.get("exit_order_delay_sec") or 0)
 
-        sells = [p for p in positions if p.get("status") == "OPEN" and p.get("side", "").upper() == "SELL"]
-        buys = [p for p in positions if p.get("status") == "OPEN" and p.get("side", "").upper() == "BUY"]
+        sells = [p for p in positions if p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0 and p.get("side", "").upper() == "SELL"]
+        buys = [p for p in positions if p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0 and p.get("side", "").upper() == "BUY"]
 
         # INVIOLABLE SAFETY DIRECTIVE:
         # Strictly under no conditions are Buy (Hedge) positions exited before Short Sell positions!
         # Sell orders are ALWAYS exited first to free up margin obligation and avoid RMS shortfall penalty.
         # If exit_delay_sec == 0s (or "None"), buffer time is 0: exit Buy hedge legs immediately upon Sell exits!
+        is_urgent = any(k in reason.upper() for k in ("MANUAL", "SQUARE OFF", "EMERGENCY", "END TIME", "TIME EXIT", "AUTO END"))
         if sells:
             sell_res = list(_PERSISTENT_LEG_POOL.map(lambda p: self._square_off_single_position(p, broker, reason=reason), sells))
 
             # Confirm sell exits without blocking user UI
             sell_exit_oids = [str(p.get("exit_order_id")) for p in sells if p.get("exit_order_id") and not str(p.get("exit_order_id")).startswith("ORD_") and not str(p.get("exit_order_id")).startswith("PAPER_")]
-            is_urgent = any(k in reason.upper() for k in ("MANUAL", "SQUARE OFF", "EMERGENCY"))
             if sell_exit_oids and not is_urgent:
                 v_futs = [_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 2.0, 0.05) for oid in sell_exit_oids]
                 for fut in concurrent.futures.as_completed(v_futs):
@@ -13193,10 +13210,13 @@ class StraddleManager:
         if buys:
             _ = list(_PERSISTENT_LEG_POOL.map(lambda p: self._square_off_single_position(p, broker, reason=reason), buys))
 
-        strat_open = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
+        strat_open = [p for p in strat.get("positions", []) if p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0]
         if not strat_open:
             strat["status"] = "TERMINATED"
             strat["repair_needed"] = False
+        else:
+            strat["status"] = "EXIT_FAILED"
+            strat["exit_error"] = f"{len(strat_open)} position(s) failed to square off cleanly. Retrying next cycle..."
         self._save_strategies()
 
     # ==========================================================
