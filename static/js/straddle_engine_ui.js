@@ -1904,6 +1904,7 @@ async function straddleResetStrategyDirect(strategyId) {
             s.exit_error = "-";
             s.last_error = null;
             s.repair_needed = false;
+            s.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
             if (Array.isArray(s.legs)) {
                 s.legs.forEach(l => {
                     l.error = null;
@@ -1914,6 +1915,7 @@ async function straddleResetStrategyDirect(strategyId) {
                     l.exit_order_id = null;
                     l.entry_price = null;
                     l.exit_price = null;
+                    l.re_execute_count = 0;
                     l.repair_needed = false;
                 });
             }
@@ -1942,10 +1944,13 @@ async function straddleResetStrategyDirect(strategyId) {
             window._straddleState.activeStrategy.repair_needed = false;
             window._straddleState.activeStrategy.mtm = 0.0;
             window._straddleState.activeStrategy.enabled = false;
+            window._straddleState.activeStrategy.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
         }
         window._straddleState.positions = [];
         window._straddleState.status = "READY";
         window._straddleState.entry_error = "-";
+        window._straddleState.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
+        updateStraddleReexecBadges([]);
         renderStraddlePositions([], 0.0, 0.0);
         renderStraddleHeader(window._straddleState);
     }
@@ -5301,13 +5306,28 @@ function updateStraddleReexecBadges(positions) {
     let ceSl = 0, ceTgt = 0, peSl = 0, peTgt = 0;
     const strat = window._straddleState?.activeStrategy;
 
-    if (strat && strat.re_execution_counts) {
+    const posList = (Array.isArray(positions))
+        ? positions
+        : (strat && Array.isArray(strat.positions) ? strat.positions : []);
+
+    // If strategy has no positions or is in clean READY state, counts are strictly 0!
+    if (posList.length === 0 || (strat && strat.status === "READY" && (!strat.positions || strat.positions.length === 0))) {
+        if (elCeSl) elCeSl.textContent = 0;
+        if (elCeTgt) elCeTgt.textContent = 0;
+        if (elPeSl) elPeSl.textContent = 0;
+        if (elPeTgt) elPeTgt.textContent = 0;
+        if (strat) {
+            strat.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
+        }
+        return;
+    }
+
+    if (strat && strat.re_execution_counts && posList.length > 0 && strat.status !== "READY") {
         ceSl = Number(strat.re_execution_counts.ce_sl || 0);
         ceTgt = Number(strat.re_execution_counts.ce_target || 0);
         peSl = Number(strat.re_execution_counts.pe_sl || 0);
         peTgt = Number(strat.re_execution_counts.pe_target || 0);
     } else {
-        const posList = (strat && Array.isArray(strat.positions)) ? strat.positions : (Array.isArray(positions) ? positions : []);
         posList.forEach(pos => {
             const isRe = !!(pos.is_re_entry || (pos.re_execute_count || 0) > 0 || (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("re-execute")));
             if (!isRe) return;
@@ -6046,6 +6066,7 @@ async function resetCurrentStraddleAlgo() {
             s.exit_error = "-";
             s.last_error = null;
             s.repair_needed = false;
+            s.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
             if (Array.isArray(s.legs)) {
                 s.legs.forEach(l => {
                     l.error = null;
@@ -6056,6 +6077,7 @@ async function resetCurrentStraddleAlgo() {
                     l.exit_order_id = null;
                     l.entry_price = null;
                     l.exit_price = null;
+                    l.re_execute_count = 0;
                     l.repair_needed = false;
                 });
             }
@@ -6074,6 +6096,7 @@ async function resetCurrentStraddleAlgo() {
     activeStrat.exit_error = "-";
     activeStrat.last_error = null;
     activeStrat.repair_needed = false;
+    activeStrat.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
     if (Array.isArray(activeStrat.legs)) {
         activeStrat.legs.forEach(l => {
             l.error = null;
@@ -6084,6 +6107,7 @@ async function resetCurrentStraddleAlgo() {
             l.exit_order_id = null;
             l.entry_price = null;
             l.exit_price = null;
+            l.re_execute_count = 0;
             l.repair_needed = false;
         });
     }
@@ -6092,10 +6116,12 @@ async function resetCurrentStraddleAlgo() {
         window._straddleState.positions = [];
         window._straddleState.status = "READY";
         window._straddleState.entry_error = "-";
+        window._straddleState.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
         window._straddleState.activeStrategy = activeStrat;
         window._straddleState.activeStrategyId = activeStrat.strategy_id;
     }
 
+    updateStraddleReexecBadges([]);
     renderStraddlePositions([], 0.0, 0.0);
     renderStraddleAlgosTable(true);
     renderStraddleHeader(window._straddleState);
@@ -7810,6 +7836,10 @@ async function saveAndStartStraddleTrade() {
         }
 
         // Step 2: Now start the algo with fresh settings and wait for order execution outcome
+        if (window._straddleState?.activeStrategy) {
+            window._straddleState.activeStrategy.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
+            updateStraddleReexecBadges([]);
+        }
         const startResp = await fetch("/api/straddle/start", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -7818,6 +7848,7 @@ async function saveAndStartStraddleTrade() {
         const startRes = await startResp.json();
 
         await Promise.all([fetchStraddleState(), loadStraddleOpenPositions()]);
+        updateStraddleReexecBadges(window._straddleState?.activeStrategy?.positions || []);
         renderStraddleAlgosTable(true);
 
         if (startRes.success) {
@@ -7931,6 +7962,10 @@ async function straddleStartAlgo() {
     }
 
     showStraddleToast("🚀 Dispatching strategy orders to broker...", "info", 3500);
+    if (window._straddleState?.activeStrategy) {
+        window._straddleState.activeStrategy.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
+        updateStraddleReexecBadges([]);
+    }
     try {
         const resp = await fetch("/api/straddle/start", {
             method: "POST",
@@ -7939,6 +7974,7 @@ async function straddleStartAlgo() {
         });
         const res = await resp.json();
         await Promise.all([fetchStraddleState(), loadStraddleOpenPositions()]);
+        updateStraddleReexecBadges(window._straddleState?.activeStrategy?.positions || []);
         renderStraddleAlgosTable(true);
 
         if (res.success) {
@@ -7971,8 +8007,17 @@ async function clearStraddleClosedAndExpiredPositions() {
         const res = await resp.json();
         if (res.success) {
             showStraddleToast("✅ Closed positions cleared.", "success", 2000);
+            if (window._straddleState?.activeStrategy) {
+                const openLegs = (window._straddleState.activeStrategy.positions || []).filter(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+                window._straddleState.activeStrategy.positions = openLegs;
+                if (openLegs.length === 0) {
+                    window._straddleState.activeStrategy.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
+                    updateStraddleReexecBadges([]);
+                }
+            }
             await loadStraddleOpenPositions();
             await fetchStraddleState();
+            updateStraddleReexecBadges(window._straddleState?.activeStrategy?.positions || []);
         } else {
             showStraddleToast("Error: " + (res.error || "Failed"), "error", 3000);
         }

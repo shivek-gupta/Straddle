@@ -4715,11 +4715,17 @@ class StraddleManager:
             has_open = any(p.get("status") == "OPEN" for p in strat_positions)
             if not has_open or force_fresh:
                 strat["positions"] = []
+                strat["closed_positions"] = []
                 strat["mtm"] = 0.0
                 strat["status"] = "TRADE_ACTIVE"
                 strat["entry_error"] = "-"
                 strat["_last_entry_attempt_ts"] = 0
                 strat["_entry_in_progress"] = False
+                strat["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
+                for leg in strat.get("legs", []):
+                    if isinstance(leg, dict):
+                        leg["re_execute_count"] = 0
+                self._state["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
                 self._save_strategies()
 
             strat["enabled"] = True
@@ -4774,6 +4780,12 @@ class StraddleManager:
                 strat["positions"] = open_legs
                 if not open_legs:
                     strat["mtm"] = 0.0
+                    strat["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
+                    for leg in strat.get("legs", []):
+                        if isinstance(leg, dict):
+                            leg["re_execute_count"] = 0
+                else:
+                    strat["re_execution_counts"] = self.get_strategy_reexecution_counts(strat)
 
             if self._state.get("positions"):
                 self._state["positions"] = [p for p in self._state["positions"] if p.get("status") == "OPEN"]
@@ -8177,6 +8189,7 @@ class StraddleManager:
                 strat["enabled"] = False
                 strat["_margin_auto_exit_pending"] = False
                 strat["margin_exit_countdown"] = 0
+                strat["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
 
                 # Reset nested strategy dict if present
                 if "strategy" in strat and isinstance(strat["strategy"], dict):
@@ -8187,6 +8200,7 @@ class StraddleManager:
                     strat["strategy"]["last_error"] = None
                     strat["strategy"]["repair_needed"] = False
                     strat["strategy"]["mtm"] = 0.0
+                    strat["strategy"]["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
 
                 # Reset runtime state on all configured legs
                 for leg_list in [strat.get("legs", []), strat.get("strategy", {}).get("legs", []) if isinstance(strat.get("strategy"), dict) else []]:
@@ -8243,6 +8257,7 @@ class StraddleManager:
             self._state["total_mtm"] = 0.0
             self._state["_margin_auto_exit_pending"] = False
             self._state["margin_exit_countdown"] = 0
+            self._state["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
             if matched_strats:
                 self._state["active_strategy"] = matched_strats[0]
                 self._active_strategy_id = matched_strats[0].get("strategy_id")
@@ -9442,6 +9457,8 @@ class StraddleManager:
         """
         counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
         positions = strat.get("positions", []) if isinstance(strat, dict) else []
+        if not positions or (isinstance(strat, dict) and strat.get("status") == "READY"):
+            return counts
         for p in positions:
             e_reason = str(p.get("entry_reason", "")).upper()
             sym = str(p.get("symbol", "")).upper()
