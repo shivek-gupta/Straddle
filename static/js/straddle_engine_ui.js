@@ -1196,7 +1196,29 @@ function renderStraddleAlgosTable(forceRebuild = false) {
     const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
 
     const activeUnd = String(window._activeGlobalUnderlying || "NIFTY").toUpperCase().replace(/\s+/g, '');
-    const showAll = window._showAllUnderlyingsAlgos === true;
+    const hasUnderlyingMatch = strategies.some(s => String(s.underlying || "NIFTY").toUpperCase().replace(/\s+/g, '') === activeUnd);
+    // Intelligent fallback: if active focused asset has 0 algos, automatically show all assets so table is never blank!
+    const showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
+
+    const badgeEl = document.getElementById("algosFocusedUnderlyingBadge");
+    const toggleBtn = document.getElementById("btnToggleShowAllAlgos");
+    if (badgeEl) {
+        if (showAll) {
+            badgeEl.textContent = `Showing All Assets (${strategies.length})`;
+            badgeEl.style.color = "#38bdf8";
+            badgeEl.style.borderColor = "rgba(56,189,248,0.4)";
+        } else {
+            const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
+            badgeEl.textContent = `Focused: ${dispName}`;
+            badgeEl.style.color = "#f43f5e";
+            badgeEl.style.borderColor = "rgba(244,63,94,0.4)";
+        }
+    }
+    if (toggleBtn) {
+        toggleBtn.textContent = showAll ? "Filter by Active Asset" : "Show All Assets";
+        toggleBtn.classList.toggle("btn-primary", showAll);
+        toggleBtn.classList.toggle("btn-outline", !showAll);
+    }
 
     // Filter strategies focused on active underlying
     let filtered = strategies.filter(s => {
