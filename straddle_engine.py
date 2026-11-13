@@ -5630,6 +5630,8 @@ class StraddleManager:
             if all_succeeded:
                 order_res = dict(first_success or slice_results[0])
                 order_res["child_order_ids"] = child_order_ids
+                if len(child_order_ids) > 1:
+                    order_res["order_id"] = ",".join(child_order_ids)
                 order_res["success"] = True
                 order_res["quantity"] = total_qty
                 order_res["lots"] = total_lots
@@ -5641,6 +5643,8 @@ class StraddleManager:
                 p_err = err_slice.get("error") or "Margin shortfall on remaining order slices"
                 order_res = dict(first_success or {})
                 order_res["child_order_ids"] = child_order_ids
+                if len(child_order_ids) > 1:
+                    order_res["order_id"] = ",".join(child_order_ids)
                 order_res["success"] = True # Keep active so filled orders are tracked and protected by SL!
                 order_res["status"] = "PARTIAL"
                 order_res["quantity"] = filled_qty
@@ -6088,6 +6092,7 @@ class StraddleManager:
             "ltp": entry_price,
             "mtm": 0.0,
             "order_id": order_id,
+            "child_order_ids": order_res.get("child_order_ids") or ([order_id] if order_id else []),
             "exit_order_id": None,
             "re_execute_count": int(leg_cfg.get("re_execute_count") or 0),
             "target_re_execute_type": leg_cfg.get("target_re_execute_type", "RE EXECUTE"),
@@ -8469,6 +8474,60 @@ class StraddleManager:
         except Exception as e_ob:
             logger.debug(f"Error sweeping orderbook for leg orders: {e_ob}")
 
+    def _lookup_order_fill_price(self, broker: BaseBrokerAdapter, order_id_str: str) -> float:
+        """
+        Looks up the authentic exchange fill price for a specific order ID or comma-separated
+        slice order IDs from the broker's order report / order history.
+        For sliced orders, computes the volume-weighted average price across all executed slices of THIS trade.
+        Strictly ignores any older orders or cumulative daily averages from the positions book.
+        """
+        if not order_id_str or str(order_id_str).strip().startswith("PAPER_") or str(order_id_str).strip().startswith("ORD_ERR_"):
+            return 0.0
+        try:
+            target_ids = {str(oid).strip() for oid in str(order_id_str).split(",") if str(oid).strip()}
+            if not target_ids:
+                return 0.0
+
+            ob = broker.get_order_book() or []
+            orders = ob.get("data", []) if isinstance(ob, dict) else (ob if isinstance(ob, list) else [])
+            matched_orders = [
+                o for o in orders
+                if isinstance(o, dict) and str(o.get("order_id") or o.get("nOrdNo") or "").strip() in target_ids
+            ]
+
+            if not matched_orders:
+                # If single order and not found in orderbook list, try direct order_history if supported
+                if len(target_ids) == 1 and hasattr(broker, "_get_client"):
+                    client = broker._get_client()
+                    if client and hasattr(client, "order_history"):
+                        single_id = next(iter(target_ids))
+                        hist = client.order_history(order_id=single_id)
+                        data = hist.get("data") if isinstance(hist, dict) else hist
+                        if isinstance(data, list) and data:
+                            traded = next((it for it in data if str(it.get("ordSt", "")).lower() in ("traded", "complete")), None)
+                            if traded:
+                                return float(traded.get("avgPrc", traded.get("prc", 0.0)) or 0.0)
+                return 0.0
+
+            total_val = 0.0
+            total_qty = 0
+            for o in matched_orders:
+                st = str(o.get("status") or o.get("ordSt") or "").upper()
+                if any(w in st for w in ("COMP", "TRAD", "FILL")):
+                    q = int(o.get("filled_quantity") or o.get("fldQty") or o.get("quantity") or o.get("qty") or 0)
+                    p = float(o.get("average_price") or o.get("avgPrc") or o.get("price") or o.get("prc") or 0.0)
+                    if q > 0 and p > 0:
+                        total_val += (q * p)
+                        total_qty += q
+                    elif p > 0:
+                        return p
+
+            if total_qty > 0 and total_val > 0:
+                return round(total_val / total_qty, 2)
+        except Exception as e:
+            logger.debug(f"Note looking up order fill price for {order_id_str}: {e}")
+        return 0.0
+
     def _square_off_single_position(
         self,
         pos: Dict[str, Any],
@@ -9702,7 +9761,7 @@ class StraddleManager:
         source: str = "Straddle Pro",
         strategy_id: Optional[str] = None,
     ):
-        oid_str = str(order_id or "").strip()
+        oid_str = str(order_id).strip()
         # Strictly ignore synthetic fallback IDs that never reached Upstox
         if not oid_str or oid_str.startswith("ORD_") or oid_str.startswith("ORD_ERR_") or oid_str.startswith("PAPER_"):
             return
@@ -12132,27 +12191,37 @@ class StraddleManager:
                 side = "BUY" if net_qty > 0 else "SELL"
                 buy_avg = float(bp.get("buy_avg") or bp.get("day_buy_price") or bp.get("buy_price") or 0.0)
                 sell_avg = float(bp.get("sell_avg") or bp.get("day_sell_price") or bp.get("sell_price") or 0.0)
-                avg_price = float(bp.get("avg_price") or bp.get("average_price") or (buy_avg if net_qty > 0 else sell_avg))
-                ltp = float(bp.get("ltp") or bp.get("last_price") or avg_price)
-                if avg_price <= 0 and ltp > 0:
-                    avg_price = ltp
-                if ltp <= 0 and avg_price > 0:
-                    ltp = avg_price
-
-                leg_mtm = round((ltp - avg_price) * net_qty if side == "BUY" else (avg_price - ltp) * abs(net_qty), 2)
+                # bp_day_avg is the broker's daily cumulative position average cost (Avg.cost) across all trades today
+                bp_day_avg = float(bp.get("avg_price") or bp.get("average_price") or (buy_avg if net_qty > 0 else sell_avg))
+                ltp = float(bp.get("ltp") or bp.get("last_price") or bp_day_avg)
+                if bp_day_avg <= 0 and ltp > 0:
+                    bp_day_avg = ltp
+                if ltp <= 0 and bp_day_avg > 0:
+                    ltp = bp_day_avg
 
                 # Check if already present in any strategy using robust instrument matcher
+                # CRITICAL: Prefer active OPEN positions first to avoid matching earlier closed legs of the same strike
                 matched_strat = None
                 matched_leg_pos = None
 
                 for s in self._strategies:
                     for p in s.get("positions", []):
-                        if _is_same_instrument(p.get("symbol"), p.get("instrument_key"), bp_sym, bp_ikey):
+                        if p.get("status") in ("OPEN", "LIVE OPEN") and not p.get("_exit_in_progress") and _is_same_instrument(p.get("symbol"), p.get("instrument_key"), bp_sym, bp_ikey):
                             matched_strat = s
                             matched_leg_pos = p
                             break
                     if matched_strat:
                         break
+
+                if not matched_leg_pos:
+                    for s in self._strategies:
+                        for p in s.get("positions", []):
+                            if _is_same_instrument(p.get("symbol"), p.get("instrument_key"), bp_sym, bp_ikey):
+                                matched_strat = s
+                                matched_leg_pos = p
+                                break
+                        if matched_strat:
+                            break
 
                 if matched_strat and matched_leg_pos:
                     if matched_leg_pos.get("_exit_in_progress") or matched_leg_pos.get("status") in ("COMPLETE", "EXIT_PENDING", "ERROR", "TERMINATED"):
@@ -12160,11 +12229,36 @@ class StraddleManager:
                     matched_leg_pos["status"] = "OPEN"
                     matched_leg_pos["quantity"] = abs(net_qty)
                     matched_leg_pos["entry_qty"] = abs(net_qty)
-                    if avg_price > 0:
-                        matched_leg_pos["avg_ent_price"] = avg_price
+
+                    # PRESERVE AND AUTO-HEAL EXACT TRADE ENTRY PRICE:
+                    # Kotak Neo's positions API (bp) reports cumulative whole-day average cost (Avg.cost).
+                    # If this strike was traded multiple times today, bp_day_avg blends older trades into this one.
+                    # We must strictly preserve THIS trade's actual fill price (or slice weighted average).
+                    cur_ent = float(matched_leg_pos.get("avg_ent_price") or 0.0)
+                    oid = str(matched_leg_pos.get("order_id") or "")
+
+                    # If current entry price is missing, or matches the broker's corrupted cumulative day average,
+                    # look up the authentic order fill price from the order report / orderbook!
+                    if cur_ent <= 0 or (oid and bp_day_avg > 0 and abs(cur_ent - bp_day_avg) < 0.01):
+                        real_fill = self._lookup_order_fill_price(broker, oid) if oid else 0.0
+                        if real_fill > 0:
+                            matched_leg_pos["avg_ent_price"] = real_fill
+                            cur_ent = real_fill
+                            changes_made = True
+                        elif cur_ent <= 0:
+                            matched_leg_pos["avg_ent_price"] = bp_day_avg
+                            cur_ent = bp_day_avg
+                    # If cur_ent > 0 and differs from bp_day_avg, DO NOT OVERWRITE! It is already the true trade fill price.
+
                     if ltp > 0:
                         matched_leg_pos["ltp"] = ltp
+
+                    # Compute MTM and pnl_pct strictly using THIS trade's authentic entry price
+                    effective_ent = cur_ent if cur_ent > 0 else bp_day_avg
+                    leg_mtm = round((ltp - effective_ent) * abs(net_qty) if side == "BUY" else (effective_ent - ltp) * abs(net_qty), 2)
                     matched_leg_pos["mtm"] = leg_mtm
+                    pnl_pct = round(((ltp - effective_ent) / effective_ent) * 100.0, 2) if side == "BUY" else round(((effective_ent - ltp) / effective_ent) * 100.0, 2)
+                    matched_leg_pos["pnl_pct"] = pnl_pct if effective_ent > 0 else 0.0
                     
                     et_sec_m = parse_time_to_seconds(matched_strat.get("end_time", "15:29:50"), 15 * 3600 + 29 * 60 + 50)
                     now_sec_m = parse_time_to_seconds(now_ist_str())
@@ -12203,16 +12297,37 @@ class StraddleManager:
                             net_qty = int(matched_bp.get("net_qty") or matched_bp.get("quantity") or 0)
                             if net_qty == 0:
                                 side = (p.get("side") or "SELL").upper()
-                                buy_avg = float(matched_bp.get("buy_avg") or matched_bp.get("day_buy_price") or matched_bp.get("buy_price") or 0.0)
-                                sell_avg = float(matched_bp.get("sell_avg") or matched_bp.get("day_sell_price") or matched_bp.get("sell_price") or 0.0)
-                                exit_price = sell_avg if side == "BUY" else buy_avg
-                                if exit_price <= 0:
-                                    exit_price = float(matched_bp.get("avg_price") or matched_bp.get("close_price") or p.get("ltp") or p.get("avg_ent_price") or 0.0)
+                                
+                                # Resolve authentic exit price for THIS trade
+                                exit_price = float(p.get("avg_exit_price") or 0.0)
+                                exit_oid = str(p.get("exit_order_id") or "")
+                                if exit_price <= 0 and exit_oid:
+                                    real_exit = self._lookup_order_fill_price(broker, exit_oid)
+                                    if real_exit > 0:
+                                        exit_price = real_exit
 
-                                ent_price = float(p.get("avg_ent_price") or (buy_avg if side == "BUY" else sell_avg) or 0.0)
-                                pnl = float(matched_bp.get("pnl") or matched_bp.get("realized_pnl") or 0.0)
-                                if pnl == 0.0 and ent_price > 0 and exit_price > 0:
-                                    pnl = round((exit_price - ent_price) * abs(int(p.get("quantity") or 1)) if side == "BUY" else (ent_price - exit_price) * abs(int(p.get("quantity") or 1)), 2)
+                                if exit_price <= 0:
+                                    buy_avg = float(matched_bp.get("buy_avg") or matched_bp.get("day_buy_price") or matched_bp.get("buy_price") or 0.0)
+                                    sell_avg = float(matched_bp.get("sell_avg") or matched_bp.get("day_sell_price") or matched_bp.get("sell_price") or 0.0)
+                                    exit_price = sell_avg if side == "BUY" else buy_avg
+                                    if exit_price <= 0:
+                                        exit_price = float(matched_bp.get("avg_price") or matched_bp.get("close_price") or p.get("ltp") or p.get("avg_ent_price") or 0.0)
+
+                                ent_price = float(p.get("avg_ent_price") or 0.0)
+                                if ent_price <= 0:
+                                    ent_oid = str(p.get("order_id") or "")
+                                    if ent_oid:
+                                        ent_price = self._lookup_order_fill_price(broker, ent_oid)
+                                    if ent_price <= 0:
+                                        buy_avg = float(matched_bp.get("buy_avg") or matched_bp.get("day_buy_price") or matched_bp.get("buy_price") or 0.0)
+                                        sell_avg = float(matched_bp.get("sell_avg") or matched_bp.get("day_sell_price") or matched_bp.get("sell_price") or 0.0)
+                                        ent_price = buy_avg if side == "BUY" else sell_avg
+
+                                qty_val = abs(int(p.get("quantity") or 1))
+                                if ent_price > 0 and exit_price > 0:
+                                    pnl = round((exit_price - ent_price) * qty_val if side == "BUY" else (ent_price - exit_price) * qty_val, 2)
+                                else:
+                                    pnl = float(matched_bp.get("pnl") or matched_bp.get("realized_pnl") or 0.0)
 
                                 is_pos_hedge = (
                                     p.get("is_associated_hedge")

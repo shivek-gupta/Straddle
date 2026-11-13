@@ -785,6 +785,16 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             self._positions_cache = None
             self._positions_cache_ts = 0.0
             primary_id = order_ids[0] if len(order_ids) == 1 else ",".join(order_ids)
+            # Calculate volume-weighted average price across successful slices
+            weighted_prc_sum = 0.0
+            total_f_qty = 0
+            for s_idx, res in enumerate(slice_results):
+                if res.get("success"):
+                    q = slices[s_idx]
+                    p = float(res.get("price") or price or 0.0)
+                    weighted_prc_sum += (q * p)
+                    total_f_qty += q
+            slice_avg_p = round(weighted_prc_sum / max(1, total_f_qty), 2) if total_f_qty > 0 else float(price or 0.0)
             return {
                 "success": all_succeeded,
                 "order_id": primary_id,
@@ -794,6 +804,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 "sliced": len(slices) > 1,
                 "filled_qty": filled_qty,
                 "remaining_qty": failed_qty,
+                "price": slice_avg_p,
                 "ack_ms": fastest_slice_ack_ms,
                 "error": failed_error if not all_succeeded else None,
                 "data": slice_results[0].get("data") if slice_results else {}
@@ -969,6 +980,33 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             return {"filled": False, "status": "NO_CLIENT", "error": "Kotak Neo client not authenticated."}
 
         oid_str = str(order_id).strip()
+        if "," in oid_str:
+            child_ids = [c.strip() for c in oid_str.split(",") if c.strip()]
+            child_f_qty = 0
+            child_val = 0.0
+            all_filled = True
+            first_err = None
+            for cid in child_ids:
+                res_c = self.wait_for_order_fill(cid, timeout_sec=timeout_sec, poll_interval_sec=poll_interval_sec)
+                if res_c.get("filled"):
+                    q = int(res_c.get("filled_quantity") or 0)
+                    p = float(res_c.get("price") or 0.0)
+                    child_f_qty += q
+                    child_val += (q * p)
+                else:
+                    all_filled = False
+                    if not first_err:
+                        first_err = res_c.get("error") or res_c.get("status")
+            vwap = round(child_val / max(1, child_f_qty), 2) if child_f_qty > 0 else 0.0
+            return {
+                "filled": all_filled or (child_f_qty > 0),
+                "status": "COMPLETE" if all_filled else ("PARTIAL" if child_f_qty > 0 else "FAILED"),
+                "order_id": oid_str,
+                "price": vwap,
+                "filled_quantity": child_f_qty,
+                "error": first_err if not all_filled else None
+            }
+
         start_t = time.time()
         logger.debug(f"[Kotak Neo] Polling order {oid_str} until FILLED (timeout={timeout_sec}s, poll={poll_interval_sec}s)...")
 
