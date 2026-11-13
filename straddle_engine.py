@@ -746,13 +746,20 @@ class StraddleManager:
         dispatch_time_str: str,
         broker_order_res: Dict[str, Any],
         action_type: str = "ENTRY",
+        exact_latency_ms: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Records parallel shadow paper trade execution alongside live broker execution.
         Calculates sub-millisecond execution latency, slippage in points, and monetary impact (₹).
         """
         try:
-            ack_latency_ms = round((time.perf_counter() - dispatch_perf_t) * 1000.0, 1)
+            res_ack = broker_order_res.get("ack_ms") if isinstance(broker_order_res, dict) else None
+            if exact_latency_ms is not None and exact_latency_ms > 0:
+                ack_latency_ms = round(float(exact_latency_ms), 1)
+            elif res_ack is not None and float(res_ack) > 0:
+                ack_latency_ms = round(float(res_ack), 1)
+            else:
+                ack_latency_ms = round((time.perf_counter() - dispatch_perf_t) * 1000.0, 1)
             broker_success = bool(broker_order_res.get("success", False))
             broker_price = float(broker_order_res.get("price") or 0.0)
 
@@ -5544,17 +5551,18 @@ class StraddleManager:
             effective_order_type = "LIMIT" if "Limit" in order_type_cfg else "MARKET"
             if effective_order_type == "LIMIT":
                 if "Points" in buffer_type:
-                    effective_buf = max(buffer_val, 2.0 if (side == "BUY" and ltp < 15.0) else (2.0 if side == "SELL" else 0.05))
+                    effective_buf = max(buffer_val, 0.20 if (side == "BUY" and ltp < 15.0) else (0.15 if side == "SELL" else 0.05))
                     raw_limit = ltp + effective_buf if side == "BUY" else max(0.05, ltp - effective_buf)
                 else:
-                    pct_buf = ltp * (max(buffer_val, 3.0 if side == "SELL" else 1.0) / 100.0)
-                    effective_buf = max(pct_buf, 2.0 if (side == "BUY" and ltp < 15.0) else (1.5 if side == "SELL" else 0.05))
+                    pct_buf = ltp * (max(buffer_val, 0.5 if side == "SELL" else 0.25) / 100.0)
+                    effective_buf = max(pct_buf, 0.20 if (side == "BUY" and ltp < 15.0) else (0.15 if side == "SELL" else 0.05))
                     raw_limit = ltp + effective_buf if side == "BUY" else max(0.05, ltp - effective_buf)
                 limit_price = round_to_tick(raw_limit, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
             else:
                 effective_order_type = "LIMIT"
-                # For Market orders in F&O, use controlled buffer to cross the spread without blowing LPP
-                marketable_buf = max(0.50, min(3.0, ltp * 0.03))
+                # Ultra-tight marketable spread buffer (0.15 - 0.40 pts) to match best bid/ask immediately (<5ms)
+                # without drifting away from candle close reference price
+                marketable_buf = max(0.15, min(0.40, ltp * 0.005))
                 limit_price = round_to_tick(ltp - marketable_buf if side == "SELL" else ltp + marketable_buf, symbol=contract.get("trading_symbol", ""), instrument_key=contract.get("instrument_key", ""))
 
         # Guarantee strict positive price floor for Limit orders to eliminate any 0-price rejection
@@ -5640,6 +5648,7 @@ class StraddleManager:
                 order_res["error"] = order_res.get("error") or "All freeze slice orders rejected"
                 order_res["remaining_lots"] = total_lots
         else:
+            t_order_send_start = time.perf_counter()
             order_res = broker.place_order(
                 symbol=contract["trading_symbol"],
                 instrument_key=contract["instrument_key"],
@@ -5650,6 +5659,9 @@ class StraddleManager:
                 price=limit_price if effective_order_type == "LIMIT" else 0.0,
                 tag=f"{tag_prefix}_{leg_cfg.get('id', 'leg')[:4]}",
             )
+            order_ack_ms = round((time.perf_counter() - t_order_send_start) * 1000.0, 1)
+            if "ack_ms" not in order_res:
+                order_res["ack_ms"] = order_ack_ms
 
         # Live Broker fill synchronization and hedge guard
         placed_oid = str(order_res.get("order_id") or "")
@@ -9314,7 +9326,9 @@ class StraddleManager:
                                 p_cand["target_broker_order_id"] = None
 
                 new_pos = None
-                re_reason_str = f"Re-Execute #{new_count} [Triggered by {pos.get('symbol')} {trigger} Hit @ ₹{pos.get('avg_exit_price', 0.0):.2f}]"
+                clean_opt = (opt_type or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")).upper()
+                clean_trig = str(trigger or "STOPLOSS").upper()
+                re_reason_str = f"{clean_opt} Re-Execute #{new_count} ({clean_trig}) [Triggered by {pos.get('symbol')} {clean_trig} Hit @ ₹{pos.get('avg_exit_price', 0.0):.2f}]"
                 try:
                     new_pos = self._place_leg_entry_order(
                         leg_cfg,
@@ -9326,9 +9340,14 @@ class StraddleManager:
                         is_re_entry=True,
                         entry_reason=re_reason_str
                     )
+                    if new_pos:
+                        new_pos["re_execute_count"] = new_count
+                        new_pos["re_execute_leg_type"] = clean_opt
+                        new_pos["re_execute_trigger"] = clean_trig
+                        new_pos["is_re_entry"] = True
                     if new_pos and new_pos.get("status") == "OPEN":
                         if pos.get("exit_reason") and "➔" not in str(pos.get("exit_reason")):
-                            pos["exit_reason"] = f"{pos['exit_reason']} ➔ Triggered Re-Execute #{new_count}"
+                            pos["exit_reason"] = f"{pos['exit_reason']} ➔ Triggered {clean_opt} Re-Execute #{new_count}"
                 finally:
                     if unblocked_items:
                         def _restore_unblocked_orders():
@@ -9415,6 +9434,37 @@ class StraddleManager:
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
             self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Parent {pos.get('symbol')} re-entries exhausted ({cur_count}/{re_max})")
+
+    def get_strategy_reexecution_counts(self, strat: Dict[str, Any]) -> Dict[str, int]:
+        """
+        Count re-executions for CE & PE for Stoploss and Target in this strategy.
+        Returns: {'ce_sl': int, 'ce_target': int, 'pe_sl': int, 'pe_target': int}
+        """
+        counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
+        positions = strat.get("positions", []) if isinstance(strat, dict) else []
+        for p in positions:
+            e_reason = str(p.get("entry_reason", "")).upper()
+            sym = str(p.get("symbol", "")).upper()
+            opt = p.get("re_execute_leg_type") or p.get("option_type") or ("CE" if "CE" in sym else ("PE" if "PE" in sym else ""))
+            trig = p.get("re_execute_trigger") or ""
+            if not trig:
+                if "TARGET" in e_reason or "TGT" in e_reason:
+                    trig = "TARGET"
+                elif "STOPLOSS" in e_reason or " SL " in e_reason or "(SL)" in e_reason:
+                    trig = "STOPLOSS"
+            is_re = bool(p.get("is_re_entry")) or int(p.get("re_execute_count", 0) or 0) > 0 or ("RE-EXECUTE" in e_reason) or ("RE-ENTRY" in e_reason)
+            if is_re:
+                if opt == "CE":
+                    if trig == "TARGET":
+                        counts["ce_target"] += 1
+                    elif trig == "STOPLOSS":
+                        counts["ce_sl"] += 1
+                elif opt == "PE":
+                    if trig == "TARGET":
+                        counts["pe_target"] += 1
+                    elif trig == "STOPLOSS":
+                        counts["pe_sl"] += 1
+        return counts
 
     def _auto_square_off_associated_hedge(
         self,
@@ -12333,14 +12383,15 @@ class StraddleManager:
                 self._save_state()
                 return
 
-            # Collect all open instrument keys across all strategies for batch quote fetch
-            all_open_keys = set()
+            # Collect all active & closed instrument keys across all strategies for real-time quote streaming
+            all_active_keys = set()
             for strat in self._strategies:
                 for pos in strat.get("positions", []):
-                    if pos.get("status") == "OPEN" and pos.get("instrument_key"):
-                        all_open_keys.add(pos["instrument_key"])
+                    ik = pos.get("instrument_key")
+                    if ik:
+                        all_active_keys.add(ik)
 
-            live_p_map, live_q_map = self._fetch_live_quotes(list(all_open_keys)) if all_open_keys else ({}, {})
+            live_p_map, live_q_map = self._fetch_live_quotes(list(all_active_keys)) if all_active_keys else ({}, {})
 
             total_portfolio_mtm = 0.0
 
@@ -12492,24 +12543,28 @@ class StraddleManager:
                         logger.debug(f"Error fetching order book for reconciliation: {e_ob}")
 
                 for pos in strat_positions:
+                    ikey = pos.get("instrument_key", "")
+                    if ikey:
+                        fresh_ltp = float(
+                            live_p_map.get(ikey)
+                            or live_p_map.get(ikey.replace("|", ":"))
+                            or live_q_map.get(ikey, {}).get("ltp")
+                            or live_q_map.get(ikey.replace("|", ":"), {}).get("ltp")
+                            or 0.0
+                        )
+                        if fresh_ltp > 0:
+                            pos["ltp"] = fresh_ltp
+                            self.record_live_minute_tick(ikey, fresh_ltp)
+
                     if pos.get("status") != "OPEN" or pos.get("_exit_in_progress"):
                         strat_mtm += pos.get("mtm", 0.0)
                         continue
 
-                    ikey = pos.get("instrument_key", "")
                     if not ikey:
                         strat_mtm += pos.get("mtm", 0.0)
                         continue
 
-                    ltp = float(
-                        live_p_map.get(ikey)
-                        or live_p_map.get(ikey.replace("|", ":"))
-                        or live_q_map.get(ikey, {}).get("ltp")
-                        or live_q_map.get(ikey.replace("|", ":"), {}).get("ltp")
-                        or pos.get("ltp", pos.get("avg_ent_price", 100.0))
-                    )
-                    pos["ltp"] = ltp
-                    self.record_live_minute_tick(ikey, ltp)
+                    ltp = float(pos.get("ltp") or pos.get("avg_ent_price", 100.0))
 
                     # AlgoTest Parity: Check if benchmark reference price needs to be locked
                     if pos.get("status") == "OPEN" and pos.get("benchmark_pending"):
@@ -12525,9 +12580,12 @@ class StraddleManager:
 
                     if side == "SELL":
                         leg_mtm = (entry_price - ltp) * qty
+                        pnl_pct = round(((entry_price - ltp) / entry_price) * 100.0, 2) if entry_price > 0 else 0.0
                     else:
                         leg_mtm = (ltp - entry_price) * qty
+                        pnl_pct = round(((ltp - entry_price) / entry_price) * 100.0, 2) if entry_price > 0 else 0.0
                     pos["mtm"] = round(leg_mtm, 2)
+                    pos["pnl_pct"] = pnl_pct
                     strat_mtm += pos["mtm"]
 
                     # Associated Dynamic Hedge: never trigger SL or Target on hedges!
@@ -12891,6 +12949,7 @@ class StraddleManager:
                                             logger.warning(f"Error modifying broker SL order to cost: {e_m}")
 
                 strat["mtm"] = round(strat_mtm, 2)
+                strat["re_execution_counts"] = self.get_strategy_reexecution_counts(strat)
                 total_portfolio_mtm += strat["mtm"]
 
                 # Check Strategy-level MTM Target
@@ -13031,6 +13090,9 @@ class StraddleManager:
                     s["cushion_margin"] = 15000.0
                 s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(s)
                 s["effective_multiplier"] = self.get_effective_multiplier(s)
+                s["re_execution_counts"] = self.get_strategy_reexecution_counts(s)
+
+            reexec_counts = self.get_strategy_reexecution_counts(active_strat) if active_strat else {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
 
             return {
                 "engine_status": self._state.get("status", "READY"),
@@ -13042,6 +13104,7 @@ class StraddleManager:
                 "active_strategy": active_strat,
                 "all_strategies": self._strategies,
                 "positions": active_positions,
+                "re_execution_counts": reexec_counts,
                 "group_mtm": self._state.get("group_mtm", 0.0),
                 "total_mtm": self._state.get("total_mtm", 0.0),
                 "max_mtm": self._state.get("max_mtm", 0.0),

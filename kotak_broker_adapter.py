@@ -20,6 +20,7 @@ import math
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
+import functools
 
 import config
 import kotak_auth
@@ -152,6 +153,7 @@ def _init_kotak_symbol_maps():
         logger.info(f"[Kotak Adapter] Initialized symbol resolution cache with {len(_KOTAK_TOKEN_MAP)} tokens.")
 
 
+@functools.lru_cache(maxsize=4096)
 def _resolve_kotak_trading_symbol(symbol: str, instrument_key: str = "") -> str:
     """
     Translates any input symbol (human display string, token, or Upstox format)
@@ -433,13 +435,15 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             clean_ot = "L"
             p_flt = float(price or 0.0)
             if clean_tt == "B":
-                # Buy: tight ceiling above Ask to match lowest ask on book immediately (<10ms) without breaching LPP
-                buf = max(0.30, min(1.50, p_flt * 0.03)) if p_flt > 0 else 0.50
+                # Buy: tight marketable spread buffer (0.15 - 0.40 pts) to match lowest ask on book immediately (<5ms)
+                # without drifting away from candle close reference price or breaching LPP
+                buf = max(0.15, min(0.40, p_flt * 0.005)) if p_flt > 0 else 0.20
                 mkt_price = p_flt + buf if p_flt > 0 else 5.0
                 clean_price = str(round_to_tick(max(0.05, mkt_price), tick_size=tick_size))
             else:
-                # Sell: tight floor below Bid to match highest bid on book immediately (<10ms) without breaching LPP
-                buf = max(0.30, min(1.50, p_flt * 0.03)) if p_flt > 0 else 0.50
+                # Sell: tight marketable spread buffer (0.15 - 0.40 pts) to match highest bid on book immediately (<5ms)
+                # without drifting away from candle close reference price or breaching LPP
+                buf = max(0.15, min(0.40, p_flt * 0.005)) if p_flt > 0 else 0.20
                 mkt_price = max(0.05, p_flt - buf) if p_flt > 0 else 0.05
                 clean_price = str(round_to_tick(max(0.05, mkt_price), tick_size=tick_size))
         elif clean_ot in ("L", "SL"):
@@ -460,6 +464,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         tag_prefix = str(tag or 'std')[:6]
         unique_tag = f"{tag_prefix}_{seq_val:06d}"
 
+        t_order_call_start = time.perf_counter()
         try:
             res = client.place_order(
                 exchange_segment=segment,
@@ -473,6 +478,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 trigger_price=clean_trig,
                 tag=unique_tag
             )
+            order_call_ack_ms = round((time.perf_counter() - t_order_call_start) * 1000.0, 1)
             logger.info(f"[Kotak Neo] Order slice ({clean_qty} qty) response: {res}")
 
             order_id = None
@@ -635,7 +641,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 "status": "OPEN",
                 "order_id": str(order_id),
                 "data": res,
-                "quantity": int(quantity)
+                "quantity": int(quantity),
+                "ack_ms": order_call_ack_ms,
             }
         except Exception as e:
             err_str = str(e)
@@ -748,10 +755,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             )
 
         # Execute multiple slices concurrently at sub-millisecond speed using pre-warmed worker pool
+        t_dispatch_start = time.perf_counter()
         if len(slices) > 1:
             slice_results = list(_ORDER_THREAD_POOL.map(_dispatch_slice, enumerate(slices)))
         else:
             slice_results = [_dispatch_slice((0, slices[0]))]
+        total_dispatch_ack_ms = round((time.perf_counter() - t_dispatch_start) * 1000.0, 1)
+        fastest_slice_ack_ms = min((float(r.get("ack_ms")) for r in slice_results if r.get("ack_ms")), default=total_dispatch_ack_ms)
 
         order_ids = []
         filled_qty = 0
@@ -784,6 +794,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 "sliced": len(slices) > 1,
                 "filled_qty": filled_qty,
                 "remaining_qty": failed_qty,
+                "ack_ms": fastest_slice_ack_ms,
                 "error": failed_error if not all_succeeded else None,
                 "data": slice_results[0].get("data") if slice_results else {}
             }
@@ -1795,6 +1806,8 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 "order_id": order_ids[0] if len(order_ids) == 1 else ",".join(order_ids),
                 "sliced": len(slices) > 1,
                 "status": init_status,
+                "price": exec_price,
+                "ack_ms": 1.0,
                 "data": {"order_id": order_ids[0], "filled_quantity": 0 if is_adv else total_qty, "price": exec_price}
             }
 

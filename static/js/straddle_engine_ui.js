@@ -4455,7 +4455,17 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
             prevMap[sym] = ltp;
 
-            const ltpColor = !isOpen ? '#f87171' : (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
+            let ltpColor = '#cbd5e1';
+            if (isOpen) {
+                ltpColor = (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
+            } else {
+                const exitP = Number(pos.avg_exit_price || 0);
+                if (exitP > 0) {
+                    ltpColor = (side === 'SELL') ? (ltp <= exitP ? '#10b981' : '#f87171') : (ltp >= exitP ? '#10b981' : '#f87171');
+                } else {
+                    ltpColor = '#cbd5e1';
+                }
+            }
             const mtm = Number(pos.mtm || 0.0);
             const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
 
@@ -4465,13 +4475,33 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 ltpEl.textContent = ltp > 0 ? ltp.toFixed(2) : "-";
                 ltpEl.style.color = ltpColor;
                 ltpEl.className = `straddle-ltp ${ltpClass}`;
+                if (!isOpen && pos.avg_exit_price) {
+                    ltpEl.setAttribute("title", `Live Market LTP: ₹${ltp.toFixed(2)} (Exited @ ₹${Number(pos.avg_exit_price).toFixed(2)})`);
+                }
             }
 
-            // Update MTM cell
+            // Update MTM & PnL% cell
             const mtmEl = row.querySelector(".straddle-mtm");
             if (mtmEl) {
                 mtmEl.textContent = mtm.toFixed(2);
                 mtmEl.className = `straddle-mtm ${mtmClass}`;
+            }
+            const pnlPctEl = row.querySelector(".straddle-pnl-pct");
+            if (pnlPctEl) {
+                let pnlPctVal = (pos.pnl_pct !== undefined && pos.pnl_pct !== null) ? Number(pos.pnl_pct) : null;
+                if (pnlPctVal === null && pos.avg_ent_price && Number(pos.avg_ent_price) > 0) {
+                    const entP = Number(pos.avg_ent_price);
+                    pnlPctVal = (side === "SELL") ? ((entP - ltp) / entP) * 100 : ((ltp - entP) / entP) * 100;
+                }
+                if (pnlPctVal !== null && !isNaN(pnlPctVal)) {
+                    const isPos = pnlPctVal >= 0;
+                    const pnlSign = isPos ? "+" : "";
+                    const pnlPctStr = `${pnlSign}${pnlPctVal.toFixed(2)}%`;
+                    pnlPctEl.textContent = pnlPctStr;
+                    pnlPctEl.style.background = isPos ? "rgba(16,185,129,0.18)" : "rgba(244,63,94,0.18)";
+                    pnlPctEl.style.color = isPos ? "#10b981" : "#f43f5e";
+                    pnlPctEl.style.borderColor = isPos ? "rgba(16,185,129,0.4)" : "rgba(244,63,94,0.4)";
+                }
             }
 
             // Sync checkbox selection state
@@ -4880,14 +4910,62 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift)
                 let entryReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
                 if (pos.entry_reason && pos.entry_reason !== "-") {
-                    const eStr = String(pos.entry_reason);
+                    const eStr = String(pos.entry_reason).trim();
                     const eLower = eStr.toLowerCase();
+                    const eUpper = eStr.toUpperCase();
                     if (eLower.includes("hedge") && (eLower.includes("shift") || eLower.includes("re-aligned") || eLower.includes("replaced"))) {
                         entryReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${eStr}">🔄 ${eStr}</span>`;
                     } else if (eLower.includes("hedge")) {
                         entryReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${eStr}">🛡️ ${eStr}</span>`;
-                    } else if (eLower.includes("re-execute") || eLower.includes("re-entry") || eLower.includes("re-cost")) {
-                        entryReasonHtml = `<span class="straddle-reason-pill entry-reentry" title="${eStr}">⚡ ${eStr}</span>`;
+                    } else if (eLower.includes("re-execute") || eLower.includes("re-entry") || eLower.includes("re-cost") || pos.is_re_entry || (pos.re_execute_count || 0) > 0) {
+                        // Determine option type (CE or PE)
+                        let optType = pos.re_execute_leg_type || "";
+                        if (!optType) {
+                            if (eUpper.includes(" CE ") || eUpper.includes(" CE-") || eUpper.includes(" CALL ") || (pos.symbol && pos.symbol.includes(" CE "))) optType = "CE";
+                            else if (eUpper.includes(" PE ") || eUpper.includes(" PE-") || eUpper.includes(" PUT ") || (pos.symbol && pos.symbol.includes(" PE "))) optType = "PE";
+                            else optType = pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE");
+                        }
+                        // Determine trigger type (STOPLOSS or TARGET)
+                        let trigger = pos.re_execute_trigger || "";
+                        if (!trigger) {
+                            if (eUpper.includes("STOPLOSS") || eUpper.includes(" SL ") || eUpper.includes("SL HIT") || eUpper.includes("STOP LOSS")) trigger = "STOPLOSS";
+                            else if (eUpper.includes("TARGET") || eUpper.includes(" TGT ") || eUpper.includes("TARGET HIT") || eUpper.includes("TGT HIT")) trigger = "TARGET";
+                        }
+                        // Determine count
+                        let count = pos.re_execute_count || 0;
+                        if (!count) {
+                            const m = eStr.match(/#(\d+)/);
+                            if (m) count = parseInt(m[1], 10);
+                            else count = 1;
+                        }
+                        const isCe = (optType === "CE");
+                        const optColor = isCe ? "#38bdf8" : "#e879f9";
+                        const optBorder = isCe ? "rgba(56,189,248,0.4)" : "rgba(232,121,249,0.4)";
+                        const optBg = isCe ? "rgba(56,189,248,0.12)" : "rgba(232,121,249,0.12)";
+                        let triggerBadge = "";
+                        if (trigger === "STOPLOSS") {
+                            triggerBadge = `<span style="display:inline-block; padding:1px 5px; font-size:9.5px; font-weight:800; border-radius:3px; background:rgba(239,68,68,0.22); color:#f87171; border:1px solid rgba(239,68,68,0.45); letter-spacing:0.3px;">🔴 STOPLOSS</span>`;
+                        } else if (trigger === "TARGET") {
+                            triggerBadge = `<span style="display:inline-block; padding:1px 5px; font-size:9.5px; font-weight:800; border-radius:3px; background:rgba(16,185,129,0.22); color:#34d399; border:1px solid rgba(16,185,129,0.45); letter-spacing:0.3px;">🟢 TARGET</span>`;
+                        }
+                        let detailText = "";
+                        const bracketMatch = eStr.match(/\[(.*?)\]/);
+                        if (bracketMatch) {
+                            detailText = bracketMatch[1].replace(/Triggered by\s*/i, "").trim();
+                        } else if (!eStr.startsWith("⚡ Re-Execute") && !eStr.startsWith("⚡ RE-EXECUTE")) {
+                            detailText = eStr;
+                        }
+                        entryReasonHtml = `
+                            <div style="display:flex; flex-direction:column; gap:3px; align-items:flex-start;">
+                                <div style="display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap;">
+                                    <span style="font-size:11px; font-weight:900; font-family:var(--font-mono); padding:2px 6px; border-radius:4px; background:${optBg}; color:${optColor}; border:1px solid ${optBorder}; display:inline-flex; align-items:center; gap:3px;">
+                                        ⚡ ${optType} Re-Execute #${count}
+                                    </span>
+                                    ${triggerBadge}
+                                </div>
+                                ${detailText ? `<div style="font-size:9.5px; color:#94a3b8; line-height:1.2; word-break:break-word; font-family:var(--font-mono);" title="${eStr}">${detailText}</div>` : ''}
+                            </div>
+                        `;
                     } else {
                         entryReasonHtml = `<span class="straddle-reason-pill entry-initial" title="${eStr}">📌 ${eStr}</span>`;
                     }
@@ -4896,7 +4974,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     entryReasonHtml = `<span class="straddle-reason-pill entry-hedge">🛡️ HEDGE (${pType}) [Protecting Main]</span>`;
                 } else if (pos.is_re_entry || (pos.re_execute_count || 0) > 0) {
                     const reCount = pos.re_execute_count || 1;
-                    entryReasonHtml = `<span class="straddle-reason-pill entry-reentry">⚡ RE-EXECUTE #${reCount}</span>`;
+                    const optType = pos.re_execute_leg_type || pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE");
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-reentry">⚡ ${optType} RE-EXECUTE #${reCount}</span>`;
                 } else {
                     const sSide = String(pos.side || "SELL").toUpperCase();
                     const sType = String(pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE")).toUpperCase();
@@ -4940,12 +5019,40 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                 else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
                 prevMap[sym] = ltp;
 
-                const ltpColor = isClosed ? '#f87171' : (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
+                let ltpColor = '#cbd5e1';
+                if (isOpen) {
+                    ltpColor = (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
+                } else if (isClosed) {
+                    const exitP = Number(pos.avg_exit_price || 0);
+                    if (exitP > 0) {
+                        ltpColor = (side === 'SELL') ? (ltp <= exitP ? '#10b981' : '#f87171') : (ltp >= exitP ? '#10b981' : '#f87171');
+                    } else {
+                        ltpColor = '#cbd5e1';
+                    }
+                }
 
-                // MTM (₹)
+                // MTM (₹) & PnL %
                 const mtm = Number(pos.mtm || 0.0);
                 const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
                 const mtmFormatted = mtm.toFixed(2);
+
+                let pnlPctVal = (pos.pnl_pct !== undefined && pos.pnl_pct !== null) ? Number(pos.pnl_pct) : null;
+                if (pnlPctVal === null && pos.avg_ent_price && Number(pos.avg_ent_price) > 0) {
+                    const entP = Number(pos.avg_ent_price);
+                    pnlPctVal = (side === "SELL") ? ((entP - ltp) / entP) * 100 : ((ltp - entP) / entP) * 100;
+                }
+
+                let pnlPctBadgeHtml = "";
+                if (pnlPctVal !== null && !isNaN(pnlPctVal)) {
+                    const isPos = pnlPctVal >= 0;
+                    const pnlSign = isPos ? "+" : "";
+                    const pnlPctStr = `${pnlSign}${pnlPctVal.toFixed(2)}%`;
+                    const pnlBg = isPos ? "rgba(16,185,129,0.18)" : "rgba(244,63,94,0.18)";
+                    const pnlColor = isPos ? "#10b981" : "#f43f5e";
+                    const pnlBorder = isPos ? "rgba(16,185,129,0.4)" : "rgba(244,63,94,0.4)";
+                    const pnlTitle = isOpen ? `Live PnL: ${pnlPctStr} (Track against Target / Stoploss %)` : `Realized PnL: ${pnlPctStr}`;
+                    pnlPctBadgeHtml = `<span class="straddle-pnl-pct" style="display:inline-block; font-size:10.5px; font-weight:800; font-family:var(--font-mono); padding:1.5px 5px; border-radius:4px; background:${pnlBg}; color:${pnlColor}; border:1px solid ${pnlBorder};" title="${pnlTitle}">${pnlPctStr}</span>`;
+                }
 
                 const rowClass = isError ? "straddle-row-error" : "";
 
@@ -5002,10 +5109,13 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </td>
                         <td style="white-space:normal; max-width:125px; word-break:break-word; line-height:1.25;">${exitReasonHtml}</td>
                         <td style="text-align:right;">
-                            <span class="straddle-ltp ${ltpClass}" style="color:${ltpColor}; font-weight:700; font-family:var(--font-mono);">${ltp > 0 ? ltp.toFixed(2) : '-'}</span>
+                            <span class="straddle-ltp ${ltpClass}" style="color:${ltpColor}; font-weight:700; font-family:var(--font-mono);" ${isClosed && pos.avg_exit_price ? `title="Live Market LTP: ₹${ltp.toFixed(2)} (Exited @ ₹${Number(pos.avg_exit_price).toFixed(2)})"` : ''}>${ltp > 0 ? ltp.toFixed(2) : '-'}</span>
                         </td>
-                        <td style="text-align:right;">
-                            <span class="straddle-mtm ${mtmClass}">${mtmFormatted}</span>
+                        <td style="text-align:right; white-space:nowrap;">
+                            <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:6px;">
+                                <span class="straddle-mtm ${mtmClass}" style="font-weight:800; font-family:var(--font-mono);">${mtmFormatted}</span>
+                                ${pnlPctBadgeHtml}
+                            </div>
                         </td>
                         <td style="text-align:center;">${actionHtml}</td>
                     </tr>
@@ -5152,6 +5262,21 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         totMtmEl.style.color = (tm >= 0) ? "#10b981" : "#f43f5e";
     }
 
+    // Sync MTM Target display if activeStrategy has mtm_target configured
+    const activeStratForTarget = window._straddleState?.activeStrategy;
+    if (activeStratForTarget && activeStratForTarget.mtm_target && activeStratForTarget.mtm_target.target_value) {
+        const mtmTgtEl = document.getElementById("straddleMtmTargetDisplay");
+        if (mtmTgtEl) {
+            const tv = Number(activeStratForTarget.mtm_target.target_value);
+            if (!isNaN(tv) && tv > 0) {
+                mtmTgtEl.textContent = `₹ ${tv.toFixed(2)}`;
+            }
+        }
+    }
+
+    // Update Re-Execution Counts Badges adjacent to MTM Target
+    updateStraddleReexecBadges(positions);
+
     // Sync master select all checkbox state
     const masterCb = document.getElementById("straddleSelectAllLegs");
     if (masterCb) {
@@ -5160,6 +5285,63 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
     // Update action buttons state
     onStraddlePositionCheckboxChange();
+}
+
+/**
+ * Updates summary re-execution count badges (CE SL, CE Target, PE SL, PE Target)
+ * adjacent to MTM Target in the lower summary strip.
+ */
+function updateStraddleReexecBadges(positions) {
+    const elCeSl = document.getElementById("reexecCountCeSl");
+    const elCeTgt = document.getElementById("reexecCountCeTgt");
+    const elPeSl = document.getElementById("reexecCountPeSl");
+    const elPeTgt = document.getElementById("reexecCountPeTgt");
+    if (!elCeSl && !elCeTgt && !elPeSl && !elPeTgt) return;
+
+    let ceSl = 0, ceTgt = 0, peSl = 0, peTgt = 0;
+    const strat = window._straddleState?.activeStrategy;
+
+    if (strat && strat.re_execution_counts) {
+        ceSl = Number(strat.re_execution_counts.ce_sl || 0);
+        ceTgt = Number(strat.re_execution_counts.ce_target || 0);
+        peSl = Number(strat.re_execution_counts.pe_sl || 0);
+        peTgt = Number(strat.re_execution_counts.pe_target || 0);
+    } else {
+        const posList = (strat && Array.isArray(strat.positions)) ? strat.positions : (Array.isArray(positions) ? positions : []);
+        posList.forEach(pos => {
+            const isRe = !!(pos.is_re_entry || (pos.re_execute_count || 0) > 0 || (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("re-execute")));
+            if (!isRe) return;
+
+            let legType = String(pos.re_execute_leg_type || "").toUpperCase();
+            if (!legType) {
+                const sym = String(pos.symbol || pos.trading_symbol || "");
+                const eStr = String(pos.entry_reason || "");
+                if (sym.includes(" CE ") || sym.includes("CE") || eStr.includes(" CE ")) legType = "CE";
+                else if (sym.includes(" PE ") || sym.includes("PE") || eStr.includes(" PE ")) legType = "PE";
+                else legType = String(pos.option_type || "").toUpperCase();
+            }
+
+            let trigger = String(pos.re_execute_trigger || "").toUpperCase();
+            if (!trigger) {
+                const eStr = String(pos.entry_reason || "").toUpperCase();
+                if (eStr.includes("STOPLOSS") || eStr.includes(" SL ") || eStr.includes("SL HIT")) trigger = "STOPLOSS";
+                else if (eStr.includes("TARGET") || eStr.includes(" TGT ") || eStr.includes("TARGET HIT")) trigger = "TARGET";
+            }
+
+            if (legType === "CE") {
+                if (trigger === "STOPLOSS") ceSl++;
+                else if (trigger === "TARGET") ceTgt++;
+            } else if (legType === "PE") {
+                if (trigger === "STOPLOSS") peSl++;
+                else if (trigger === "TARGET") peTgt++;
+            }
+        });
+    }
+
+    if (elCeSl) elCeSl.textContent = ceSl;
+    if (elCeTgt) elCeTgt.textContent = ceTgt;
+    if (elPeSl) elPeSl.textContent = peSl;
+    if (elPeTgt) elPeTgt.textContent = peTgt;
 }
 
 // =========================================================================
