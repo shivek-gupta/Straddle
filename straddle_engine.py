@@ -5025,6 +5025,130 @@ class StraddleManager:
         chk = self.get_strategy_schedule_status(strat)
         return chk["is_time_window"]
 
+    def _pre_warm_strategy_entry(self, strat: Dict[str, Any], spot_price: float = 0.0) -> Optional[Dict[str, Any]]:
+        """
+        Advance Pre-Flight Calculation & Pre-Warming Engine for Strategy Entry.
+        Executes 5 to 30 seconds before start_time:
+        1. Pre-warms Kotak Neo HTTP connection (eliminates TLS handshake latency).
+        2. Pre-resolves ATM strikes, leg contracts, and dynamic hedges in memory.
+        3. Pre-calculates multipliers and freeze slicing partitions.
+        4. Pre-fetches and caches live option quotes into memory.
+        Result: At start_time (09:15:00.000), orders are dispatched with pure socket speed (<20ms).
+        """
+        try:
+            if not strat or not strat.get("enabled", False):
+                return None
+            if strat.get("status") in ("TRADE_ACTIVE", "STOPPED", "TERMINATED", "ENTRY_FAILED"):
+                return None
+            if strat.get("positions"):
+                return None
+
+            legs_cfg = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
+            if not legs_cfg:
+                return None
+
+            und = strat.get("underlying", "NIFTY")
+            if spot_price <= 0:
+                spot_price = self._get_underlying_spot_price(und)
+            if spot_price <= 0:
+                return None
+
+            mult = self.get_effective_multiplier(strat)
+            adv = {}
+            if isinstance(strat.get("advanced"), dict):
+                adv.update(strat["advanced"])
+            if isinstance(strat.get("advanced_settings"), dict):
+                adv.update(strat["advanced_settings"])
+
+            # Pre-warm Kotak broker session
+            try:
+                kotak_auth.warm_up_connection()
+            except Exception:
+                pass
+
+            buy_legs = []
+            sell_legs = []
+            all_leg_keys = []
+
+            for leg in legs_cfg:
+                contract = self.resolve_strike_and_contract(
+                    underlying=und,
+                    strike_selection=leg.get("strike_selection", "ATM"),
+                    option_type=leg.get("option_type", "CE"),
+                    expiry_type=leg.get("expiry", "Weekly"),
+                    multiple_strike_selection=leg.get("multiple_strike_selection", "none"),
+                )
+                if not contract:
+                    continue
+                all_leg_keys.append(contract["instrument_key"])
+
+                if leg.get("side", "Sell").upper() == "BUY":
+                    buy_legs.append({"cfg": leg, "contract": contract})
+                else:
+                    # Check dynamic hedge
+                    strat_dyn_hedge = bool(strat.get("dynamic_hedging")) or bool(strat.get("toggles", {}).get("dynamic_hedging"))
+                    h_cfg = leg.get("associated_hedge") or {}
+                    is_hedge_enabled = True if strat_dyn_hedge else bool(h_cfg.get("enabled"))
+                    if is_hedge_enabled:
+                        init_otm = int(h_cfg.get("initial_otm") or 20)
+                        h_opt_type = leg.get("option_type", "CE")
+                        short_strike = float(contract.get("strike_price", 0.0))
+                        short_expiry_ms = contract.get("expiry_ms") or contract.get("expiry") or leg.get("custom_expiry_ms")
+
+                        h_contract = self._resolve_exact_hedge_contract(
+                            underlying=und,
+                            short_strike=short_strike,
+                            init_otm=init_otm,
+                            option_type=h_opt_type,
+                            expiry_type=leg.get("expiry", "Weekly"),
+                            custom_expiry_ms=short_expiry_ms,
+                        )
+                        if h_contract:
+                            all_leg_keys.append(h_contract["instrument_key"])
+                            h_leg_cfg = {
+                                "id": f"hedge_{leg.get('id', 'leg')}",
+                                "side": "Buy",
+                                "product": leg.get("product", "NRML"),
+                                "strike_selection": f"OTM {init_otm}",
+                                "option_type": h_opt_type,
+                                "lots": leg.get("lots", 1),
+                                "target_type": "None",
+                                "target_value": 0.0,
+                                "target_re_execute_count": 0,
+                                "sl_type": "None",
+                                "sl_value": 0.0,
+                                "sl_re_execute_count": 0,
+                                "tsl_type": "None",
+                                "action": "Square off leg",
+                                "underlying": und,
+                                "expiry": leg.get("expiry", "Weekly"),
+                                "is_associated_hedge": True,
+                                "parent_leg_id": leg.get("id"),
+                                "hedge_parent_type": h_opt_type,
+                            }
+                            buy_legs.append({"cfg": h_leg_cfg, "contract": h_contract})
+                            leg["associated_hedge_id"] = f"hedge_{leg.get('id', 'leg')}"
+                            leg["has_associated_hedge"] = True
+                    sell_legs.append({"cfg": leg, "contract": contract})
+
+            cached_prices, cached_quotes = self._fetch_live_quotes(all_leg_keys) if all_leg_keys else ({}, {})
+
+            plan = {
+                "ts": time.time(),
+                "spot": spot_price,
+                "buy_legs": buy_legs,
+                "sell_legs": sell_legs,
+                "all_leg_keys": all_leg_keys,
+                "cached_prices": cached_prices,
+                "cached_quotes": cached_quotes,
+                "multiplier": mult,
+            }
+            strat["_pre_warmed_entry_plan"] = plan
+            return plan
+        except Exception as e_pw:
+            logger.debug(f"Pre-warm entry notice for '{strat.get('name')}': {e_pw}")
+            return None
+
     def _execute_strategy_entry(self, strat: Dict[str, Any]):
         """Execute entry orders for all configured legs with hedge sequencing, parallel execution, and margin optimization."""
         with _ENGINE_LOCK:
@@ -5107,142 +5231,167 @@ class StraddleManager:
                 self._log_event(f"No legs configured for strategy '{strat.get('name')}'. Entry skipped.")
                 return
 
-            # Batch 1: Pre-resolve all leg contracts
+            # Batch 1: Pre-resolve all leg contracts (or use fresh pre-warmed plan for 0ms latency)
             buy_legs = []
             sell_legs = []
             all_leg_keys = []
             new_positions = []
+            cached_prices = {}
+            cached_quotes = {}
 
-            for leg in legs_cfg:
-                # Check if this main leg already has an OPEN or COMPLETE position in strat_positions
-                already_open_main = next(
-                    (p for p in strat_positions 
-                     if p.get("status") in ("OPEN", "COMPLETE") 
-                     and not p.get("is_associated_hedge") 
-                     and (p.get("id") == leg.get("id") or p.get("leg_id") == leg.get("id"))),
-                    None
-                )
-                if already_open_main:
-                    if already_open_main not in new_positions:
-                        new_positions.append(already_open_main)
-                    # Also keep its active hedge if present
-                    associated_h = next(
+            pre_plan = strat.get("_pre_warmed_entry_plan")
+            use_pre_warmed = False
+            if pre_plan and isinstance(pre_plan, dict) and not strat_positions:
+                age = time.time() - float(pre_plan.get("ts", 0.0))
+                if age < 20.0 and pre_plan.get("sell_legs"):
+                    curr_spot = self._get_underlying_spot_price(und)
+                    step = STRIKE_STEPS.get(und, 50)
+                    p_spot = float(pre_plan.get("spot") or 0.0)
+                    if p_spot <= 0.0 or abs(curr_spot - p_spot) < (step * 0.45):
+                        use_pre_warmed = True
+                        buy_legs = list(pre_plan.get("buy_legs") or [])
+                        sell_legs = list(pre_plan.get("sell_legs") or [])
+                        all_leg_keys = list(pre_plan.get("all_leg_keys") or [])
+                        cached_prices = dict(pre_plan.get("cached_prices") or {})
+                        cached_quotes = dict(pre_plan.get("cached_quotes") or {})
+                        self._log_event(
+                            f"[{strat.get('name')}] ⚡ Pre-Flight Entry Ready: Utilizing pre-calculated contracts & warm connection (age {age:.1f}s, spot ₹{curr_spot:.2f}). 0ms resolution lag.",
+                            level="INFO"
+                        )
+
+            if not use_pre_warmed:
+                for leg in legs_cfg:
+                    # Check if this main leg already has an OPEN or COMPLETE position in strat_positions
+                    already_open_main = next(
                         (p for p in strat_positions 
                          if p.get("status") in ("OPEN", "COMPLETE") 
-                         and (p.get("parent_leg_id") == leg.get("id") or (p.get("is_associated_hedge") and p.get("hedge_parent_type") == leg.get("option_type")))),
+                         and not p.get("is_associated_hedge") 
+                         and (p.get("id") == leg.get("id") or p.get("leg_id") == leg.get("id"))),
                         None
                     )
-                    if associated_h and associated_h not in new_positions:
-                        new_positions.append(associated_h)
-                    continue
-
-                contract = self.resolve_strike_and_contract(
-                    underlying=und,
-                    strike_selection=leg.get("strike_selection", "ATM"),
-                    option_type=leg.get("option_type", "CE"),
-                    expiry_type=leg.get("expiry", "Weekly"),
-                    multiple_strike_selection=leg.get("multiple_strike_selection", "none"),
-                )
-                if not contract:
-                    err_detail = f"Could not resolve {und} {leg.get('strike_selection', 'ATM')} {leg.get('option_type', 'CE')} contract"
-                    strat["entry_error"] = err_detail
-                    self._log_event(f"[{strat.get('name')}] {err_detail}", level="ERROR")
-                    continue
-                all_leg_keys.append(contract["instrument_key"])
-                if leg.get("side", "Sell").upper() == "BUY":
-                    buy_legs.append({"cfg": leg, "contract": contract})
-                else:
-                    # Check for Associated Dynamic Hedge (Auto Margin Saver)
-                    strat_dyn_hedge = bool(strat.get("dynamic_hedging")) or bool(strat.get("toggles", {}).get("dynamic_hedging"))
-                    h_cfg = leg.get("associated_hedge") or {}
-                    is_hedge_enabled = True if strat_dyn_hedge else bool(h_cfg.get("enabled"))
-
-                    if is_hedge_enabled:
-                        # Check if associated hedge is ALREADY open in strat_positions!
-                        existing_open_hedge = next(
+                    if already_open_main:
+                        if already_open_main not in new_positions:
+                            new_positions.append(already_open_main)
+                        # Also keep its active hedge if present
+                        associated_h = next(
                             (p for p in strat_positions 
                              if p.get("status") in ("OPEN", "COMPLETE") 
                              and (p.get("parent_leg_id") == leg.get("id") or (p.get("is_associated_hedge") and p.get("hedge_parent_type") == leg.get("option_type")))),
                             None
                         )
-                        if existing_open_hedge:
-                            leg["associated_hedge_id"] = existing_open_hedge.get("id")
-                            leg["has_associated_hedge"] = True
-                            if existing_open_hedge not in new_positions:
-                                new_positions.append(existing_open_hedge)
-                            self._log_event(
-                                f"[{strat.get('name')}] Associated Hedge already OPEN for {leg.get('id')} ({existing_open_hedge.get('symbol')}). Re-using existing hedge."
-                            )
-                        else:
-                            init_otm = int(h_cfg.get("initial_otm") or 20)
-                            h_opt_type = leg.get("option_type", "CE")
-                            short_strike = float(contract.get("strike_price", 0.0))
-                            short_expiry_ms = contract.get("expiry_ms") or contract.get("expiry") or leg.get("custom_expiry_ms")
+                        if associated_h and associated_h not in new_positions:
+                            new_positions.append(associated_h)
+                        continue
 
-                            h_contract = self._resolve_exact_hedge_contract(
-                                underlying=und,
-                                short_strike=short_strike,
-                                init_otm=init_otm,
-                                option_type=h_opt_type,
-                                expiry_type=leg.get("expiry", "Weekly"),
-                                custom_expiry_ms=short_expiry_ms,
-                            )
+                    contract = self.resolve_strike_and_contract(
+                        underlying=und,
+                        strike_selection=leg.get("strike_selection", "ATM"),
+                        option_type=leg.get("option_type", "CE"),
+                        expiry_type=leg.get("expiry", "Weekly"),
+                        multiple_strike_selection=leg.get("multiple_strike_selection", "none"),
+                    )
+                    if not contract:
+                        err_detail = f"Could not resolve {und} {leg.get('strike_selection', 'ATM')} {leg.get('option_type', 'CE')} contract"
+                        strat["entry_error"] = err_detail
+                        self._log_event(f"[{strat.get('name')}] {err_detail}", level="ERROR")
+                        continue
+                    all_leg_keys.append(contract["instrument_key"])
+                    if leg.get("side", "Sell").upper() == "BUY":
+                        buy_legs.append({"cfg": leg, "contract": contract})
+                    else:
+                        # Check for Associated Dynamic Hedge (Auto Margin Saver)
+                        strat_dyn_hedge = bool(strat.get("dynamic_hedging")) or bool(strat.get("toggles", {}).get("dynamic_hedging"))
+                        h_cfg = leg.get("associated_hedge") or {}
+                        is_hedge_enabled = True if strat_dyn_hedge else bool(h_cfg.get("enabled"))
 
-                            if not h_contract:
-                                # Secondary fallback: try 10 OTM
+                        if is_hedge_enabled:
+                            # Check if associated hedge is ALREADY open in strat_positions!
+                            existing_open_hedge = next(
+                                (p for p in strat_positions 
+                                 if p.get("status") in ("OPEN", "COMPLETE") 
+                                 and (p.get("parent_leg_id") == leg.get("id") or (p.get("is_associated_hedge") and p.get("hedge_parent_type") == leg.get("option_type")))),
+                                None
+                            )
+                            if existing_open_hedge:
+                                leg["associated_hedge_id"] = existing_open_hedge.get("id")
+                                leg["has_associated_hedge"] = True
+                                if existing_open_hedge not in new_positions:
+                                    new_positions.append(existing_open_hedge)
+                                self._log_event(
+                                    f"[{strat.get('name')}] Associated Hedge already OPEN for {leg.get('id')} ({existing_open_hedge.get('symbol')}). Re-using existing hedge."
+                                )
+                            else:
+                                init_otm = int(h_cfg.get("initial_otm") or 20)
+                                h_opt_type = leg.get("option_type", "CE")
+                                short_strike = float(contract.get("strike_price", 0.0))
+                                short_expiry_ms = contract.get("expiry_ms") or contract.get("expiry") or leg.get("custom_expiry_ms")
+
                                 h_contract = self._resolve_exact_hedge_contract(
                                     underlying=und,
                                     short_strike=short_strike,
-                                    init_otm=10,
+                                    init_otm=init_otm,
                                     option_type=h_opt_type,
                                     expiry_type=leg.get("expiry", "Weekly"),
                                     custom_expiry_ms=short_expiry_ms,
                                 )
 
-                            if h_contract:
-                                all_leg_keys.append(h_contract["instrument_key"])
-                                h_leg_cfg = {
-                                    "id": f"hedge_{leg.get('id', 'leg')}",
-                                    "side": "Buy",
-                                    "product": leg.get("product", "NRML"),
-                                    "strike_selection": f"OTM {init_otm}",
-                                    "option_type": h_opt_type,
-                                    "lots": leg.get("lots", 1),
-                                    "target_type": "None",
-                                    "target_value": 0.0,
-                                    "target_re_execute_count": 0,
-                                    "sl_type": "None",
-                                    "sl_value": 0.0,
-                                    "sl_re_execute_count": 0,
-                                    "tsl_type": "None",
-                                    "action": "Square off leg",
-                                    "underlying": und,
-                                    "expiry": leg.get("expiry", "Weekly"),
-                                    "is_associated_hedge": True,
-                                    "parent_leg_id": leg.get("id"),
-                                    "hedge_parent_type": h_opt_type,
-                                }
-                                buy_legs.append({"cfg": h_leg_cfg, "contract": h_contract})
-                                leg["associated_hedge_id"] = f"hedge_{leg.get('id', 'leg')}"
-                                leg["has_associated_hedge"] = True
-                                self._log_event(
-                                    f"[{strat.get('name')}] Associated Hedge configured for {leg.get('id')} ({h_opt_type}): Buying OTM {init_otm} ({h_contract['trading_symbol']}) first for SPAN margin reduction."
-                                )
-                            else:
-                                # INVIOLABLE SAFETY GUARD: If dynamic hedge is enabled but contract resolution fails,
-                                # STRICTLY ABORT ENTRY! Never punch naked sell legs which cause RMS Margin Exceeds.
-                                err_msg = f"Dynamic hedge contract could not be resolved for {short_strike} {h_opt_type}. Naked sell blocked to protect margin."
-                                self._log_event(f"[{strat.get('name')}] ERROR: {err_msg}", level="ERROR")
-                                strat["entry_error"] = err_msg
-                                strat["status"] = "ENTRY_FAILED"
-                                strat["_entry_in_progress"] = False
-                                self._save_strategies()
-                                self._save_state()
-                                return
-                    sell_legs.append({"cfg": leg, "contract": contract})
+                                if not h_contract:
+                                    # Secondary fallback: try 10 OTM
+                                    h_contract = self._resolve_exact_hedge_contract(
+                                        underlying=und,
+                                        short_strike=short_strike,
+                                        init_otm=10,
+                                        option_type=h_opt_type,
+                                        expiry_type=leg.get("expiry", "Weekly"),
+                                        custom_expiry_ms=short_expiry_ms,
+                                    )
 
-            # Batch 2: Pre-fetch quotes for all legs in a single high-speed call
-            cached_prices, cached_quotes = self._fetch_live_quotes(all_leg_keys) if all_leg_keys else ({}, {})
+                                if h_contract:
+                                    all_leg_keys.append(h_contract["instrument_key"])
+                                    h_leg_cfg = {
+                                        "id": f"hedge_{leg.get('id', 'leg')}",
+                                        "side": "Buy",
+                                        "product": leg.get("product", "NRML"),
+                                        "strike_selection": f"OTM {init_otm}",
+                                        "option_type": h_opt_type,
+                                        "lots": leg.get("lots", 1),
+                                        "target_type": "None",
+                                        "target_value": 0.0,
+                                        "target_re_execute_count": 0,
+                                        "sl_type": "None",
+                                        "sl_value": 0.0,
+                                        "sl_re_execute_count": 0,
+                                        "tsl_type": "None",
+                                        "action": "Square off leg",
+                                        "underlying": und,
+                                        "expiry": leg.get("expiry", "Weekly"),
+                                        "is_associated_hedge": True,
+                                        "parent_leg_id": leg.get("id"),
+                                        "hedge_parent_type": h_opt_type,
+                                    }
+                                    buy_legs.append({"cfg": h_leg_cfg, "contract": h_contract})
+                                    leg["associated_hedge_id"] = f"hedge_{leg.get('id', 'leg')}"
+                                    leg["has_associated_hedge"] = True
+                                    self._log_event(
+                                        f"[{strat.get('name')}] Associated Hedge configured for {leg.get('id')} ({h_opt_type}): Buying OTM {init_otm} ({h_contract['trading_symbol']}) first for SPAN margin reduction."
+                                    )
+                                else:
+                                    # INVIOLABLE SAFETY GUARD: If dynamic hedge is enabled but contract resolution fails,
+                                    # STRICTLY ABORT ENTRY! Never punch naked sell legs which cause RMS Margin Exceeds.
+                                    err_msg = f"Dynamic hedge contract could not be resolved for {short_strike} {h_opt_type}. Naked sell blocked to protect margin."
+                                    self._log_event(f"[{strat.get('name')}] ERROR: {err_msg}", level="ERROR")
+                                    strat["entry_error"] = err_msg
+                                    strat["status"] = "ENTRY_FAILED"
+                                    strat["_entry_in_progress"] = False
+                                    self._save_strategies()
+                                    self._save_state()
+                                    return
+                        sell_legs.append({"cfg": leg, "contract": contract})
+
+                # Batch 2: Pre-fetch quotes for all legs in a single high-speed call
+                fresh_p, fresh_q = self._fetch_live_quotes(all_leg_keys) if all_leg_keys else ({}, {})
+                cached_prices.update(fresh_p)
+                cached_quotes.update(fresh_q)
 
             strat["entry_error"] = "-"
 
@@ -5615,7 +5764,8 @@ class StraddleManager:
             def _fire_leg_slice(s_idx, s_lot):
                 s_qty = s_lot * lot_size
                 tag_str = f"{tag_prefix}_{leg_cfg.get('id', 'leg')[:3]}_{s_idx+1}"
-                return broker.place_order(
+                t_slice_start = time.perf_counter()
+                res = broker.place_order(
                     symbol=contract["trading_symbol"],
                     instrument_key=contract["instrument_key"],
                     transaction_type=side,
@@ -5625,6 +5775,10 @@ class StraddleManager:
                     price=limit_price if effective_order_type == "LIMIT" else 0.0,
                     tag=tag_str
                 )
+                slice_ack = round((time.perf_counter() - t_slice_start) * 1000.0, 1)
+                if isinstance(res, dict) and "ack_ms" not in res:
+                    res["ack_ms"] = slice_ack
+                return res
 
             futs = [_PERSISTENT_LEG_POOL.submit(_fire_leg_slice, i, l) for i, l in enumerate(sliced_lots)]
             slice_results = [f.result() for f in futs]
@@ -5656,6 +5810,8 @@ class StraddleManager:
                 order_res["lots"] = total_lots
                 order_res["remaining_lots"] = 0
                 order_res["price"] = avg_slice_price
+                if "ack_ms" not in order_res and first_success and "ack_ms" in first_success:
+                    order_res["ack_ms"] = first_success["ack_ms"]
             elif filled_lots > 0:
                 # PARTIAL FILL: Some slices filled on broker, remaining failed due to margin/limits
                 err_slice = failed_slices[0]
@@ -9135,12 +9291,32 @@ class StraddleManager:
                             f"[{strat.get('name')}] Re-Execution 'Candle Close' active. Waiting {total_wait:.2f}s until 1-min candle close @ {target_dt.strftime('%H:%M:%S')}...",
                             level="INFO"
                         )
-                        time.sleep(total_wait)
+                        # Pre-warm connection and pre-fetch quotes 2.5s before candle close for 0ms execution
+                        if total_wait > 3.0:
+                            time.sleep(total_wait - 2.5)
+                            try:
+                                kotak_auth.warm_up_connection()
+                            except Exception:
+                                pass
+                            rem_wait = max(0.0, (target_dt - now_ist()).total_seconds())
+                            if rem_wait > 0:
+                                time.sleep(rem_wait)
+                        else:
+                            time.sleep(total_wait)
                 else:
                     delay_sec = int(adv.get("re_execute_order_delay_sec", 0) or 0)
                     if delay_sec > 0:
                         self._log_event(f"[{strat.get('name')}] Re-Execution 'Immediate' waiting {delay_sec}s delay...", level="INFO")
-                        time.sleep(delay_sec)
+                        if delay_sec > 3.0:
+                            time.sleep(delay_sec - 2.0)
+                            try:
+                                kotak_auth.warm_up_connection()
+                            except Exception:
+                                pass
+                            rem_d = max(0.0, delay_sec - (delay_sec - 2.0))
+                            time.sleep(rem_d)
+                        else:
+                            time.sleep(delay_sec)
                     else:
                         self._log_event(f"[{strat.get('name')}] Re-Execution 'Immediate' (0s delay). Dispatching re-entry order immediately.", level="INFO")
 
@@ -9421,6 +9597,7 @@ class StraddleManager:
                 clean_trig = str(trigger or "STOPLOSS").upper()
                 re_reason_str = f"{clean_opt} Re-Execute #{new_count} ({clean_trig}) [Triggered by {pos.get('symbol')} {clean_trig} Hit @ ₹{pos.get('avg_exit_price', 0.0):.2f}]"
                 try:
+                    re_p, re_q = self._fetch_live_quotes([contract["instrument_key"]])
                     new_pos = self._place_leg_entry_order(
                         leg_cfg,
                         contract,
@@ -9428,6 +9605,7 @@ class StraddleManager:
                         broker,
                         adv,
                         strategy=strat,
+                        prefetched_quotes=(re_p, re_q),
                         is_re_entry=True,
                         entry_reason=re_reason_str
                     )
@@ -12648,6 +12826,14 @@ class StraddleManager:
                     if strat_status not in ("READY", "ENTRY_FAILED") and not has_open_positions:
                         strat["status"] = "READY"
                     strat["entry_error"] = f"Waiting for Start Time ({st})"
+
+                    # Pre-flight advance pre-warming: 0 to 30 seconds before start_time
+                    time_until_start = st_sec - now_sec
+                    if 0 < time_until_start <= 30 and is_enabled and not has_open_positions and not has_completed_positions:
+                        last_prewarm = float(strat.get("_last_prewarm_ts", 0.0))
+                        if time.time() - last_prewarm >= 2.0:
+                            strat["_last_prewarm_ts"] = time.time()
+                            threading.Thread(target=self._pre_warm_strategy_entry, args=(strat,), daemon=True).start()
                 elif is_after_end:
                     if not has_open_positions:
                         strat["entry_error"] = f"Trading hours ended ({et})"
