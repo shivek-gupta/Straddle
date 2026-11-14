@@ -994,8 +994,28 @@ body {
 
 .straddle-grid-2col {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: 1.2fr 1fr;
     gap: 16px;
+}
+
+.straddle-grid-3col {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1.6fr;
+    gap: 12px;
+}
+
+.straddle-grid-4col {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.prem-matching-radios-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
 }
 
 .straddle-form-group {
@@ -10161,16 +10181,226 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         justify-content: center !important;
     }
 
-    /* 5. Master Algos Table Wrapper */
+    /* 5. Master Algos Table Mobile Cards (Zero Horizontal Scroll) */
     .straddle-table-wrap {
         width: 100% !important;
-        overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch !important;
         border-radius: 8px !important;
     }
 
-    .straddle-table-wrap table {
-        min-width: 700px !important;
+    #straddleAlgosTable thead {
+        display: none !important;
+    }
+
+    #straddleAlgosTable,
+    #straddleAlgosTable tbody {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    #straddleAlgosTable tbody tr[data-strategy-id] {
+        display: grid !important;
+        grid-template-columns: 26px 1fr auto !important;
+        grid-template-areas:
+            "sel name mtm"
+            "status status mult"
+            "switches switches switches"
+            "timings timings timings"
+            "days days days"
+            "err err err";
+        gap: 8px 10px !important;
+        background: #0c101c !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 10px !important;
+        padding: 12px 14px !important;
+        margin-bottom: 12px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+    }
+
+    #straddleAlgosTable td {
+        display: block !important;
+        padding: 0 !important;
+        border: none !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    .algo-col-select {
+        grid-area: sel !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+
+    .algo-col-name {
+        grid-area: name !important;
+        display: flex !important;
+        align-items: center !important;
+        min-width: 0 !important;
+    }
+
+    .algo-col-name a {
+        font-size: 13.5px !important;
+        font-weight: 800 !important;
+        word-break: break-word !important;
+    }
+
+    .algo-col-mtm {
+        grid-area: mtm !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        font-size: 14px !important;
+        font-weight: 800 !important;
+    }
+
+    .algo-col-status {
+        grid-area: status !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+    }
+
+    .algo-col-mult {
+        grid-area: mult !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+    }
+
+    .algo-col-enable,
+    .algo-col-adv-sl {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+    }
+
+    .algo-col-enable::before {
+        content: "Auto Entry:";
+        font-size: 11px;
+        font-weight: 700;
+        color: #94a3b8;
+    }
+
+    .algo-col-adv-sl::before {
+        content: "0ms SL:";
+        font-size: 11px;
+        font-weight: 700;
+        color: #94a3b8;
+    }
+
+    #straddleAlgosTable tr[data-strategy-id] .algo-col-enable {
+        grid-column: 1 / 2;
+        grid-row: 3;
+    }
+
+    #straddleAlgosTable tr[data-strategy-id] .algo-col-adv-sl {
+        grid-column: 2 / 4;
+        grid-row: 3;
+        justify-content: flex-end;
+    }
+
+    .algo-col-start::before {
+        content: "Start: ";
+        font-size: 10px;
+        font-weight: 700;
+        color: #64748b;
+    }
+
+    .algo-col-end::before {
+        content: "End: ";
+        font-size: 10px;
+        font-weight: 700;
+        color: #64748b;
+    }
+
+    #straddleAlgosTable tr[data-strategy-id] .algo-col-start {
+        grid-column: 1 / 2;
+        grid-row: 4;
+        font-size: 11px !important;
+    }
+
+    #straddleAlgosTable tr[data-strategy-id] .algo-col-end {
+        grid-column: 2 / 4;
+        grid-row: 4;
+        font-size: 11px !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        justify-content: flex-end !important;
+    }
+
+    .algo-col-days {
+        grid-column: 1 / -1 !important;
+        grid-row: 5 !important;
+        padding-top: 4px !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+    }
+
+    .algo-col-entry-err {
+        grid-column: 1 / -1 !important;
+        grid-row: 6 !important;
+    }
+
+    .algo-col-exit-err {
+        grid-column: 1 / -1 !important;
+        grid-row: 7 !important;
+    }
+
+    .algo-col-entry-err:empty,
+    .algo-col-exit-err:empty {
+        display: none !important;
+    }
+
+    /* Open & Closed Positions Table Mobile Transformation (Zero Horizontal Scroll) */
+    #straddlePositionsTable thead {
+        display: none !important;
+    }
+
+    #straddlePositionsTable,
+    #straddlePositionsTable tbody {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    #straddlePositionsTable tbody tr[data-leg-index] {
+        display: flex !important;
+        flex-direction: column !important;
+        background: #0c101c !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 10px !important;
+        padding: 12px 14px !important;
+        margin-bottom: 12px !important;
+        gap: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+    }
+
+    #straddlePositionsTable td {
+        display: block !important;
+        padding: 0 !important;
+        border: none !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .pos-col-select {
+        display: none !important;
+    }
+
+    .pos-col-sym {
+        width: 100% !important;
+    }
+
+    .pos-col-ent-price,
+    .pos-col-target,
+    .pos-col-sl,
+    .pos-col-exit-price {
+        padding: 4px 0 !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
     }
 
     /* 6. Strategy Settings & Builder Panel */
@@ -10213,16 +10443,141 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         font-size: 13px !important;
     }
 
+    /* Configurable Legs Table Mobile Transformation (Screenshot 5) */
+    .straddle-legs-builder-table thead {
+        display: none !important;
+    }
+
+    .straddle-legs-builder-table,
+    .straddle-legs-builder-table tbody {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .straddle-legs-builder-table tr.straddle-leg-builder-row {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        gap: 8px 10px !important;
+        align-items: center !important;
+        background: #0c101c !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 10px !important;
+        padding: 12px 14px !important;
+        margin-bottom: 12px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+    }
+
+    .straddle-legs-builder-table td {
+        display: inline-flex !important;
+        align-items: center !important;
+        padding: 0 !important;
+        border: none !important;
+        box-sizing: border-box !important;
+    }
+
+    .leg-col-handle {
+        width: 24px !important;
+    }
+
+    .leg-col-side {
+        width: auto !important;
+    }
+
+    .leg-col-prod {
+        width: auto !important;
+    }
+
+    .leg-col-strike {
+        flex: 1 1 auto !important;
+    }
+
+    .leg-col-type {
+        width: auto !important;
+    }
+
+    .leg-col-lots {
+        width: auto !important;
+    }
+
+    .leg-col-actions {
+        margin-left: auto !important;
+    }
+
+    .leg-col-target {
+        flex: 1 1 45% !important;
+        padding-top: 4px !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
+    }
+
+    .leg-col-tgt-reexec {
+        flex: 1 1 45% !important;
+        padding-top: 4px !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
+    }
+
+    .leg-col-sl {
+        flex: 1 1 45% !important;
+    }
+
+    .leg-col-sl-reexec {
+        flex: 1 1 45% !important;
+    }
+
+    .leg-col-hedge {
+        flex: 1 1 100% !important;
+        padding-top: 4px !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
+    }
+
+    .leg-col-underlying {
+        flex: 1 1 45% !important;
+    }
+
+    .leg-col-expiry {
+        flex: 1 1 45% !important;
+    }
+
+    .leg-col-action {
+        flex: 1 1 100% !important;
+    }
+
+    .leg-col-tsl {
+        display: none !important;
+    }
+
     #straddleLegsContainer,
     #straddleLegsTable {
         width: 100% !important;
-        overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch !important;
+        overflow-x: visible !important;
         display: block !important;
     }
 
-    #straddleLegsTable table {
-        min-width: 760px !important;
+    /* Form & Grid Vertical Stacking (Screenshots 3 & 4) */
+    .straddle-grid-4col,
+    .straddle-grid-3col,
+    .straddle-grid-2col {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+
+    .straddle-toggles-row {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: 8px !important;
+    }
+
+    .prem-matching-radios-row {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 12px !important;
+    }
+
+    .pnl-main-layout {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
     }
 
     /* 7. Full-Screen Mobile Modals */
@@ -10387,6 +10742,38 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 
     .straddle-action-bar .straddle-btn {
         width: 100% !important;
+    }
+
+    #straddleAlgosTable tbody tr[data-strategy-id] {
+        padding: 10px 12px !important;
+        gap: 6px 8px !important;
+    }
+
+    .algo-col-name a {
+        font-size: 12.5px !important;
+    }
+
+    .algo-col-mtm {
+        font-size: 13px !important;
+    }
+
+    .straddle-legs-builder-table tr.straddle-leg-builder-row {
+        padding: 10px 12px !important;
+        gap: 6px 8px !important;
+    }
+
+    .straddle-legs-builder-table td select,
+    .straddle-legs-builder-table td input {
+        font-size: 11px !important;
+    }
+
+    .leg-col-target,
+    .leg-col-tgt-reexec,
+    .leg-col-sl,
+    .leg-col-sl-reexec,
+    .leg-col-underlying,
+    .leg-col-expiry {
+        flex: 1 1 100% !important;
     }
 }
 

@@ -26,7 +26,7 @@ try:
 except Exception:
     pass
 
-from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
+from flask import Flask, jsonify, request, render_template, send_from_directory, send_file, Response
 
 import config
 import kotak_auth
@@ -54,6 +54,29 @@ def index():
     creds = config.get_kotak_credentials()
     auth_status = kotak_auth.get_auth_status()
     return render_template("index.html", creds=creds, auth_status=auth_status)
+
+
+@app.route("/manifest.json")
+def manifest():
+    manifest_path = Path("static/manifest.json")
+    if manifest_path.exists():
+        content = manifest_path.read_text(encoding="utf-8")
+        resp = Response(content, mimetype="application/manifest+json")
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+    return jsonify({"error": "manifest not found"}), 404
+
+
+@app.route("/sw.js")
+def service_worker():
+    sw_path = Path("static/sw.js")
+    if sw_path.exists():
+        content = sw_path.read_text(encoding="utf-8")
+        resp = Response(content, mimetype="application/javascript")
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.headers["Service-Worker-Allowed"] = "/"
+        return resp
+    return Response("// no-op sw", mimetype="application/javascript")
 
 
 @app.after_request

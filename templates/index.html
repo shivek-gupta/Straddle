@@ -2,8 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>⚡ STRADDLE PRO — Kotak Neo High-Speed Algorithmic Platform</title>
+
+    <!-- Progressive Web App (PWA) Mobile Installation & Meta Tags -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#070a13">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="StraddlePro">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -271,12 +281,20 @@
                         <span id="gitBranchBadge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800; font-family:var(--font-mono);">main</span>
                     </div>
                     <!-- Broker Execution Mode -->
-                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
+                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span id="topbarModeIcon">⚡</span>
                             <span style="font-weight:700; color:#f8fafc; font-size:12px;">Trading Mode</span>
                         </div>
                         <span id="topbarModeLabel" style="font-size:10.5px; color:#10b981; font-weight:700;">Live Broker</span>
+                    </div>
+                    <!-- PWA Mobile App Install (Standalone App Installation) -->
+                    <div id="pwaInstallDropdownRow" onclick="triggerPwaInstall(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Install Straddle Pro as Standalone Native App">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span>📱</span>
+                            <span style="font-weight:700; color:#38bdf8; font-size:12px;">Install App on Phone</span>
+                        </div>
+                        <span style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800;">INSTALL</span>
                     </div>
                 </div>
             </div>
@@ -1402,7 +1420,7 @@
 
                 <div id="sec_builder_premium" class="straddle-collapsible-body" style="display:none;">
                     <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-                        <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
+                        <div class="prem-matching-radios-row" style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
                             <label class="straddle-checkbox-label">
                                 <input type="radio" name="prem_match_mode" id="radPremNone" value="No matching of premiums" checked onchange="syncPremiumMatchingFieldStates()"> No matching of premiums 🔗
                             </label>
@@ -1546,7 +1564,7 @@
                     <!-- Stoploss & Target Order Placement Mode & Delays (Broker OCO Parity) -->
                     <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-top:10px;">
                         <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:10px;">Stoploss & Target Order Placement Mode & Delays (Broker OCO)</div>
-                        <div class="straddle-grid-4col" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:12px;">
+                        <div class="straddle-grid-4col">
                             <div class="straddle-form-group">
                                 <label>SL order placement (individual leg):</label>
                                 <select id="cfgSlOrderPlacement" class="straddle-select">
@@ -1595,7 +1613,7 @@
                             <div style="font-size:12px; font-weight:700; color:#38bdf8;">🎯 Benchmark Reference Price Basis</div>
                             <span style="font-size:10px; color:#94a3b8; font-style:italic;">Calculate SL/Target % based on 1-min candle close vs actual broker fill price</span>
                         </div>
-                        <div class="straddle-grid-3col" style="display:grid; grid-template-columns: 1.4fr 1fr 1.6fr; gap:12px;">
+                        <div class="straddle-grid-3col">
                             <div class="straddle-form-group">
                                 <label>Price Calculation Basis:</label>
                                 <select id="cfgRefPriceMode" class="straddle-select">
@@ -1629,7 +1647,7 @@
                     <!-- Re-Execute Method & Order Delay (Quantiply Parity) -->
                     <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-bottom:10px;">
                         <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:10px;">Re-Entry / Re-Execute Method & Timing (Quantiply Parity)</div>
-                        <div class="straddle-grid-2col" style="display:grid; grid-template-columns: 1.2fr 1fr; gap:16px;">
+                        <div class="straddle-grid-2col">
                             <div class="straddle-form-group">
                                 <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">Re-Execute method:</label>
                                 <select id="cfgReExecuteMethod" class="straddle-select" style="font-weight:700;">
@@ -1721,7 +1739,7 @@
             </div>
 
             <!-- Main Layout: Sidebar List + Canvas Chart Area -->
-            <div style="display:grid; grid-template-columns: 240px 1fr; gap:14px;">
+            <div class="pnl-main-layout" style="display:grid; grid-template-columns: 240px 1fr; gap:14px;">
                 <!-- Left Entity Selector Sidebar -->
                 <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; height:520px; overflow-y:auto;">
                     <input type="text" id="pnlSearchEntities" class="straddle-input" placeholder="Search Strategy / Algo..." oninput="filterPnlEntitiesList()">
@@ -3691,5 +3709,47 @@
         </div>
     </div>
 
+    <!-- PWA Install Prompt Handler & Service Worker Registration -->
+    <script>
+        let deferredPwaInstallPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPwaInstallPrompt = e;
+            console.log('[PWA] beforeinstallprompt event captured');
+            const installBtn = document.getElementById('pwaInstallDropdownRow');
+            if (installBtn) {
+                installBtn.style.display = 'flex';
+            }
+        });
+
+        window.addEventListener('appinstalled', () => {
+            console.log('[PWA] App successfully installed!');
+            deferredPwaInstallPrompt = null;
+        });
+
+        function triggerPwaInstall() {
+            if (deferredPwaInstallPrompt) {
+                deferredPwaInstallPrompt.prompt();
+                deferredPwaInstallPrompt.userChoice.then((choiceResult) => {
+                    if (choiceResult.outcome === 'accepted') {
+                        console.log('[PWA] User accepted installation');
+                    }
+                    deferredPwaInstallPrompt = null;
+                });
+            } else {
+                alert('📱 To install Straddle Pro as an App on your phone:\n\n1. In Chrome/Edge: Tap the 3-dots menu (⋮) in the top-right corner.\n2. Tap "Install app" or "Add to Home screen".\n3. Tap "Install" to place the golden Straddle Pro icon on your home screen.');
+            }
+        }
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').then(reg => {
+                    console.log('[PWA] Straddle Pro ServiceWorker active:', reg.scope);
+                }).catch(err => {
+                    console.debug('[PWA] ServiceWorker registration notice:', err);
+                });
+            });
+        }
+    </script>
 </body>
 </html>

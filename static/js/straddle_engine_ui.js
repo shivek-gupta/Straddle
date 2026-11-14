@@ -1470,28 +1470,28 @@ function renderStraddleAlgosTable(forceRebuild = false) {
 
         rowsHtml += `
             <tr data-strategy-id="${s.strategy_id}" style="${isSelected ? 'background:rgba(59,130,246,0.08);' : ''}">
-                <td style="text-align:center;">
+                <td class="algo-col-select" style="text-align:center;">
                     <input type="checkbox" class="straddle-algo-checkbox" data-id="${s.strategy_id}" ${isSelected ? "checked" : ""} onchange="onToggleAlgoSelect('${s.strategy_id}', this.checked)">
                 </td>
-                <td>
+                <td class="algo-col-enable">
                     <label class="quantiply-switch" title="Toggle Auto Execution">
                         <input type="checkbox" data-enable-sid="${s.strategy_id}" ${isAlgoEnabled ? "checked" : ""} onchange="onToggleAlgoEnable('${s.strategy_id}', this.checked)">
                         <span class="quantiply-slider"></span>
                     </label>
                 </td>
-                <td style="text-align:center;">
+                <td class="algo-col-adv-sl" style="text-align:center;">
                     <label class="quantiply-switch" title="Place Stoploss order directly on Exchange matching engine (<1ms fill)">
                         <input type="checkbox" data-adv-sl-sid="${s.strategy_id}" ${isAdvSl ? "checked" : ""} onchange="toggleAlgoAdvanceSl('${s.strategy_id}', this.checked)">
                         <span class="quantiply-slider" style="${isAdvSl ? 'background:#10b981;' : ''}"></span>
                     </label>
                 </td>
-                <td>
+                <td class="algo-col-status">
                     <span id="algo_status_pill_${s.strategy_id}" class="straddle-pill-badge ${statusClass}" style="font-size:10.5px; padding:2px 8px;">${displayStatus}</span>
                 </td>
-                <td>
+                <td class="algo-col-days">
                     ${daysHtml}
                 </td>
-                <td id="algo_mult_cell_${s.strategy_id}" style="text-align:center; min-width:115px; padding:6px 6px;">
+                <td class="algo-col-mult" id="algo_mult_cell_${s.strategy_id}" style="text-align:center; min-width:115px; padding:6px 6px;">
                     <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                         <div style="display:inline-flex; background:#0b1120; border:1px solid #334155; border-radius:4px; padding:1px;">
                             <button type="button" onclick="setAlgoMultiplierMode('${s.strategy_id}', 'MANUAL')" style="background:${isManual ? '#2563eb' : 'transparent'}; color:${isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Manual Lots Multiplier">Manual</button>
@@ -1507,10 +1507,10 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                         `}
                     </div>
                 </td>
-                <td id="algo_mtm_${s.strategy_id}" style="text-align:right; font-family:var(--font-mono); font-weight:800; ${mtmClass}">
+                <td class="algo-col-mtm" id="algo_mtm_${s.strategy_id}" style="text-align:right; font-family:var(--font-mono); font-weight:800; ${mtmClass}">
                     ${mtmFormatted}
                 </td>
-                <td>
+                <td class="algo-col-name">
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span id="algo_err_badge_${s.strategy_id}" style="display:${errCount > 0 ? 'inline-flex' : 'none'}; align-items:center; gap:4px; color:#f87171; cursor:pointer;" title="Click to inspect and retry error" onclick="openStrategyInTerminal('${s.strategy_id}')">
                             <span style="font-size:12px;">⚠️</span><span class="algo-error-counter">${errCount}</span>
@@ -1532,10 +1532,10 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                         </div>
                     </div>
                 </td>
-                <td id="algo_entry_err_${s.strategy_id}" style="color:${entryErrColor}; font-size:11px; font-weight:${entryErrWeight}; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;" title="${entryErr}">${entryErr}</td>
-                <td style="color:#64748b; font-size:11px; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;">${s.exit_error || '-'}</td>
-                <td style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">${startTime}</td>
-                <td style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">
+                <td class="algo-col-entry-err" id="algo_entry_err_${s.strategy_id}" style="color:${entryErrColor}; font-size:11px; font-weight:${entryErrWeight}; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;" title="${entryErr}">${entryErr}</td>
+                <td class="algo-col-exit-err" style="color:#64748b; font-size:11px; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;">${s.exit_error || '-'}</td>
+                <td class="algo-col-start" style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">${startTime}</td>
+                <td class="algo-col-end" style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">
                     <div>${endTime}</div>
                     ${(s.no_reentry_after && s.no_reentry_after.enabled && s.no_reentry_after.time) ? `<div style="font-size:9.5px; color:#f59e0b; font-weight:700;" title="No new entry or re-execution after this time">Cutoff: ${s.no_reentry_after.time}</div>` : ''}
                 </td>
@@ -5122,37 +5122,37 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
                 html += `
                     <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-entry-reason="${pos.entry_reason || ''}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}" data-ref-price="${pos.reference_price || ''}" data-sl-price="${pos.sl_price || ''}" data-tgt-price="${pos.target_price || ''}">
-                        <td style="text-align:center;">
+                        <td class="pos-col-select" style="text-align:center;">
                             <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
                         </td>
-                        <td>${statusHtml}</td>
-                        <td><span class="straddle-side-badge ${sideClass}">${side}</span></td>
-                        <td>${symHtml}</td>
-                        <td>${qtyHtml}</td>
-                        <td>
+                        <td class="pos-col-status">${statusHtml}</td>
+                        <td class="pos-col-side"><span class="straddle-side-badge ${sideClass}">${side}</span></td>
+                        <td class="pos-col-sym">${symHtml}</td>
+                        <td class="pos-col-qty">${qtyHtml}</td>
+                        <td class="pos-col-ent-price">
                             <div class="straddle-ent-price-val" style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${avgEntPrice}</div>
                             <div class="straddle-subtext">${entryTime}</div>
                             ${refPriceBadgeHtml}
                             ${refBasisSelectHtml}
                         </td>
-                        <td style="white-space:normal; min-width:130px; max-width:170px; word-break:break-word; line-height:1.25;">${entryReasonHtml}</td>
-                        <td>${targetHtml}</td>
-                        <td>${slHtml}</td>
-                        <td>
+                        <td class="pos-col-ent-reason" style="white-space:normal; min-width:130px; max-width:170px; word-break:break-word; line-height:1.25;">${entryReasonHtml}</td>
+                        <td class="pos-col-target">${targetHtml}</td>
+                        <td class="pos-col-sl">${slHtml}</td>
+                        <td class="pos-col-exit-price">
                             <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${avgExitPrice}</div>
                             ${exitTime !== '-' ? `<div class="straddle-subtext">${exitTime}</div>` : ''}
                         </td>
-                        <td style="white-space:normal; max-width:125px; word-break:break-word; line-height:1.25;">${exitReasonHtml}</td>
-                        <td style="text-align:right;">
+                        <td class="pos-col-exit-reason" style="white-space:normal; max-width:125px; word-break:break-word; line-height:1.25;">${exitReasonHtml}</td>
+                        <td class="pos-col-ltp" style="text-align:right;">
                             <span class="straddle-ltp ${ltpClass}" style="color:${ltpColor}; font-weight:700; font-family:var(--font-mono);" ${isClosed && pos.avg_exit_price ? `title="Live Market LTP: ₹${ltp.toFixed(2)} (Exited @ ₹${Number(pos.avg_exit_price).toFixed(2)})"` : ''}>${ltp > 0 ? ltp.toFixed(2) : '-'}</span>
                         </td>
-                        <td style="text-align:right; white-space:nowrap;">
+                        <td class="pos-col-mtm" style="text-align:right; white-space:nowrap;">
                             <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:6px;">
                                 <span class="straddle-mtm ${mtmClass}" style="font-weight:800; font-family:var(--font-mono);">${mtmFormatted}</span>
                                 ${pnlPctBadgeHtml}
                             </div>
                         </td>
-                        <td style="text-align:center;">${actionHtml}</td>
+                        <td class="pos-col-action" style="text-align:center;">${actionHtml}</td>
                     </tr>
                 `;
 
@@ -6887,21 +6887,22 @@ function addStraddleLegRow(leg = null) {
 
     const tr = document.createElement("tr");
     tr.id = rowId;
+    tr.className = "straddle-leg-builder-row";
     tr.innerHTML = `
-        <td style="text-align:center; cursor:grab; color:#64748b;">☰</td>
-        <td>
+        <td class="leg-col-handle" style="text-align:center; cursor:grab; color:#64748b;">☰</td>
+        <td class="leg-col-side">
             <select class="straddle-select leg-side" onchange="onLegSideChanged('${rowId}', this.value)">
                 <option value="Buy" ${l.side === "Buy" ? "selected" : ""}>Buy</option>
                 <option value="Sell" ${l.side === "Sell" ? "selected" : ""}>Sell</option>
             </select>
         </td>
-        <td>
+        <td class="leg-col-prod">
             <select class="straddle-select leg-product">
                 <option value="NRML" ${l.product === "NRML" ? "selected" : ""}>NRML</option>
                 <option value="MIS" ${l.product === "MIS" ? "selected" : ""}>MIS</option>
             </select>
         </td>
-        <td>
+        <td class="leg-col-strike">
             <div style="display:flex; align-items:center; gap:3px;">
                 <div class="straddle-stepper-box" style="height:28px;">
                     <select class="straddle-select leg-strike straddle-stepper-input" style="min-width:85px; border:none; background:transparent; font-size:11.5px; font-weight:700; padding:2px 4px; color:#f8fafc;" onchange="syncStrategyLegChange('${rowId}')">
@@ -6917,13 +6918,13 @@ function addStraddleLegRow(leg = null) {
                 <span class="leg-mult-badge" style="display:${hasMult ? 'inline-block' : 'none'}; font-size:9px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.3); border-radius:3px; padding:1px 3px;" title="500/100 Multiple Strike Active">500/100</span>
             </div>
         </td>
-        <td>
+        <td class="leg-col-type">
             <select class="straddle-select leg-type" onchange="syncStrategyLegChange('${rowId}')">
                 <option value="CE" ${l.option_type === "CE" ? "selected" : ""}>CE</option>
                 <option value="PE" ${l.option_type === "PE" ? "selected" : ""}>PE</option>
             </select>
         </td>
-        <td>
+        <td class="leg-col-lots">
             <div class="straddle-stepper-box" style="height:28px;">
                 <input type="number" class="straddle-input leg-lots straddle-stepper-input" style="width:38px; border:none; background:transparent; font-size:12px; font-weight:700; text-align:center; padding:2px 2px; color:#f8fafc;" value="${l.lots || 1}" min="1" max="500" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
                 <div class="straddle-stepper-arrows" style="width:16px;">
@@ -6932,7 +6933,7 @@ function addStraddleLegRow(leg = null) {
                 </div>
             </div>
         </td>
-        <td>
+        <td class="leg-col-hedge">
             <div class="leg-hedge-container" style="display:${isSell ? 'flex' : 'none'}; align-items:center; gap:3px;">
                 <input type="checkbox" class="leg-hedge-enabled" ${hEnabled ? 'checked' : ''} onchange="toggleLegHedgeRow('${rowId}', this.checked)" title="Enable Associated Dynamic Hedge for margin reduction">
                 <button type="button" class="straddle-btn btn-outline leg-hedge-btn" style="padding:2px 5px; font-size:10px; font-weight:700; color:${hEnabled ? '#38bdf8' : '#64748b'}; border-color:${hEnabled ? '#38bdf8' : '#334155'}; background:${hEnabled ? 'rgba(56,189,248,0.1)' : 'transparent'}; white-space:nowrap;" onclick="openLegSettingsModal('${rowId}')" title="Configure Initial OTM, Shift Threshold and Reset OTM">
@@ -6944,7 +6945,7 @@ function addStraddleLegRow(leg = null) {
             </div>
             <div class="leg-hedge-na" style="display:${isSell ? 'none' : 'block'}; text-align:center; color:#475569; font-size:11px; font-weight:600;">—</div>
         </td>
-        <td>
+        <td class="leg-col-target">
             <div style="display:flex; flex-direction:column; gap:3px;">
                 <div style="display:flex; gap:2px;">
                     <select class="straddle-select leg-tgt-type" style="width:85px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
@@ -6958,7 +6959,7 @@ function addStraddleLegRow(leg = null) {
                 </select>
             </div>
         </td>
-        <td>
+        <td class="leg-col-tgt-reexec">
             <div style="display:flex; gap:2px;">
                 <select class="straddle-select leg-tgt-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
                     ${tgtReOptionsHtml}
@@ -6966,7 +6967,7 @@ function addStraddleLegRow(leg = null) {
                 <input type="number" class="straddle-input leg-tgt-re-cnt" style="width:40px;" value="${l.target_re_execute_count || 6}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
             </div>
         </td>
-        <td>
+        <td class="leg-col-sl">
             <div style="display:flex; flex-direction:column; gap:3px;">
                 <div style="display:flex; gap:2px;">
                     <select class="straddle-select leg-sl-type" style="width:80px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
@@ -6980,14 +6981,14 @@ function addStraddleLegRow(leg = null) {
                 </select>
             </div>
         </td>
-        <td>
+        <td class="leg-col-tsl">
             <select class="straddle-select leg-tsl-type" style="width:80px;" onchange="syncStrategyLegChange('${rowId}')">
                 <option value="None" ${l.tsl_type === "None" ? "selected" : ""}>None</option>
                 <option value="TSL: %" ${l.tsl_type === "TSL: %" ? "selected" : ""}>TSL: %</option>
                 <option value="TSL: pts" ${l.tsl_type === "TSL: pts" ? "selected" : ""}>TSL: pts</option>
             </select>
         </td>
-        <td>
+        <td class="leg-col-sl-reexec">
             <div style="display:flex; gap:2px;">
                 <select class="straddle-select leg-sl-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
                     ${slReOptionsHtml}
@@ -6995,23 +6996,23 @@ function addStraddleLegRow(leg = null) {
                 <input type="number" class="straddle-input leg-sl-re-cnt" style="width:40px;" value="${l.sl_re_execute_count || 1}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
             </div>
         </td>
-        <td>
+        <td class="leg-col-action">
             <select class="straddle-select leg-action" style="width:110px;" onchange="syncStrategyLegChange('${rowId}')">
                 <option value="Square off leg" ${l.action === "Square off leg" ? "selected" : ""}>Square off leg</option>
                 <option value="Square off all" ${l.action === "Square off all" ? "selected" : ""}>Square off all</option>
             </select>
         </td>
-        <td>
+        <td class="leg-col-underlying">
             <select class="straddle-select leg-underlying" onchange="syncStrategyLegChange('${rowId}')">
                 ${undOptionsHtml}
             </select>
         </td>
-        <td>
+        <td class="leg-col-expiry">
             <select class="straddle-select leg-expiry" onchange="syncStrategyLegChange('${rowId}')">
                 ${expOptionsHtml}
             </select>
         </td>
-        <td style="text-align:center;">
+        <td class="leg-col-actions" style="text-align:center;">
             <button type="button" class="straddle-btn btn-danger" style="padding:2px 6px; font-size:10px;" onclick="removeStraddleLegRow('${rowId}')">✕</button>
         </td>
     `;
