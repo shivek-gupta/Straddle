@@ -7725,25 +7725,36 @@ function applyStraddleBulkEdit(action) {
     document.getElementById("cfgBulkEdit").value = "";
 }
 
-function toggleAlgoBuilderSection(secId) {
+window._lastSecToggleTs = window._lastSecToggleTs || {};
+
+function toggleAlgoBuilderSection(secId, forceState = null) {
     const sec = document.getElementById(secId);
     const chevron = document.getElementById("chevron_" + secId);
     if (!sec) return;
-    
-    // Robust check using inline style, class, or computed display
-    const isCurrentlyHidden = (sec.style.display === "none") || 
-                              sec.classList.contains("collapsed") ||
-                              (!sec.classList.contains("expanded") && window.getComputedStyle(sec).display === "none");
-    
-    if (isCurrentlyHidden) {
-        sec.style.setProperty("display", "block", "important");
+
+    // Debounce rapid duplicate event dispatches (e.g. inline onclick + event listeners within 250ms)
+    const now = Date.now();
+    if (forceState === null && window._lastSecToggleTs[secId] && (now - window._lastSecToggleTs[secId] < 250)) {
+        return;
+    }
+    window._lastSecToggleTs[secId] = now;
+
+    // Check if section is currently hidden
+    const isHidden = sec.classList.contains("collapsed") ||
+                     sec.style.display === "none" ||
+                     (!sec.classList.contains("expanded") && window.getComputedStyle(sec).display === "none");
+
+    const shouldExpand = (forceState !== null) ? !!forceState : isHidden;
+
+    if (shouldExpand) {
         sec.classList.remove("collapsed");
         sec.classList.add("expanded");
+        sec.style.setProperty("display", "block", "important");
         if (chevron) chevron.textContent = "▼";
     } else {
-        sec.style.setProperty("display", "none", "important");
         sec.classList.remove("expanded");
         sec.classList.add("collapsed");
+        sec.style.setProperty("display", "none", "important");
         if (chevron) chevron.textContent = "▶";
     }
 }
@@ -7760,37 +7771,23 @@ function toggleAllAlgoBuilderSections(forceExpand = null) {
         'sec_builder_reentry'
     ];
     const firstSec = document.getElementById(secIds[0]);
-    const isFirstVisible = firstSec ? (firstSec.classList.contains("expanded") && firstSec.style.display !== "none") : false;
-    const shouldExpand = (forceExpand !== null) ? !!forceExpand : !isFirstVisible;
-    
+    const isFirstExpanded = firstSec ? (firstSec.classList.contains("expanded") && firstSec.style.display !== "none") : true;
+    const shouldExpand = (forceExpand !== null) ? !!forceExpand : !isFirstExpanded;
+
     secIds.forEach(id => {
-        const sec = document.getElementById(id);
-        const ch = document.getElementById("chevron_" + id);
-        if (!sec) return;
-        sec.style.setProperty("display", shouldExpand ? "block" : "none", "important");
-        sec.classList.toggle("expanded", shouldExpand);
-        sec.classList.toggle("collapsed", !shouldExpand);
-        if (ch) ch.textContent = shouldExpand ? "▼" : "▶";
+        toggleAlgoBuilderSection(id, shouldExpand);
     });
+
+    const btn = document.getElementById("btnToggleAllAlgoSections");
+    if (btn) {
+        btn.textContent = shouldExpand ? "Collapse All" : "Expand All";
+    }
 }
 window.toggleAllAlgoBuilderSections = toggleAllAlgoBuilderSections;
 
 function initCollapsibleAccordionHeaders() {
     document.querySelectorAll(".straddle-collapsible-header").forEach(header => {
-        if (header._collapsibleBound) return;
-        header._collapsibleBound = true;
         header.style.cursor = "pointer";
-        header.addEventListener("click", function(e) {
-            // If clicked on a button or input inside the header, don't toggle
-            if (e.target.closest("button") || e.target.closest("input") || e.target.closest("select")) return;
-            const onclickAttr = header.getAttribute("onclick");
-            if (onclickAttr && onclickAttr.includes("toggleAlgoBuilderSection")) {
-                const match = onclickAttr.match(/toggleAlgoBuilderSection\(['"]([^'"]+)['"]\)/);
-                if (match && match[1]) {
-                    toggleAlgoBuilderSection(match[1]);
-                }
-            }
-        });
     });
 }
 window.initCollapsibleAccordionHeaders = initCollapsibleAccordionHeaders;
