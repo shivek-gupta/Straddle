@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261021_pills4">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261115_mobile_v4">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -544,21 +544,21 @@
             <!-- Top Summary Strip -->
             <div style="display:flex; justify-content:space-between; align-items:center; background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                    <!-- Filter Sub-Tabs -->
-                    <div style="display:flex; gap:4px; background:#111726; padding:3px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
-                        <button type="button" class="straddle-btn btn-outline active-toggle" id="btnPosFilterOpen" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('open')">
+                    <!-- Filter Sub-Tabs (Horizontally Scrollable Strip, Never Clipped on Mobile) -->
+                    <div class="pos-sub-tabs-strip" id="posFilterSubTabsStrip">
+                        <button type="button" class="pos-sub-tab active-toggle" id="btnPosFilterOpen" onclick="setStraddlePositionsViewFilter('open')">
                             🟢 Live Open (<span id="posSubCountOpen">0</span>)
                         </button>
-                        <button type="button" class="straddle-btn btn-outline" id="btnPosFilterClosed" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('closed')">
+                        <button type="button" class="pos-sub-tab" id="btnPosFilterClosed" onclick="setStraddlePositionsViewFilter('closed')">
                             🔴 Closed Today (<span id="posSubCountClosed">0</span>)
                         </button>
-                        <button type="button" class="straddle-btn btn-outline" id="btnPosFilterAll" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('all')">
+                        <button type="button" class="pos-sub-tab" id="btnPosFilterAll" onclick="setStraddlePositionsViewFilter('all')">
                             📑 All Positions (<span id="posSubCountAll">0</span>)
                         </button>
-                        <button type="button" class="straddle-btn btn-outline" id="btnPosFilterOrders" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('orders')">
+                        <button type="button" class="pos-sub-tab" id="btnPosFilterOrders" onclick="setStraddlePositionsViewFilter('orders')">
                             📋 Orderbook Log
                         </button>
-                        <button type="button" class="straddle-btn btn-outline" id="btnPosFilterMargin" style="padding:4px 10px; font-size:11.5px;" onclick="setStraddlePositionsViewFilter('margin')">
+                        <button type="button" class="pos-sub-tab" id="btnPosFilterMargin" onclick="setStraddlePositionsViewFilter('margin')">
                             💰 Funds & Margin
                         </button>
                     </div>
@@ -1044,7 +1044,7 @@
                     </div>
 
                     <!-- Dynamic Legs Table -->
-                    <div class="straddle-table-wrap" style="max-height:400px; overflow-y:auto;">
+                    <div class="straddle-table-wrap" style="max-height:400px; overflow-y:auto; overflow-x:auto !important; max-width:100% !important; -webkit-overflow-scrolling:touch !important;">
                         <table class="straddle-legs-builder-table">
                             <thead>
                                 <tr>
@@ -2260,7 +2260,7 @@
                 </div>
 
                 <!-- Matrix Table (Compact, Wrapped, Zero Horizontal Scrollbar, Perfectly Aligned) -->
-                <div class="straddle-modal-body" style="padding:0; overflow-x:hidden; max-height:calc(88vh - 160px); overflow-y:auto;">
+                <div class="straddle-modal-body opt-chain-scroll-body" style="padding:0; overflow-x:auto !important; -webkit-overflow-scrolling:touch !important; max-height:calc(88vh - 160px); overflow-y:auto;">
                     <table class="straddle-table opt-chain-table" id="straddleOptionChainTable" style="margin:0; width:100%; font-size:12px; table-layout:fixed; border-collapse:collapse;">
                         <colgroup>
                             <col style="width: 88px;">
@@ -2752,14 +2752,15 @@
                 </div>
 
                 <!-- Option Chain Link & Window Close -->
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <button type="button" class="straddle-btn btn-outline" onclick="openOptionChainForActiveBasket()" style="border-radius:9999px; padding:5px 14px; font-size:12px; font-weight:800; border-color:#38bdf8; color:#38bdf8; background:rgba(56,189,248,0.08); display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="Open Option Chain directly to select & add strikes to this basket">⛓️ Select from Option Chain</button>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button type="button" class="straddle-btn btn-outline" id="btnToggleBasketSearchHeader" onclick="toggleBasketSearchHeader()" style="border-radius:9999px; padding:4px 10px; font-size:11.5px; font-weight:700; border-color:#475569; color:#cbd5e1; background:rgba(255,255,255,0.05); display:inline-flex; align-items:center; gap:5px;" title="Toggle search bar & strategy presets to save vertical space"><span>🔍</span> Search & Presets ▾</button>
+                    <button type="button" class="straddle-btn btn-outline" onclick="openOptionChainForActiveBasket()" style="border-radius:9999px; padding:5px 12px; font-size:12px; font-weight:800; border-color:#38bdf8; color:#38bdf8; background:rgba(56,189,248,0.08); display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="Open Option Chain directly to select & add strikes to this basket">⛓️ Chain</button>
                     <button type="button" class="straddle-modal-close" onclick="closeBasketOrderModal()" style="font-size:20px; color:#94a3b8; background:none; border:none; cursor:pointer; padding:4px 8px;">✕</button>
                 </div>
             </div>
 
-            <!-- Header Row 2: Underlying Selector (Nifty vs Commodities), Presets, and Dedicated Search -->
-            <div style="padding:10px 20px; background:#090a0e; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <!-- Header Row 2: Underlying Selector (Nifty vs Commodities), Presets, and Dedicated Search (Collapsible) -->
+            <div id="basketHeaderRow2" style="padding:10px 16px; background:#090a0e; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                 <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                     <!-- Focused Basket Underlying Read-only Badge (Switch via top bar) -->
                     <div style="display:flex; align-items:center; gap:6px;">
@@ -2823,9 +2824,9 @@
             </div>
 
             <!-- Basket Orders List Table -->
-            <div style="padding:16px 20px; max-height:55vh; overflow-y:auto; background:#080c14;">
-                <div style="overflow-x:hidden;">
-                    <table class="straddle-table basket-orders-table" style="width:100%; border-collapse:separate; border-spacing:0 6px;">
+            <div id="basketOrdersTableWrapContainer" style="padding:10px 14px; max-height:55vh; overflow-y:auto; background:#080c14;">
+                <div class="basket-table-scroll-wrap" style="overflow-x:auto !important; -webkit-overflow-scrolling:touch !important; width:100%; max-width:100%;">
+                    <table class="straddle-table basket-orders-table" style="width:100%; border-collapse:separate; border-spacing:0 4px;">
                         <thead>
                             <tr style="color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid rgba(255,255,255,0.06);">
                                 <th style="width:32px; padding:6px 4px; text-align:center;"><input type="checkbox" id="basketSelectAllCheckbox" checked onchange="toggleSelectAllBasketOrders(this.checked)"></th>
@@ -3380,7 +3381,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261111_algotest_parity_v2"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261115_mobile_v4"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
@@ -3614,12 +3615,16 @@
             updateGitStatus();
             setInterval(updateKotakAuthStatus, 25000);
             if (typeof initStraddleTimeSteppers === "function") initStraddleTimeSteppers();
+            if (typeof initCollapsibleAccordionHeaders === "function") initCollapsibleAccordionHeaders();
 
             // Initialize Straddle Platform and render algos
             if (typeof initStraddlePlatform === "function") {
                 initStraddlePlatform().then(() => {
                     if (typeof switchStraddleSubView === "function") {
                         switchStraddleSubView("algos");
+                    }
+                    if (typeof initCollapsibleAccordionHeaders === "function") {
+                        initCollapsibleAccordionHeaders();
                     }
                 }).catch(err => {
                     console.error("Straddle init failed:", err);

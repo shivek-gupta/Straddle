@@ -10250,6 +10250,19 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         font-size: 11.5px !important;
     }
 
+    /* Wrap Entry Reason and Exit Reason cells so text never overflows into adjacent Target column */
+    #straddlePositionsTable td.pos-col-ent-reason,
+    #straddlePositionsTable td.pos-col-exit-reason,
+    #straddlePositionsTable th.pos-col-ent-reason,
+    #straddlePositionsTable th.pos-col-exit-reason {
+        white-space: normal !important;
+        min-width: 140px !important;
+        max-width: 220px !important;
+        word-break: break-word !important;
+        overflow-wrap: break-word !important;
+        line-height: 1.25 !important;
+    }
+
     #straddleAlgosTable {
         min-width: 820px !important;
     }
@@ -10803,4 +10816,178 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     font-weight: 700;
     line-height: 1.35;
 }
+
+/* ==========================================================
+   ENHANCED MOBILE LAYOUT & VIEWPORT CONTAINMENT (MOBILE V4)
+   ========================================================== */
+
+/* 1. Open Positions Filter Sub-Tabs Strip (Smooth Horizontal Scroll, Never Clipped) */
+.pos-sub-tabs-strip {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    background: #090a0e !important;
+    padding: 4px 6px !important;
+    border-radius: 8px !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    white-space: nowrap !important;
+    scrollbar-width: none !important;
+    box-sizing: border-box !important;
+}
+
+.pos-sub-tabs-strip::-webkit-scrollbar {
+    display: none !important;
+}
+
+.pos-sub-tab {
+    padding: 5px 12px !important;
+    font-size: 11.5px !important;
+    font-weight: 700 !important;
+    border-radius: 6px !important;
+    border: 1px solid transparent !important;
+    background: transparent !important;
+    color: #94a3b8 !important;
+    cursor: pointer !important;
+    white-space: nowrap !important;
+    transition: all 0.15s ease !important;
+    flex-shrink: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+}
+
+.pos-sub-tab:hover {
+    color: #f8fafc !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.pos-sub-tab.active-toggle,
+.pos-sub-tab.active {
+    background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+    color: #ffffff !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.45) !important;
+}
+
+/* 2. Strict Viewport & Container Containment to Prevent Any Horizontal Screen Blowout */
+@media (max-width: 768px) {
+    html, body,
+    .straddle-layout,
+    .straddle-main,
+    #straddleSubView_terminal,
+    #straddleSettingsPanel,
+    .straddle-settings-panel,
+    .straddle-collapsible-body {
+        max-width: 100vw !important;
+        overflow-x: hidden !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Any table container scrolls horizontally on touch, never blows out the page */
+    .straddle-table-wrap,
+    #sec_builder_legs .straddle-table-wrap {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Prevent Accordion Header Text from blowing out mobile screen */
+    .straddle-collapsible-header {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+    }
+
+    .straddle-collapsible-header > div {
+        max-width: 90% !important;
+        flex-wrap: wrap !important;
+    }
+
+    .straddle-collapsible-header span {
+        white-space: normal !important;
+        word-break: break-word !important;
+        overflow-wrap: break-word !important;
+    }
+
+    /* Option Chain Modal Horizontal Swiping on Mobile */
+    #straddleOptionChainModal .straddle-modal-body,
+    .opt-chain-scroll-body {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        width: 100% !important;
+        max-width: 100vw !important;
+        box-sizing: border-box !important;
+    }
+
+    #straddleOptionChainModal .opt-chain-table {
+        min-width: 530px !important;
+        table-layout: fixed !important;
+    }
+
+    /* Basket Orders Modal Mobile Polish & 4-Leg Instant Visibility */
+    #modalBasketOrders .straddle-modal-body,
+    .basket-table-scroll-wrap {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        width: 100% !important;
+        max-width: 100vw !important;
+        box-sizing: border-box !important;
+    }
+
+    .basket-orders-table {
+        min-width: 660px !important;
+        border-spacing: 0 3px !important;
+    }
+
+    .basket-orders-table td {
+        padding: 4px 6px !important;
+        font-size: 11px !important;
+    }
+
+    .basket-orders-table .basket-stepper-btn {
+        padding: 2px 4px !important;
+        font-size: 9px !important;
+    }
+
+    .basket-orders-table .basket-input-num {
+        font-size: 11px !important;
+    }
+
+    /* Audit Logs Modal Mobile Polish */
+    .straddle-audit-filter-bar {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        white-space: nowrap !important;
+        gap: 6px !important;
+        padding: 6px 10px !important;
+    }
+
+    .straddle-audit-filter-bar button {
+        flex-shrink: 0 !important;
+        font-size: 10.5px !important;
+        padding: 4px 8px !important;
+    }
+
+    .audit-log-card {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 4px !important;
+        padding: 8px 10px !important;
+    }
+
+    .audit-log-card-header {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+    }
+}
+
 

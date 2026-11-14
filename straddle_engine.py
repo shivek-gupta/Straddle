@@ -11753,6 +11753,31 @@ class StraddleManager:
             if max_pnl > 0:
                 profit_kept_pct = f"{round(max(0.0, (final_pnl / max_pnl) * 100), 1)}%"
 
+            # If underlying is specified and not None, fetch underlying intraday candles for chart overlay
+            underlying_points = []
+            underlying_meta = {}
+            if underlying and str(underlying).strip().upper() not in ("NONE", "", "NULL"):
+                try:
+                    c_res = self.get_chart_candles(underlying=str(underlying).strip(), timeframe="5m", range_str="1d")
+                    if c_res and isinstance(c_res, dict) and c_res.get("candles"):
+                        underlying_meta = {
+                            "symbol": c_res.get("symbol") or str(underlying).upper(),
+                            "display_symbol": c_res.get("display_symbol") or str(underlying).upper(),
+                            "spot_price": c_res.get("spot_price") or 0.0,
+                            "interval": c_res.get("timeframe") or "5m"
+                        }
+                        for cd in c_res["candles"]:
+                            underlying_points.append({
+                                "time": cd.get("time"),
+                                "price": float(cd.get("close") or cd.get("open") or 0.0),
+                                "open": float(cd.get("open") or 0.0),
+                                "high": float(cd.get("high") or 0.0),
+                                "low": float(cd.get("low") or 0.0),
+                                "close": float(cd.get("close") or 0.0),
+                            })
+                except Exception as ex:
+                    logger.warning(f"Error fetching underlying chart candles for PnL overlay: {ex}")
+
             return {
                 "client_id": "Kotak Neo Live",
                 "strategy_id": strategy_id_val,
@@ -11770,6 +11795,9 @@ class StraddleManager:
                 "total_pnl": final_pnl,
                 "total_open_mtm": open_mtm,
                 "total_realised_pnl": realised_pnl,
+                "underlying": underlying or "None",
+                "underlying_points": underlying_points,
+                "underlying_meta": underlying_meta,
             }
 
     # Option Chain snapshot alias

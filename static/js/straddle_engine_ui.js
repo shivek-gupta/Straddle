@@ -637,11 +637,27 @@ function switchStraddleSubView(view) {
 
 function setStraddlePositionsViewFilter(filter) {
     window._straddleState.positionsFilter = filter;
-    document.getElementById("btnPosFilterOpen")?.classList.toggle("active-toggle", filter === "open");
-    document.getElementById("btnPosFilterClosed")?.classList.toggle("active-toggle", filter === "closed");
-    document.getElementById("btnPosFilterAll")?.classList.toggle("active-toggle", filter === "all");
-    document.getElementById("btnPosFilterOrders")?.classList.toggle("active-toggle", filter === "orders");
-    document.getElementById("btnPosFilterMargin")?.classList.toggle("active-toggle", filter === "margin");
+    const filterBtnMap = {
+        open: "btnPosFilterOpen",
+        closed: "btnPosFilterClosed",
+        all: "btnPosFilterAll",
+        orders: "btnPosFilterOrders",
+        margin: "btnPosFilterMargin"
+    };
+
+    Object.entries(filterBtnMap).forEach(([fKey, btnId]) => {
+        const btn = document.getElementById(btnId);
+        if (btn) {
+            const isMatch = (filter === fKey);
+            btn.classList.toggle("active-toggle", isMatch);
+            btn.classList.toggle("active", isMatch);
+            if (isMatch && typeof btn.scrollIntoView === "function") {
+                try {
+                    btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                } catch (_) {}
+            }
+        }
+    });
 
     const posCard = document.getElementById("straddleOpenPositionsCard") || document.getElementById("straddleOpenPositionsTable")?.closest(".straddle-card");
     const summaryControls = document.getElementById("straddlePositionsSummaryControls");
@@ -2348,7 +2364,7 @@ async function loadStraddlePnlChart() {
     const und = document.getElementById("pnlUnderlyingSelect")?.value || "None";
 
     try {
-        const resp = await fetch(`/api/straddle/pnl_chart?selector_type=${selector}&entity_id=${encodeURIComponent(entityId)}&start_date=${start}&end_date=${end}&underlying=${und}`);
+        const resp = await fetch(`/api/straddle/pnl_chart?selector_type=${selector}&entity_id=${encodeURIComponent(entityId)}&start_date=${start}&end_date=${end}&underlying=${encodeURIComponent(und)}`);
         const data = await resp.json();
         if (data && data.success && data.data) {
             window._straddleState.pnlDataCache = data.data;
@@ -2461,9 +2477,10 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     canvas.height = H * dpr;
     ctx.scale(dpr, dpr);
 
+    const hasUnderlying = Boolean(pnlData && pnlData.underlying_points && pnlData.underlying_points.length > 0 && pnlData.underlying && pnlData.underlying !== "None");
     const padLeft = 75;
-    const padRight = 35;
-    const padTop = 35;
+    const padRight = hasUnderlying ? 75 : 35;
+    const padTop = 38;
     const padBottom = 45;
     const chartW = W - padLeft - padRight;
     const chartH = H - padTop - padBottom;
@@ -2497,7 +2514,7 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ];
     }
 
-    // Determine Y-axis bounds with breathing room
+    // Determine Y-axis bounds with breathing room for P&L
     let maxVal = Math.max(200, (pnlData.max_pnl || 0) * 1.15);
     let minVal = Math.min(-200, (pnlData.min_pnl || 0) * 1.15);
     const range = Math.max(100, maxVal - minVal);
@@ -2505,7 +2522,27 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     const getY = (val) => padTop + chartH - ((val - minVal) / range) * chartH;
     const getX = (idx) => padLeft + (idx / Math.max(1, points.length - 1)) * chartW;
 
-    // 1. Draw horizontal grid lines & Y labels
+    // Determine Y-axis bounds for Underlying Spot if active
+    let undMin = 0, undMax = 0, undRange = 1;
+    let getUndY = (val) => padTop + chartH / 2;
+    if (hasUnderlying) {
+        const undPrices = pnlData.underlying_points.map(u => Number(u.price || u.close || 0)).filter(p => p > 0);
+        if (undPrices.length > 0) {
+            undMin = Math.min(...undPrices);
+            undMax = Math.max(...undPrices);
+            if (undMin === undMax) {
+                undMin = undMin * 0.995;
+                undMax = undMax * 1.005;
+            }
+            const buf = (undMax - undMin) * 0.12;
+            undMin -= buf;
+            undMax += buf;
+            undRange = Math.max(1, undMax - undMin);
+            getUndY = (price) => padTop + chartH - ((price - undMin) / undRange) * chartH;
+        }
+    }
+
+    // 1. Draw horizontal grid lines & Y labels (P&L on Left)
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
     ctx.fillStyle = "#64748b";
@@ -2522,6 +2559,18 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.stroke();
         const formattedVal = (val >= 0 ? "+₹ " : "-₹ ") + Math.abs(Math.round(val)).toLocaleString("en-IN");
         ctx.fillText(formattedVal, padLeft - 8, y + 3.5);
+    }
+
+    // 1b. Draw Right Y-axis labels for Underlying Spot if active
+    if (hasUnderlying && undRange > 1) {
+        ctx.fillStyle = "#38bdf8";
+        ctx.font = "bold 10px monospace";
+        ctx.textAlign = "left";
+        for (let i = 0; i <= ySteps; i++) {
+            const uVal = undMin + (i / ySteps) * undRange;
+            const uy = padTop + chartH - (i / ySteps) * chartH;
+            ctx.fillText(Math.round(uVal).toLocaleString("en-IN"), W - padRight + 8, uy + 3.5);
+        }
     }
 
     // 2. Draw Zero Baseline Line
@@ -2686,6 +2735,49 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         });
     }
 
+    // 5b. Draw Underlying Spot Intraday Price Curve (Electric Cyan Line Overlay)
+    if (hasUnderlying && pnlData.underlying_points && pnlData.underlying_points.length > 0) {
+        const uPts = pnlData.underlying_points;
+        ctx.save();
+        ctx.beginPath();
+        uPts.forEach((uPt, uIdx) => {
+            const uRatio = uIdx / Math.max(1, uPts.length - 1);
+            const ux = padLeft + uRatio * chartW;
+            const uy = getUndY(Number(uPt.price || uPt.close || 0));
+            if (uIdx === 0) ctx.moveTo(ux, uy);
+            else ctx.lineTo(ux, uy);
+        });
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#38bdf8";
+        ctx.shadowColor = "rgba(56, 189, 248, 0.4)";
+        ctx.shadowBlur = 6;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    // 5c. Top Legend Chips
+    ctx.textAlign = "left";
+    ctx.font = "bold 11px Inter, sans-serif";
+    // Strategy P&L Chip
+    ctx.fillStyle = "#10b981";
+    ctx.fillRect(padLeft + 6, padTop - 22, 10, 10);
+    ctx.fillStyle = "#cbd5e1";
+    ctx.fillText("Strategy P&L (₹)", padLeft + 22, padTop - 13);
+
+    // Underlying Spot Chip
+    if (hasUnderlying) {
+        const uSym = pnlData.underlying_meta?.display_symbol || pnlData.underlying || "Underlying";
+        const curSpot = pnlData.underlying_meta?.spot_price || (pnlData.underlying_points[pnlData.underlying_points.length - 1]?.price) || 0;
+        ctx.strokeStyle = "#38bdf8";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(padLeft + 140, padTop - 17);
+        ctx.lineTo(padLeft + 160, padTop - 17);
+        ctx.stroke();
+        ctx.fillStyle = "#38bdf8";
+        ctx.fillText(`⚡ ${uSym} Intraday Spot (₹ ${Number(curSpot).toLocaleString('en-IN', {minimumFractionDigits: 1})})`, padLeft + 166, padTop - 13);
+    }
+
     // 6. X-axis timestamps
     ctx.fillStyle = "#64748b";
     ctx.font = "10.5px monospace";
@@ -2747,7 +2839,7 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.textAlign = "center";
         ctx.fillText(pt.timestamp, ptX, H - 15);
 
-        // Side Y-Axis Price Badge Pill
+        // Side Left Y-Axis P&L Badge Pill
         const yBadgeW = 80;
         const yBadgeH = 18;
         ctx.fillStyle = (pt.pnl >= 0) ? "#10b981" : "#f43f5e";
@@ -2760,9 +2852,28 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         const badgeTxt = (pt.pnl >= 0 ? "+₹ " : "-₹ ") + Math.abs(pt.pnl).toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
         ctx.fillText(badgeTxt, padLeft - yBadgeW / 2 - 6, ptY + 3.5);
 
+        // Side Right Y-Axis Underlying Badge Pill (if active)
+        let currUndPrice = null;
+        if (hasUnderlying && pnlData.underlying_points && pnlData.underlying_points.length > 0) {
+            const uIdx = Math.min(pnlData.underlying_points.length - 1, Math.max(0, Math.round((targetIdx / (points.length - 1)) * (pnlData.underlying_points.length - 1))));
+            const uPt = pnlData.underlying_points[uIdx];
+            if (uPt) {
+                currUndPrice = Number(uPt.price || uPt.close || 0);
+                const uY = getUndY(currUndPrice);
+                ctx.fillStyle = "#0284c7";
+                ctx.beginPath();
+                ctx.roundRect(W - padRight + 6, uY - yBadgeH / 2, yBadgeW - 10, yBadgeH, 4);
+                ctx.fill();
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 10px monospace";
+                ctx.textAlign = "center";
+                ctx.fillText(`₹ ${Math.round(currUndPrice).toLocaleString('en-IN')}`, W - padRight + 6 + (yBadgeW - 10) / 2, uY + 3.5);
+            }
+        }
+
         // Floating Glassmorphism Tooltip Card
-        const tipW = 165;
-        const tipH = 68;
+        const tipW = hasUnderlying ? 195 : 165;
+        const tipH = hasUnderlying ? 86 : 68;
         let tipX = (ptX > W - padRight - tipW - 20) ? (ptX - tipW - 14) : (ptX + 14);
         let tipY = Math.max(padTop + 8, Math.min(padTop + chartH - tipH - 8, ptY - tipH / 2));
 
@@ -2785,10 +2896,21 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         const tipPnlFormatted = (pt.pnl >= 0 ? "+₹ " : "-₹ ") + Math.abs(pt.pnl).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         ctx.fillText(`P&L: ${tipPnlFormatted}`, tipX + 10, tipY + 38);
 
-        const drawdownVal = Math.max(0, (pnlData.max_pnl - pt.pnl));
-        ctx.font = "10.5px Inter, sans-serif";
-        ctx.fillStyle = "#cbd5e1";
-        ctx.fillText(`Drawdown: -₹ ${drawdownVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`, tipX + 10, tipY + 56);
+        if (hasUnderlying && currUndPrice !== null) {
+            ctx.font = "bold 11px monospace";
+            ctx.fillStyle = "#38bdf8";
+            ctx.fillText(`Spot: ₹ ${currUndPrice.toLocaleString('en-IN', {minimumFractionDigits: 2})}`, tipX + 10, tipY + 56);
+            
+            const drawdownVal = Math.max(0, (pnlData.max_pnl - pt.pnl));
+            ctx.font = "10px Inter, sans-serif";
+            ctx.fillStyle = "#94a3b8";
+            ctx.fillText(`Drawdown: -₹ ${drawdownVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`, tipX + 10, tipY + 74);
+        } else {
+            const drawdownVal = Math.max(0, (pnlData.max_pnl - pt.pnl));
+            ctx.font = "10.5px Inter, sans-serif";
+            ctx.fillStyle = "#cbd5e1";
+            ctx.fillText(`Drawdown: -₹ ${drawdownVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`, tipX + 10, tipY + 56);
+        }
     }
 }
 
@@ -2803,8 +2925,9 @@ function setupPnlCanvasEvents() {
         const rect = canvas.getBoundingClientRect();
         const mouseX = clientX - rect.left;
         const mouseY = clientY - rect.top;
+        const hasUnderlying = Boolean(pnlData && pnlData.underlying_points && pnlData.underlying_points.length > 0 && pnlData.underlying && pnlData.underlying !== "None");
         const padLeft = 75;
-        const padRight = 35;
+        const padRight = hasUnderlying ? 75 : 35;
         const chartW = rect.width - padLeft - padRight;
 
         if (mouseX < padLeft || mouseX > rect.width - padRight) {
@@ -2828,7 +2951,15 @@ function setupPnlCanvasEvents() {
         if (cursorLabel && pt) {
             const pnlFormatted = (pt.pnl >= 0 ? "+₹ " : "-₹ ") + Math.abs(pt.pnl).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const color = pt.pnl >= 0 ? "#10b981" : "#f43f5e";
-            cursorLabel.innerHTML = `Time: <b style="color:#ffffff;">${pt.timestamp}</b> | P&L: <b style="color:${color};">${pnlFormatted}</b>`;
+            let spotText = "";
+            if (hasUnderlying && pnlData.underlying_points && pnlData.underlying_points.length > 0) {
+                const uIdx = Math.min(pnlData.underlying_points.length - 1, Math.max(0, Math.round((idx / (pnlData.points.length - 1)) * (pnlData.underlying_points.length - 1))));
+                const uPt = pnlData.underlying_points[uIdx];
+                if (uPt) {
+                    spotText = ` | Spot: <b style="color:#38bdf8;">₹ ${Number(uPt.price || uPt.close || 0).toLocaleString('en-IN', {minimumFractionDigits: 1})}</b>`;
+                }
+            }
+            cursorLabel.innerHTML = `Time: <b style="color:#ffffff;">${pt.timestamp}</b> | P&L: <b style="color:${color};">${pnlFormatted}</b>${spotText}`;
         }
     };
 
@@ -3315,92 +3446,93 @@ async function loadStraddleMargin(btn) {
             const utilPct = total > 0 ? ((usedMargin / total) * 100).toFixed(2) : "0.00";
 
             container.innerHTML = `
-                <!-- Hero Available to Trade Banner (Matching Kotak Neo Funds Overview) -->
-                <div style="background:linear-gradient(135deg, #0d1527 0%, #111e38 100%); border:1px solid rgba(59,130,246,0.25); border-radius:12px; padding:22px 28px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:18px; box-shadow:0 8px 24px rgba(0,0,0,0.35);">
+                <!-- Hero Available to Trade Banner (Pitch Black OLED Theme) -->
+                <div style="background:#0c0d12; border:1px solid rgba(16,185,129,0.35); border-radius:12px; padding:18px 22px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.6);">
                     <div>
-                        <div style="font-size:12px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:6px;">Available to trade</div>
-                        <div style="font-size:32px; font-weight:900; color:#ffffff; font-family:var(--font-mono); letter-spacing:-0.5px;">₹ ${availCash.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
-                        <div style="font-size:12px; color:#10b981; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:6px;">
-                            <span style="width:7px; height:7px; border-radius:50%; background:#10b981; display:inline-block;"></span>
+                        <div style="font-size:11.5px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:4px;">Available to trade (Cash + Collateral)</div>
+                        <div style="font-size:28px; font-weight:900; color:#10b981; font-family:var(--font-mono); letter-spacing:-0.5px;">₹ ${availCash.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-size:11.5px; color:#34d399; font-weight:700; margin-top:4px; display:flex; align-items:center; gap:6px;">
+                            <span style="width:7px; height:7px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981; display:inline-block;"></span>
                             Instant intraday & F&O execution limit active
                         </div>
                     </div>
-                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
-                        <div style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:8px 16px; text-align:right;">
-                            <div style="font-size:11px; color:#94a3b8; font-weight:700;">Margin Utilization</div>
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+                        <div style="background:#111319; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:6px 14px; text-align:right;">
+                            <div style="font-size:10.5px; color:#94a3b8; font-weight:700;">Margin Utilization</div>
                             <div style="font-size:16px; font-weight:800; color:${usedMargin > 0 ? '#38bdf8' : '#64748b'}; font-family:var(--font-mono);">${utilPct}%</div>
                         </div>
-                        <div style="width:160px; height:5px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
-                            <div style="width:${Math.max(2, Math.min(100, utilPct * 10))}%; height:100%; background:linear-gradient(90deg, #38bdf8, #10b981); border-radius:3px;"></div>
+                        <div style="width:140px; height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden;">
+                            <div style="width:${Math.max(2, Math.min(100, utilPct * 10))}%; height:100%; background:linear-gradient(90deg, #38bdf8, #10b981); border-radius:2px;"></div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 4 Detailed Metric Cards Grid -->
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-bottom:18px;">
+                <!-- 4 Detailed Metric Cards Grid (OLED Dark Pitch Black) -->
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-bottom:14px;">
                     <!-- Card 1: Cash -->
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px; transition:transform 0.2s ease, border-color 0.2s ease;" onmouseenter="this.style.borderColor='rgba(59,130,246,0.4)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.08)'">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <span style="color:#94a3b8; font-size:12.5px; font-weight:700;">Cash Balance</span>
-                            <span style="font-size:16px;">💵</span>
+                    <div style="background:#111319; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:border-color 0.2s ease;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="color:#94a3b8; font-size:11.5px; font-weight:700;">Cash Balance</span>
+                            <span style="font-size:14px;">💵</span>
                         </div>
-                        <div style="font-family:var(--font-mono); font-weight:800; color:#ffffff; font-size:20px; margin-bottom:4px;">₹ ${availCash.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
-                        <div style="font-size:11.5px; color:#64748b;">Direct ledger funds available for trading</div>
+                        <div style="font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:18px; margin-bottom:2px;">₹ ${availCash.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-size:10.5px; color:#64748b;">Direct ledger funds for trading</div>
                     </div>
 
                     <!-- Card 2: Margin from Pledge -->
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px; transition:transform 0.2s ease, border-color 0.2s ease;" onmouseenter="this.style.borderColor='rgba(139,92,246,0.4)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.08)'">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <span style="color:#94a3b8; font-size:12.5px; font-weight:700;">Margin from Pledge</span>
-                            <span style="font-size:16px;">📈</span>
+                    <div style="background:#111319; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:border-color 0.2s ease;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="color:#94a3b8; font-size:11.5px; font-weight:700;">Margin from Pledge</span>
+                            <span style="font-size:14px;">📈</span>
                         </div>
-                        <div style="font-family:var(--font-mono); font-weight:800; color:#cbd5e1; font-size:20px; margin-bottom:4px;">₹ ${collateral.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
-                        <div style="font-size:11.5px; color:#64748b;">Collateral from stock / ETF pledges</div>
+                        <div style="font-family:var(--font-mono); font-weight:800; color:#38bdf8; font-size:18px; margin-bottom:2px;">₹ ${collateral.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-size:10.5px; color:#64748b;">Collateral from stock / ETF pledges</div>
                     </div>
 
                     <!-- Card 3: Margin Used -->
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px; transition:transform 0.2s ease, border-color 0.2s ease;" onmouseenter="this.style.borderColor='rgba(244,63,94,0.4)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.08)'">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <span style="color:#94a3b8; font-size:12.5px; font-weight:700;">Margin used</span>
-                            <span style="font-size:16px;">⚡</span>
+                    <div style="background:#111319; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:border-color 0.2s ease;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="color:#94a3b8; font-size:11.5px; font-weight:700;">Margin Used</span>
+                            <span style="font-size:14px;">⚡</span>
                         </div>
-                        <div style="font-family:var(--font-mono); font-weight:800; color:#f43f5e; font-size:20px; margin-bottom:4px;">₹ ${usedMargin.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
-                        <div style="font-size:11.5px; color:#64748b;">Margin used for your open transactions</div>
+                        <div style="font-family:var(--font-mono); font-weight:800; color:#f43f5e; font-size:18px; margin-bottom:2px;">₹ ${usedMargin.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-size:10.5px; color:#64748b;">Margin committed for open positions</div>
                     </div>
 
                     <!-- Card 4: Unavailable to trade -->
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px; transition:transform 0.2s ease, border-color 0.2s ease;" onmouseenter="this.style.borderColor='rgba(245,158,11,0.4)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.08)'">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <span style="color:#94a3b8; font-size:12.5px; font-weight:700;">Unavailable to trade</span>
-                            <span style="font-size:16px;">🛑</span>
+                    <div style="background:#111319; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:border-color 0.2s ease;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="color:#94a3b8; font-size:11.5px; font-weight:700;">Unavailable to Trade</span>
+                            <span style="font-size:14px;">🛑</span>
                         </div>
-                        <div style="font-family:var(--font-mono); font-weight:800; color:#f59e0b; font-size:20px; margin-bottom:4px;">₹ ${unavail.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
-                        <div style="font-size:11.5px; color:#64748b;">Funds in T+1 clearing / unsettled credits</div>
+                        <div style="font-family:var(--font-mono); font-weight:800; color:#fbbf24; font-size:18px; margin-bottom:2px;">₹ ${unavail.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-size:10.5px; color:#64748b;">Funds in T+1 clearing / unsettled credits</div>
                     </div>
                 </div>
 
-                <!-- Margin Breakdown Grid (Reports & Account Statements section removed as requested) -->
-                <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:18px;">
-                    <div style="font-size:13px; font-weight:800; color:#38bdf8; margin-bottom:14px; letter-spacing:0.3px;">F&O MARGIN BREAKDOWN</div>
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#070a13; border:1px solid rgba(255,255,255,0.04); border-radius:8px;">
-                            <span style="color:#94a3b8; font-size:12.5px;">SPAN Margin (Regulatory):</span>
-                            <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:13.5px;">₹ ${span.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                <!-- Margin Breakdown Grid (Pitch Black OLED Theme) -->
+                <div style="background:#0c0d12; border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:14px 16px;">
+                    <div style="font-size:12px; font-weight:800; color:#38bdf8; margin-bottom:10px; letter-spacing:0.5px; text-transform:uppercase;">F&O Margin Breakdown (Kotak Neo Live)</div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#111319; border:1px solid rgba(255,255,255,0.05); border-radius:6px;">
+                            <span style="color:#94a3b8; font-size:11.5px;">SPAN Margin (Regulatory):</span>
+                            <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:12.5px;">₹ ${span.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                         </div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#070a13; border:1px solid rgba(255,255,255,0.04); border-radius:8px;">
-                            <span style="color:#94a3b8; font-size:12.5px;">Exposure Margin:</span>
-                            <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:13.5px;">₹ ${exposure.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#111319; border:1px solid rgba(255,255,255,0.05); border-radius:6px;">
+                            <span style="color:#94a3b8; font-size:11.5px;">Exposure Margin:</span>
+                            <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:12.5px;">₹ ${exposure.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                         </div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#070a13; border:1px solid rgba(255,255,255,0.04); border-radius:8px;">
-                            <span style="color:#94a3b8; font-size:12.5px;">Payin Received Today:</span>
-                            <span style="font-family:var(--font-mono); font-weight:700; color:#10b981; font-size:13.5px;">₹ ${payin.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#111319; border:1px solid rgba(255,255,255,0.05); border-radius:6px;">
+                            <span style="color:#94a3b8; font-size:11.5px;">Payin Received Today:</span>
+                            <span style="font-family:var(--font-mono); font-weight:700; color:#10b981; font-size:12.5px;">₹ ${payin.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                         </div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:linear-gradient(135deg, rgba(37,99,235,0.1), rgba(16,185,129,0.1)); border:1px solid rgba(59,130,246,0.3); border-radius:8px;">
-                            <span style="color:#f8fafc; font-size:13px; font-weight:800;">Total Account Value:</span>
-                            <span style="font-family:var(--font-mono); font-weight:900; color:#ffffff; font-size:15px;">₹ ${(availCash + usedMargin + unavail).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:linear-gradient(135deg, rgba(37,99,235,0.15), rgba(16,185,129,0.15)); border:1px solid rgba(59,130,246,0.4); border-radius:6px;">
+                            <span style="color:#f8fafc; font-size:12px; font-weight:800;">Total Account Value:</span>
+                            <span style="font-family:var(--font-mono); font-weight:900; color:#ffffff; font-size:13.5px;">₹ ${(availCash + usedMargin + unavail).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                         </div>
                     </div>
                 </div>
+            `;
             `;
         }
     } catch (e) {
@@ -7605,12 +7737,12 @@ function toggleAlgoBuilderSection(secId) {
                               (!sec.classList.contains("expanded") && window.getComputedStyle(sec).display === "none");
     
     if (isCurrentlyHidden) {
-        sec.style.display = "block";
+        sec.style.setProperty("display", "block", "important");
         sec.classList.remove("collapsed");
         sec.classList.add("expanded");
         if (chevron) chevron.textContent = "▼";
     } else {
-        sec.style.display = "none";
+        sec.style.setProperty("display", "none", "important");
         sec.classList.remove("expanded");
         sec.classList.add("collapsed");
         if (chevron) chevron.textContent = "▶";
@@ -7629,19 +7761,40 @@ function toggleAllAlgoBuilderSections(forceExpand = null) {
         'sec_builder_reentry'
     ];
     const firstSec = document.getElementById(secIds[0]);
-    const shouldExpand = (forceExpand !== null) ? !!forceExpand : (firstSec ? firstSec.style.display === "none" : true);
+    const isFirstVisible = firstSec ? (firstSec.classList.contains("expanded") && firstSec.style.display !== "none") : false;
+    const shouldExpand = (forceExpand !== null) ? !!forceExpand : !isFirstVisible;
     
     secIds.forEach(id => {
         const sec = document.getElementById(id);
         const ch = document.getElementById("chevron_" + id);
         if (!sec) return;
-        sec.style.display = shouldExpand ? "block" : "none";
+        sec.style.setProperty("display", shouldExpand ? "block" : "none", "important");
         sec.classList.toggle("expanded", shouldExpand);
         sec.classList.toggle("collapsed", !shouldExpand);
         if (ch) ch.textContent = shouldExpand ? "▼" : "▶";
     });
 }
 window.toggleAllAlgoBuilderSections = toggleAllAlgoBuilderSections;
+
+function initCollapsibleAccordionHeaders() {
+    document.querySelectorAll(".straddle-collapsible-header").forEach(header => {
+        if (header._collapsibleBound) return;
+        header._collapsibleBound = true;
+        header.style.cursor = "pointer";
+        header.addEventListener("click", function(e) {
+            // If clicked on a button or input inside the header, don't toggle
+            if (e.target.closest("button") || e.target.closest("input") || e.target.closest("select")) return;
+            const onclickAttr = header.getAttribute("onclick");
+            if (onclickAttr && onclickAttr.includes("toggleAlgoBuilderSection")) {
+                const match = onclickAttr.match(/toggleAlgoBuilderSection\(['"]([^'"]+)['"]\)/);
+                if (match && match[1]) {
+                    toggleAlgoBuilderSection(match[1]);
+                }
+            }
+        });
+    });
+}
+window.initCollapsibleAccordionHeaders = initCollapsibleAccordionHeaders;
 
 let _timeStepHoldTimer = null;
 let _timeStepHoldInterval = null;
@@ -10338,12 +10491,20 @@ function _buildAuditLogsHtml(logsList) {
         }
 
         html += `
-            <div style="padding:7px 12px; background:${bg}; border:1px solid ${border}; border-radius:6px; display:flex; gap:10px; align-items:center; margin-bottom:5px;">
-                <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:600;">[${dateStr}${l.timestamp || ''}]</span>
-                ${tradeTypeBadge}
-                ${sideBadge}
-                <span style="color:${color}; font-weight:800; font-size:10.5px; text-transform:uppercase; min-width:48px;">${level}</span>
-                <span style="color:#e2e8f0; font-size:12px; line-height:1.4; word-break:break-word; flex:1;">${l.message || ''}</span>
+            <div class="audit-log-card" style="padding:8px 12px; background:${bg}; border:1px solid ${border}; border-radius:6px; margin-bottom:6px; display:flex; flex-direction:column; gap:4px;">
+                <div class="audit-log-card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                    <div style="display:inline-flex; align-items:center; gap:6px;">
+                        <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:700;">🕒 [${dateStr}${l.timestamp || ''}]</span>
+                        <span style="color:${color}; font-weight:900; font-size:10.5px; text-transform:uppercase;">${level}</span>
+                    </div>
+                    <div style="display:inline-flex; align-items:center; gap:5px;">
+                        ${tradeTypeBadge}
+                        ${sideBadge}
+                    </div>
+                </div>
+                <div style="color:#f1f5f9; font-size:12px; line-height:1.45; word-break:break-word; overflow-wrap:break-word;">
+                    ${l.message || ''}
+                </div>
             </div>
         `;
     });
@@ -11247,11 +11408,38 @@ function openBasketOrderModal() {
     const multInput = document.getElementById("basketMultiplierInput");
     if (multInput) multInput.value = window._basketMultiplier || 1;
     updateBasketBadges();
+
+    // On mobile, collapse Search & Presets header by default when legs exist so 4+ legs fit instantly
+    if (window.innerWidth <= 768 && window._basketOrders && window._basketOrders.length > 0) {
+        const row = document.getElementById("basketHeaderRow2");
+        const btn = document.getElementById("btnToggleBasketSearchHeader");
+        if (row) row.style.display = "none";
+        if (btn) {
+            btn.innerHTML = `<span>🔍</span> Search & Presets ▾`;
+            btn.style.borderColor = "#475569";
+            btn.style.color = "#cbd5e1";
+        }
+    }
+
     renderBasketOrdersTable();
     updateBasketMarginCalculation();
     loadBasketExpiryFilterOptions();
     startBasketQuoteTicker();
 }
+
+function toggleBasketSearchHeader() {
+    const row = document.getElementById("basketHeaderRow2");
+    const btn = document.getElementById("btnToggleBasketSearchHeader");
+    if (!row) return;
+    const isHidden = (row.style.display === "none");
+    row.style.display = isHidden ? "flex" : "none";
+    if (btn) {
+        btn.innerHTML = isHidden ? `<span>🔍</span> Search & Presets ▴` : `<span>🔍</span> Search & Presets ▾`;
+        btn.style.borderColor = isHidden ? "#38bdf8" : "#475569";
+        btn.style.color = isHidden ? "#38bdf8" : "#cbd5e1";
+    }
+}
+window.toggleBasketSearchHeader = toggleBasketSearchHeader;
 
 function closeBasketOrderModal() {
     const modal = document.getElementById("modalBasketOrders");
