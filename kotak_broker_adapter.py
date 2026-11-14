@@ -820,6 +820,15 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         trigger_price: Optional[float] = None,
         order_type: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if "," in str(order_id):
+            oids = [o.strip() for o in str(order_id).split(",") if o.strip()]
+            child_res = [self.modify_order(o, quantity=None, price=price, trigger_price=trigger_price, order_type=order_type) for o in oids]
+            return {
+                "success": any(r.get("success") for r in child_res),
+                "order_id": str(order_id),
+                "child_results": child_res
+            }
+
         if _is_kotak_disconnected():
             logger.warning(f"[KOTAK KILL-SWITCH BLOCKED] Blocked modify_order for {order_id}. Kotak Neo is DISCONNECTED by user in Settings.")
             return {
@@ -879,6 +888,15 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             return {"success": False, "error": str(e)}
 
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        if "," in str(order_id):
+            oids = [o.strip() for o in str(order_id).split(",") if o.strip()]
+            child_res = [self.cancel_order(o) for o in oids]
+            return {
+                "success": any(r.get("success") for r in child_res),
+                "order_id": str(order_id),
+                "child_results": child_res
+            }
+
         if _is_kotak_disconnected():
             logger.warning(f"[KOTAK KILL-SWITCH BLOCKED] Blocked cancel_order for {order_id}. Kotak Neo is DISCONNECTED by user in Settings.")
             return {
@@ -907,6 +925,20 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         oid_str = str(order_id).strip()
         if not client or not oid_str:
             return {"status": "UNKNOWN", "order_id": oid_str}
+
+        if "," in oid_str:
+            oids = [o.strip() for o in oid_str.split(",") if o.strip()]
+            statuses = [self.get_order_status(o) for o in oids]
+            all_filled = bool(statuses and all(s.get("filled") for s in statuses))
+            any_cancelled = any("CANCEL" in str(s.get("status", "")).upper() for s in statuses)
+            any_rejected = any("REJECT" in str(s.get("status", "")).upper() for s in statuses)
+            agg_st = "COMPLETE" if all_filled else ("CANCELLED" if any_cancelled else ("REJECTED" if any_rejected else "OPEN"))
+            return {
+                "filled": all_filled,
+                "status": agg_st,
+                "order_id": oid_str,
+                "child_statuses": statuses
+            }
 
         # 1. First, check active order_book (which maps all current orders with exact IDs)
         try:
@@ -1857,6 +1889,10 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         trigger_price: Optional[float] = None,
         order_type: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if "," in str(order_id):
+            oids = [o.strip() for o in str(order_id).split(",") if o.strip()]
+            child_res = [self.modify_order(o, quantity=None, price=price, trigger_price=trigger_price, order_type=order_type) for o in oids]
+            return {"success": any(r.get("success") for r in child_res), "order_id": str(order_id), "child_results": child_res}
         with self._lock:
             orders = self._read_json(self._orderbook_file)
             for o in orders:
@@ -1872,6 +1908,10 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             return {"success": True, "order_id": order_id, "message": "Paper order updated"}
 
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        if "," in str(order_id):
+            oids = [o.strip() for o in str(order_id).split(",") if o.strip()]
+            child_res = [self.cancel_order(o) for o in oids]
+            return {"success": any(r.get("success") for r in child_res), "order_id": str(order_id), "child_results": child_res}
         with self._lock:
             orders = self._read_json(self._orderbook_file)
             for o in orders:

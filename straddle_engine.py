@@ -4785,8 +4785,26 @@ class StraddleManager:
             self._active_strategy_id = sid
             self._state["active_strategy_id"] = sid
             self._state["algo_running"] = True
+
+            # If Premium Matching is enabled and condition not yet met, arm strategy in READY state to wait for condition
+            is_pm_matched, pm_reason = self.check_premium_matching_condition(strat)
+            if not is_pm_matched and not force_fresh:
+                strat["status"] = "READY"
+                strat["entry_error"] = f"Waiting for Premium Matching ({pm_reason})"
+                self._state["status"] = "READY"
+                self._save_strategies()
+                self._save_state()
+                self._log_event(f"Strategy '{strat.get('name')}' armed. Waiting for Premium Matching: {pm_reason}")
+                return {
+                    "success": True,
+                    "status": "READY",
+                    "message": f"Strategy armed. Waiting for Premium Matching: {pm_reason}",
+                    "strategy": strat
+                }
+
             self._state["status"] = "TRADE_ACTIVE"
             strat["status"] = "TRADE_ACTIVE"
+            strat["entry_error"] = "-"
             self._save_strategies()
             self._save_state()
             self._log_event(f"Algorithm '{strat.get('name')}' started manually. Punching entry orders...")
@@ -5074,6 +5092,174 @@ class StraddleManager:
     def _is_within_trading_hours(self, strat: Dict[str, Any]) -> bool:
         chk = self.get_strategy_schedule_status(strat)
         return chk["is_time_window"]
+
+    def check_premium_matching_condition(self, strat: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Evaluates whether the strategy's configured Premium Matching & Range condition is satisfied.
+        Reference: Quantiply Premium Matching Functionality (https://quantiply.tech/documentation/features-trade-logic/premium-matching-functionality/)
+        Options supported:
+          1. 'No matching of premiums': Enters immediately at start_time
+          2. 'Match premiums with maximum difference': abs(CE - PE) <= max_diff
+          3. 'Premium close to': both CE and PE close to target premium (within tolerance)
+          4. 'Premium range': min_val <= CE <= max_val and min_val <= PE <= max_val
+          5. 'Combined Premium': sum(CE, PE) < / > value
+          6. Frequency: 'LTP (Continuous Monitoring)', '1 sec', '5 sec'
+        """
+        pm = strat.get("premium_matching") or {}
+        if not pm.get("enabled", False):
+            return True, "Disabled"
+
+        mode = str(pm.get("mode") or "No matching of premiums").strip()
+        comb_type = str(pm.get("combined_premium_type") or "None").strip()
+
+        # If set to no matching and no combined premium filter, condition is met immediately
+        if mode in ("No matching of premiums", "None", "") and comb_type in ("None", "", None):
+            return True, "No matching of premiums configured"
+
+        # Frequency Throttling
+        freq = str(pm.get("condition_frequency") or "LTP (Continuous Monitoring)")
+        now_ts = time.time()
+        min_interval = 0.0
+        if "1 sec" in freq:
+            min_interval = 1.0
+        elif "5 sec" in freq:
+            min_interval = 5.0
+
+        last_ts = float(strat.get("_last_prem_match_ts") or 0.0)
+        if min_interval > 0 and (now_ts - last_ts) < min_interval:
+            if "_last_prem_match_res" in strat:
+                return strat["_last_prem_match_res"], strat.get("_last_prem_match_reason", "Throttled")
+
+        strat["_last_prem_match_ts"] = now_ts
+
+        # Determine marked legs to evaluate (primary sell legs CE & PE)
+        legs_cfg = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
+        if not legs_cfg:
+            return True, "No legs configured"
+
+        und = strat.get("underlying") or "NIFTY"
+        eval_legs = [l for l in legs_cfg if not l.get("is_associated_hedge") and str(l.get("side", "")).upper() == "SELL"]
+        if not eval_legs:
+            eval_legs = [l for l in legs_cfg if not l.get("is_associated_hedge")]
+        if len(eval_legs) < 2:
+            return True, "Fewer than 2 legs configured"
+
+        # Fetch underlying spot price to resolve dynamic strikes
+        spot_price = self._get_underlying_spot_price(und)
+        if spot_price <= 0:
+            res = (False, f"Waiting for {und} Spot price")
+            strat["_last_prem_match_res"] = res[0]
+            strat["_last_prem_match_reason"] = res[1]
+            return res
+
+        leg_contracts = []
+        leg_keys = []
+        for leg in eval_legs[:2]:
+            c = self.resolve_strike_and_contract(
+                underlying=und,
+                strike_selection=leg.get("strike_selection", "ATM"),
+                option_type=leg.get("option_type", "CE"),
+                expiry_type=leg.get("expiry", "Weekly"),
+                multiple_strike_selection=leg.get("multiple_strike_selection", "none"),
+            )
+            if not c or not c.get("instrument_key"):
+                res = (False, f"Resolving {leg.get('option_type', 'CE')} contract")
+                strat["_last_prem_match_res"] = res[0]
+                strat["_last_prem_match_reason"] = res[1]
+                return res
+            leg_contracts.append(c)
+            leg_keys.append(c["instrument_key"])
+
+        # Fetch live quotes
+        cached_p, _ = self._fetch_live_quotes(leg_keys)
+        p1 = float(cached_p.get(leg_keys[0]) or 0.0)
+        p2 = float(cached_p.get(leg_keys[1]) or 0.0)
+
+        if p1 <= 0.0 or p2 <= 0.0:
+            res = (False, "Waiting for live option quotes")
+            strat["_last_prem_match_res"] = res[0]
+            strat["_last_prem_match_reason"] = res[1]
+            return res
+
+        lbl1 = eval_legs[0].get("option_type", "CE")
+        lbl2 = eval_legs[1].get("option_type", "PE")
+
+        matched = True
+        reason = ""
+
+        # 1. Match premiums with maximum difference
+        if mode == "Match premiums with maximum difference":
+            max_diff = float(pm.get("max_difference") or 0.0)
+            diff = round(abs(p1 - p2), 2)
+            if diff <= max_diff:
+                matched = True
+                reason = f"Diff ₹{diff:.2f} <= max ₹{max_diff:.2f} ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f})"
+            else:
+                matched = False
+                reason = f"Diff ₹{diff:.2f} > max ₹{max_diff:.2f} ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f})"
+
+        # 2. Premium close to
+        elif mode == "Premium close to":
+            target_p = float(pm.get("close_to") or 0.0)
+            if target_p > 0:
+                tol = max(5.0, round(target_p * 0.05, 2))
+                is_close_1 = abs(p1 - target_p) <= tol
+                is_close_2 = abs(p2 - target_p) <= tol
+                if is_close_1 and is_close_2:
+                    matched = True
+                    reason = f"Premiums ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f}) close to target ₹{target_p:.2f} (±₹{tol:.1f})"
+                else:
+                    matched = False
+                    reason = f"Premiums ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f}) not close to target ₹{target_p:.2f} (±₹{tol:.1f})"
+            else:
+                matched = True
+                reason = "Target is 0"
+
+        # 3. Premium range
+        elif mode == "Premium range":
+            r_min = float(pm.get("range_min") or 0.0)
+            r_max = float(pm.get("range_max") or 0.0)
+            if r_max > 0:
+                in_range_1 = (r_min <= p1 <= r_max)
+                in_range_2 = (r_min <= p2 <= r_max)
+                if in_range_1 and in_range_2:
+                    matched = True
+                    reason = f"Premiums ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f}) in range [₹{r_min:.2f}, ₹{r_max:.2f}]"
+                else:
+                    matched = False
+                    reason = f"Premiums ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f}) outside range [₹{r_min:.2f}, ₹{r_max:.2f}]"
+            else:
+                matched = True
+                reason = "Range max is 0"
+
+        # 4. Combined Premium
+        if matched and comb_type in ("Lower than", "Higher than", "Between range"):
+            comb_val = float(pm.get("combined_premium_value") or 0.0)
+            comb_actual = round(p1 + p2, 2)
+            if comb_type == "Lower than":
+                if comb_actual <= comb_val:
+                    reason += (f" & " if reason else "") + f"Combined ₹{comb_actual:.2f} <= ₹{comb_val:.2f}"
+                else:
+                    matched = False
+                    reason = f"Combined ₹{comb_actual:.2f} > ₹{comb_val:.2f} ({lbl1}: ₹{p1:.2f} + {lbl2}: ₹{p2:.2f})"
+            elif comb_type == "Higher than":
+                if comb_actual >= comb_val:
+                    reason += (f" & " if reason else "") + f"Combined ₹{comb_actual:.2f} >= ₹{comb_val:.2f}"
+                else:
+                    matched = False
+                    reason = f"Combined ₹{comb_actual:.2f} < ₹{comb_val:.2f} ({lbl1}: ₹{p1:.2f} + {lbl2}: ₹{p2:.2f})"
+            elif comb_type == "Between range":
+                min_c = float(pm.get("range_min") or 0.0)
+                max_c = float(pm.get("range_max") or comb_val)
+                if min_c <= comb_actual <= max_c:
+                    reason += (f" & " if reason else "") + f"Combined ₹{comb_actual:.2f} in [₹{min_c:.2f}, ₹{max_c:.2f}]"
+                else:
+                    matched = False
+                    reason = f"Combined ₹{comb_actual:.2f} outside [₹{min_c:.2f}, ₹{max_c:.2f}]"
+
+        strat["_last_prem_match_res"] = matched
+        strat["_last_prem_match_reason"] = reason
+        return matched, reason
 
     def _pre_warm_strategy_entry(self, strat: Dict[str, Any], spot_price: float = 0.0) -> Optional[Dict[str, Any]]:
         """
@@ -7537,6 +7723,61 @@ class StraddleManager:
                     limit_sl_p = round_to_tick(min(max(0.05, sl_price - 0.05), sl_price * (1.0 - sl_buf_pct / 100.0)), 0.05)
 
                 logger.info(f"[Advance SL] Placing advance SL-Limit order on broker for {sym} @ trigger ₹{sl_price:.2f}, limit ₹{limit_sl_p:.2f} (qty={qty})...")
+                
+                # Exchange freeze limit auto-slicing for high quantity / high lot sizes (e.g. 150 lots)
+                und = pos.get("underlying") or "NIFTY"
+                lot_size = int(pos.get("lot_size") or 0)
+                if lot_size <= 0:
+                    lot_size = get_lot_size_for_symbol(sym, pos.get("instrument_key", ""))
+                qty_slices = slice_quantity_by_freeze(qty, lot_size, und)
+
+                if len(qty_slices) > 1:
+                    logger.info(f"[Advance SL Slicer] Slicing {qty} qty of {sym} into {len(qty_slices)} orders ({qty_slices}) for exchange freeze compliance...")
+                    placed_oids = []
+                    for s_idx, s_qty in enumerate(qty_slices):
+                        res = broker.place_order(
+                            symbol=sym,
+                            instrument_key=pos.get("instrument_key", ""),
+                            transaction_type=sl_side,
+                            quantity=s_qty,
+                            product=pos.get("product", "NRML"),
+                            order_type="SL",
+                            price=limit_sl_p,
+                            trigger_price=sl_price,
+                            tag=f"adv_sl_{s_idx+1}"
+                        )
+                        if not res.get("success"):
+                            res = broker.place_order(
+                                symbol=sym,
+                                instrument_key=pos.get("instrument_key", ""),
+                                transaction_type=sl_side,
+                                quantity=s_qty,
+                                product=pos.get("product", "NRML"),
+                                order_type="SL-M",
+                                price=0.0,
+                                trigger_price=sl_price,
+                                tag=f"adv_sl_{s_idx+1}"
+                            )
+                        if res.get("success") and res.get("order_id"):
+                            placed_oids.append(str(res.get("order_id")))
+
+                    if placed_oids:
+                        pos["sl_broker_order_id"] = ",".join(placed_oids)
+                        pos["last_sl_broker_order_id"] = ",".join(placed_oids)
+                        pos["sl_order_placement"] = "Place in advance"
+                        pos["sl_cancelled_unexpectedly"] = False
+                        pos.pop("sl_cancel_notice", None)
+                        pos.pop("sl_placement_error", None)
+                        logger.info(f"[Advance SL Slicer] Orders placed with broker IDs: {pos['sl_broker_order_id']}")
+                        self._save_strategies()
+                        self._save_state()
+                        return
+                    else:
+                        pos["sl_placement_error"] = "All SL freeze slices rejected by broker"
+                        self._save_strategies()
+                        self._save_state()
+                        return
+
                 res = broker.place_order(
                     symbol=sym,
                     instrument_key=pos.get("instrument_key", ""),
@@ -7625,6 +7866,49 @@ class StraddleManager:
                 qty = int(pos.get("quantity") or 65)
                 sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
                 logger.info(f"[Advance Target] Placing advance LIMIT order on broker for {sym} @ price ₹{tgt_price:.2f} (qty={qty})...")
+
+                # Exchange freeze limit auto-slicing for high quantity / high lot sizes (e.g. 150 lots)
+                und = pos.get("underlying") or "NIFTY"
+                lot_size = int(pos.get("lot_size") or 0)
+                if lot_size <= 0:
+                    lot_size = get_lot_size_for_symbol(sym, pos.get("instrument_key", ""))
+                qty_slices = slice_quantity_by_freeze(qty, lot_size, und)
+
+                if len(qty_slices) > 1:
+                    logger.info(f"[Advance Target Slicer] Slicing {qty} qty of {sym} into {len(qty_slices)} orders ({qty_slices}) for exchange freeze compliance...")
+                    placed_oids = []
+                    for s_idx, s_qty in enumerate(qty_slices):
+                        res = broker.place_order(
+                            symbol=sym,
+                            instrument_key=pos.get("instrument_key", ""),
+                            transaction_type=tgt_side,
+                            quantity=s_qty,
+                            product=pos.get("product", "NRML"),
+                            order_type="LIMIT",
+                            price=tgt_price,
+                            trigger_price=0.0,
+                            tag=f"adv_tgt_{s_idx+1}"
+                        )
+                        if res.get("success") and res.get("order_id"):
+                            placed_oids.append(str(res.get("order_id")))
+
+                    if placed_oids:
+                        pos["target_broker_order_id"] = ",".join(placed_oids)
+                        pos["last_target_broker_order_id"] = ",".join(placed_oids)
+                        pos["target_order_placement"] = "Place in advance"
+                        pos["target_cancelled_unexpectedly"] = False
+                        pos.pop("target_cancel_notice", None)
+                        pos.pop("target_placement_error", None)
+                        logger.info(f"[Advance Target Slicer] Orders placed with broker IDs: {pos['target_broker_order_id']}")
+                        self._save_strategies()
+                        self._save_state()
+                        return
+                    else:
+                        pos["target_placement_error"] = "All Target freeze slices rejected by broker"
+                        self._save_strategies()
+                        self._save_state()
+                        return
+
                 res = broker.place_order(
                     symbol=sym,
                     instrument_key=pos.get("instrument_key", ""),
@@ -12938,10 +13222,17 @@ class StraddleManager:
                     # ONLY auto-start strategies in READY state that are enabled, scheduled, NOT manually reset, cooldown elapsed, and have NOT traded yet today
                     if strat_status == "READY" and not has_open_positions and not has_completed_positions:
                         if not entry_in_prog and not strat.get("_manual_reset") and strat.get("last_trade_date") != today_s and (now_ts - last_attempt > 60):
+                            # Evaluate Premium Matching & Range condition if enabled
+                            is_pm_matched, pm_reason = self.check_premium_matching_condition(strat)
+                            if not is_pm_matched:
+                                strat["entry_error"] = f"Waiting for Premium Matching ({pm_reason})"
+                                continue
+
+                            strat["entry_error"] = "-"
                             strat["status"] = "TRADE_ACTIVE"
                             strat["last_trade_date"] = today_s
                             strat["_last_entry_attempt_ts"] = now_ts
-                            self._log_event(f"Auto Starting Strategy '{strat.get('name')}' for {today_name} ({st} - {et}).")
+                            self._log_event(f"Auto Starting Strategy '{strat.get('name')}' for {today_name} ({st} - {et}). Condition: {pm_reason}")
                             threading.Thread(target=self._execute_strategy_entry, args=(strat,), daemon=True).start()
 
 

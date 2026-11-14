@@ -1449,6 +1449,10 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         const isAdvSl = (adv.sl_order_placement === "Place in advance");
         const isErrActive = (entryErr !== "-" && !entryErr.toLowerCase().includes("waiting"));
 
+        const isWaitingPrem = entryErr.toLowerCase().includes("waiting for premium");
+        const entryErrColor = isErrActive ? '#f43f5e' : (isWaitingPrem ? '#38bdf8' : '#64748b');
+        const entryErrWeight = (isErrActive || isWaitingPrem) ? '700' : '400';
+
         // Build interactive day selector badges
         let daysHtml = `<div style="display:inline-flex; gap:3px; flex-wrap:wrap;">`;
         dayLabels.forEach(d => {
@@ -1528,7 +1532,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                         </div>
                     </div>
                 </td>
-                <td id="algo_entry_err_${s.strategy_id}" style="color:${isErrActive ? '#f43f5e' : '#64748b'}; font-size:11px; font-weight:${isErrActive ? '600' : '400'}; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;" title="${entryErr}">${entryErr}</td>
+                <td id="algo_entry_err_${s.strategy_id}" style="color:${entryErrColor}; font-size:11px; font-weight:${entryErrWeight}; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;" title="${entryErr}">${entryErr}</td>
                 <td style="color:#64748b; font-size:11px; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;">${s.exit_error || '-'}</td>
                 <td style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">${startTime}</td>
                 <td style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">
@@ -7443,8 +7447,8 @@ function syncPremiumMatchingFieldStates() {
         combVal.classList.toggle("input-disabled-muted", !isCombActive);
     }
     if (combFreq) {
-        combFreq.disabled = !isCombActive;
-        combFreq.classList.toggle("input-disabled-muted", !isCombActive);
+        combFreq.disabled = !isSecEnabled;
+        combFreq.classList.toggle("input-disabled-muted", !isSecEnabled);
     }
 }
 window.syncPremiumMatchingFieldStates = syncPremiumMatchingFieldStates;
