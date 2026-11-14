@@ -3533,7 +3533,6 @@ async function loadStraddleMargin(btn) {
                     </div>
                 </div>
             `;
-            `;
         }
     } catch (e) {
         console.error("Error loading margin:", e);
