@@ -7598,12 +7598,50 @@ function toggleAlgoBuilderSection(secId) {
     const sec = document.getElementById(secId);
     const chevron = document.getElementById("chevron_" + secId);
     if (!sec) return;
-    const isHidden = (sec.style.display === "none");
-    sec.style.display = isHidden ? "block" : "none";
-    if (chevron) {
-        chevron.textContent = isHidden ? "▼" : "▶";
+    
+    // Robust check using inline style, class, or computed display
+    const isCurrentlyHidden = (sec.style.display === "none") || 
+                              sec.classList.contains("collapsed") ||
+                              (!sec.classList.contains("expanded") && window.getComputedStyle(sec).display === "none");
+    
+    if (isCurrentlyHidden) {
+        sec.style.display = "block";
+        sec.classList.remove("collapsed");
+        sec.classList.add("expanded");
+        if (chevron) chevron.textContent = "▼";
+    } else {
+        sec.style.display = "none";
+        sec.classList.remove("expanded");
+        sec.classList.add("collapsed");
+        if (chevron) chevron.textContent = "▶";
     }
 }
+window.toggleAlgoBuilderSection = toggleAlgoBuilderSection;
+
+function toggleAllAlgoBuilderSections(forceExpand = null) {
+    const secIds = [
+        'sec_builder_legs',
+        'sec_builder_timings',
+        'sec_builder_mtm',
+        'sec_builder_premium',
+        'sec_builder_execution',
+        'sec_builder_parity',
+        'sec_builder_reentry'
+    ];
+    const firstSec = document.getElementById(secIds[0]);
+    const shouldExpand = (forceExpand !== null) ? !!forceExpand : (firstSec ? firstSec.style.display === "none" : true);
+    
+    secIds.forEach(id => {
+        const sec = document.getElementById(id);
+        const ch = document.getElementById("chevron_" + id);
+        if (!sec) return;
+        sec.style.display = shouldExpand ? "block" : "none";
+        sec.classList.toggle("expanded", shouldExpand);
+        sec.classList.toggle("collapsed", !shouldExpand);
+        if (ch) ch.textContent = shouldExpand ? "▼" : "▶";
+    });
+}
+window.toggleAllAlgoBuilderSections = toggleAllAlgoBuilderSections;
 
 let _timeStepHoldTimer = null;
 let _timeStepHoldInterval = null;

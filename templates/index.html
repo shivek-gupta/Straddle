@@ -240,12 +240,12 @@
 
             <!-- Merged Settings & System Dropdown (Kotak API + Git main + Trading Mode) -->
             <div style="position:relative; display:inline-block;" id="topbarSettingsMenuWrap">
-                <button type="button" class="straddle-sys-btn" id="btnTopbarSettingsToggle" onclick="toggleTopbarSettingsDropdown(event)" style="display:inline-flex; align-items:center; gap:7px; background:#0f172a; border:1px solid #334155; padding:6px 12px; border-radius:6px; cursor:pointer; color:#f8fafc; font-size:12px; font-weight:700;" title="System Settings & Integrations">
+                <button type="button" class="straddle-sys-btn" id="btnTopbarSettingsToggle" onclick="toggleTopbarSettingsDropdown(event)" style="display:inline-flex; align-items:center; gap:7px; background:#0c0d12; border:1px solid #252836; padding:6px 12px; border-radius:6px; cursor:pointer; color:#f8fafc; font-size:12px; font-weight:700;" title="System Settings & Integrations">
                     <span>⚙️</span>
                     <span>Settings</span>
                     <span style="font-size:10px; color:#94a3b8; margin-left:2px;">▼</span>
                 </button>
-                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:36px; right:0; width:270px; background:#0b0f19; border:1px solid #334155; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.85); z-index:11500; overflow:hidden;">
+                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:36px; right:0; width:270px; background:#0b0f19; border:1px solid #252836; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.85); z-index:11500; overflow:hidden;">
                     <!-- Kotak Neo Live Connection Kill Switch -->
                     <div id="kotakBrokerConnectionCard" style="padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.08); background:rgba(15,23,42,0.6);">
                         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
@@ -262,7 +262,7 @@
                     </div>
 
                     <!-- Kotak API Credentials -->
-                    <div id="kotakAuthStatusPill" class="{% if not (auth_status and auth_status.is_authenticated) %}disconnected{% endif %}" onclick="openKotakSettingsModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Configure Kotak Neo API Keys">
+                    <div id="kotakAuthStatusPill" class="{% if not (auth_status and auth_status.is_authenticated) %}disconnected{% endif %}" onclick="openKotakSettingsModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Configure Kotak Neo API Keys">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span>⚙️</span>
                             <span style="font-weight:700; color:#f8fafc; font-size:12px;">Kotak Neo API</span>
@@ -273,7 +273,7 @@
                         </div>
                     </div>
                     <!-- Git Cloud Sync -->
-                    <div id="gitStatusBtn" onclick="openSystemUpdateModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Git Cloud Sync & Updates">
+                    <div id="gitStatusBtn" onclick="openSystemUpdateModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Git Cloud Sync & Updates">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span>🔄</span>
                             <span style="font-weight:700; color:#f8fafc; font-size:12px;">Git Cloud Sync</span>
@@ -281,7 +281,7 @@
                         <span id="gitBranchBadge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800; font-family:var(--font-mono);">main</span>
                     </div>
                     <!-- Broker Execution Mode -->
-                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
+                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span id="topbarModeIcon">⚡</span>
                             <span style="font-weight:700; color:#f8fafc; font-size:12px;">Trading Mode</span>
@@ -289,7 +289,7 @@
                         <span id="topbarModeLabel" style="font-size:10.5px; color:#10b981; font-weight:700;">Live Broker</span>
                     </div>
                     <!-- PWA Mobile App Install (Standalone App Installation) -->
-                    <div id="pwaInstallDropdownRow" onclick="triggerPwaInstall(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Install Straddle Pro as Standalone Native App">
+                    <div id="pwaInstallDropdownRow" onclick="triggerPwaInstall(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Install Straddle Pro as Standalone Native App">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span>📱</span>
                             <span style="font-weight:700; color:#38bdf8; font-size:12px;">Install App on Phone</span>
@@ -542,7 +542,7 @@
              ==================================================================== -->
         <div id="straddleSubView_open_positions" class="straddle-subview-panel" style="display:none;">
             <!-- Top Summary Strip -->
-            <div style="display:flex; justify-content:space-between; align-items:center; background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                     <!-- Filter Sub-Tabs -->
                     <div style="display:flex; gap:4px; background:#111726; padding:3px; border-radius:6px; border:1px solid rgba(255,255,255,0.08);">
@@ -647,14 +647,14 @@
                         
                         <div style="display:flex; align-items:center; gap:6px;">
                             <label style="font-size:12px; color:#cbd5e1; font-weight:600; white-space:nowrap;">Select Client ID:</label>
-                            <select id="orderbookClientSelect" class="straddle-select" style="min-width:140px; background:#0f172a; border:1px solid rgba(255,255,255,0.15); color:#f8fafc; border-radius:4px; padding:5px 10px; font-size:12px;" onchange="onOrderbookClientIdChange(this.value)">
+                            <select id="orderbookClientSelect" class="straddle-select" style="min-width:140px; background:#0c0d12; border:1px solid rgba(255,255,255,0.15); color:#f8fafc; border-radius:4px; padding:5px 10px; font-size:12px;" onchange="onOrderbookClientIdChange(this.value)">
                                 <option value="ALL">All Client IDs</option>
                                 <option value="Kotak Neo Live">Kotak Neo Live</option>
                             </select>
                         </div>
 
                         <div style="position:relative;">
-                            <input type="text" id="orderbookSearchInput" class="straddle-input" placeholder="🔍 Search" style="width:160px; background:#0f172a; border:1px solid rgba(255,255,255,0.15); border-radius:4px; padding:5px 10px; font-size:12px; color:#f8fafc;" oninput="renderStraddleOrderbookTable()">
+                            <input type="text" id="orderbookSearchInput" class="straddle-input" placeholder="🔍 Search" style="width:160px; background:#0c0d12; border:1px solid rgba(255,255,255,0.15); border-radius:4px; padding:5px 10px; font-size:12px; color:#f8fafc;" oninput="renderStraddleOrderbookTable()">
                         </div>
                     </div>
                 </div>
@@ -710,7 +710,7 @@
              ==================================================================== -->
         <div id="straddleSubView_algos" class="straddle-subview-panel">
             <!-- Filter & Action Strip -->
-            <div style="display:flex; justify-content:space-between; align-items:center; background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 14px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 14px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <div style="display:flex; align-items:center; gap:6px; background:#111726; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 10px;">
                         <span style="font-size:11px; color:#94a3b8; font-weight:700;">Total MTM:</span>
@@ -728,7 +728,7 @@
             </div>
 
             <!-- Bulk Actions Floating Bar -->
-            <div id="straddleAlgosBulkActions" style="display:none; margin-bottom:12px; background:linear-gradient(90deg, #0f172a 0%, #1e1b4b 100%); border:1px solid #3b82f6; border-radius:8px; padding:10px 16px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; box-shadow:0 4px 14px rgba(59,130,246,0.15);">
+            <div id="straddleAlgosBulkActions" style="display:none; margin-bottom:12px; background:linear-gradient(90deg, #0c0d12 0%, #1e1b4b 100%); border:1px solid #3b82f6; border-radius:8px; padding:10px 16px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; box-shadow:0 4px 14px rgba(59,130,246,0.15);">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <span id="straddleBulkSelectedCount" style="font-weight:800; font-size:12.5px; color:#60a5fa; background:rgba(59,130,246,0.18); padding:4px 12px; border-radius:12px; border:1px solid rgba(59,130,246,0.4);">0 algos selected</span>
                 </div>
@@ -816,7 +816,7 @@
             <!-- 2. Live Positions Table (Screenshot 1) -->
             <div class="straddle-card" style="padding:0; overflow:hidden;">
                 <!-- Live Positions Filter & Multi-Criteria Sort Toolbar -->
-                <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:8px 14px; background:#0b1120; border-bottom:1px solid #1e293b;">
+                <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:8px 14px; background:#08090e; border-bottom:1px solid #161822;">
                     <!-- Left: Quick Filters & Counts -->
                     <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                         <span style="font-size:11px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">ALGO TRADES:</span>
@@ -827,8 +827,8 @@
                         </button>
 
                         <!-- Filter Selector Pills -->
-                        <div style="display:flex; align-items:center; gap:2px; background:#0f172a; padding:2px; border-radius:6px; border:1px solid #334155;">
-                            <button type="button" class="algo-filter-pill active" data-filter="all" onclick="setAlgoTradeFilter('all')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:#1e293b; color:#f8fafc;">All (<span id="algoCountAll">0</span>)</button>
+                        <div style="display:flex; align-items:center; gap:2px; background:#0c0d12; padding:2px; border-radius:6px; border:1px solid #252836;">
+                            <button type="button" class="algo-filter-pill active" data-filter="all" onclick="setAlgoTradeFilter('all')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:#161822; color:#f8fafc;">All (<span id="algoCountAll">0</span>)</button>
                             <button type="button" class="algo-filter-pill" data-filter="open" onclick="setAlgoTradeFilter('open')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#10b981;">Open (<span id="algoCountOpen">0</span>)</button>
                             <button type="button" class="algo-filter-pill" data-filter="closed" onclick="setAlgoTradeFilter('closed')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#94a3b8;">Closed (<span id="algoCountClosed">0</span>)</button>
                             <button type="button" class="algo-filter-pill" data-filter="main" onclick="setAlgoTradeFilter('main')" style="padding:2px 8px; font-size:10.5px; font-weight:700; border:none; border-radius:4px; cursor:pointer; background:transparent; color:#f59e0b;">Main/Short</button>
@@ -841,7 +841,7 @@
                     <!-- Right: Multi-Criteria Sort Dropdown -->
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:11px; font-weight:700; color:#94a3b8;">SORT BY:</span>
-                        <select id="algoPositionsSortSelect" class="straddle-select" style="min-width:185px; padding:3px 8px; font-size:11px; font-weight:700; background:#0f172a; border-color:#334155; color:#38bdf8; border-radius:5px; cursor:pointer;" onchange="onAlgoPositionsSortChange(this.value)">
+                        <select id="algoPositionsSortSelect" class="straddle-select" style="min-width:185px; padding:3px 8px; font-size:11px; font-weight:700; background:#0c0d12; border-color:#252836; color:#38bdf8; border-radius:5px; cursor:pointer;" onchange="onAlgoPositionsSortChange(this.value)">
                             <option value="default">↕️ Default (Execution Order)</option>
                             <option value="open_first">🟢 Open First, Closed Last</option>
                             <option value="closed_first">⚪ Closed First, Open Last</option>
@@ -894,11 +894,11 @@
                     <div class="straddle-reexec-counts-badge" id="straddleReexecCountsDisplay" style="display:inline-flex; align-items:center; gap:8px; padding:3px 10px; background:rgba(15,23,42,0.85); border:1px solid rgba(56,189,248,0.3); border-radius:6px; font-size:11.5px; font-family:var(--font-mono);" title="Strategy Re-Execution Count Summary (CE & PE for Stoploss & Target)">
                         <span style="color:#94a3b8; font-weight:700;">Re-Exec:</span>
                         <span style="color:#38bdf8; font-weight:800;" title="Call Option Stoploss Re-executions">CE SL: <span id="reexecCountCeSl" style="color:#f43f5e; font-weight:900;">0</span></span>
-                        <span style="color:#334155;">|</span>
+                        <span style="color:#252836;">|</span>
                         <span style="color:#38bdf8; font-weight:800;" title="Call Option Target Re-executions">CE Target: <span id="reexecCountCeTgt" style="color:#10b981; font-weight:900;">0</span></span>
-                        <span style="color:#334155;">|</span>
+                        <span style="color:#252836;">|</span>
                         <span style="color:#e879f9; font-weight:800;" title="Put Option Stoploss Re-executions">PE SL: <span id="reexecCountPeSl" style="color:#f43f5e; font-weight:900;">0</span></span>
-                        <span style="color:#334155;">|</span>
+                        <span style="color:#252836;">|</span>
                         <span style="color:#e879f9; font-weight:800;" title="Put Option Target Re-executions">PE Target: <span id="reexecCountPeTgt" style="color:#10b981; font-weight:900;">0</span></span>
                     </div>
                 </div>
@@ -918,7 +918,7 @@
             <div class="straddle-action-bar" id="straddleTerminalActionBar" style="margin-bottom:14px; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
                 <button type="button" class="straddle-btn btn-success" id="btnStraddleRetryErrors" onclick="retrySelectedStraddleLegs()" style="background:#15803d; border-color:#16a34a; font-weight:800; display:none;">🔄 Retry (1)</button>
                 <button type="button" class="straddle-btn" id="btnStraddleResetAlgo" onclick="resetCurrentStraddleAlgo()" title="Clear failed order errors and reset strategy to clean Ready state" style="background:#7c3aed; border-color:#8b5cf6; color:#ffffff; font-weight:800; display:none;">🔄 Reset Algo</button>
-                <button type="button" class="straddle-btn" id="btnStraddleClearClosed" onclick="clearStraddleClosedAndExpiredPositions()" title="Clear closed/expired trades and keep only active positions" style="background:#334155; border-color:#475569; color:#f1f5f9; font-weight:700; display:none;">🧹 Clear Closed</button>
+                <button type="button" class="straddle-btn" id="btnStraddleClearClosed" onclick="clearStraddleClosedAndExpiredPositions()" title="Clear closed/expired trades and keep only active positions" style="background:#252836; border-color:#475569; color:#f1f5f9; font-weight:700; display:none;">🧹 Clear Closed</button>
                 <button type="button" class="straddle-btn btn-success" id="btnStraddleStartAlgo" onclick="straddleStartAlgo()" title="Start algorithm and execute strategy orders" style="font-weight:800;">▶ Start Algo</button>
                 <button type="button" class="straddle-btn btn-warning" id="btnStraddleStopAlgo" onclick="straddleTerminateAlgo()" title="Halt strategy algorithm execution without squaring off broker positions" style="background:#b45309; border-color:#d97706; font-weight:800; display:none;">⏹ Stop Algo</button>
                 <button type="button" class="straddle-btn btn-danger" id="btnStraddleSquareOffAll" onclick="straddleSquareOffAllAndTerminate()" title="Emergency: Square off all open broker positions immediately and stop algorithm" style="background:#ea580c; border-color:#f97316; font-weight:800;">🚨 Square Off All</button>
@@ -935,13 +935,13 @@
                 <!-- Strategy Settings Error Banner -->
                 <div id="stratSettingsErrorBanner" style="display:none; background:rgba(239, 68, 68, 0.15); border:1px solid #ef4444; border-radius:8px; padding:10px 14px; margin-bottom:12px; color:#fca5a5; font-size:12.5px; font-weight:700;"></div>
                 <!-- Strategy Name Header Bar -->
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:10px 14px; margin-bottom:14px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; background:#0c0d12; border:1px solid #161822; border-radius:8px; padding:10px 14px; margin-bottom:14px; flex-wrap:wrap;">
                     <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:280px; flex-wrap:wrap;">
                         <span style="font-size:12px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Algo Name:</span>
                         <input type="text" id="cfgStrategyName" class="straddle-input" style="flex:1; min-width:180px; max-width:320px; font-size:13px; font-weight:700; color:#60a5fa;" placeholder="e.g. NIFTY 9:20 Short Straddle">
                         <div style="display:flex; align-items:center; gap:6px; margin-left:6px;">
                             <span style="font-size:12px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Underlying:</span>
-                            <select id="cfgStrategyUnderlying" class="straddle-select" style="min-width:145px; font-weight:700; color:#38bdf8; background:#1e293b; border:1px solid #3b82f6;" onchange="onStrategyUnderlyingChange(this.value)" title="Choose Underlying Index or Commodity">
+                            <select id="cfgStrategyUnderlying" class="straddle-select" style="min-width:145px; font-weight:700; color:#38bdf8; background:#161822; border:1px solid #3b82f6;" onchange="onStrategyUnderlyingChange(this.value)" title="Choose Underlying Index or Commodity">
                                 <optgroup label="NSE / BSE Equity Indices">
                                     <option value="NIFTY" selected>NIFTY 50</option>
                                     <option value="BANKNIFTY">BANKNIFTY</option>
@@ -966,7 +966,7 @@
                         </div>
                         <div style="display:flex; align-items:center; gap:6px; margin-left:6px;">
                             <span style="font-size:12px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Mode:</span>
-                            <select id="cfgStrategyExecutionMode" class="straddle-select" style="min-width:135px; font-weight:700; color:#10b981; background:#1e293b; border:1px solid #10b981;" onchange="onStrategyExecutionModeChange(this.value)" title="Choose execution mode for this strategy">
+                            <select id="cfgStrategyExecutionMode" class="straddle-select" style="min-width:135px; font-weight:700; color:#10b981; background:#161822; border:1px solid #10b981;" onchange="onStrategyExecutionModeChange(this.value)" title="Choose execution mode for this strategy">
                                 <option value="LIVE_BROKER" selected>🟢 Kotak Neo Live</option>
                                 <option value="PAPER_TRADING">📄 Paper Trading</option>
                             </select>
@@ -979,6 +979,7 @@
                             <span style="font-size:11px; font-weight:700; color:#38bdf8;">⚡ Benchmark Latency</span>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <button type="button" class="straddle-btn btn-outline" onclick="toggleAllAlgoBuilderSections()" title="Toggle Expand / Collapse All Sections" style="border-color:#64748b; color:#cbd5e1; font-size:11.5px; font-weight:700;">↕ Expand / Collapse All</button>
                         <button type="button" class="straddle-btn btn-outline" onclick="openAdoptBrokerPositionModal()" title="View and adopt manual or external broker positions into this algo" style="border-color:#38bdf8; color:#38bdf8; font-size:11.5px; font-weight:700;">📥 Adopt Trade</button>
                         <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save strategy settings without placing orders">💾 Save Changes</button>
                         <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings Drawer">✕ Close</button>
@@ -995,7 +996,7 @@
                     </div>
                 </div>
 
-                <div id="sec_builder_legs" class="straddle-collapsible-body">
+                <div id="sec_builder_legs" class="straddle-collapsible-body expanded">
                     <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
                         <div class="straddle-form-group" style="margin-bottom:0;">
                             <label>Segment:</label>
@@ -1006,9 +1007,9 @@
                         </div>
                         <div class="straddle-form-group" style="margin-bottom:0;">
                             <label>Multiplier Mode:</label>
-                            <div style="display:inline-flex; background:#0b1120; border:1px solid #334155; border-radius:6px; overflow:hidden;">
+                            <div style="display:inline-flex; background:#08090e; border:1px solid #252836; border-radius:6px; overflow:hidden;">
                                 <button type="button" id="btnMultModeManual" class="mult-mode-btn active" onclick="setFormMultiplierMode('MANUAL')" style="background:#2563eb; color:#fff; border:none; padding:4px 10px; font-size:11px; font-weight:800; cursor:pointer;">Manual</button>
-                                <button type="button" id="btnMultModeAuto" class="mult-mode-btn" onclick="setFormMultiplierMode('AUTO')" style="background:#1e293b; color:#94a3b8; border:none; padding:4px 10px; font-size:11px; font-weight:800; cursor:pointer;">Auto</button>
+                                <button type="button" id="btnMultModeAuto" class="mult-mode-btn" onclick="setFormMultiplierMode('AUTO')" style="background:#161822; color:#94a3b8; border:none; padding:4px 10px; font-size:11px; font-weight:800; cursor:pointer;">Auto</button>
                             </div>
                         </div>
                         <div class="straddle-form-group" id="grpManualMultiplier" style="margin-bottom:0;">
@@ -1075,12 +1076,12 @@
                 <!-- SECTION 2: TIMINGS & UNDERLYING SETTINGS (Collapsible) -->
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_timings')">
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <span id="chevron_sec_builder_timings" class="chevron-icon">▼</span>
+                        <span id="chevron_sec_builder_timings" class="chevron-icon">▶</span>
                         <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">TIMINGS, UNDERLYING & STRATEGY TOGGLES</span>
                     </div>
                 </div>
 
-                <div id="sec_builder_timings" class="straddle-collapsible-body">
+                <div id="sec_builder_timings" class="straddle-collapsible-body collapsed" style="display:none;">
                     <!-- Toggles Row (Screenshot 2) -->
                     <div class="straddle-toggles-row" style="margin-bottom:12px;">
                         <label class="straddle-checkbox-label">
@@ -1124,7 +1125,7 @@
                         <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Start Time (HH:MM:SS):</label>
-                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#070a12; border:1px solid #1e2638; border-radius:8px; padding:3px 6px; gap:4px;">
+                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#050608; border:1px solid #1a1d27; border-radius:8px; padding:3px 6px; gap:4px;">
                                     <!-- HH -->
                                     <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:30px;">
                                         <input type="text" id="cfgStartTime_hh" maxlength="2" value="09" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgStartTime')" oninput="validateTimeDigits(this, 23)" style="width:28px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Hour (00-23)">
@@ -1168,7 +1169,7 @@
                             </div>
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">End Time (HH:MM:SS):</label>
-                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#070a12; border:1px solid #1e2638; border-radius:8px; padding:3px 6px; gap:4px;">
+                                <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#050608; border:1px solid #1a1d27; border-radius:8px; padding:3px 6px; gap:4px;">
                                     <!-- HH -->
                                     <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:30px;">
                                         <input type="text" id="cfgEndTime_hh" maxlength="2" value="15" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgEndTime')" oninput="validateTimeDigits(this, 23)" style="width:28px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Hour (00-23)">
@@ -1219,7 +1220,7 @@
                                         <span class="quantiply-slider"></span>
                                     </label>
                                 </div>
-                                <div class="straddle-time-stepper-group" id="groupNoReEntryAfterTime" style="display:inline-flex; align-items:center; background:#070a12; border:1px solid #1e2638; border-radius:8px; padding:3px 6px; gap:4px; opacity:0.6; transition:opacity 0.2s ease;">
+                                <div class="straddle-time-stepper-group" id="groupNoReEntryAfterTime" style="display:inline-flex; align-items:center; background:#050608; border:1px solid #1a1d27; border-radius:8px; padding:3px 6px; gap:4px; opacity:0.6; transition:opacity 0.2s ease;">
                                     <!-- HH -->
                                     <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:30px;">
                                         <input type="text" id="cfgNoReEntryAfterTime_hh" maxlength="2" value="15" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgNoReEntryAfterTime')" oninput="validateTimeDigits(this, 23)" style="width:28px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Hour (00-23)">
@@ -1269,7 +1270,7 @@
                 <!-- SECTION 3: MTM TARGET & MTM STOPLOSS (Collapsible) -->
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_mtm')">
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <span id="chevron_sec_builder_mtm" class="chevron-icon">▼</span>
+                        <span id="chevron_sec_builder_mtm" class="chevron-icon">▶</span>
                         <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">MTM TARGET & MTM STOPLOSS</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:10px;" onclick="event.stopPropagation()">
@@ -1281,12 +1282,12 @@
                     </div>
                 </div>
 
-                <div id="sec_builder_mtm" class="straddle-collapsible-body">
+                <div id="sec_builder_mtm" class="straddle-collapsible-body collapsed" style="display:none;">
                     <!-- MTM Calculation Mode Toggle Bar (AlgoTest / Quantiply Parity) -->
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; background:#070a12; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 14px; margin-bottom:14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; background:#050608; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 14px; margin-bottom:14px;">
                         <div style="display:flex; align-items:center; gap:10px;">
                             <span style="font-size:12px; font-weight:700; color:#cbd5e1;">MTM Calculation Mode:</span>
-                            <div class="straddle-btn-group" style="display:inline-flex; border:1px solid #1e2638; border-radius:6px; overflow:hidden; background:#0b0e14;">
+                            <div class="straddle-btn-group" style="display:inline-flex; border:1px solid #1a1d27; border-radius:6px; overflow:hidden; background:#0b0e14;">
                                 <button type="button" class="straddle-btn active-toggle" id="btnMtmModeOverall" onclick="setMtmCalcMode('Overall')" style="padding:4px 14px; font-size:11.5px; font-weight:700;" title="Overall MTM: Target, Lock & Trail and SL values apply to the aggregate strategy basket">Overall MTM</button>
                                 <button type="button" class="straddle-btn btn-outline" id="btnMtmModePerLot" onclick="setMtmCalcMode('Per Lot')" style="padding:4px 14px; font-size:11.5px; font-weight:700;" title="MTM Per Lot: Target, Lock & Trail and SL values scale dynamically multiplied by total strategy lots">MTM Per Lot</button>
                             </div>
@@ -1298,7 +1299,7 @@
 
                     <div class="straddle-grid-2col">
                         <!-- MTM Target & Trailing Box (AlgoTest Lock & Trail Parity) -->
-                        <div id="card_mtm_target" style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:all 0.2s ease;">
+                        <div id="card_mtm_target" style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:all 0.2s ease;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                                 <div style="font-size:12px; font-weight:800; color:#38bdf8;">MTM TARGET & TRAILING (LOCK & TRAIL)</div>
                                 <div style="display:flex; align-items:center; gap:6px;">
@@ -1322,7 +1323,7 @@
                             </div>
 
                             <!-- AlgoTest Style Lock and Trail 2x2 Input Grid -->
-                            <div id="group_mtm_lock_and_trail" style="background:#070a12; border:1px solid #1e2638; border-radius:8px; padding:10px 12px; margin-bottom:12px;">
+                            <div id="group_mtm_lock_and_trail" style="background:#050608; border:1px solid #1a1d27; border-radius:8px; padding:10px 12px; margin-bottom:12px;">
                                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
                                     <div id="box_mtm_reach">
                                         <label id="lblMtmTargetReach" style="font-size:11px; font-weight:700; color:#94a3b8; display:block; margin-bottom:4px;">If profit reaches:</label>
@@ -1369,7 +1370,7 @@
                         </div>
 
                         <!-- MTM Stoploss Box -->
-                        <div id="card_mtm_sl" style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:all 0.2s ease;">
+                        <div id="card_mtm_sl" style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:all 0.2s ease;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                                 <div style="font-size:12px; font-weight:800; color:#f43f5e;">MTM STOPLOSS</div>
                                 <div style="display:flex; align-items:center; gap:6px;">
@@ -1418,8 +1419,8 @@
                     </div>
                 </div>
 
-                <div id="sec_builder_premium" class="straddle-collapsible-body" style="display:none;">
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                <div id="sec_builder_premium" class="straddle-collapsible-body collapsed" style="display:none;">
+                    <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
                         <div class="prem-matching-radios-row" style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
                             <label class="straddle-checkbox-label">
                                 <input type="radio" name="prem_match_mode" id="radPremNone" value="No matching of premiums" checked onchange="syncPremiumMatchingFieldStates()"> No matching of premiums 🔗
@@ -1467,9 +1468,9 @@
                     </div>
                 </div>
 
-                <div id="sec_builder_execution" class="straddle-collapsible-body" style="display:none;">
+                <div id="sec_builder_execution" class="straddle-collapsible-body collapsed" style="display:none;">
                     <div class="straddle-grid-2col">
-                        <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                        <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
                             <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:8px;">Entry Order Parameters</div>
                             <div class="straddle-form-group">
                                 <label>Entry order type:</label>
@@ -1518,7 +1519,7 @@
                             </div>
                         </div>
 
-                        <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                        <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
                             <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:8px;">Exit Order Parameters</div>
                             <div class="straddle-form-group">
                                 <label>Exit order type:</label>
@@ -1562,7 +1563,7 @@
                     </div>
 
                     <!-- Stoploss & Target Order Placement Mode & Delays (Broker OCO Parity) -->
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-top:10px;">
+                    <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-top:10px;">
                         <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:10px;">Stoploss & Target Order Placement Mode & Delays (Broker OCO)</div>
                         <div class="straddle-grid-4col">
                             <div class="straddle-form-group">
@@ -1607,8 +1608,8 @@
                     </div>
                 </div>
 
-                <div id="sec_builder_parity" class="straddle-collapsible-body" style="display:none;">
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                <div id="sec_builder_parity" class="straddle-collapsible-body collapsed" style="display:none;">
+                    <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                             <div style="font-size:12px; font-weight:700; color:#38bdf8;">🎯 Benchmark Reference Price Basis</div>
                             <span style="font-size:10px; color:#94a3b8; font-style:italic;">Calculate SL/Target % based on 1-min candle close vs actual broker fill price</span>
@@ -1643,9 +1644,9 @@
                     </div>
                 </div>
 
-                <div id="sec_builder_reentry" class="straddle-collapsible-body" style="display:none;">
+                <div id="sec_builder_reentry" class="straddle-collapsible-body collapsed" style="display:none;">
                     <!-- Re-Execute Method & Order Delay (Quantiply Parity) -->
-                    <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-bottom:10px;">
+                    <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-bottom:10px;">
                         <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:10px;">Re-Entry / Re-Execute Method & Timing (Quantiply Parity)</div>
                         <div class="straddle-grid-2col">
                             <div class="straddle-form-group">
@@ -1667,7 +1668,7 @@
                     </div>
 
                     <!-- Additional Execution Controls (Quantiply Standard Safety Guards) -->
-                    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
+                    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
                         <label class="straddle-checkbox-label" title="Continuously tracks broker-placed SL orders. If cancelled unexpectedly by client or broker, the algo automatically takes over live price monitoring and triggers exit on SL/Target hit to avoid naked exposure.">
                             <input type="checkbox" id="cfgAutoHandlingSl" checked> Auto handling of unexpected Stoploss order cancellations
                         </label>
@@ -1702,7 +1703,7 @@
              ==================================================================== -->
         <div id="straddleSubView_pnl" class="straddle-subview-panel" style="display:none;">
             <!-- Header Filter Bar -->
-            <div style="display:flex; justify-content:space-between; align-items:center; background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" style="padding:4px 10px; font-size:12px;">← Algos</button>
                     <span style="font-size:14px; font-weight:800; color:#f8fafc;">P&L Chart Analysis</span>
@@ -1741,7 +1742,7 @@
             <!-- Main Layout: Sidebar List + Canvas Chart Area -->
             <div class="pnl-main-layout" style="display:grid; grid-template-columns: 240px 1fr; gap:14px;">
                 <!-- Left Entity Selector Sidebar -->
-                <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; height:520px; overflow-y:auto;">
+                <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; height:520px; overflow-y:auto;">
                     <input type="text" id="pnlSearchEntities" class="straddle-input" placeholder="Search Strategy / Algo..." oninput="filterPnlEntitiesList()">
                     <div id="pnlEntitiesList" style="display:flex; flex-direction:column; gap:4px;">
                         <!-- List populated dynamically via JS -->
@@ -1762,7 +1763,7 @@
                     <div class="straddle-pnl-stats-strip" style="background:#080c14; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px 18px; margin-top:10px;">
                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; width:100%;">
                             <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
-                                <div style="display:flex; flex-direction:column; gap:2px; background:#0f172a; border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:6px 12px;">
+                                <div style="display:flex; flex-direction:column; gap:2px; background:#0c0d12; border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:6px 12px;">
                                     <span style="color:#94a3b8; font-size:11px; font-weight:700;">Max Profit:</span>
                                     <div style="display:flex; align-items:baseline; gap:6px;">
                                         <span id="pnlStatMax" style="color:#10b981; font-family:var(--font-mono); font-size:14px; font-weight:800;">₹ 0.00</span>
@@ -1770,7 +1771,7 @@
                                     </div>
                                 </div>
 
-                                <div style="display:flex; flex-direction:column; gap:2px; background:#0f172a; border:1px solid rgba(244,63,94,0.25); border-radius:6px; padding:6px 12px;">
+                                <div style="display:flex; flex-direction:column; gap:2px; background:#0c0d12; border:1px solid rgba(244,63,94,0.25); border-radius:6px; padding:6px 12px;">
                                     <span style="color:#94a3b8; font-size:11px; font-weight:700;">Max Loss:</span>
                                     <div style="display:flex; align-items:baseline; gap:6px;">
                                         <span id="pnlStatMin" style="color:#f43f5e; font-family:var(--font-mono); font-size:14px; font-weight:800;">₹ 0.00</span>
@@ -1778,7 +1779,7 @@
                                     </div>
                                 </div>
 
-                                <div style="display:flex; flex-direction:column; gap:2px; background:#0f172a; border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:6px 12px;">
+                                <div style="display:flex; flex-direction:column; gap:2px; background:#0c0d12; border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:6px 12px;">
                                     <span style="color:#94a3b8; font-size:11px; font-weight:700;">Max Drawdown:</span>
                                     <div style="display:flex; align-items:baseline; gap:6px;">
                                         <span id="pnlStatDrawdown" style="color:#f59e0b; font-family:var(--font-mono); font-size:14px; font-weight:800;">₹ 0.00</span>
@@ -1786,7 +1787,7 @@
                                     </div>
                                 </div>
 
-                                <div style="display:flex; flex-direction:column; gap:2px; background:#0f172a; border:1px solid rgba(6,182,212,0.25); border-radius:6px; padding:6px 12px;">
+                                <div style="display:flex; flex-direction:column; gap:2px; background:#0c0d12; border:1px solid rgba(6,182,212,0.25); border-radius:6px; padding:6px 12px;">
                                     <span style="color:#94a3b8; font-size:11px; font-weight:700;">Profit Kept:</span>
                                     <div style="display:flex; align-items:baseline; gap:6px;">
                                         <span id="pnlStatProfitKept" style="color:#06b6d4; font-family:var(--font-mono); font-size:14px; font-weight:800;">100%</span>
@@ -1907,7 +1908,7 @@
         <div id="modalRectifyLeg" class="straddle-modal-backdrop" style="display:none; z-index:10050;">
             <div class="straddle-modal-dialog" style="max-width:560px; background:#111622; border:1px solid rgba(59,130,246,0.3); border-radius:12px; box-shadow:0 16px 48px rgba(0,0,0,0.85); overflow:hidden;">
                 <!-- Header -->
-                <div style="padding:16px 20px; background:linear-gradient(90deg, #0f172a 0%, #1e293b 100%); border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
+                <div style="padding:16px 20px; background:linear-gradient(90deg, #0c0d12 0%, #161822 100%); border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
                     <div style="display:flex; align-items:center; gap:10px;">
                         <span style="font-size:20px;">🛠️</span>
                         <div>
@@ -2093,7 +2094,7 @@
                     </div>
 
                     <!-- Associated Dynamic Hedge Settings Section -->
-                    <div id="legSettingsHedgeCard" style="background:#0c111d; border:1px solid #1e293b; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px;">
+                    <div id="legSettingsHedgeCard" style="background:#0c111d; border:1px solid #161822; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <label style="color:#38bdf8; font-size:12px; font-weight:800; display:flex; align-items:center; gap:6px; cursor:pointer;">
                                 <input type="checkbox" id="legSettingsHedgeEnabled" onchange="toggleLegModalHedgeFields(this.checked)"> Associated Dynamic Hedge 🛡️
@@ -2176,7 +2177,7 @@
                         </label>
 
                         <!-- Focused Underlying Read-only Badge (Switch via top bar) -->
-                        <div class="straddle-badge" style="display:inline-flex; align-items:center; gap:6px; background:#0f172a; border:1px solid #2563eb; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:800;" title="Focused Underlying (Change via Top Bar dropdown)">
+                        <div class="straddle-badge" style="display:inline-flex; align-items:center; gap:6px; background:#0c0d12; border:1px solid #2563eb; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:800;" title="Focused Underlying (Change via Top Bar dropdown)">
                             <span style="color:#94a3b8; font-size:11px;">Asset:</span>
                             <span id="optChainUnderlyingBadge" style="color:#60a5fa; font-weight:800;">NIFTY</span>
                         </div>
@@ -2211,14 +2212,14 @@
                         </select>
 
                         <button type="button" class="straddle-btn btn-outline" style="padding:4px 10px; font-size:12px;" onclick="loadStraddleOptionChain()">🔄 Refresh</button>
-                        <button type="button" class="straddle-btn" id="btnToggleBasketMode" onclick="toggleOptionChainBasketMode()" style="background:#0f172a; color:#38bdf8; border:1px solid #38bdf8; font-weight:800; padding:4px 12px; font-size:12px; display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="Toggle multi-leg basket selection checkboxes">🧺 Basket Mode: <span id="basketModeStateLabel" style="color:#f87171; font-weight:900;">OFF</span></button>
+                        <button type="button" class="straddle-btn" id="btnToggleBasketMode" onclick="toggleOptionChainBasketMode()" style="background:#0c0d12; color:#38bdf8; border:1px solid #38bdf8; font-weight:800; padding:4px 12px; font-size:12px; display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="Toggle multi-leg basket selection checkboxes">🧺 Basket Mode: <span id="basketModeStateLabel" style="color:#f87171; font-weight:900;">OFF</span></button>
                         <button type="button" class="straddle-btn btn-primary" style="padding:4px 14px; font-size:12px; font-weight:800;" onclick="openBasketOrderModal()">📋 Basket <span id="basketHeaderBadge" style="background:rgba(255,255,255,0.25); color:#fff; border-radius:9999px; padding:0 6px; font-size:10px;">0</span></button>
                         <button class="straddle-modal-close" onclick="closeStraddleOptionChainModal()">×</button>
                     </div>
                 </div>
 
                 <!-- Live Market Insights Ribbon Collapsible Toggle Bar -->
-                <div id="optChainInsightsToggle" onclick="toggleOptionChainInsights()" style="display:flex; align-items:center; justify-content:space-between; padding:5px 14px; background:#0b1120; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; user-select:none; font-size:11.5px; color:#94a3b8; transition:all 0.15s ease;" title="Click to show/hide underlying spot, PCR, Max Pain, and Major Support/Resistance">
+                <div id="optChainInsightsToggle" onclick="toggleOptionChainInsights()" style="display:flex; align-items:center; justify-content:space-between; padding:5px 14px; background:#08090e; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; user-select:none; font-size:11.5px; color:#94a3b8; transition:all 0.15s ease;" title="Click to show/hide underlying spot, PCR, Max Pain, and Major Support/Resistance">
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span id="optChainInsightsArrow" style="font-size:10px; color:#38bdf8; display:inline-block; transition:transform 0.2s ease;">▶</span>
                         <span style="font-weight:700; color:#cbd5e1;">Market Sentiment & Levels</span>
@@ -2285,7 +2286,7 @@
                                     PUT
                                 </th>
                             </tr>
-                            <tr id="optChainSubHeaderRow" style="background:#0c101a; border-bottom:1px solid rgba(255,255,255,0.1);">
+                            <tr id="optChainSubHeaderRow" style="background:#090a0e; border-bottom:1px solid rgba(255,255,255,0.1);">
                                 <!-- Calls Columns: Action/Select, CHG%, LTP -->
                                 <th id="thCeActionHeader" class="opt-action-col" style="text-align:center; width:88px; color:#38bdf8; padding:3px 2px; font-weight:800; font-size:10px;">ACTION</th>
                                 <th id="thCeChg" style="text-align:right; width:62px; color:#94a3b8; font-weight:800; padding:3px 4px; font-size:10px;">CHG %</th>
@@ -2307,7 +2308,7 @@
                 </div>
 
                 <!-- Sticky Bottom Toolbar for Basket Mode (Kotak Neo Screenshot 5 Experience) -->
-                <div id="optionChainBasketBottomBar" style="display:none; justify-content:space-between; align-items:center; padding:10px 18px; background:#070a13; border-top:1px solid #1e293b; box-shadow:0 -6px 20px rgba(0,0,0,0.6); flex-wrap:wrap; gap:10px;">
+                <div id="optionChainBasketBottomBar" style="display:none; justify-content:space-between; align-items:center; padding:10px 18px; background:#070a13; border-top:1px solid #161822; box-shadow:0 -6px 20px rgba(0,0,0,0.6); flex-wrap:wrap; gap:10px;">
                     <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                         <button type="button" class="straddle-btn btn-outline" style="font-size:11.5px; padding:5px 12px; border-color:#64748b; color:#94a3b8;" onclick="clearOptionChainBasketSelection()">✕ Clear Selection</button>
                         <span style="font-size:12.5px; color:#cbd5e1; font-weight:700;"><strong id="optionChainBasketSelectedCount" style="color:#38bdf8; font-size:14px;">0</strong> legs selected:</span>
@@ -2361,7 +2362,7 @@
         <div id="straddleDirectOrderModal" class="straddle-modal-backdrop" style="display:none;">
             <div class="straddle-modal-dialog" style="max-width:490px; border-radius:14px; box-shadow:0 25px 60px -15px rgba(0,0,0,0.9); overflow:hidden; border:1px solid rgba(255,255,255,0.15);">
                 <!-- Dynamic Colored Header -->
-                <div id="directOrderHeader" style="padding:16px 20px; background:linear-gradient(135deg, #0f172a, #1e293b); border-bottom:1px solid rgba(255,255,255,0.1); display:flex; justify-content:space-between; align-items:center;">
+                <div id="directOrderHeader" style="padding:16px 20px; background:linear-gradient(135deg, #0c0d12, #161822); border-bottom:1px solid rgba(255,255,255,0.1); display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span id="directOrderSideBadge" style="background:#10b981; color:#fff; font-size:11px; font-weight:800; padding:2px 8px; border-radius:4px; text-transform:uppercase;">BUY</span>
@@ -2394,10 +2395,10 @@
                     <div>
                         <div style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; margin-bottom:6px; letter-spacing:0.5px;">Product Type</div>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                            <button type="button" id="btnProductDelivery" class="straddle-btn" style="padding:9px; font-size:12.5px; font-weight:700; border-radius:8px; background:#1e293b; color:#60a5fa; border:1px solid #3b82f6; cursor:pointer;" onclick="setOrderModalProduct('D')">
+                            <button type="button" id="btnProductDelivery" class="straddle-btn" style="padding:9px; font-size:12.5px; font-weight:700; border-radius:8px; background:#161822; color:#60a5fa; border:1px solid #3b82f6; cursor:pointer;" onclick="setOrderModalProduct('D')">
                                 Overnight (NRML / Delivery)
                             </button>
-                            <button type="button" id="btnProductIntraday" class="straddle-btn" style="padding:9px; font-size:12.5px; font-weight:700; border-radius:8px; background:#0f172a; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalProduct('I')">
+                            <button type="button" id="btnProductIntraday" class="straddle-btn" style="padding:9px; font-size:12.5px; font-weight:700; border-radius:8px; background:#0c0d12; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalProduct('I')">
                                 Intraday (MIS / Same Day)
                             </button>
                         </div>
@@ -2407,16 +2408,16 @@
                     <div>
                         <div style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; margin-bottom:6px; letter-spacing:0.5px;">Order Type</div>
                         <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;">
-                            <button type="button" id="btnTypeMarket" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0f172a; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('MARKET')">
+                            <button type="button" id="btnTypeMarket" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0c0d12; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('MARKET')">
                                 Market
                             </button>
-                            <button type="button" id="btnTypeLimit" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#1e293b; color:#38bdf8; border:1px solid #0284c7; cursor:pointer;" onclick="setOrderModalType('LIMIT')">
+                            <button type="button" id="btnTypeLimit" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#161822; color:#38bdf8; border:1px solid #0284c7; cursor:pointer;" onclick="setOrderModalType('LIMIT')">
                                 Limit
                             </button>
-                            <button type="button" id="btnTypeSL" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0f172a; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('SL')">
+                            <button type="button" id="btnTypeSL" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0c0d12; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('SL')">
                                 SL (Limit)
                             </button>
-                            <button type="button" id="btnTypeSLM" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0f172a; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('SL-M')">
+                            <button type="button" id="btnTypeSLM" class="straddle-btn" style="padding:7px 4px; font-size:12px; font-weight:700; border-radius:6px; background:#0c0d12; color:#94a3b8; border:1px solid rgba(255,255,255,0.08); cursor:pointer;" onclick="setOrderModalType('SL-M')">
                                 SL-M
                             </button>
                         </div>
@@ -2429,10 +2430,10 @@
                                 <label style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Lots</label>
                                 <span id="directOrderLotBadge" style="font-size:11px; color:#38bdf8; font-weight:700; font-family:var(--font-mono);">1 lot = 65 (65 Qty)</span>
                             </div>
-                            <div style="display:flex; align-items:center; background:#0f172a; border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden;">
-                                <button type="button" style="background:#1e293b; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderLots(-1)">−</button>
+                            <div style="display:flex; align-items:center; background:#0c0d12; border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden;">
+                                <button type="button" style="background:#161822; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderLots(-1)">−</button>
                                 <input type="number" id="directOrderLotsInput" value="1" min="1" step="1" style="flex:1; width:100%; background:transparent; border:none; text-align:center; color:#fff; font-size:15px; font-weight:800; font-family:var(--font-mono); outline:none;" oninput="onDirectOrderLotsChange()" />
-                                <button type="button" style="background:#1e293b; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderLots(1)">+</button>
+                                <button type="button" style="background:#161822; border:none; color:#f8fafc; font-size:16px; font-weight:800; padding:8px 14px; cursor:pointer;" onclick="adjustOrderLots(1)">+</button>
                             </div>
                             <input type="hidden" id="directOrderQuantityInput" value="65" />
                         </div>
@@ -2441,7 +2442,7 @@
                                 <label style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">Price (₹)</label>
                                 <span style="font-size:10px; color:#64748b; font-family:var(--font-mono);">Tick 0.05</span>
                             </div>
-                            <input type="number" id="directOrderPriceInput" step="0.05" min="0.05" style="width:100%; box-sizing:border-box; background:#0f172a; border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:9px 12px; color:#fff; font-size:14px; font-weight:800; font-family:var(--font-mono); outline:none;" placeholder="Price" oninput="updateOrderMarginSummary()" />
+                            <input type="number" id="directOrderPriceInput" step="0.05" min="0.05" style="width:100%; box-sizing:border-box; background:#0c0d12; border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:9px 12px; color:#fff; font-size:14px; font-weight:800; font-family:var(--font-mono); outline:none;" placeholder="Price" oninput="updateOrderMarginSummary()" />
                         </div>
                     </div>
 
@@ -2451,7 +2452,7 @@
                             <label style="font-size:11px; font-weight:700; color:#f59e0b; text-transform:uppercase; letter-spacing:0.5px;">Trigger Price (₹)</label>
                             <span style="font-size:10px; color:#64748b; font-family:var(--font-mono);">Must trigger order execution</span>
                         </div>
-                        <input type="number" id="directOrderTriggerPriceInput" step="0.05" min="0.05" style="width:100%; box-sizing:border-box; background:#0f172a; border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:9px 12px; color:#f59e0b; font-size:14px; font-weight:800; font-family:var(--font-mono); outline:none;" placeholder="Trigger Price (₹)" />
+                        <input type="number" id="directOrderTriggerPriceInput" step="0.05" min="0.05" style="width:100%; box-sizing:border-box; background:#0c0d12; border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:9px 12px; color:#f59e0b; font-size:14px; font-weight:800; font-family:var(--font-mono); outline:none;" placeholder="Trigger Price (₹)" />
                     </div>
 
                     <!-- Margin and Funds Breakdown -->
@@ -2491,7 +2492,7 @@
                     Session tokens are refreshed automatically every morning at <b>08:15 AM IST</b>.
                 </p>
                 <!-- Live Order Transmission Kill Switch Card -->
-                <div style="background:rgba(15, 23, 42, 0.7); border:1px solid #334155; border-radius:6px; padding:10px 14px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <div style="background:rgba(15, 23, 42, 0.7); border:1px solid #252836; border-radius:6px; padding:10px 14px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
                     <div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span style="font-size:14px;">🔌</span>
@@ -2563,7 +2564,7 @@
                 <button type="button" class="straddle-modal-close" onclick="closeSystemUpdateModal()">✕</button>
             </div>
             <div class="straddle-modal-body">
-                <div style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; font-family:var(--font-mono); font-size:11.5px; margin-bottom:14px;">
+                <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; font-family:var(--font-mono); font-size:11.5px; margin-bottom:14px;">
                     <div><b>Branch:</b> <span id="gitModalBranch">--</span></div>
                     <div><b>Latest Commit:</b> <span id="gitModalCommit">--</span></div>
                     <div style="margin-top:6px; color:#94a3b8;"><b>Recent Log:</b></div>
@@ -2590,7 +2591,7 @@
     <!-- Modal: Adopt / Import Existing Broker Position into Algo -->
     <div id="modalAdoptBrokerPosition" class="straddle-modal-backdrop" style="display:none; z-index:10050;">
         <div class="straddle-modal-card" style="max-width:840px;">
-            <div class="straddle-modal-header" style="padding:14px 20px; background:linear-gradient(135deg, #0f172a, #1e293b); border-bottom:1px solid rgba(56,189,248,0.2); display:flex; justify-content:space-between; align-items:center;">
+            <div class="straddle-modal-header" style="padding:14px 20px; background:linear-gradient(135deg, #0c0d12, #161822); border-bottom:1px solid rgba(56,189,248,0.2); display:flex; justify-content:space-between; align-items:center;">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-size:18px;">📥</span>
                     <div>
@@ -2612,7 +2613,7 @@
                     <!-- Target Strategy Picker -->
                     <div style="display:flex; align-items:center; gap:10px; background:#070a13; border:1px solid rgba(56,189,248,0.25); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
                         <span style="font-size:12px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px;">Target Algo:</span>
-                        <select id="adopt_target_strat_select" class="straddle-select" style="flex:1; font-weight:700; color:#f8fafc; background:#0f172a;" onchange="onAdoptTargetStratChange(this.value)">
+                        <select id="adopt_target_strat_select" class="straddle-select" style="flex:1; font-weight:700; color:#f8fafc; background:#0c0d12;" onchange="onAdoptTargetStratChange(this.value)">
                             <!-- Populated dynamically with all strategies -->
                         </select>
                     </div>
@@ -2649,7 +2650,7 @@
                     <!-- Dropdown for selecting Main / Short Leg to Hedge (shown only when hedge checkbox is checked) -->
                     <div id="adopt_hedge_parent_container" style="display:none; margin-bottom:12px; background:#070a13; border:1px solid rgba(56,189,248,0.3); border-radius:8px; padding:12px;">
                         <label style="font-size:11px; font-weight:700; color:#38bdf8; display:block; margin-bottom:6px;">Select Existing Main / Short Leg to Hedge:</label>
-                        <select id="adopt_hedge_parent_select" class="straddle-select" style="width:100%; font-weight:700; color:#f8fafc; background:#0f172a;">
+                        <select id="adopt_hedge_parent_select" class="straddle-select" style="width:100%; font-weight:700; color:#f8fafc; background:#0c0d12;">
                             <option value="">-- Select Short Leg --</option>
                         </select>
                         <div style="font-size:10.5px; color:#94a3b8; margin-top:5px;">This adopted position will provide margin protection and hedge cover for the selected short leg.</div>
@@ -2726,14 +2727,14 @@
          ANGELONE-GRADE BASKET ORDERS MODAL
          ==================================================================== -->
     <div id="modalBasketOrders" class="straddle-modal-backdrop" style="display:none; z-index:10060;">
-        <div class="straddle-modal-card" style="max-width:1050px; width:95%; background:#0b0f19; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.85); overflow:hidden; display:flex; flex-direction:column;">
+        <div class="straddle-modal-card" style="max-width:1050px; width:95%; background:#0b0f19; border:1px solid #161822; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.85); overflow:hidden; display:flex; flex-direction:column;">
             <!-- Header Row 1: Baskets management & Option Chain link -->
             <div class="basket-modal-header" style="padding:12px 20px; background:#070a13; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                     <!-- Saved Baskets Dropdown -->
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:12px; color:#94a3b8; font-weight:700;">Basket:</span>
-                        <select id="savedBasketsSelect" onchange="onSwitchSavedBasket(this.value)" class="straddle-select" style="min-width:160px; font-weight:700; border-radius:9999px; font-size:12px; padding:4px 10px; background:#0f172a; border-color:#334155; color:#38bdf8;" title="Select from saved baskets">
+                        <select id="savedBasketsSelect" onchange="onSwitchSavedBasket(this.value)" class="straddle-select" style="min-width:160px; font-weight:700; border-radius:9999px; font-size:12px; padding:4px 10px; background:#0c0d12; border-color:#252836; color:#38bdf8;" title="Select from saved baskets">
                             <option value="default">Default Basket</option>
                         </select>
                     </div>
@@ -2758,12 +2759,12 @@
             </div>
 
             <!-- Header Row 2: Underlying Selector (Nifty vs Commodities), Presets, and Dedicated Search -->
-            <div style="padding:10px 20px; background:#0c101a; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div style="padding:10px 20px; background:#090a0e; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                     <!-- Focused Basket Underlying Read-only Badge (Switch via top bar) -->
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:12px; color:#94a3b8; font-weight:700;">Underlying:</span>
-                        <div class="straddle-badge" style="display:inline-flex; align-items:center; gap:6px; background:#0f172a; border:1px solid #2563eb; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:800;" title="Basket Underlying (Change via Top Bar dropdown)">
+                        <div class="straddle-badge" style="display:inline-flex; align-items:center; gap:6px; background:#0c0d12; border:1px solid #2563eb; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:800;" title="Basket Underlying (Change via Top Bar dropdown)">
                             <span id="basketUnderlyingBadge" style="color:#60a5fa; font-weight:800;">NIFTY</span>
                         </div>
                         <select id="basketUnderlyingSelect" onchange="onBasketUnderlyingChange(this.value)" class="straddle-select" style="display:none;" title="Choose underlying for this basket">
@@ -2792,7 +2793,7 @@
                     <!-- Presets Menu Button & Popover -->
                     <div style="position:relative; display:inline-block;">
                         <button type="button" class="straddle-btn" id="btnBasketPresetsToggle" onclick="toggleBasketPresetsDropdown(event)" style="border-radius:9999px; padding:5px 14px; font-size:12px; font-weight:800; background:linear-gradient(135deg, #7c3aed, #6366f1); color:#fff; border:none; display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="Load popular strategies or custom saved presets">⚡ Presets ▼</button>
-                        <div id="basketPresetsDropdown" style="display:none; position:absolute; top:36px; left:0; width:330px; background:#0f172a; border:1px solid #6366f1; border-radius:10px; box-shadow:0 16px 45px rgba(0,0,0,0.92); z-index:11500; padding:10px 0; font-size:12px;">
+                        <div id="basketPresetsDropdown" style="display:none; position:absolute; top:36px; left:0; width:330px; background:#0c0d12; border:1px solid #6366f1; border-radius:10px; box-shadow:0 16px 45px rgba(0,0,0,0.92); z-index:11500; padding:10px 0; font-size:12px;">
                             <!-- Populated dynamically by renderBasketPresetsDropdown() -->
                         </div>
                     </div>
@@ -2804,19 +2805,19 @@
                     <!-- Expiry Filter Dropdown for Basket Search -->
                     <div style="display:inline-flex; align-items:center; gap:6px;">
                         <span style="font-size:11px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px;">EXPIRY:</span>
-                        <select id="basketExpiryFilterSelect" onchange="onBasketExpiryFilterChange(this.value)" style="background:#070a13; color:#38bdf8; font-size:11.5px; font-weight:700; border:1px solid #334155; border-radius:9999px; padding:4px 12px; cursor:pointer; outline:none;" title="Filter basket search to specific expiry">
+                        <select id="basketExpiryFilterSelect" onchange="onBasketExpiryFilterChange(this.value)" style="background:#070a13; color:#38bdf8; font-size:11.5px; font-weight:700; border:1px solid #252836; border-radius:9999px; padding:4px 12px; cursor:pointer; outline:none;" title="Filter basket search to specific expiry">
                             <option value="ALL">All Expiries</option>
                         </select>
                     </div>
 
                     <!-- Search & Add Bar Filtered to Current Underlying -->
                     <div style="position:relative; width:340px; max-width:100%;">
-                        <div style="display:flex; align-items:center; background:#070a13; border:1px solid #334155; border-radius:9999px; padding:0 12px; height:34px;">
+                        <div style="display:flex; align-items:center; background:#070a13; border:1px solid #252836; border-radius:9999px; padding:0 12px; height:34px;">
                             <span style="font-size:13px; color:#64748b; margin-right:8px;">🔍</span>
                             <input type="text" id="basketSearchInput" placeholder="Search strikes & options (e.g. 23800, 17 Nov)" oninput="handleBasketSearchInput(this.value)" autocomplete="off" style="background:transparent; border:none; outline:none; color:#f8fafc; font-size:12px; width:100%;">
                             <span id="basketSearchClear" style="font-size:12px; color:#64748b; cursor:pointer; display:none;" onclick="clearBasketSearch()">✕</span>
                         </div>
-                        <div id="basketSearchResultsDropdown" style="display:none; position:absolute; top:38px; left:0; width:450px; max-width:92vw; background:#0f172a; border:1px solid #3b82f6; border-radius:8px; z-index:11000; max-height:280px; overflow-y:auto; box-shadow:0 12px 30px rgba(0,0,0,0.85);"></div>
+                        <div id="basketSearchResultsDropdown" style="display:none; position:absolute; top:38px; left:0; width:450px; max-width:92vw; background:#0c0d12; border:1px solid #3b82f6; border-radius:8px; z-index:11000; max-height:280px; overflow-y:auto; box-shadow:0 12px 30px rgba(0,0,0,0.85);"></div>
                     </div>
                 </div>
             </div>
@@ -2884,10 +2885,10 @@
                     <div style="display:flex; align-items:center; gap:8px;">
                         <button type="button" id="btnBasketAutoLots" onclick="autoCalculateBasketLots()" class="straddle-btn btn-outline" style="padding:4px 9px; font-size:11px; font-weight:800; border-color:#0284c7; color:#38bdf8; background:rgba(2,132,199,0.15); border-radius:5px; cursor:pointer;" title="Automatically set multiplier to maximum safe tradeable lots based on Available Margin">⚡ Auto Lots (<span id="basketAutoLotsCount">1</span>)</button>
                         <span style="font-size:12px; color:#94a3b8; font-weight:700;">Multiplier</span>
-                        <div style="display:flex; align-items:center; background:#0b1120; border:1px solid #334155; border-radius:6px; overflow:hidden;">
-                            <button type="button" onclick="stepBasketMultiplier(-1)" style="background:#1e293b; color:#cbd5e1; border:none; width:28px; height:28px; cursor:pointer; font-weight:800; font-size:14px;">-</button>
+                        <div style="display:flex; align-items:center; background:#08090e; border:1px solid #252836; border-radius:6px; overflow:hidden;">
+                            <button type="button" onclick="stepBasketMultiplier(-1)" style="background:#161822; color:#cbd5e1; border:none; width:28px; height:28px; cursor:pointer; font-weight:800; font-size:14px;">-</button>
                             <input type="number" id="basketMultiplierInput" min="1" max="100" value="1" onchange="onBasketMultiplierChange(this.value)" style="width:42px; height:28px; background:transparent; border:none; text-align:center; font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:13px; outline:none;">
-                            <button type="button" onclick="stepBasketMultiplier(1)" style="background:#1e293b; color:#cbd5e1; border:none; width:28px; height:28px; cursor:pointer; font-weight:800; font-size:14px;">+</button>
+                            <button type="button" onclick="stepBasketMultiplier(1)" style="background:#161822; color:#cbd5e1; border:none; width:28px; height:28px; cursor:pointer; font-weight:800; font-size:14px;">+</button>
                         </div>
                     </div>
                 </div>
@@ -2905,7 +2906,7 @@
                         <span id="basketChargesInfoIcon" onclick="toggleBasketChargesPopover(event)" onmouseenter="showBasketChargesPopover()" onmouseleave="hideBasketChargesPopoverDelayed()" style="cursor:pointer; font-size:13px; color:#64748b; padding:2px;" title="Click to view full Angel One / Exchange charges breakup">ℹ️</span>
 
                         <!-- Angel One Style Charges Breakup Popover (Exact Match to Screenshot 1) -->
-                        <div id="basketChargesPopover" onmouseenter="clearBasketChargesPopoverTimer()" onmouseleave="hideBasketChargesPopoverDelayed()" style="display:none; position:absolute; bottom:34px; left:0; width:340px; background:#0f172a; border:1px solid #334155; border-radius:10px; box-shadow:0 20px 45px rgba(0,0,0,0.92); z-index:12000; padding:14px; font-size:12px; color:#cbd5e1;">
+                        <div id="basketChargesPopover" onmouseenter="clearBasketChargesPopoverTimer()" onmouseleave="hideBasketChargesPopoverDelayed()" style="display:none; position:absolute; bottom:34px; left:0; width:340px; background:#0c0d12; border:1px solid #252836; border-radius:10px; box-shadow:0 20px 45px rgba(0,0,0,0.92); z-index:12000; padding:14px; font-size:12px; color:#cbd5e1;">
                             <!-- Angel One Brokerage Row -->
                             <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08); font-weight:700; color:#f8fafc;">
                                 <span>Angel One Brokerage</span>
@@ -2957,7 +2958,7 @@
                             </div>
 
                             <!-- Total Charges Bar -->
-                            <div style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; border-radius:6px; padding:8px 10px; margin-top:10px; font-weight:800; font-size:13px; color:#f8fafc;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; background:#161822; border-radius:6px; padding:8px 10px; margin-top:10px; font-weight:800; font-size:13px; color:#f8fafc;">
                                 <span>Total Charges</span>
                                 <span style="font-family:var(--font-mono); color:#38bdf8;">₹ <span id="chgBreakdownTotal">0.00</span></span>
                             </div>
@@ -2983,7 +2984,7 @@
          INTERACTIVE LIVE CANDLESTICK CHART MODAL (TradingView Grade)
          ==================================================================== -->
     <div id="modalLiveChart" class="straddle-modal-backdrop hidden" style="display:none !important; z-index:10070;" onclick="if(event.target === this) closeLiveChartModal()">
-        <div class="straddle-modal-card" style="max-width:1150px; width:96%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.9); overflow:hidden; display:flex; flex-direction:column;">
+        <div class="straddle-modal-card" style="max-width:1150px; width:96%; background:#090d16; border:1px solid #161822; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.9); overflow:hidden; display:flex; flex-direction:column;">
             <!-- Row 1: Merged Header & Live Price Stream (Always visible in compact mode) -->
             <div id="chartTopRow1" style="padding:8px 16px; background:#060911; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                 <!-- Left: Dot + Blue Heading Badge + Real-time Price Stream -->
@@ -3018,7 +3019,7 @@
 
                 <!-- Right: Action Buttons (Compact, Refresh, Close) -->
                 <div style="display:flex; align-items:center; gap:6px;">
-                    <button type="button" id="btnToggleChartHeader" class="straddle-btn" onclick="toggleChartHeaderCollapse()" style="padding:3px 10px; font-size:11px; font-weight:700; background:#1e293b; border:1px solid rgba(255,255,255,0.18); color:#cbd5e1; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;" title="Collapse/Expand topbar to maximize chart space">
+                    <button type="button" id="btnToggleChartHeader" class="straddle-btn" onclick="toggleChartHeaderCollapse()" style="padding:3px 10px; font-size:11px; font-weight:700; background:#161822; border:1px solid rgba(255,255,255,0.18); color:#cbd5e1; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;" title="Collapse/Expand topbar to maximize chart space">
                         <span id="iconChartHeaderCollapse">▲</span>
                         <span id="lblChartHeaderCollapse">Compact</span>
                     </button>
@@ -3228,7 +3229,7 @@
             </div>
 
             <!-- Canvas Container -->
-            <div style="padding:14px 20px; background:#070a12; position:relative;">
+            <div style="padding:14px 20px; background:#050608; position:relative;">
                 <div class="chart-canvas-container" id="chartCanvasContainer">
                     <!-- Hover Tooltip / OHLC Legend -->
                     <div class="chart-legend-badge" id="chartHoverLegend">
@@ -3277,7 +3278,7 @@
          REAL-TIME MARKET DEPTH MODAL (Level 2 Quotes - 5 Bids & 5 Asks)
          ==================================================================== -->
     <div id="modalMarketDepth" class="straddle-modal-backdrop" style="display:none; z-index:200000;" onclick="if(event.target === this) closeMarketDepthModal()">
-        <div class="straddle-modal-card" style="max-width:540px; width:94%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.95), 0 0 30px rgba(245,158,11,0.15); overflow:hidden; display:flex; flex-direction:column;">
+        <div class="straddle-modal-card" style="max-width:540px; width:94%; background:#090d16; border:1px solid #161822; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.95), 0 0 30px rgba(245,158,11,0.15); overflow:hidden; display:flex; flex-direction:column;">
             <!-- Header -->
             <div style="padding:10px 16px; background:#060911; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
                 <div style="display:flex; align-items:center; gap:8px;">
@@ -3303,7 +3304,7 @@
             </div>
 
             <!-- Stats Ribbon (OHLC, Volume, OI) -->
-            <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; padding:8px 14px; background:#0c101c; border-bottom:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:11px;">
+            <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; padding:8px 14px; background:#08090d; border-bottom:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:11px;">
                 <div style="text-align:center;">
                     <span style="color:#64748b; font-size:9.5px; display:block;">OPEN</span>
                     <strong id="depthStatOpen" style="color:#cbd5e1;">--</strong>
@@ -3327,7 +3328,7 @@
             </div>
 
             <!-- Market Depth Table (5 Bids on Left, 5 Asks on Right) -->
-            <div style="padding:10px 14px; background:#070a12;">
+            <div style="padding:10px 14px; background:#050608;">
                 <table style="width:100%; border-collapse:collapse; font-size:11.5px; font-family:var(--font-mono); table-layout:fixed;">
                     <thead>
                         <tr style="border-bottom:1px solid rgba(255,255,255,0.1); font-size:10px; text-transform:uppercase; color:#94a3b8; letter-spacing:0.4px;">
@@ -3358,7 +3359,7 @@
                         <span id="depthBuyPctLabel" style="color:#34d399;">Buyers: 50.0%</span>
                         <span id="depthSellPctLabel" style="color:#fb7185;">Sellers: 50.0%</span>
                     </div>
-                    <div style="width:100%; height:6px; background:#1e293b; border-radius:9999px; overflow:hidden; display:flex;">
+                    <div style="width:100%; height:6px; background:#161822; border-radius:9999px; overflow:hidden; display:flex;">
                         <div id="depthBuyProgressBar" style="width:50%; background:#10b981; transition:width 0.3s ease;"></div>
                         <div id="depthSellProgressBar" style="width:50%; background:#ef4444; transition:width 0.3s ease;"></div>
                     </div>
@@ -3643,9 +3644,9 @@
     <!-- MODAL: EXECUTION BENCHMARK (KOTAK NEO LIVE BROKER vs PARALLEL PAPER)      -->
     <!-- ========================================================================= -->
     <div id="modalExecutionBenchmark" class="straddle-modal-backdrop" style="display:none; z-index:200000;" onclick="if(event.target === this) closeExecutionBenchmarkModal()">
-        <div class="straddle-modal-card" style="max-width:1050px; width:95%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.85); overflow:hidden;">
+        <div class="straddle-modal-card" style="max-width:1050px; width:95%; background:#090d16; border:1px solid #161822; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.85); overflow:hidden;">
             <!-- Header -->
-            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:#0f172a; border-bottom:1px solid #1e293b;">
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:#0c0d12; border-bottom:1px solid #161822;">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <span style="font-size:20px;">⚡</span>
                     <div>
@@ -3661,24 +3662,24 @@
             </div>
 
             <!-- KPI Cards Ribbon -->
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; padding:14px 20px; background:#0c101c; border-bottom:1px solid rgba(255,255,255,0.06);">
-                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; padding:14px 20px; background:#08090d; border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="background:#0c0d12; border:1px solid #161822; border-radius:8px; padding:8px 12px; text-align:center;">
                     <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Avg Broker Latency</span>
                     <strong id="bmkAvgLatency" style="color:#38bdf8; font-size:16px; font-family:var(--font-mono);">0.0 ms</strong>
                 </div>
-                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                <div style="background:#0c0d12; border:1px solid #161822; border-radius:8px; padding:8px 12px; text-align:center;">
                     <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Fastest / Slowest</span>
                     <strong id="bmkFastSlowLatency" style="color:#f8fafc; font-size:13px; font-family:var(--font-mono);">0 ms / 0 ms</strong>
                 </div>
-                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                <div style="background:#0c0d12; border:1px solid #161822; border-radius:8px; padding:8px 12px; text-align:center;">
                     <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Total Slippage (pts)</span>
                     <strong id="bmkTotalSlippagePts" style="color:#10b981; font-size:16px; font-family:var(--font-mono);">0.00 pts</strong>
                 </div>
-                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                <div style="background:#0c0d12; border:1px solid #161822; border-radius:8px; padding:8px 12px; text-align:center;">
                     <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Total Slippage Impact (₹)</span>
                     <strong id="bmkTotalSlippageInr" style="color:#10b981; font-size:16px; font-family:var(--font-mono);">₹0.00</strong>
                 </div>
-                <div style="background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:8px 12px; text-align:center;">
+                <div style="background:#0c0d12; border:1px solid #161822; border-radius:8px; padding:8px 12px; text-align:center;">
                     <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block;">Execution Health</span>
                     <strong id="bmkHealthGrade" style="color:#10b981; font-size:14px; font-weight:800;">⚡ EXCELLENT</strong>
                 </div>
@@ -3688,7 +3689,7 @@
             <div style="max-height:480px; overflow-y:auto; padding:12px 20px;">
                 <table style="width:100%; border-collapse:collapse; font-size:11px; font-family:var(--font-mono);">
                     <thead>
-                        <tr style="border-bottom:1px solid #334155; color:#94a3b8; text-transform:uppercase; font-size:9.5px; text-align:left;">
+                        <tr style="border-bottom:1px solid #252836; color:#94a3b8; text-transform:uppercase; font-size:9.5px; text-align:left;">
                             <th style="padding:6px 4px;">Time IST</th>
                             <th style="padding:6px 4px;">Symbol</th>
                             <th style="padding:6px 4px;">Side</th>

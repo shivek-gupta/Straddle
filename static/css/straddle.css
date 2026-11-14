@@ -1,41 +1,41 @@
 :root {
     color-scheme: dark;
-    --bg-root: #0a0d14;
-    --bg-header: #10141f;
-    --bg-panel: #131826;
-    --bg-panel-header: #181e2e;
-    --bg-panel-subtle: rgba(255, 255, 255, 0.03);
-    --bg-card: #151a28;
-    --bg-input: #090d15;
-    --bg-table-header: #141926;
-    --bg-table-row: #0c101a;
-    --bg-table-hover: rgba(41, 98, 255, 0.09);
+    --bg-root: #060709;
+    --bg-header: #0d0e12;
+    --bg-panel: #0f1116;
+    --bg-panel-header: #13151c;
+    --bg-panel-subtle: rgba(255, 255, 255, 0.025);
+    --bg-card: #111319;
+    --bg-input: #090a0e;
+    --bg-table-header: #101217;
+    --bg-table-row: #0a0b0f;
+    --bg-table-hover: rgba(255, 255, 255, 0.04);
 
     --border-subtle: rgba(255, 255, 255, 0.07);
     --border-medium: rgba(255, 255, 255, 0.12);
-    --border-focus: rgba(41, 98, 255, 0.55);
+    --border-focus: #10b981;
 
-    --accent-blue: #2962ff;
-    --accent-blue-hover: #1e53e5;
-    --accent-blue-glow: rgba(41, 98, 255, 0.35);
+    --accent-blue: #3b82f6;
+    --accent-blue-hover: #2563eb;
+    --accent-blue-glow: rgba(59, 130, 246, 0.3);
 
-    --accent-green: #089981;
-    --accent-green-bright: #10b981;
-    --accent-green-bg: rgba(8, 153, 129, 0.16);
+    --accent-green: #10b981;
+    --accent-green-bright: #34d399;
+    --accent-green-bg: rgba(16, 185, 129, 0.14);
 
-    --accent-red: #f23645;
-    --accent-red-bright: #f43f5e;
-    --accent-red-bg: rgba(242, 54, 69, 0.16);
+    --accent-red: #f43f5e;
+    --accent-red-bright: #fb7185;
+    --accent-red-bg: rgba(244, 63, 94, 0.14);
 
     --accent-amber: #f59e0b;
     --accent-amber-bright: #fbbf24;
-    --accent-amber-bg: rgba(245, 158, 11, 0.16);
+    --accent-amber-bg: rgba(245, 158, 11, 0.14);
 
     --accent-purple: #8b5cf6;
-    --accent-purple-bg: rgba(139, 92, 246, 0.16);
+    --accent-purple-bg: rgba(139, 92, 246, 0.14);
 
     --accent-pink: #ec4899;
-    --accent-pink-bg: rgba(236, 72, 153, 0.16);
+    --accent-pink-bg: rgba(236, 72, 153, 0.14);
 
     --text-primary: #f8fafc;
     --text-secondary: #cbd5e1;
@@ -63,8 +63,8 @@ body {
 
 /* Standalone Top Navigation Header */
 .straddle-topbar {
-    background: linear-gradient(180deg, #131826 0%, #0d121c 100%);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: #0d0e12;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     padding: 10px 20px;
     display: flex;
     justify-content: space-between;
@@ -74,7 +74,7 @@ body {
     position: sticky;
     top: 0;
     z-index: 1000;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
 }
 
 .straddle-brand {
@@ -162,7 +162,7 @@ body {
 }
 
 .straddle-modal-dialog {
-    background: #10141f;
+    background: #0d0e12;
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
     width: 100%;
@@ -240,7 +240,7 @@ body {
 }
 
 .straddle-card {
-    background: #10141f;
+    background: #0d0e12;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
     padding: 14px 18px;
@@ -468,9 +468,9 @@ body {
 }
 
 .status-badge-closed {
-    background: #1e293b;
+    background: #161822;
     color: #cbd5e1;
-    border: 1px solid #334155;
+    border: 1px solid #252836;
 }
 
 .status-badge-reentry {
@@ -492,9 +492,9 @@ body {
 }
 
 .status-complete {
-    background: #1e293b;
+    background: #161822;
     color: #cbd5e1;
-    border: 1px solid #334155;
+    border: 1px solid #252836;
 }
 
 .status-sl-hit {
@@ -906,8 +906,8 @@ body {
 
 /* Strategy Builder / Settings Panels */
 .straddle-settings-panel {
-    background: #10141f;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #0a0b0e;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
     padding: 16px 20px;
     display: flex;
@@ -1046,7 +1046,7 @@ body {
 }
 
 .straddle-modal-dialog {
-    background: #10141f;
+    background: #0d0e12;
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
     width: 100%;
@@ -1220,7 +1220,7 @@ body {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #334155;
+    background-color: #252836;
     transition: .2s;
     border-radius: 18px;
 }
@@ -1407,7 +1407,7 @@ select:disabled.straddle-select {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: #0c101a;
+    background: #090a0e;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     padding: 10px 18px;
@@ -1971,7 +1971,7 @@ select:disabled.straddle-select {
     right: 0;
     z-index: 1050;
     background: #0b0f19;
-    border: 1px solid #334155;
+    border: 1px solid #252836;
     border-radius: 8px;
     box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7);
     width: 230px;
@@ -2005,7 +2005,7 @@ select:disabled.straddle-select {
     gap: 8px;
     padding: 6px 12px;
     background: #0e1422;
-    border-bottom: 1px solid #1e293b;
+    border-bottom: 1px solid #161822;
 }
 .col-dropdown-action-link {
     font-size: 11px;
@@ -2038,7 +2038,7 @@ select:disabled.straddle-select {
     user-select: none;
 }
 .col-dropdown-item:hover {
-    background: #1e293b;
+    background: #161822;
     color: #ffffff;
 }
 .col-dropdown-item input[type="checkbox"] {
@@ -2532,7 +2532,7 @@ table tbody tr {
 
 .position-select option,
 select option {
-    background-color: #10141f !important;
+    background-color: #0d0e12 !important;
     color: #f8fafc !important;
     color-scheme: dark;
 }
@@ -2722,7 +2722,7 @@ table .flag-cell {
 .flag-choice.purple { background: var(--accent-purple); }
 .flag-choice.cyan { background: #06b6d4; box-shadow: 0 0 6px rgba(6, 182, 212, 0.5); }
 .flag-choice.clear {
-    background: #334155;
+    background: #252836;
     color: #cbd5e1;
     font-size: 11px;
     line-height: 18px;
@@ -2910,7 +2910,7 @@ table .flag-cell {
    ========================================================== */
 
 .filter-panel {
-    background: linear-gradient(145deg, #131826, #0e121d);
+    background: linear-gradient(145deg, #0e0f14, #0e121d);
     border: 1px solid var(--border-subtle);
     border-radius: 10px;
     padding: 12px 18px;
@@ -3030,7 +3030,7 @@ table .flag-cell {
 }
 
 .filter-panel {
-    background: var(--bg-card, #0f172a);
+    background: var(--bg-card, #0c0d12);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     padding: 10px 14px;
@@ -3429,7 +3429,7 @@ table .flag-cell {
 }
 
 .fs-stock-selector-btn {
-    background: #1e293b;
+    background: #161822;
     border: 1px solid rgba(255, 255, 255, 0.22);
     color: #f8fafc;
     font-family: var(--font-mono);
@@ -3445,7 +3445,7 @@ table .flag-cell {
 }
 
 .fs-stock-selector-btn:hover {
-    background: #334155;
+    background: #252836;
     border-color: #60a5fa;
     color: #ffffff;
     box-shadow: 0 0 10px rgba(96, 165, 250, 0.35);
@@ -3518,7 +3518,7 @@ table .flag-cell {
 }
 
 .fs-flag-btn:hover {
-    background: #334155;
+    background: #252836;
     color: #ffffff;
 }
 
@@ -3528,7 +3528,7 @@ table .flag-cell {
     left: 14px;
     width: 330px;
     max-height: 440px;
-    background: #0f172a;
+    background: #0c0d12;
     border: 1px solid #3b82f6;
     border-radius: 8px;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.95);
@@ -3543,7 +3543,7 @@ table .flag-cell {
 }
 
 .fs-search-input {
-    background: #1e293b;
+    background: #161822;
     border: none;
     border-bottom: 1px solid rgba(255, 255, 255, 0.15);
     color: #ffffff;
@@ -4495,7 +4495,7 @@ table .flag-cell {
 }
 
 .btn-secondary {
-    background: #1e293b;
+    background: #161822;
     color: #cbd5e1;
     border: 1px solid rgba(255, 255, 255, 0.12);
     padding: 4px 13px;
@@ -4509,7 +4509,7 @@ table .flag-cell {
     transition: all 0.15s ease;
 }
 .btn-secondary:hover {
-    background: #334155;
+    background: #252836;
     color: #ffffff;
     border-color: rgba(255, 255, 255, 0.25);
 }
@@ -4751,7 +4751,7 @@ table .flag-cell {
 
 /* Exits summary badge */
 .exits-summary-badge {
-    background: #1e293b;
+    background: #161822;
     border: 1px solid rgba(255, 255, 255, 0.12);
     color: #e2e8f0;
     padding: 2px 7px;
@@ -4762,7 +4762,7 @@ table .flag-cell {
     transition: all 0.15s;
 }
 .exits-summary-badge:hover {
-    background: #334155;
+    background: #252836;
     border-color: #60a5fa;
     color: #ffffff;
 }
@@ -4771,7 +4771,7 @@ table .flag-cell {
    Dashboard Expectancy Hero Banner & Quant Analytics Styling
    ========================================================== */
 .expectancy-hero {
-    background: radial-gradient(circle at 10% 20%, #151c33 0%, #0c101c 70%, #070913 100%);
+    background: radial-gradient(circle at 10% 20%, #151c33 0%, #08090d 70%, #070913 100%);
     border: 1px solid rgba(139, 92, 246, 0.35);
     border-radius: 14px;
     padding: 16px 20px;
@@ -4930,7 +4930,7 @@ table .flag-cell {
     margin-bottom: 22px;
 }
 .insight-card {
-    background: linear-gradient(145deg, #111726, #0c101a);
+    background: linear-gradient(145deg, #111726, #090a0e);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     padding: 10px 14px;
@@ -5564,7 +5564,7 @@ table .flag-cell {
 .fund-sh-progress-bar {
     height: 14px;
     border-radius: 7px;
-    background: #1e293b;
+    background: #161822;
     overflow: hidden;
     display: flex;
     margin: 8px 0 14px 0;
@@ -6435,7 +6435,7 @@ table .flag-cell {
     left: 0;
     right: 0;
     height: 4px;
-    background: #1e293b;
+    background: #161822;
     border-radius: 2px;
 }
 .depth-ohlc-range-fill {
@@ -6499,7 +6499,7 @@ table .flag-cell {
 .depth-ratio-labels .sell-text { color: #ef4444; }
 .depth-ratio-bar-track {
     height: 5px;
-    background: #1e293b;
+    background: #161822;
     border-radius: 3px;
     overflow: hidden;
     display: flex;
@@ -6620,7 +6620,7 @@ table .flag-cell {
     margin-left: 6px;
 }
 .chart-timeframe-select {
-    background: #0f172a;
+    background: #0c0d12;
     border: 1px solid rgba(56, 189, 248, 0.45);
     color: #38bdf8;
     font-size: 11.5px;
@@ -6634,11 +6634,11 @@ table .flag-cell {
 }
 .chart-timeframe-select:hover, .chart-timeframe-select:focus {
     border-color: #38bdf8;
-    background: #1e293b;
+    background: #161822;
     box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
 }
 .chart-timeframe-select option {
-    background: #0f172a;
+    background: #0c0d12;
     color: #f1f5f9;
     font-weight: 600;
 }
@@ -6682,7 +6682,7 @@ table .flag-cell {
     font-family: var(--font-mono, monospace);
 }
 .pane-tf-select {
-    background: #0f172a;
+    background: #0c0d12;
     border: 1px solid rgba(56, 189, 248, 0.4);
     color: #38bdf8;
     font-size: 10.5px;
@@ -6696,7 +6696,7 @@ table .flag-cell {
     border-color: #38bdf8;
 }
 .pane-tf-select option {
-    background: #0f172a;
+    background: #0c0d12;
     color: #f1f5f9;
 }
 .chart-pane canvas {
@@ -6791,7 +6791,7 @@ table .flag-cell {
     margin-top: 4px;
 }
 .pill-option {
-    background: #1e2638;
+    background: #1a1d27;
     border: 1px solid rgba(255, 255, 255, 0.14);
     color: #94a3b8;
     padding: 4px 10px;
@@ -6853,7 +6853,7 @@ table .flag-cell {
     gap: 4px;
     cursor: pointer;
     font-size: 20px;
-    color: #334155;
+    color: #252836;
 }
 .interactive-stars .star-active {
     color: #fbbf24;
@@ -6906,7 +6906,7 @@ table .flag-cell {
     font-family: var(--font-sans, 'Inter', -apple-system, sans-serif) !important;
     cursor: pointer !important;
     border: 1px solid rgba(255, 255, 255, 0.14) !important;
-    background: #1e293b !important;
+    background: #161822 !important;
     color: #e2e8f0 !important;
     letter-spacing: 0.3px !important;
     transition: all 0.2s ease !important;
@@ -7034,7 +7034,7 @@ table .flag-cell {
     opacity: 0 !important;
     cursor: pointer !important;
     color-scheme: dark !important;
-    background: #0f172a !important;
+    background: #0c0d12 !important;
     color: #f1f5f9 !important;
     z-index: 2 !important;
 }
@@ -7798,7 +7798,7 @@ table .flag-cell {
         position: sticky !important;
         left: 0 !important;
         z-index: 10 !important;
-        background: #0c101a !important;
+        background: #090a0e !important;
         min-width: 90px !important;
         box-shadow: 3px 0 8px rgba(0, 0, 0, 0.5) !important;
     }
@@ -8541,22 +8541,23 @@ table .flag-cell {
     display: flex !important;
     justify-content: space-between !important;
     align-items: center !important;
-    background: #0d1527 !important;
-    border: 1px solid rgba(56, 189, 248, 0.18) !important;
+    background: #111319 !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     border-radius: 8px !important;
-    padding: 11px 16px !important;
-    margin-top: 14px !important;
+    padding: 10px 14px !important;
+    margin-top: 10px !important;
     margin-bottom: 8px !important;
     cursor: pointer !important;
     user-select: none !important;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+    -webkit-tap-highlight-color: transparent !important;
+    transition: all 0.18s ease !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35) !important;
 }
 
 .straddle-collapsible-header:hover {
-    background: #142038 !important;
-    border-color: rgba(56, 189, 248, 0.45) !important;
-    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.12) !important;
+    background: #171922 !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45) !important;
 }
 
 .straddle-collapsible-header .chevron-icon {
@@ -8572,6 +8573,14 @@ table .flag-cell {
     width: 100% !important;
     margin-bottom: 12px !important;
     animation: fadeInCollapsible 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.straddle-collapsible-body.collapsed {
+    display: none !important;
+}
+
+.straddle-collapsible-body.expanded {
+    display: block !important;
 }
 
 @keyframes fadeInCollapsible {
@@ -8669,7 +8678,7 @@ table .flag-cell {
 }
 
 .straddle-time-stepper-group .time-step-btn:first-child {
-    border-bottom: 1px solid #1e2638 !important;
+    border-bottom: 1px solid #1a1d27 !important;
     border-right: none !important;
 }
 
@@ -8774,7 +8783,7 @@ table .flag-cell {
 }
 
 .straddle-modal-card {
-    background: #0b1120 !important;
+    background: #08090e !important;
     border: 1px solid rgba(56, 189, 248, 0.28) !important;
     border-radius: 12px !important;
     box-shadow: 0 20px 45px rgba(0, 0, 0, 0.75), 0 0 25px rgba(56, 189, 248, 0.15) !important;
@@ -8851,8 +8860,8 @@ table .flag-cell {
     font-size: 11px;
     font-weight: 800;
     cursor: pointer;
-    border: 1px solid #334155;
-    background: #0f172a;
+    border: 1px solid #252836;
+    background: #0c0d12;
     color: #cbd5e1;
     transition: all 0.15s ease;
 }
@@ -8883,20 +8892,20 @@ table .flag-cell {
 }
 
 .basket-search-result-item:hover {
-    background: #1e293b;
+    background: #161822;
 }
 
 .basket-stepper-box {
     display: inline-flex;
     align-items: center;
-    background: #0b1120;
-    border: 1px solid #334155;
+    background: #08090e;
+    border: 1px solid #252836;
     border-radius: 4px;
     overflow: hidden;
 }
 
 .basket-stepper-btn {
-    background: #1e293b;
+    background: #161822;
     color: #cbd5e1;
     border: none;
     width: 22px;
@@ -8910,7 +8919,7 @@ table .flag-cell {
 }
 
 .basket-stepper-btn:hover {
-    background: #334155;
+    background: #252836;
     color: #ffffff;
 }
 
@@ -8960,7 +8969,7 @@ table .flag-cell {
     height: 13px;
     border-radius: 3px;
     border: 1.5px solid #475569;
-    background: #0b1120;
+    background: #08090e;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -9296,11 +9305,11 @@ table .flag-cell {
 
 /* Search Dropdown Items & Buttons */
 .basket-search-result-item {
-    background: #0f172a;
+    background: #0c0d12;
     transition: background 0.15s ease;
 }
 .basket-search-result-item:hover {
-    background: #1e293b;
+    background: #161822;
 }
 .search-btn-buy {
     background: linear-gradient(135deg, #059669, #10b981) !important;
@@ -9630,7 +9639,7 @@ button, input[type="button"], input[type="submit"] {
 }
 
 .straddle-btn.btn-outline:hover {
-    background: #1e293b !important;
+    background: #161822 !important;
     color: #ffffff !important;
     border-color: #38bdf8 !important;
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.25) !important;
@@ -9680,7 +9689,7 @@ button, input[type="button"], input[type="submit"] {
 .tradeable-toggle-switch {
     width: 38px;
     height: 20px;
-    background: #1e293b;
+    background: #161822;
     border: 1px solid #475569;
     border-radius: 9999px;
     position: relative;
@@ -9754,7 +9763,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
    ========================================================== */
 
 .chart-timeframe-btn {
-    background: #0f172a;
+    background: #0c0d12;
     border: 1px solid rgba(255, 255, 255, 0.15);
     color: #94a3b8;
     padding: 4px 12px;
@@ -9767,7 +9776,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 }
 
 .chart-timeframe-btn:hover {
-    background: #1e293b;
+    background: #161822;
     color: #ffffff;
     border-color: #38bdf8;
 }
@@ -9785,7 +9794,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     width: 100%;
     height: 500px;
     max-height: 500px;
-    background: #070a12;
+    background: #050608;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     overflow: hidden;
@@ -9836,7 +9845,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 
 /* Chart Toolbar Action Buttons (Zoom & Reset) */
 .chart-action-btn {
-    background: #0f172a;
+    background: #0c0d12;
     border: 1px solid rgba(255, 255, 255, 0.15);
     color: #cbd5e1;
     padding: 3px 9px;
@@ -9852,7 +9861,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 }
 
 .chart-action-btn:hover {
-    background: #1e293b;
+    background: #161822;
     color: #38bdf8;
     border-color: #38bdf8;
     box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
@@ -10063,34 +10072,42 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         box-sizing: border-box !important;
     }
 
-    /* 1. Topbar Navigation */
+    /* 1. Topbar Navigation (Non-Sticky on Mobile as requested) */
     .straddle-topbar {
-        padding: 8px 10px !important;
+        position: relative !important;
+        top: auto !important;
+        padding: 6px 10px !important;
         flex-wrap: wrap !important;
-        gap: 8px !important;
+        gap: 6px !important;
         height: auto !important;
-        min-height: 48px !important;
+        min-height: 42px !important;
+        box-shadow: none !important;
     }
 
     .straddle-brand {
-        font-size: 14.5px !important;
+        font-size: 13.5px !important;
         gap: 6px !important;
     }
 
+    .straddle-brand-badge {
+        font-size: 9px !important;
+        padding: 2px 5px !important;
+    }
+
     .straddle-header-controls {
-        gap: 6px !important;
+        gap: 5px !important;
         flex-wrap: wrap !important;
     }
 
     #topbarMtmPill {
-        padding: 4px 8px !important;
-        font-size: 11px !important;
+        padding: 3px 7px !important;
+        font-size: 10.5px !important;
     }
 
     .straddle-topbar .straddle-btn,
     .straddle-topbar .straddle-sys-btn {
-        padding: 5px 9px !important;
-        font-size: 11px !important;
+        padding: 4px 8px !important;
+        font-size: 10.5px !important;
     }
 
     #topbarSettingsDropdown {
@@ -10181,237 +10198,91 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         justify-content: center !important;
     }
 
-    /* 5. Master Algos Table Mobile Cards (Zero Horizontal Scroll) */
+    /* 5. Master Algos Table, Positions Table & Legs Builder Table: Responsive Horizontal Scroll */
     .straddle-table-wrap {
         width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
         border-radius: 8px !important;
-    }
-
-    #straddleAlgosTable thead {
-        display: none !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        background: #0a0b0f !important;
     }
 
     #straddleAlgosTable,
-    #straddleAlgosTable tbody {
-        display: block !important;
-        width: 100% !important;
-        min-width: 0 !important;
-    }
-
-    #straddleAlgosTable tbody tr[data-strategy-id] {
-        display: grid !important;
-        grid-template-columns: 26px 1fr auto !important;
-        grid-template-areas:
-            "sel name mtm"
-            "status status mult"
-            "switches switches switches"
-            "timings timings timings"
-            "days days days"
-            "err err err";
-        gap: 8px 10px !important;
-        background: #0c101c !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-radius: 10px !important;
-        padding: 12px 14px !important;
-        margin-bottom: 12px !important;
-        width: 100% !important;
-        box-sizing: border-box !important;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
-    }
-
-    #straddleAlgosTable td {
-        display: block !important;
-        padding: 0 !important;
-        border: none !important;
-        min-width: 0 !important;
-        box-sizing: border-box !important;
-    }
-
-    .algo-col-select {
-        grid-area: sel !important;
-        display: flex !important;
-        align-items: center !important;
-    }
-
-    .algo-col-name {
-        grid-area: name !important;
-        display: flex !important;
-        align-items: center !important;
-        min-width: 0 !important;
-    }
-
-    .algo-col-name a {
-        font-size: 13.5px !important;
-        font-weight: 800 !important;
-        word-break: break-word !important;
-    }
-
-    .algo-col-mtm {
-        grid-area: mtm !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: flex-end !important;
-        font-size: 14px !important;
-        font-weight: 800 !important;
-    }
-
-    .algo-col-status {
-        grid-area: status !important;
-        display: flex !important;
-        align-items: center !important;
-        gap: 6px !important;
-    }
-
-    .algo-col-mult {
-        grid-area: mult !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: flex-end !important;
-    }
-
-    .algo-col-enable,
-    .algo-col-adv-sl {
-        display: inline-flex !important;
-        align-items: center !important;
-        gap: 6px !important;
-    }
-
-    .algo-col-enable::before {
-        content: "Auto Entry:";
-        font-size: 11px;
-        font-weight: 700;
-        color: #94a3b8;
-    }
-
-    .algo-col-adv-sl::before {
-        content: "0ms SL:";
-        font-size: 11px;
-        font-weight: 700;
-        color: #94a3b8;
-    }
-
-    #straddleAlgosTable tr[data-strategy-id] .algo-col-enable {
-        grid-column: 1 / 2;
-        grid-row: 3;
-    }
-
-    #straddleAlgosTable tr[data-strategy-id] .algo-col-adv-sl {
-        grid-column: 2 / 4;
-        grid-row: 3;
-        justify-content: flex-end;
-    }
-
-    .algo-col-start::before {
-        content: "Start: ";
-        font-size: 10px;
-        font-weight: 700;
-        color: #64748b;
-    }
-
-    .algo-col-end::before {
-        content: "End: ";
-        font-size: 10px;
-        font-weight: 700;
-        color: #64748b;
-    }
-
-    #straddleAlgosTable tr[data-strategy-id] .algo-col-start {
-        grid-column: 1 / 2;
-        grid-row: 4;
-        font-size: 11px !important;
-    }
-
-    #straddleAlgosTable tr[data-strategy-id] .algo-col-end {
-        grid-column: 2 / 4;
-        grid-row: 4;
-        font-size: 11px !important;
-        display: flex !important;
-        align-items: center !important;
-        gap: 8px !important;
-        justify-content: flex-end !important;
-    }
-
-    .algo-col-days {
-        grid-column: 1 / -1 !important;
-        grid-row: 5 !important;
-        padding-top: 4px !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
-    }
-
-    .algo-col-entry-err {
-        grid-column: 1 / -1 !important;
-        grid-row: 6 !important;
-    }
-
-    .algo-col-exit-err {
-        grid-column: 1 / -1 !important;
-        grid-row: 7 !important;
-    }
-
-    .algo-col-entry-err:empty,
-    .algo-col-exit-err:empty {
-        display: none !important;
-    }
-
-    /* Open & Closed Positions Table Mobile Transformation (Zero Horizontal Scroll) */
-    #straddlePositionsTable thead {
-        display: none !important;
-    }
-
     #straddlePositionsTable,
-    #straddlePositionsTable tbody {
+    .straddle-legs-builder-table {
+        display: table !important;
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
+
+    #straddleAlgosTable thead,
+    #straddlePositionsTable thead,
+    .straddle-legs-builder-table thead {
+        display: table-header-group !important;
+    }
+
+    #straddleAlgosTable tbody,
+    #straddlePositionsTable tbody,
+    .straddle-legs-builder-table tbody {
+        display: table-row-group !important;
+    }
+
+    #straddleAlgosTable tr,
+    #straddlePositionsTable tr,
+    .straddle-legs-builder-table tr {
+        display: table-row !important;
+    }
+
+    #straddleAlgosTable th,
+    #straddleAlgosTable td,
+    #straddlePositionsTable th,
+    #straddlePositionsTable td,
+    .straddle-legs-builder-table th,
+    .straddle-legs-builder-table td {
+        display: table-cell !important;
+        padding: 6px 8px !important;
+        white-space: nowrap !important;
+        vertical-align: middle !important;
+        font-size: 11.5px !important;
+    }
+
+    #straddleAlgosTable {
+        min-width: 820px !important;
+    }
+
+    #straddlePositionsTable {
+        min-width: 780px !important;
+    }
+
+    .straddle-legs-builder-table {
+        min-width: 950px !important;
+    }
+
+    #straddleLegsContainer,
+    #straddleLegsTable {
+        width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
         display: block !important;
-        width: 100% !important;
-        min-width: 0 !important;
-    }
-
-    #straddlePositionsTable tbody tr[data-leg-index] {
-        display: flex !important;
-        flex-direction: column !important;
-        background: #0c101c !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-radius: 10px !important;
-        padding: 12px 14px !important;
-        margin-bottom: 12px !important;
-        gap: 8px !important;
-        width: 100% !important;
-        box-sizing: border-box !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
-    }
-
-    #straddlePositionsTable td {
-        display: block !important;
-        padding: 0 !important;
-        border: none !important;
-        width: 100% !important;
-        box-sizing: border-box !important;
-    }
-
-    .pos-col-select {
-        display: none !important;
-    }
-
-    .pos-col-sym {
-        width: 100% !important;
-    }
-
-    .pos-col-ent-price,
-    .pos-col-target,
-    .pos-col-sl,
-    .pos-col-exit-price {
-        padding: 4px 0 !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
     }
 
     /* 6. Strategy Settings & Builder Panel */
     .straddle-settings-panel {
-        padding: 8px !important;
-        max-width: 100vw !important;
+        padding: 10px 8px !important;
+        width: 100% !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
+        overflow-x: hidden !important;
     }
 
     .straddle-settings-section {
         padding: 10px 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
     }
 
     .straddle-settings-panel > div:first-child {
@@ -10423,6 +10294,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     .straddle-settings-panel > div:first-child > div {
         width: 100% !important;
         flex-wrap: wrap !important;
+        gap: 6px !important;
     }
 
     .straddle-settings-panel > div:last-child {
@@ -10439,140 +10311,59 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 
     .straddle-settings-panel > div:last-child button {
         width: 100% !important;
-        padding: 10px !important;
-        font-size: 13px !important;
+        padding: 8px !important;
+        font-size: 12px !important;
     }
 
-    /* Configurable Legs Table Mobile Transformation (Screenshot 5) */
-    .straddle-legs-builder-table thead {
-        display: none !important;
-    }
-
-    .straddle-legs-builder-table,
-    .straddle-legs-builder-table tbody {
-        display: block !important;
-        width: 100% !important;
-        min-width: 0 !important;
-    }
-
-    .straddle-legs-builder-table tr.straddle-leg-builder-row {
-        display: flex !important;
-        flex-wrap: wrap !important;
-        gap: 8px 10px !important;
-        align-items: center !important;
-        background: #0c101c !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-radius: 10px !important;
-        padding: 12px 14px !important;
-        margin-bottom: 12px !important;
-        width: 100% !important;
-        box-sizing: border-box !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
-    }
-
-    .straddle-legs-builder-table td {
-        display: inline-flex !important;
-        align-items: center !important;
-        padding: 0 !important;
-        border: none !important;
-        box-sizing: border-box !important;
-    }
-
-    .leg-col-handle {
-        width: 24px !important;
-    }
-
-    .leg-col-side {
-        width: auto !important;
-    }
-
-    .leg-col-prod {
-        width: auto !important;
-    }
-
-    .leg-col-strike {
-        flex: 1 1 auto !important;
-    }
-
-    .leg-col-type {
-        width: auto !important;
-    }
-
-    .leg-col-lots {
-        width: auto !important;
-    }
-
-    .leg-col-actions {
-        margin-left: auto !important;
-    }
-
-    .leg-col-target {
-        flex: 1 1 45% !important;
-        padding-top: 4px !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
-    }
-
-    .leg-col-tgt-reexec {
-        flex: 1 1 45% !important;
-        padding-top: 4px !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
-    }
-
-    .leg-col-sl {
-        flex: 1 1 45% !important;
-    }
-
-    .leg-col-sl-reexec {
-        flex: 1 1 45% !important;
-    }
-
-    .leg-col-hedge {
-        flex: 1 1 100% !important;
-        padding-top: 4px !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
-    }
-
-    .leg-col-underlying {
-        flex: 1 1 45% !important;
-    }
-
-    .leg-col-expiry {
-        flex: 1 1 45% !important;
-    }
-
-    .leg-col-action {
-        flex: 1 1 100% !important;
-    }
-
-    .leg-col-tsl {
-        display: none !important;
-    }
-
-    #straddleLegsContainer,
-    #straddleLegsTable {
-        width: 100% !important;
-        overflow-x: visible !important;
-        display: block !important;
-    }
-
-    /* Form & Grid Vertical Stacking (Screenshots 3 & 4) */
+    /* Form & Grid Vertical Stacking with 100% Box-Sizing to Prevent Right Screen Cutoff */
     .straddle-grid-4col,
     .straddle-grid-3col,
     .straddle-grid-2col {
         grid-template-columns: 1fr !important;
-        gap: 12px !important;
+        gap: 10px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .straddle-form-group {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .straddle-form-group label {
+        word-break: break-word !important;
+        white-space: normal !important;
+        font-size: 11.5px !important;
+    }
+
+    .straddle-select,
+    .straddle-input {
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        text-overflow: ellipsis !important;
     }
 
     .straddle-toggles-row {
         display: grid !important;
         grid-template-columns: 1fr !important;
         gap: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
     }
 
     .prem-matching-radios-row {
         flex-direction: column !important;
-        align-items: stretch !important;
-        gap: 12px !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .prem-matching-radios-row .straddle-checkbox-label {
+        word-break: break-word !important;
+        white-space: normal !important;
+        font-size: 11.5px !important;
     }
 
     .pnl-main-layout {
@@ -10743,38 +10534,6 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     .straddle-action-bar .straddle-btn {
         width: 100% !important;
     }
-
-    #straddleAlgosTable tbody tr[data-strategy-id] {
-        padding: 10px 12px !important;
-        gap: 6px 8px !important;
-    }
-
-    .algo-col-name a {
-        font-size: 12.5px !important;
-    }
-
-    .algo-col-mtm {
-        font-size: 13px !important;
-    }
-
-    .straddle-legs-builder-table tr.straddle-leg-builder-row {
-        padding: 10px 12px !important;
-        gap: 6px 8px !important;
-    }
-
-    .straddle-legs-builder-table td select,
-    .straddle-legs-builder-table td input {
-        font-size: 11px !important;
-    }
-
-    .leg-col-target,
-    .leg-col-tgt-reexec,
-    .leg-col-sl,
-    .leg-col-sl-reexec,
-    .leg-col-underlying,
-    .leg-col-expiry {
-        flex: 1 1 100% !important;
-    }
 }
 
 
@@ -10865,7 +10624,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     max-height: 480px !important;
     overflow-y: auto !important;
     background: #090e1a !important;
-    border: 1px solid #334155 !important;
+    border: 1px solid #252836 !important;
     border-radius: 12px !important;
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(56, 189, 248, 0.15) !important;
     z-index: 12000 !important;
@@ -10891,7 +10650,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 }
 
 .asset-dropdown-item:hover {
-    background: #1e293b !important;
+    background: #161822 !important;
 }
 
 .asset-dropdown-item.active {
@@ -10927,7 +10686,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
    ========================================================== */
 
 .orderbook-tab-btn {
-    background: #0f172a !important;
+    background: #0c0d12 !important;
     color: #94a3b8 !important;
     border: 1px solid rgba(255, 255, 255, 0.12) !important;
     border-radius: 6px !important;
@@ -10945,7 +10704,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 .orderbook-tab-btn:hover {
     color: #f8fafc !important;
     border-color: rgba(56, 189, 248, 0.45) !important;
-    background: #1e293b !important;
+    background: #161822 !important;
 }
 
 .orderbook-tab-btn.active {
