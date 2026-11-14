@@ -1192,6 +1192,58 @@
                                     <input type="hidden" id="cfgEndTime" value="15:29:50">
                                 </div>
                             </div>
+                            <!-- No Re-Entry After (Cutoff to avoid new entries / re-executions in last minutes of algo) -->
+                            <div class="straddle-form-group" style="margin-bottom:0;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+                                    <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:0;" title="No new entries or re-executions will be triggered after this cutoff time">No re-entry after:</label>
+                                    <label class="quantiply-switch switch-compact" title="Enable / Disable No Re-Entry After Cutoff">
+                                        <input type="checkbox" id="cfgToggleNoReEntryAfter" onchange="syncNoReEntryAfterState()">
+                                        <span class="quantiply-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="straddle-time-stepper-group" id="groupNoReEntryAfterTime" style="display:inline-flex; align-items:center; background:#070a12; border:1px solid #1e2638; border-radius:8px; padding:3px 6px; gap:4px; opacity:0.6; transition:opacity 0.2s ease;">
+                                    <!-- HH -->
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:30px;">
+                                        <input type="text" id="cfgNoReEntryAfterTime_hh" maxlength="2" value="15" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgNoReEntryAfterTime')" oninput="validateTimeDigits(this, 23)" style="width:28px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Hour (00-23)">
+                                        <div class="straddle-stepper-arrows">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgNoReEntryAfterTime', 'hh', 1)" title="Hour +1">
+                                                <svg width="7" height="4" viewBox="0 0 7 4" fill="currentColor" style="display:block;"><path d="M3.5 0L7 4H0z"/></svg>
+                                            </button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgNoReEntryAfterTime', 'hh', -1)" title="Hour -1">
+                                                <svg width="7" height="4" viewBox="0 0 7 4" fill="currentColor" style="display:block;"><path d="M3.5 4L0 0h7z"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
+                                    <!-- MM -->
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:30px;">
+                                        <input type="text" id="cfgNoReEntryAfterTime_mm" maxlength="2" value="00" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgNoReEntryAfterTime')" oninput="validateTimeDigits(this, 59)" style="width:28px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Minute (00-59)">
+                                        <div class="straddle-stepper-arrows">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgNoReEntryAfterTime', 'mm', 1)" title="Minute +1">
+                                                <svg width="7" height="4" viewBox="0 0 7 4" fill="currentColor" style="display:block;"><path d="M3.5 0L7 4H0z"/></svg>
+                                            </button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgNoReEntryAfterTime', 'mm', -1)" title="Minute -1">
+                                                <svg width="7" height="4" viewBox="0 0 7 4" fill="currentColor" style="display:block;"><path d="M3.5 4L0 0h7z"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <span style="color:#64748b; font-weight:800; font-size:13px;">:</span>
+                                    <!-- SS -->
+                                    <div class="straddle-stepper-box" style="display:inline-flex; align-items:stretch; background:#0b0e14; border:1px solid #232d3d; border-radius:6px; overflow:hidden; height:30px;">
+                                        <input type="text" id="cfgNoReEntryAfterTime_ss" maxlength="2" value="00" class="straddle-time-input straddle-stepper-input" onchange="syncTimeSegmentsToMain('cfgNoReEntryAfterTime')" oninput="validateTimeDigits(this, 59)" style="width:28px; font-family:var(--font-mono); text-align:center; font-weight:800; border:none; background:transparent; font-size:13px; color:#38bdf8; padding:0 2px;" title="Second (00-59)">
+                                        <div class="straddle-stepper-arrows">
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgNoReEntryAfterTime', 'ss', 1)" title="Second +1">
+                                                <svg width="7" height="4" viewBox="0 0 7 4" fill="currentColor" style="display:block;"><path d="M3.5 0L7 4H0z"/></svg>
+                                            </button>
+                                            <button type="button" class="time-step-btn" onclick="stepStraddleTimePart('cfgNoReEntryAfterTime', 'ss', -1)" title="Second -1">
+                                                <svg width="7" height="4" viewBox="0 0 7 4" fill="currentColor" style="display:block;"><path d="M3.5 4L0 0h7z"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <input type="hidden" id="cfgNoReEntryAfterTime" value="15:00:00">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" style="margin-left:4px;" title="Clock Cutoff"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                </div>
+                            </div>
                         </div>
                     </div> <!-- /closing underlying & timings flex container -->
                 </div> <!-- /#sec_builder_timings -->
@@ -1212,31 +1264,75 @@
                 </div>
 
                 <div id="sec_builder_mtm" class="straddle-collapsible-body">
+                    <!-- MTM Calculation Mode Toggle Bar (AlgoTest / Quantiply Parity) -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; background:#070a12; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 14px; margin-bottom:14px;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:12px; font-weight:700; color:#cbd5e1;">MTM Calculation Mode:</span>
+                            <div class="straddle-btn-group" style="display:inline-flex; border:1px solid #1e2638; border-radius:6px; overflow:hidden; background:#0b0e14;">
+                                <button type="button" class="straddle-btn active-toggle" id="btnMtmModeOverall" onclick="setMtmCalcMode('Overall')" style="padding:4px 14px; font-size:11.5px; font-weight:700;" title="Overall MTM: Target, Lock & Trail and SL values apply to the aggregate strategy basket">Overall MTM</button>
+                                <button type="button" class="straddle-btn btn-outline" id="btnMtmModePerLot" onclick="setMtmCalcMode('Per Lot')" style="padding:4px 14px; font-size:11.5px; font-weight:700;" title="MTM Per Lot: Target, Lock & Trail and SL values scale dynamically multiplied by total strategy lots">MTM Per Lot</button>
+                            </div>
+                        </div>
+                        <div id="mtmLotsIndicator" style="font-size:11.5px; color:#38bdf8; font-family:var(--font-mono); font-weight:700;">
+                            (Overall strategy basket mode active)
+                        </div>
+                    </div>
+
                     <div class="straddle-grid-2col">
-                        <!-- MTM Target Box -->
+                        <!-- MTM Target & Trailing Box (AlgoTest Lock & Trail Parity) -->
                         <div id="card_mtm_target" style="background:#0c101a; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; transition:all 0.2s ease;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                                <div style="font-size:12px; font-weight:800; color:#38bdf8;">MTM TARGET</div>
+                                <div style="font-size:12px; font-weight:800; color:#38bdf8;">MTM TARGET & TRAILING (LOCK & TRAIL)</div>
                                 <div style="display:flex; align-items:center; gap:6px;">
                                     <span id="badge_mtm_sub_target" style="font-size:9.5px; font-weight:700; color:#38bdf8; text-transform:uppercase;">ACTIVE</span>
-                                    <label class="quantiply-switch switch-compact" title="Enable / Disable MTM Target">
+                                    <label class="quantiply-switch switch-compact" title="Enable / Disable MTM Target & Trailing">
                                         <input type="checkbox" id="cfgToggleMtmTarget" checked onchange="onToggleMtmSubTarget(this.checked)">
                                         <span class="quantiply-slider"></span>
                                     </label>
                                 </div>
                             </div>
                             <div class="straddle-form-group">
-                                <label>Type:</label>
+                                <label style="font-weight:700; font-size:11.5px; color:#94a3b8;">Trailing / Target Type:</label>
                                 <select id="cfgMtmTargetType" class="straddle-select" onchange="syncMtmFieldStates()">
-                                    <option value="MTM in total amount" selected>MTM in total amount</option>
-                                    <option value="MTM in %">MTM in %</option>
+                                    <option value="Lock and Trail" selected>Lock and Trail</option>
+                                    <option value="Lock Profit">Lock Profit</option>
+                                    <option value="Trail Profit">Trail Profit</option>
+                                    <option value="MTM in total amount">Fixed Target (Amount)</option>
+                                    <option value="MTM in %">Fixed Target (%)</option>
                                     <option value="None">None</option>
                                 </select>
                             </div>
-                            <div class="straddle-form-group">
-                                <label>Value (₹ / %):</label>
+
+                            <!-- AlgoTest Style Lock and Trail 2x2 Input Grid -->
+                            <div id="group_mtm_lock_and_trail" style="background:#070a12; border:1px solid #1e2638; border-radius:8px; padding:10px 12px; margin-bottom:12px;">
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+                                    <div id="box_mtm_reach">
+                                        <label id="lblMtmTargetReach" style="font-size:11px; font-weight:700; color:#94a3b8; display:block; margin-bottom:4px;">If profit reaches:</label>
+                                        <input type="number" id="cfgMtmTargetReach" class="straddle-input" value="100000" placeholder="0">
+                                    </div>
+                                    <div id="box_mtm_lock">
+                                        <label id="lblMtmTargetLock" style="font-size:11px; font-weight:700; color:#94a3b8; display:block; margin-bottom:4px;">Lock profit:</label>
+                                        <input type="number" id="cfgMtmTargetLock" class="straddle-input" value="80000" placeholder="0">
+                                    </div>
+                                </div>
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                    <div id="box_mtm_trail_step">
+                                        <label id="lblMtmTargetTrailStep" style="font-size:11px; font-weight:700; color:#94a3b8; display:block; margin-bottom:4px;">For every increase in profit by:</label>
+                                        <input type="number" id="cfgMtmTargetTrailStep" class="straddle-input" value="8000" placeholder="0">
+                                    </div>
+                                    <div id="box_mtm_trail_val">
+                                        <label id="lblMtmTargetTrailVal" style="font-size:11px; font-weight:700; color:#94a3b8; display:block; margin-bottom:4px;">Trail profit by:</label>
+                                        <input type="number" id="cfgMtmTargetTrailVal" class="straddle-input" value="5000" placeholder="0">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Legacy / Fixed Target Value input -->
+                            <div id="group_mtm_fixed_target" class="straddle-form-group" style="display:none;">
+                                <label id="lblMtmTargetVal">Value (₹ / %):</label>
                                 <input type="number" id="cfgMtmTargetValue" class="straddle-input" value="10000">
                             </div>
+
                             <div class="straddle-form-group">
                                 <label>MTM Re-entry:</label>
                                 <select id="cfgMtmTargetReEntry" class="straddle-select">
@@ -1275,15 +1371,8 @@
                                 </select>
                             </div>
                             <div class="straddle-form-group">
-                                <label>Value (₹ / %):</label>
+                                <label id="lblMtmSlVal">Value (₹ / %):</label>
                                 <input type="number" id="cfgMtmSlValue" class="straddle-input" value="-5000">
-                            </div>
-                            <div class="straddle-form-group">
-                                <label>Profit lock and Trailing stoploss:</label>
-                                <select id="cfgMtmProfitLock" class="straddle-select">
-                                    <option value="None" selected>None</option>
-                                    <option value="Lock & Trail">Lock & Trail</option>
-                                </select>
                             </div>
                             <div class="straddle-form-group">
                                 <label>Action:</label>

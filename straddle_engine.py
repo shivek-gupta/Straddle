@@ -446,24 +446,27 @@ DEFAULT_STRATEGIES = [
             "range_breakout": False,
             "dynamic_hedging": True,
         },
+        "mtm_calc_mode": "Overall",
+        "no_reentry_after": {
+            "enabled": False,
+            "time": "15:00:00"
+        },
         "mtm_target": {
-            "type": "MTM in total amount",
+            "enabled": True,
+            "type": "Lock and Trail",
+            "profit_reaches": 100000.0,
+            "lock_profit": 80000.0,
+            "trail_step": 8000.0,
+            "trail_val": 5000.0,
             "value": 10000.0,
             "re_entry": "None",
             "max_re_entries": 0,
             "action": "Square off all positions",
         },
         "mtm_stoploss": {
+            "enabled": True,
             "type": "None",
             "value": 0.0,
-            "profit_lock_trail": {
-                "threshold": 0.0,
-                "lock_profit": 0.0,
-                "trail_step": 0.0,
-                "trail_profit": 0.0,
-            },
-            "re_entry": "None",
-            "max_re_entries": 0,
             "action": "Square off all positions",
         },
         "premium_matching": {
@@ -3366,6 +3369,15 @@ class StraddleManager:
             # Strictly normalize start_time and end_time strings for both new and updated strategies
             strat_dict["start_time"] = normalize_time_str(strat_dict.get("start_time"), "09:15:56")
             strat_dict["end_time"] = normalize_time_str(strat_dict.get("end_time"), "15:29:50")
+            if "no_reentry_after" in strat_dict and isinstance(strat_dict["no_reentry_after"], dict):
+                raw_nrt = strat_dict["no_reentry_after"].get("time")
+                if raw_nrt:
+                    strat_dict["no_reentry_after"]["time"] = normalize_time_str(raw_nrt, "15:00:00")
+            if "advanced_settings" in strat_dict and isinstance(strat_dict["advanced_settings"], dict):
+                adv_nrt = strat_dict["advanced_settings"].get("no_reentry_after_time")
+                if adv_nrt:
+                    strat_dict["advanced_settings"]["no_reentry_after_time"] = normalize_time_str(adv_nrt, "15:00:00")
+                strat_dict["advanced"] = dict(strat_dict["advanced_settings"])
 
             idx = next((i for i, s in enumerate(self._strategies) if s.get("strategy_id") == sid), -1)
             if idx >= 0:
@@ -3549,6 +3561,26 @@ class StraddleManager:
 
         auto_lots = int(math.floor(available_capital / total_margin_per_lot))
         return max(1, auto_lots)
+
+    def get_strategy_lots(self, strat: Dict[str, Any]) -> int:
+        """
+        Returns the effective number of traded lots for the strategy,
+        factoring in main leg lot sizing and effective multiplier.
+        Used for scaling 'MTM Per Lot' targets, lock & trail, and stoplosses.
+        """
+        try:
+            eff_mult = self.get_effective_multiplier(strat)
+            legs = strat.get("legs", [])
+            sell_legs = [l for l in legs if str(l.get("side", "")).upper() == "SELL" and not l.get("is_associated_hedge")]
+            if not sell_legs:
+                sell_legs = [l for l in legs if not l.get("is_associated_hedge")]
+            if not sell_legs:
+                sell_legs = legs
+            base_lots = max((int(l.get("lots", 1) or 1) for l in sell_legs), default=1)
+            return max(1, int(eff_mult * base_lots))
+        except Exception:
+            return 1
+
 
 
     def update_strategy_multiplier(
@@ -4991,8 +5023,22 @@ class StraddleManager:
         is_after_end = (now_sec >= et_sec)
         is_time_window = (st_sec <= now_sec < et_sec)
 
+        # Check No Re-Entry After Cutoff (avoids taking entries / re-executions in last few minutes of algo)
+        no_re_cfg = strat.get("no_reentry_after") or {}
+        adv_cfg = strat.get("advanced_settings") or strat.get("advanced") or {}
+        no_re_enabled = bool(no_re_cfg.get("enabled", adv_cfg.get("no_reentry_after_enabled", False)))
+        no_re_time = str(no_re_cfg.get("time") or adv_cfg.get("no_reentry_after_time") or adv_cfg.get("re_entry_before_time") or "").strip()
+        is_after_reentry_cutoff = False
+        reentry_cutoff_str = ""
+        if no_re_enabled and no_re_time:
+            reentry_cutoff_sec = parse_time_to_seconds(no_re_time, -1)
+            if reentry_cutoff_sec > 0:
+                reentry_cutoff_str = no_re_time
+                if now_sec >= reentry_cutoff_sec:
+                    is_after_reentry_cutoff = True
+
         # Can this strategy initiate a new trade right now?
-        can_enter = is_enabled and is_day_scheduled and is_time_window
+        can_enter = is_enabled and is_day_scheduled and is_time_window and not is_after_reentry_cutoff
 
         reason = "OK"
         if not is_enabled:
@@ -5003,6 +5049,8 @@ class StraddleManager:
             reason = f"Waiting for Start Time ({st_str})"
         elif is_after_end:
             reason = f"Trading hours ended ({et_str})"
+        elif is_after_reentry_cutoff:
+            reason = f"Past No Re-Entry cutoff ({reentry_cutoff_str})"
 
         return {
             "is_enabled": is_enabled,
@@ -5010,6 +5058,8 @@ class StraddleManager:
             "is_time_window": is_time_window,
             "is_before_start": is_before_start,
             "is_after_end": is_after_end,
+            "is_after_reentry_cutoff": is_after_reentry_cutoff,
+            "no_reentry_cutoff_str": reentry_cutoff_str,
             "can_enter": can_enter,
             "reason": reason,
             "st_sec": st_sec,
@@ -8370,6 +8420,11 @@ class StraddleManager:
                 strat["_margin_auto_exit_pending"] = False
                 strat["margin_exit_countdown"] = 0
                 strat["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
+                strat["_mtm_lock_triggered"] = False
+                strat["_mtm_locked_profit"] = None
+                strat["_mtm_peak_profit"] = 0.0
+                strat.pop("mtm_locked_floor", None)
+                strat.pop("mtm_peak_profit", None)
 
                 # Reset nested strategy dict if present
                 if "strategy" in strat and isinstance(strat["strategy"], dict):
@@ -9198,6 +9253,27 @@ class StraddleManager:
             f"[{strat.get('name')}] Re-Execution evaluation for {pos.get('symbol')} ({trigger} hit): re_type='{re_type_u}', count={cur_count}/{re_max}, enabled={is_re_enabled}"
         )
 
+        # Check 'No Re-Entry After' cutoff condition (AlgoTest Parity)
+        no_re_cfg = strat.get("no_reentry_after") or {}
+        adv_cfg = strat.get("advanced_settings") or strat.get("advanced") or {}
+        no_re_enabled = bool(no_re_cfg.get("enabled", adv_cfg.get("no_reentry_after_enabled", False)))
+        no_re_time = str(no_re_cfg.get("time") or adv_cfg.get("no_reentry_after_time") or adv_cfg.get("re_entry_before_time") or "").strip()
+        if no_re_enabled and no_re_time:
+            cutoff_sec = parse_time_to_seconds(no_re_time, -1)
+            ist_now = now_ist()
+            now_sec = ist_now.hour * 3600 + ist_now.minute * 60 + ist_now.second
+            if cutoff_sec > 0 and now_sec >= cutoff_sec:
+                now_str = ist_now.strftime("%H:%M:%S")
+                self._log_event(
+                    f"[{strat.get('name')}] ⛔ Re-entry BLOCKED for leg '{pos.get('symbol')}': "
+                    f"Current time ({now_str}) is past 'No Re-Entry After' cutoff ({no_re_time}).",
+                    level="INFO"
+                )
+                mode = self._state.get("execution_mode", "LIVE_BROKER")
+                broker = get_broker_adapter(mode)
+                self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"No Re-Entry After cutoff reached ({no_re_time})")
+                return
+
         chk = self.get_strategy_schedule_status(strat)
         strat_active = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
         can_proceed = (chk.get("can_enter", False) or (strat_active and not chk.get("is_after_end", False) and chk.get("is_day_scheduled", True))) and self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED")
@@ -9217,6 +9293,21 @@ class StraddleManager:
             target_exit_order_id = exit_order_id or pos.get("exit_order_id")
 
             def _re_entry_worker():
+                if no_re_enabled and no_re_time:
+                    c_sec = parse_time_to_seconds(no_re_time, -1)
+                    now_d = now_ist()
+                    now_s = now_d.hour * 3600 + now_d.minute * 60 + now_d.second
+                    if c_sec > 0 and now_s >= c_sec:
+                        self._log_event(
+                            f"[{strat.get('name')}] ⛔ Re-entry worker aborted for leg '{pos.get('symbol')}': "
+                            f"Current time ({now_d.strftime('%H:%M:%S')}) is past 'No Re-Entry After' cutoff ({no_re_time}).",
+                            level="INFO"
+                        )
+                        mode_w = self._state.get("execution_mode", "LIVE_BROKER")
+                        broker_w = get_broker_adapter(mode_w)
+                        self._auto_square_off_associated_hedge(strat, pos, broker_w, reason=f"No Re-Entry After cutoff reached ({no_re_time})")
+                        return
+
                 chk_w = self.get_strategy_schedule_status(strat)
                 strat_active_w = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
                 can_enter_w = (chk_w.get("can_enter", False) or (strat_active_w and not chk_w.get("is_after_end", False) and chk_w.get("is_day_scheduled", True)))
@@ -13287,19 +13378,110 @@ class StraddleManager:
                 strat["re_execution_counts"] = self.get_strategy_reexecution_counts(strat)
                 total_portfolio_mtm += strat["mtm"]
 
-                # Check Strategy-level MTM Target
+                # Check Strategy-level MTM Target & Trailing (AlgoTest Lock & Trail Parity)
                 mtm_sec_enabled = strat.get("mtm_enabled", True)
                 mtm_tgt = strat.get("mtm_target", {})
                 mtm_tgt_enabled = mtm_sec_enabled and mtm_tgt.get("enabled", True)
                 tgt_type = mtm_tgt.get("type", "None")
 
+                # Calculation Mode & Effective Strategy Lots
+                mtm_calc_mode = str(strat.get("mtm_calc_mode") or "Overall")
+                strat_lots = self.get_strategy_lots(strat) if mtm_calc_mode == "Per Lot" else 1
+
                 if mtm_tgt_enabled and tgt_type not in ("None", None, ""):
-                    if tgt_type in ("MTM in total amount", "Fixed Amount"):
-                        tgt_val = abs(float(mtm_tgt.get("value", 0.0)))
+                    if tgt_type in ("Lock and Trail", "Lock Profit", "Trail Profit"):
+                        p_reaches = float(mtm_tgt.get("profit_reaches", 0.0) or (mtm_tgt.get("profit_lock_trail", {}).get("threshold", 0.0) if isinstance(mtm_tgt.get("profit_lock_trail"), dict) else 0.0) or 0.0) * strat_lots
+                        l_profit = float(mtm_tgt.get("lock_profit", 0.0) or (mtm_tgt.get("profit_lock_trail", {}).get("lock_profit", 0.0) if isinstance(mtm_tgt.get("profit_lock_trail"), dict) else 0.0) or 0.0) * strat_lots
+                        t_step = float(mtm_tgt.get("trail_step", 0.0) or (mtm_tgt.get("profit_lock_trail", {}).get("trail_step", 0.0) if isinstance(mtm_tgt.get("profit_lock_trail"), dict) else 0.0) or 0.0) * strat_lots
+                        t_val = float(mtm_tgt.get("trail_val", 0.0) or (mtm_tgt.get("profit_lock_trail", {}).get("trail_profit", 0.0) if isinstance(mtm_tgt.get("profit_lock_trail"), dict) else 0.0) or 0.0) * strat_lots
+
+                        is_lock_active = bool(strat.get("_mtm_lock_triggered", False))
+                        cur_locked_profit = strat.get("_mtm_locked_profit")
+
+                        if tgt_type in ("Lock and Trail", "Lock Profit"):
+                            if not is_lock_active:
+                                if p_reaches > 0 and strat_mtm >= p_reaches:
+                                    strat["_mtm_lock_triggered"] = True
+                                    strat["_mtm_peak_profit"] = strat_mtm
+                                    strat["mtm_peak_profit"] = strat_mtm
+                                    excess_profit = max(0.0, strat_mtm - p_reaches)
+                                    steps = int(excess_profit // t_step) if (tgt_type == "Lock and Trail" and t_step > 0 and t_val > 0) else 0
+                                    init_lock = round(l_profit + (steps * t_val), 2)
+                                    strat["_mtm_locked_profit"] = init_lock
+                                    strat["mtm_locked_floor"] = init_lock
+                                    cur_locked_profit = init_lock
+                                    is_lock_active = True
+                                    step_msg = f" (Jump Trailed +{steps} steps to ₹{init_lock:.2f})" if steps > 0 else ""
+                                    self._log_event(
+                                        f"[{strat.get('name')}] 🔒 MTM Profit reached ₹{strat_mtm:.2f} (>= Trigger ₹{p_reaches:.2f})! "
+                                        f"Locked Profit floor activated at ₹{init_lock:.2f}{step_msg} (Mode: {mtm_calc_mode}, Lots: {strat_lots})."
+                                    )
+                            else:
+                                if strat_mtm > float(strat.get("_mtm_peak_profit", p_reaches) or p_reaches):
+                                    strat["_mtm_peak_profit"] = strat_mtm
+                                    strat["mtm_peak_profit"] = strat_mtm
+
+                                if tgt_type == "Lock and Trail" and t_step > 0 and t_val > 0:
+                                    excess_profit = max(0.0, strat_mtm - p_reaches)
+                                    steps = int(excess_profit // t_step)
+                                    new_lock = round(l_profit + (steps * t_val), 2)
+                                    if cur_locked_profit is None or new_lock > cur_locked_profit:
+                                        strat["_mtm_locked_profit"] = new_lock
+                                        strat["mtm_locked_floor"] = new_lock
+                                        self._log_event(
+                                            f"[{strat.get('name')}] 📈 MTM Trailed! Profit ₹{strat_mtm:.2f} (+₹{excess_profit:.2f} above trigger). "
+                                            f"Locked Profit floor raised from ₹{cur_locked_profit} to ₹{new_lock:.2f} (Step #{steps})."
+                                        )
+                                        cur_locked_profit = new_lock
+
+                        elif tgt_type == "Trail Profit":
+                            if t_step > 0 and t_val > 0:
+                                if strat_mtm >= t_step:
+                                    steps = int(strat_mtm // t_step)
+                                    new_lock = round(steps * t_val, 2)
+                                    if cur_locked_profit is None or new_lock > cur_locked_profit:
+                                        strat["_mtm_lock_triggered"] = True
+                                        strat["_mtm_locked_profit"] = new_lock
+                                        strat["mtm_locked_floor"] = new_lock
+                                        strat["_mtm_peak_profit"] = max(strat_mtm, float(strat.get("_mtm_peak_profit", 0.0) or 0.0))
+                                        strat["mtm_peak_profit"] = strat["_mtm_peak_profit"]
+                                        self._log_event(
+                                            f"[{strat.get('name')}] 📈 MTM Trailed! Current MTM: ₹{strat_mtm:.2f}. "
+                                            f"Trailing profit floor set to ₹{new_lock:.2f} (Step #{steps})."
+                                        )
+                                        cur_locked_profit = new_lock
+                                        is_lock_active = True
+
+                        if is_lock_active and cur_locked_profit is not None:
+                            strat["mtm_locked_floor"] = cur_locked_profit
+
+                        # Check if locked profit floor is hit on market pullback/reversal
+                        if is_lock_active and cur_locked_profit is not None and strat.get("status") == "TRADE_ACTIVE":
+                            if strat_mtm <= cur_locked_profit:
+                                self._log_event(
+                                    f"[{strat.get('name')}] 🎯 Lock & Trail Profit Triggered! Current MTM ₹{strat_mtm:.2f} fell to/below locked floor ₹{cur_locked_profit:.2f}. "
+                                    f"Securing profit and squaring off all positions!"
+                                )
+                                self._square_off_strategy_positions(strat, broker, reason=f"LOCK & TRAIL HIT (Floor ₹{cur_locked_profit:.2f})")
+                                action = mtm_tgt.get("action", "Square off all positions")
+                                if "terminate" in str(action).lower():
+                                    strat["status"] = "TERMINATED"
+                                    strat["enabled"] = False
+                                else:
+                                    strat["status"] = "TERMINATED"
+                                self._save_strategies()
+
+                    elif tgt_type in ("MTM in total amount", "Fixed Amount", "Fixed Target (Amount)", "Fixed Target"):
+                        tgt_val = abs(float(mtm_tgt.get("value", 0.0))) * strat_lots
                         if tgt_val > 0 and strat_mtm >= tgt_val and strat.get("status") == "TRADE_ACTIVE":
-                            self._log_event(f"MTM Target reached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f}. Squaring off.")
+                            self._log_event(f"MTM Target reached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f} >= ₹{tgt_val:.2f}. Squaring off.")
                             self._square_off_strategy_positions(strat, broker, reason="MTM TARGET HIT")
-                            strat["status"] = "TERMINATED"
+                            action = mtm_tgt.get("action", "Square off all positions")
+                            if "terminate" in str(action).lower():
+                                strat["status"] = "TERMINATED"
+                                strat["enabled"] = False
+                            else:
+                                strat["status"] = "TERMINATED"
                             self._save_strategies()
 
                 # Check Strategy-level MTM Stoploss
@@ -13309,16 +13491,21 @@ class StraddleManager:
 
                 if mtm_sl_enabled and sl_type not in ("None", None, ""):
                     if sl_type in ("MTM in total amount", "Fixed Amount"):
-                        sl_val = abs(float(mtm_sl.get("value", 0.0)))
+                        sl_val = abs(float(mtm_sl.get("value", 0.0))) * strat_lots
                         adv_cfg = strat.get("advanced_settings") or strat.get("advanced") or {}
                         mtm_delay = int(adv_cfg.get("mtm_sl_delay_sec") or 0)
                         trade_ts = float(strat.get("_trade_active_ts") or strat.get("_last_entry_attempt_ts") or 0.0)
                         delay_active = (mtm_delay > 0 and trade_ts > 0 and (time.time() - trade_ts) < mtm_delay)
 
                         if sl_val > 0 and strat_mtm <= -sl_val and strat.get("status") == "TRADE_ACTIVE" and not delay_active:
-                            self._log_event(f"MTM Stoploss breached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f}. Squaring off.")
+                            self._log_event(f"MTM Stoploss breached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f} <= -₹{sl_val:.2f}. Squaring off.")
                             self._square_off_strategy_positions(strat, broker, reason="MTM STOPLOSS BREACHED")
-                            strat["status"] = "TERMINATED"
+                            action = mtm_sl.get("action", "Square off all positions")
+                            if "terminate" in str(action).lower():
+                                strat["status"] = "TERMINATED"
+                                strat["enabled"] = False
+                            else:
+                                strat["status"] = "TERMINATED"
                             self._save_strategies()
 
             self._state["group_mtm"] = round(total_portfolio_mtm, 2)

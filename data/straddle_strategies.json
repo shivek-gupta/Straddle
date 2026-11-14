@@ -25,6 +25,29 @@
       "Thursday",
       "Friday"
     ],
+    "mtm_calc_mode": "Overall",
+    "mtm_enabled": true,
+    "mtm_target": {
+      "enabled": true,
+      "type": "Lock and Trail",
+      "profit_reaches": 100000.0,
+      "lock_profit": 80000.0,
+      "trail_step": 8000.0,
+      "trail_val": 5000.0,
+      "value": 10000.0,
+      "re_entry": "None",
+      "action": "Square off all positions"
+    },
+    "mtm_stoploss": {
+      "enabled": true,
+      "type": "None",
+      "value": -5000.0,
+      "action": "Square off all positions"
+    },
+    "no_reentry_after": {
+      "enabled": false,
+      "time": "15:00:00"
+    },
     "advanced": {
       "sl_order_placement": "Place in advance",
       "target_order_placement": "Place in advance"

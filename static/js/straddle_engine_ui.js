@@ -1513,6 +1513,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                         </span>
                         <span id="algo_dot_${s.strategy_id}" style="color:${dotColor}; font-size:8px;">●</span>
                         <a href="javascript:void(0)" onclick="openStrategyInTerminal('${s.strategy_id}')" style="color:#60a5fa; font-weight:700; font-size:13px; text-decoration:none; cursor:pointer;" title="Click to open Builder & Live Legs" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${name}</a>
+                        ${s.mtm_calc_mode === 'Per Lot' ? `<span style="font-size:9px; background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); border-radius:3px; padding:1px 4px; font-weight:800;" title="MTM Per Lot Mode Active">Per Lot</span>` : ''}
                         <div class="straddle-dropdown" style="display:inline-block; margin-left:4px;">
                             <button type="button" class="algo-btn-menu" title="Strategy Options" onclick="toggleDropdownMenu('dd_${s.strategy_id}', event)" style="padding:1px 6px; font-size:13px; line-height:1; height:20px; border-radius:4px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; cursor:pointer;">⋮</button>
                             <div id="dd_${s.strategy_id}" class="straddle-dropdown-menu">
@@ -1530,7 +1531,10 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 <td id="algo_entry_err_${s.strategy_id}" style="color:${isErrActive ? '#f43f5e' : '#64748b'}; font-size:11px; font-weight:${isErrActive ? '600' : '400'}; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;" title="${entryErr}">${entryErr}</td>
                 <td style="color:#64748b; font-size:11px; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;">${s.exit_error || '-'}</td>
                 <td style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">${startTime}</td>
-                <td style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">${endTime}</td>
+                <td style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">
+                    <div>${endTime}</div>
+                    ${(s.no_reentry_after && s.no_reentry_after.enabled && s.no_reentry_after.time) ? `<div style="font-size:9.5px; color:#f59e0b; font-weight:700;" title="No new entry or re-execution after this time">Cutoff: ${s.no_reentry_after.time}</div>` : ''}
+                </td>
             </tr>
         `;
     });
@@ -5291,12 +5295,39 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
     // Sync MTM Target display if activeStrategy has mtm_target configured
     const activeStratForTarget = window._straddleState?.activeStrategy;
-    if (activeStratForTarget && activeStratForTarget.mtm_target && activeStratForTarget.mtm_target.target_value) {
+    if (activeStratForTarget && activeStratForTarget.mtm_target) {
         const mtmTgtEl = document.getElementById("straddleMtmTargetDisplay");
         if (mtmTgtEl) {
-            const tv = Number(activeStratForTarget.mtm_target.target_value);
-            if (!isNaN(tv) && tv > 0) {
-                mtmTgtEl.textContent = `₹ ${tv.toFixed(2)}`;
+            const m = activeStratForTarget.mtm_target;
+            const isPerLot = (activeStratForTarget.mtm_calc_mode === "Per Lot");
+            const lots = (typeof getActiveStrategyLots === "function") ? getActiveStrategyLots() : 1;
+            const mult = isPerLot ? lots : 1;
+
+            if (activeStratForTarget.mtm_locked_floor !== undefined && activeStratForTarget.mtm_locked_floor !== null) {
+                mtmTgtEl.innerHTML = `<span style="color:#10b981; font-weight:800;" title="Floor locked & trailing">🔒 Floor: ₹ ${Number(activeStratForTarget.mtm_locked_floor).toFixed(2)}</span>`;
+            } else if (m.type === "Lock and Trail" || m.profit_reaches || m.profit_lock_trail) {
+                const reach = Number((m.profit_reaches !== undefined ? m.profit_reaches : (m.profit_lock_trail?.threshold || 0)) * mult);
+                const lock = Number((m.lock_profit !== undefined ? m.lock_profit : (m.profit_lock_trail?.lock_profit || 0)) * mult);
+                if (reach > 0) {
+                    mtmTgtEl.innerHTML = `<span title="Lock ₹${lock.toFixed(0)} when profit reaches ₹${reach.toFixed(0)}">Lock ₹${lock.toFixed(0)} @ ₹${reach.toFixed(0)}${isPerLot ? ' (per lot)' : ''}</span>`;
+                } else {
+                    mtmTgtEl.textContent = "Lock & Trail (0)";
+                }
+            } else if (m.type === "Lock Profit") {
+                const reach = Number((m.profit_reaches || 0) * mult);
+                const lock = Number((m.lock_profit || 0) * mult);
+                mtmTgtEl.textContent = `Lock ₹${lock.toFixed(0)} @ ₹${reach.toFixed(0)}`;
+            } else if (m.type === "Trail Profit") {
+                const step = Number((m.trail_step || 0) * mult);
+                const val = Number((m.trail_val || 0) * mult);
+                mtmTgtEl.textContent = `Trail +₹${val.toFixed(0)} / +₹${step.toFixed(0)}`;
+            } else {
+                const tv = Number((m.value !== undefined ? m.value : (m.target_value || 0)) * mult);
+                if (!isNaN(tv) && tv > 0) {
+                    mtmTgtEl.textContent = `₹ ${tv.toFixed(2)}${isPerLot ? ' (per lot)' : ''}`;
+                } else {
+                    mtmTgtEl.textContent = "None";
+                }
             }
         }
     }
@@ -6490,6 +6521,21 @@ function populateStraddleSettingsForm(s) {
     setStraddleTimeInputValue("cfgEndTime", initEt);
     initStraddleTimeSteppers();
 
+    // No Re-Entry After Cutoff
+    const noReCfg = s.no_reentry_after || {};
+    const advCfg = s.advanced_settings || s.advanced || {};
+    const noReEnabled = (noReCfg.enabled !== undefined) ? !!noReCfg.enabled : !!advCfg.no_reentry_after_enabled;
+    const defaultNoReTime = isComm ? "23:00:00" : "15:00:00";
+    const noReTime = noReCfg.time || advCfg.no_reentry_after_time || advCfg.re_entry_before_time || defaultNoReTime;
+    const noReToggle = document.getElementById("cfgToggleNoReEntryAfter");
+    if (noReToggle) {
+        noReToggle.checked = noReEnabled;
+    }
+    setStraddleTimeInputValue("cfgNoReEntryAfterTime", noReTime);
+    if (typeof syncNoReEntryAfterState === "function") {
+        syncNoReEntryAfterState();
+    }
+
     document.getElementById("cfgToggleMoveSlToCost").checked = !!s.move_sl_to_cost;
     document.getElementById("cfgToggleWaitAndTrade").checked = !!s.wait_and_trade;
     document.getElementById("cfgToggleReEntry").checked = s.re_entry_enabled !== false;
@@ -6501,6 +6547,12 @@ function populateStraddleSettingsForm(s) {
 
     setUnderlyingPriceSource(s.underlying_price_source || "Spot");
     setStraddleTradeType(s.trade_type || "Intraday");
+
+    // MTM Calculation Mode (Overall vs Per Lot)
+    const mtmMode = s.mtm_calc_mode || "Overall";
+    if (typeof setMtmCalcMode === "function") {
+        setMtmCalcMode(mtmMode);
+    }
 
     // MTM Target & SL
     const mtm = s.mtm_target || {};
@@ -6520,15 +6572,26 @@ function populateStraddleSettingsForm(s) {
         mtmSlToggle.checked = (sl.enabled !== undefined) ? !!sl.enabled : (sl.type !== "None");
     }
 
-    document.getElementById("cfgMtmTargetType").value = mtm.type || "MTM in total amount";
-    document.getElementById("cfgMtmTargetValue").value = mtm.value !== undefined ? mtm.value : 10000;
-    document.getElementById("cfgMtmTargetReEntry").value = mtm.re_entry || "None";
-    document.getElementById("cfgMtmTargetAction").value = mtm.action || "Square off all positions";
+    const mtmType = mtm.type || (mtm.profit_reaches ? "Lock and Trail" : "Lock and Trail");
+    const tgtTypeEl = document.getElementById("cfgMtmTargetType");
+    if (tgtTypeEl) tgtTypeEl.value = mtmType;
 
-    document.getElementById("cfgMtmSlType").value = sl.type || "None";
-    document.getElementById("cfgMtmSlValue").value = sl.value !== undefined ? sl.value : -5000;
-    document.getElementById("cfgMtmProfitLock").value = sl.profit_lock || "None";
-    document.getElementById("cfgMtmSlAction").value = sl.action || "Square off all positions";
+    const reachVal = (mtm.profit_reaches !== undefined) ? mtm.profit_reaches : (mtm.profit_lock_trail?.threshold !== undefined ? mtm.profit_lock_trail.threshold : 100000);
+    const lockVal = (mtm.lock_profit !== undefined) ? mtm.lock_profit : (mtm.profit_lock_trail?.lock_profit !== undefined ? mtm.profit_lock_trail.lock_profit : 80000);
+    const stepVal = (mtm.trail_step !== undefined) ? mtm.trail_step : (mtm.profit_lock_trail?.trail_step !== undefined ? mtm.profit_lock_trail.trail_step : 8000);
+    const trailVal = (mtm.trail_val !== undefined) ? mtm.trail_val : (mtm.profit_lock_trail?.trail_profit !== undefined ? mtm.profit_lock_trail.trail_profit : 5000);
+
+    if (document.getElementById("cfgMtmTargetReach")) document.getElementById("cfgMtmTargetReach").value = reachVal;
+    if (document.getElementById("cfgMtmTargetLock")) document.getElementById("cfgMtmTargetLock").value = lockVal;
+    if (document.getElementById("cfgMtmTargetTrailStep")) document.getElementById("cfgMtmTargetTrailStep").value = stepVal;
+    if (document.getElementById("cfgMtmTargetTrailVal")) document.getElementById("cfgMtmTargetTrailVal").value = trailVal;
+    if (document.getElementById("cfgMtmTargetValue")) document.getElementById("cfgMtmTargetValue").value = (mtm.value !== undefined) ? mtm.value : 10000;
+    if (document.getElementById("cfgMtmTargetReEntry")) document.getElementById("cfgMtmTargetReEntry").value = mtm.re_entry || "None";
+    if (document.getElementById("cfgMtmTargetAction")) document.getElementById("cfgMtmTargetAction").value = mtm.action || "Square off all positions";
+
+    if (document.getElementById("cfgMtmSlType")) document.getElementById("cfgMtmSlType").value = sl.type || "None";
+    if (document.getElementById("cfgMtmSlValue")) document.getElementById("cfgMtmSlValue").value = (sl.value !== undefined) ? sl.value : -5000;
+    if (document.getElementById("cfgMtmSlAction")) document.getElementById("cfgMtmSlAction").value = sl.action || "Square off all positions";
 
     syncMtmFieldStates();
 
@@ -7067,6 +7130,97 @@ function onToggleMtmSubSl(enabled) {
 }
 window.onToggleMtmSubSl = onToggleMtmSubSl;
 
+function getActiveStrategyLots() {
+    const active = window._straddleState?.activeStrategy || {};
+    const multType = (document.getElementById("grpAutoMultiplier")?.style.display !== "none") ? "AUTO" : "MANUAL";
+    let mult = 1;
+    if (multType === "MANUAL") {
+        mult = parseInt(document.getElementById("cfgMultiplier")?.value) || 1;
+    } else {
+        mult = parseInt(active.effective_multiplier || active.multiplier || 1) || 1;
+    }
+    let maxLegLots = 1;
+    const trs = document.querySelectorAll("#straddleLegsBuilderBody tr");
+    if (trs.length > 0) {
+        trs.forEach(tr => {
+            const side = tr.querySelector(".leg-side")?.value || "Sell";
+            if (String(side).toUpperCase() === "SELL") {
+                const l = parseInt(tr.querySelector(".leg-lots")?.value) || 1;
+                if (l > maxLegLots) maxLegLots = l;
+            }
+        });
+    } else if (active.legs && active.legs.length > 0) {
+        active.legs.forEach(l => {
+            const side = l.side || "Sell";
+            if (String(side).toUpperCase() === "SELL") {
+                const lots = parseInt(l.lots) || 1;
+                if (lots > maxLegLots) maxLegLots = lots;
+            }
+        });
+    }
+    return Math.max(1, mult * maxLegLots);
+}
+window.getActiveStrategyLots = getActiveStrategyLots;
+
+function setMtmCalcMode(mode) {
+    const isPerLot = (mode === "Per Lot");
+    const btnOverall = document.getElementById("btnMtmModeOverall");
+    const btnPerLot = document.getElementById("btnMtmModePerLot");
+    if (btnOverall && btnPerLot) {
+        if (isPerLot) {
+            btnPerLot.className = "straddle-btn active-toggle";
+            btnOverall.className = "straddle-btn btn-outline";
+        } else {
+            btnOverall.className = "straddle-btn active-toggle";
+            btnPerLot.className = "straddle-btn btn-outline";
+        }
+    }
+
+    const lots = getActiveStrategyLots();
+    const ind = document.getElementById("mtmLotsIndicator");
+    if (ind) {
+        if (isPerLot) {
+            ind.innerHTML = `(MTM Per Lot active: <b>${lots} lot(s)</b> &bull; Targets, Lock & Trail and SL values scale by <b>&times;${lots}</b>)`;
+            ind.style.color = "#38bdf8";
+        } else {
+            ind.innerHTML = `(Overall strategy basket mode active: values apply directly to total basket)`;
+            ind.style.color = "#94a3b8";
+        }
+    }
+
+    // Dynamic labels
+    const unitText = isPerLot ? "(₹ / lot)" : "(₹)";
+    const reachLbl = document.getElementById("lblMtmTargetReach");
+    if (reachLbl) reachLbl.textContent = `If profit reaches ${unitText}:`;
+    const lockLbl = document.getElementById("lblMtmTargetLock");
+    if (lockLbl) lockLbl.textContent = `Lock profit ${unitText}:`;
+    const stepLbl = document.getElementById("lblMtmTargetTrailStep");
+    if (stepLbl) stepLbl.textContent = `For every increase in profit by ${unitText}:`;
+    const trailLbl = document.getElementById("lblMtmTargetTrailVal");
+    if (trailLbl) trailLbl.textContent = `Trail profit by ${unitText}:`;
+    const tgtValLbl = document.getElementById("lblMtmTargetVal");
+    if (tgtValLbl) tgtValLbl.textContent = `Value ${isPerLot ? '(₹ / lot / %)' : '(₹ / %)'}:`;
+    const slValLbl = document.getElementById("lblMtmSlVal");
+    if (slValLbl) slValLbl.textContent = `Value ${isPerLot ? '(₹ / lot / %)' : '(₹ / %)'}:`;
+}
+window.setMtmCalcMode = setMtmCalcMode;
+
+function syncNoReEntryAfterState() {
+    const toggle = document.getElementById("cfgToggleNoReEntryAfter");
+    const group = document.getElementById("groupNoReEntryAfterTime");
+    const isEnabled = toggle ? toggle.checked : false;
+    if (group) {
+        group.style.opacity = isEnabled ? "1" : "0.5";
+        const inputs = group.querySelectorAll("input, button");
+        inputs.forEach(el => {
+            if (el.id !== "cfgNoReEntryAfterTime") {
+                el.disabled = !isEnabled;
+            }
+        });
+    }
+}
+window.syncNoReEntryAfterState = syncNoReEntryAfterState;
+
 function syncMtmFieldStates() {
     const secToggle = document.getElementById("cfgToggleMtmSection");
     const isSecEnabled = secToggle ? secToggle.checked : true;
@@ -7081,6 +7235,10 @@ function syncMtmFieldStates() {
     if (secBody) {
         secBody.classList.toggle("section-muted-locked", !isSecEnabled);
     }
+
+    // Refresh MTM Calc mode indicator & labels
+    const isPerLot = document.getElementById("btnMtmModePerLot")?.classList.contains("active-toggle");
+    setMtmCalcMode(isPerLot ? "Per Lot" : "Overall");
 
     // Target Box
     const cardTgt = document.getElementById("card_mtm_target");
@@ -7097,7 +7255,7 @@ function syncMtmFieldStates() {
     }
 
     const tgtTypeSel = document.getElementById("cfgMtmTargetType");
-    const tgtVal = document.getElementById("cfgMtmTargetValue");
+    const tgtType = tgtTypeSel ? tgtTypeSel.value : "Lock and Trail";
     const tgtRe = document.getElementById("cfgMtmTargetReEntry");
     const tgtAction = document.getElementById("cfgMtmTargetAction");
 
@@ -7106,15 +7264,59 @@ function syncMtmFieldStates() {
     if (tgtAction) tgtAction.disabled = !isTgtSubEnabled;
     if (tgtSubToggle) tgtSubToggle.disabled = !isSecEnabled;
 
-    if (tgtVal) {
-        const isTgtNone = !isTgtSubEnabled || (tgtTypeSel && tgtTypeSel.value === "None");
-        tgtVal.disabled = isTgtNone;
-        tgtVal.classList.toggle("input-disabled-muted", isTgtNone);
-        if (isTgtNone) {
-            tgtVal.setAttribute("title", "MTM Target is disabled or set to None.");
-        } else {
-            tgtVal.removeAttribute("title");
-        }
+    const grpLockTrail = document.getElementById("group_mtm_lock_and_trail");
+    const boxReach = document.getElementById("box_mtm_reach");
+    const boxLock = document.getElementById("box_mtm_lock");
+    const boxTrailStep = document.getElementById("box_mtm_trail_step");
+    const boxTrailVal = document.getElementById("box_mtm_trail_val");
+    const grpFixedTgt = document.getElementById("group_mtm_fixed_target");
+
+    const reachInp = document.getElementById("cfgMtmTargetReach");
+    const lockInp = document.getElementById("cfgMtmTargetLock");
+    const stepInp = document.getElementById("cfgMtmTargetTrailStep");
+    const valInp = document.getElementById("cfgMtmTargetTrailVal");
+    const fixedValInp = document.getElementById("cfgMtmTargetValue");
+
+    if (tgtType === "Lock and Trail") {
+        if (grpLockTrail) grpLockTrail.style.display = "block";
+        if (boxReach) boxReach.style.display = "block";
+        if (boxLock) boxLock.style.display = "block";
+        if (boxTrailStep) boxTrailStep.style.display = "block";
+        if (boxTrailVal) boxTrailVal.style.display = "block";
+        if (grpFixedTgt) grpFixedTgt.style.display = "none";
+
+        if (reachInp) reachInp.disabled = !isTgtSubEnabled;
+        if (lockInp) lockInp.disabled = !isTgtSubEnabled;
+        if (stepInp) stepInp.disabled = !isTgtSubEnabled;
+        if (valInp) valInp.disabled = !isTgtSubEnabled;
+    } else if (tgtType === "Lock Profit") {
+        if (grpLockTrail) grpLockTrail.style.display = "block";
+        if (boxReach) boxReach.style.display = "block";
+        if (boxLock) boxLock.style.display = "block";
+        if (boxTrailStep) boxTrailStep.style.display = "none";
+        if (boxTrailVal) boxTrailVal.style.display = "none";
+        if (grpFixedTgt) grpFixedTgt.style.display = "none";
+
+        if (reachInp) reachInp.disabled = !isTgtSubEnabled;
+        if (lockInp) lockInp.disabled = !isTgtSubEnabled;
+    } else if (tgtType === "Trail Profit") {
+        if (grpLockTrail) grpLockTrail.style.display = "block";
+        if (boxReach) boxReach.style.display = "none";
+        if (boxLock) boxLock.style.display = "none";
+        if (boxTrailStep) boxTrailStep.style.display = "block";
+        if (boxTrailVal) boxTrailVal.style.display = "block";
+        if (grpFixedTgt) grpFixedTgt.style.display = "none";
+
+        if (stepInp) stepInp.disabled = !isTgtSubEnabled;
+        if (valInp) valInp.disabled = !isTgtSubEnabled;
+    } else if (tgtType === "None") {
+        if (grpLockTrail) grpLockTrail.style.display = "none";
+        if (grpFixedTgt) grpFixedTgt.style.display = "none";
+    } else {
+        // Fixed Amount / Fixed %
+        if (grpLockTrail) grpLockTrail.style.display = "none";
+        if (grpFixedTgt) grpFixedTgt.style.display = "block";
+        if (fixedValInp) fixedValInp.disabled = !isTgtSubEnabled;
     }
 
     // Stoploss Box
@@ -7133,11 +7335,9 @@ function syncMtmFieldStates() {
 
     const slTypeSel = document.getElementById("cfgMtmSlType");
     const slVal = document.getElementById("cfgMtmSlValue");
-    const slLock = document.getElementById("cfgMtmProfitLock");
     const slAction = document.getElementById("cfgMtmSlAction");
 
     if (slTypeSel) slTypeSel.disabled = !isSlSubEnabled;
-    if (slLock) slLock.disabled = !isSlSubEnabled;
     if (slAction) slAction.disabled = !isSlSubEnabled;
     if (slSubToggle) slSubToggle.disabled = !isSecEnabled;
 
@@ -7628,26 +7828,33 @@ function serializeCurrentStrategySettings() {
         trade_type: document.getElementById("btnTradePositional")?.classList.contains("active-toggle") ? "Positional" : "Intraday",
         schedule_days: active.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
         mtm_enabled: !!document.getElementById("cfgToggleMtmSection")?.checked,
+        mtm_calc_mode: document.getElementById("btnMtmModePerLot")?.classList.contains("active-toggle") ? "Per Lot" : "Overall",
         mtm_target: {
             enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmTarget")?.checked),
-            type: document.getElementById("cfgMtmTargetType")?.value,
+            type: document.getElementById("cfgMtmTargetType")?.value || "Lock and Trail",
+            profit_reaches: parseFloat(document.getElementById("cfgMtmTargetReach")?.value) || 0.0,
+            lock_profit: parseFloat(document.getElementById("cfgMtmTargetLock")?.value) || 0.0,
+            trail_step: parseFloat(document.getElementById("cfgMtmTargetTrailStep")?.value) || 0.0,
+            trail_val: parseFloat(document.getElementById("cfgMtmTargetTrailVal")?.value) || 0.0,
             value: parseFloat(document.getElementById("cfgMtmTargetValue")?.value) || 10000,
-            re_entry: document.getElementById("cfgMtmTargetReEntry")?.value,
-            action: document.getElementById("cfgMtmTargetAction")?.value
+            re_entry: document.getElementById("cfgMtmTargetReEntry")?.value || "None",
+            action: document.getElementById("cfgMtmTargetAction")?.value || "Square off all positions"
         },
         mtm_stoploss: {
             enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmSl")?.checked),
-            type: document.getElementById("cfgMtmSlType")?.value,
+            type: document.getElementById("cfgMtmSlType")?.value || "None",
             value: parseFloat(document.getElementById("cfgMtmSlValue")?.value) || -5000,
-            profit_lock: document.getElementById("cfgMtmProfitLock")?.value,
-            action: document.getElementById("cfgMtmSlAction")?.value
+            action: document.getElementById("cfgMtmSlAction")?.value || "Square off all positions"
         },
         mtm_sl: {
             enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmSl")?.checked),
-            type: document.getElementById("cfgMtmSlType")?.value,
+            type: document.getElementById("cfgMtmSlType")?.value || "None",
             value: parseFloat(document.getElementById("cfgMtmSlValue")?.value) || -5000,
-            profit_lock: document.getElementById("cfgMtmProfitLock")?.value,
-            action: document.getElementById("cfgMtmSlAction")?.value
+            action: document.getElementById("cfgMtmSlAction")?.value || "Square off all positions"
+        },
+        no_reentry_after: {
+            enabled: !!document.getElementById("cfgToggleNoReEntryAfter")?.checked,
+            time: document.getElementById("cfgNoReEntryAfterTime")?.value || "15:00:00"
         },
         premium_matching: {
             enabled: !!document.getElementById("cfgTogglePremSection")?.checked,
@@ -7686,6 +7893,9 @@ function serializeCurrentStrategySettings() {
             mtm_sl_delay_sec: isNaN(parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10),
             re_execute_method: document.getElementById("cfgReExecuteMethod")?.value || "Immediate",
             re_execute_order_delay_sec: isNaN(parseInt(document.getElementById("cfgReExecuteOrderDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgReExecuteOrderDelaySec")?.value, 10),
+            no_reentry_after_enabled: !!document.getElementById("cfgToggleNoReEntryAfter")?.checked,
+            no_reentry_after_time: document.getElementById("cfgNoReEntryAfterTime")?.value || "15:00:00",
+            re_entry_before_time: document.getElementById("cfgNoReEntryAfterTime")?.value || "15:00:00",
             auto_handling_sl_cancellation: document.getElementById("cfgAutoHandlingSl")?.checked !== false,
             auto_exit_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
             auto_exit_on_margin_error: !!document.getElementById("cfgAutoExitMargin")?.checked,
