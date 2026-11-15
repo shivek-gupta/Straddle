@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261115_mobile_v6">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261116_v7">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -211,41 +211,41 @@
             </div>
         </div>
 
-        <div class="straddle-header-controls">
-            <!-- Interactive Live / Paper Trading Mode Pill -->
-            <button type="button" id="topbarModePillBtn" onclick="toggleStraddleExecutionMode()" style="display:inline-flex; align-items:center; gap:6px; background:rgba(16,185,129,0.12); border:1px solid #10b981; padding:5px 12px; border-radius:6px; font-family:var(--font-mono); font-size:11.5px; font-weight:800; cursor:pointer; color:#10b981; transition:all 0.2s ease;" title="Click to Switch between Live Broker and Paper Trading Simulation">
+        <div class="straddle-header-controls" style="display:flex; align-items:center; gap:6px; flex-wrap:nowrap; flex-shrink:0;">
+            <!-- Interactive Live / Paper Trading Mode Pill (Compact Green Dot) -->
+            <button type="button" id="topbarModePillBtn" onclick="toggleStraddleExecutionMode()" style="display:inline-flex; align-items:center; justify-content:center; background:rgba(16,185,129,0.12); border:1px solid #10b981; padding:4px 8px; border-radius:6px; font-family:var(--font-mono); font-size:12px; font-weight:800; cursor:pointer; color:#10b981; transition:all 0.2s ease; flex-shrink:0;" title="Kotak Neo Live Broker Connected (Click to switch to Paper)">
                 <span id="topbarModePillIcon">🟢</span>
-                <span id="topbarModePillText">LIVE BROKER</span>
+                <span id="topbarModePillText" style="display:none;">LIVE BROKER</span>
             </button>
-            <button type="button" id="topbarResetPaperBtn" onclick="resetPaperTradingAccount()" style="display:none; align-items:center; gap:4px; background:rgba(168,85,247,0.15); border:1px solid #a855f7; padding:5px 10px; border-radius:6px; font-family:var(--font-mono); font-size:11px; font-weight:800; cursor:pointer; color:#c084fc; transition:all 0.2s ease;" title="Clear and Reset Paper Trading Account">
-                <span>🔄</span> Reset Paper
+            <button type="button" id="topbarResetPaperBtn" onclick="resetPaperTradingAccount()" style="display:none; align-items:center; gap:4px; background:rgba(168,85,247,0.15); border:1px solid #a855f7; padding:4px 8px; border-radius:6px; font-family:var(--font-mono); font-size:11px; font-weight:800; cursor:pointer; color:#c084fc; transition:all 0.2s ease; flex-shrink:0;" title="Clear and Reset Paper Trading Account">
+                <span>🔄</span> Reset
             </button>
 
             <!-- Net MTM Pill -->
-            <div id="topbarMtmPill" style="display:inline-flex; align-items:center; gap:6px; background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.12); padding:5px 14px; border-radius:6px; font-family:var(--font-mono); font-size:12.5px; font-weight:800;">
-                <span style="color:#94a3b8; font-size:11px;">NET MTM:</span>
+            <div id="topbarMtmPill" style="display:inline-flex; align-items:center; gap:4px; background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.12); padding:4px 9px; border-radius:6px; font-family:var(--font-mono); font-size:11.5px; font-weight:800; flex-shrink:0; white-space:nowrap;">
+                <span style="color:#94a3b8; font-size:10px;">NET:</span>
                 <span id="topbarMtmVal" style="color:#38bdf8;">₹0.00</span>
             </div>
 
             <!-- Emergency Square-Off Kill Switch -->
-            <button type="button" class="straddle-btn btn-danger" onclick="emergencySquareOffAllStraddles()" style="padding:6px 14px; font-size:11.5px; letter-spacing:0.02em; font-weight:800;">
+            <button type="button" class="straddle-btn btn-danger" onclick="emergencySquareOffAllStraddles()" style="padding:4px 10px; font-size:11px; letter-spacing:0.02em; font-weight:800; flex-shrink:0; white-space:nowrap;">
                 <span>🛑</span> SQUARE OFF ALL
             </button>
 
             <!-- Disconnected Alert Badge (visible when Kotak Neo orders are blocked) -->
-            <div id="topbarBrokerDisconnectedAlert" style="display:none; align-items:center; gap:6px; background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; padding:5px 12px; border-radius:6px; font-size:11.5px; font-weight:800; cursor:pointer;" onclick="toggleBrokerConnection(event)" title="Live orders blocked! Click to reconnect platform to Kotak Neo">
+            <div id="topbarBrokerDisconnectedAlert" style="display:none; align-items:center; gap:6px; background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:800; cursor:pointer; flex-shrink:0;" onclick="toggleBrokerConnection(event)" title="Live orders blocked! Click to reconnect platform to Kotak Neo">
                 <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#ef4444; box-shadow:0 0 8px #ef4444;"></span>
-                <span>KOTAK DISCONNECTED (ORDERS BLOCKED)</span>
+                <span>KOTAK DISCONNECTED</span>
             </div>
 
             <!-- Merged Settings & System Dropdown (Kotak API + Git main + Trading Mode) -->
-            <div style="position:relative; display:inline-block;" id="topbarSettingsMenuWrap">
-                <button type="button" class="straddle-sys-btn" id="btnTopbarSettingsToggle" onclick="toggleTopbarSettingsDropdown(event)" style="display:inline-flex; align-items:center; gap:7px; background:#0c0d12; border:1px solid #252836; padding:6px 12px; border-radius:6px; cursor:pointer; color:#f8fafc; font-size:12px; font-weight:700;" title="System Settings & Integrations">
+            <div style="position:relative; display:inline-block; flex-shrink:0;" id="topbarSettingsMenuWrap">
+                <button type="button" class="straddle-sys-btn" id="btnTopbarSettingsToggle" onclick="toggleTopbarSettingsDropdown(event)" style="display:inline-flex; align-items:center; gap:5px; background:#0c0d12; border:1px solid #252836; padding:4px 9px; border-radius:6px; cursor:pointer; color:#f8fafc; font-size:11px; font-weight:700; white-space:nowrap;" title="System Settings & Integrations">
                     <span>⚙️</span>
                     <span>Settings</span>
-                    <span style="font-size:10px; color:#94a3b8; margin-left:2px;">▼</span>
+                    <span style="font-size:9px; color:#94a3b8; margin-left:1px;">▼</span>
                 </button>
-                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:36px; right:0; width:270px; background:#0b0f19; border:1px solid #252836; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.85); z-index:11500; overflow:hidden;">
+                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:36px; right:0; width:260px; background:#0b0f19; border:1px solid #252836; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.85); z-index:11500; overflow:hidden;">
                     <!-- Kotak Neo Live Connection Kill Switch -->
                     <div id="kotakBrokerConnectionCard" style="padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.08); background:rgba(15,23,42,0.6);">
                         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
@@ -281,20 +281,12 @@
                         <span id="gitBranchBadge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800; font-family:var(--font-mono);">main</span>
                     </div>
                     <!-- Broker Execution Mode -->
-                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
+                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span id="topbarModeIcon">⚡</span>
                             <span style="font-weight:700; color:#f8fafc; font-size:12px;">Trading Mode</span>
                         </div>
                         <span id="topbarModeLabel" style="font-size:10.5px; color:#10b981; font-weight:700;">Live Broker</span>
-                    </div>
-                    <!-- PWA Mobile App Install (Standalone App Installation) -->
-                    <div id="pwaInstallDropdownRow" onclick="triggerPwaInstall(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Install Straddle Pro as Standalone Native App">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span>📱</span>
-                            <span style="font-weight:700; color:#38bdf8; font-size:12px;">Install App on Phone</span>
-                        </div>
-                        <span style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800;">INSTALL</span>
                     </div>
                 </div>
             </div>
@@ -923,7 +915,6 @@
                 <button type="button" class="straddle-btn btn-warning" id="btnStraddleStopAlgo" onclick="straddleTerminateAlgo()" title="Halt strategy algorithm execution without squaring off broker positions" style="background:#b45309; border-color:#d97706; font-weight:800; display:none;">⏹ Stop Algo</button>
                 <button type="button" class="straddle-btn btn-danger" id="btnStraddleSquareOffAll" onclick="straddleSquareOffAllAndTerminate()" title="Emergency: Square off all open broker positions immediately and stop algorithm" style="background:#ea580c; border-color:#f97316; font-weight:800;">🚨 Square Off All</button>
                 <button type="button" class="straddle-btn btn-primary" id="btnStraddleToggleSettings" onclick="toggleStraddleSettingsPanel()" title="Open strategy parameters, execution rules & leg builder" style="background:#2563eb; border-color:#3b82f6; font-weight:800;">⚙️ Settings</button>
-                <button type="button" class="straddle-btn btn-outline" id="btnStraddleOptionChain" onclick="openStraddleOptionChainModal()" title="View live option chain matrix">📊 Option Chain</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleAdoptPosition" onclick="openAdoptBrokerPositionModal()" title="Adopt existing manual or broker positions into this algo for automated SL/Target management" style="border-color:#38bdf8; color:#38bdf8; font-weight:700;">📥 Adopt Trade</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleBenchmark" onclick="openExecutionBenchmarkModal()" title="View real-time latency & slippage comparison between Kotak Neo Live Broker and Parallel Paper Simulation" style="border-color:#38bdf8; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.1);">⚡ Execution Benchmark</button>
                 <button type="button" class="straddle-btn btn-outline" id="btnStraddleSquareOffSelected" style="margin-left:auto; display:none;" onclick="straddleSquareOffSelectedLegs()" title="Square off only the selected open leg positions">Square off selected legs</button>
@@ -3381,7 +3372,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261115_mobile_v6"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261116_v7"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

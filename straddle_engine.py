@@ -1179,6 +1179,20 @@ class StraddleManager:
             if len(logs) > 1000:
                 self._state["logs"] = logs[:1000]
 
+        # Instant Quantiply-style Telegram Error Alert Dispatch
+        if level == "ERROR" or any(k in message.upper() for k in ("ORDER REJECTED", "EXECUTION FAILED", "SL PLACEMENT FAILED", "TARGET PLACEMENT FAILED", "FAILED TO PLACE", "TERMINATED DUE TO ERROR")):
+            strat_name = det.get("strategy_name") or det.get("algo_name") or (self.get_strategy(self._active_strategy_id) or {}).get("name")
+            sym = det.get("symbol") or det.get("trading_symbol")
+            err_code = det.get("error_code") or det.get("code")
+            self.send_telegram_error_alert(
+                title="Order / Strategy Execution Error",
+                message=message,
+                strategy_name=strat_name,
+                symbol=sym,
+                error_code=err_code,
+                details=det
+            )
+
         # Non-blocking async background flush to disk
         def _persist_logs():
             try:
@@ -1238,8 +1252,8 @@ class StraddleManager:
     def _send_telegram_alert(self, message: str):
         """Dispatches an asynchronous Telegram notification alert if configured."""
         def _post_telegram():
-            token = os.environ.get("TELEGRAM_BOT_TOKEN") or self._state.get("telegram_bot_token")
-            chat_id = os.environ.get("TELEGRAM_CHAT_ID") or self._state.get("telegram_chat_id")
+            token = os.environ.get("TELEGRAM_BOT_TOKEN") or self._state.get("telegram_bot_token") or getattr(config, "TELEGRAM_BOT_TOKEN", "")
+            chat_id = os.environ.get("TELEGRAM_CHAT_ID") or self._state.get("telegram_chat_id") or getattr(config, "TELEGRAM_CHAT_ID", "")
             if not token or not chat_id:
                 return
             try:
@@ -1254,9 +1268,59 @@ class StraddleManager:
                 req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
                 urllib.request.urlopen(req, timeout=5.0)
             except Exception as e:
-                logger.debug(f"[Telegram Alert] Failed to dispatch notification: {e}")
+                # If Markdown parsing fails due to special characters, fallback to plain text
+                try:
+                    payload_plain = json.dumps({
+                        "chat_id": str(chat_id),
+                        "text": message.replace("*", "").replace("`", "").replace("_", ""),
+                        "disable_web_page_preview": True
+                    }).encode("utf-8")
+                    req_plain = urllib.request.Request(url, data=payload_plain, headers={"Content-Type": "application/json"})
+                    urllib.request.urlopen(req_plain, timeout=5.0)
+                except Exception as e2:
+                    logger.debug(f"[Telegram Alert] Failed to dispatch notification: {e2}")
 
         threading.Thread(target=_post_telegram, daemon=True).start()
+
+    def send_telegram_error_alert(
+        self,
+        title: str,
+        message: str,
+        strategy_name: Optional[str] = None,
+        symbol: Optional[str] = None,
+        error_code: Optional[str] = None,
+        details: Optional[Dict] = None
+    ):
+        """Dispatches an instant Quantiply-parity error alert with a 30-second deduplication cache."""
+        now = time.time()
+        dedup_key = f"{title}_{strategy_name}_{symbol}_{message[:60]}"
+        if not hasattr(self, "_telegram_alert_cache"):
+            self._telegram_alert_cache = {}
+        last_sent = self._telegram_alert_cache.get(dedup_key, 0)
+        if now - last_sent < 30.0:
+            return  # Suppress duplicate alert bursts within 30 seconds
+        self._telegram_alert_cache[dedup_key] = now
+
+        # Prune old cache entries
+        if len(self._telegram_alert_cache) > 200:
+            self._telegram_alert_cache = {k: v for k, v in self._telegram_alert_cache.items() if now - v < 60.0}
+
+        strat_str = f"• *Algo:* `{strategy_name}`\n" if strategy_name else ""
+        sym_str = f"• *Symbol:* `{symbol}`\n" if symbol else ""
+        code_str = f"• *Code:* `{error_code}`\n" if error_code else ""
+        clean_msg = str(message).replace("*", "").replace("`", "").replace("_", "")
+        clean_title = str(title).replace("*", "").replace("`", "").replace("_", "")
+
+        tg_text = (
+            f"🚨 *[STRADDLE PRO ERROR ALERT]*\n"
+            f"*{clean_title}*\n"
+            f"{strat_str}"
+            f"{sym_str}"
+            f"{code_str}"
+            f"• *Reason:* {clean_msg}\n"
+            f"• *Time:* `{now_ist_str()}`"
+        )
+        self._send_telegram_alert(tg_text)
 
     # ==========================================================
     # Option Instruments & Expiry Discovery
@@ -8689,6 +8753,8 @@ class StraddleManager:
                 strat["closed_positions"] = []
                 strat["shadow_benchmark"] = []
                 strat["mtm"] = 0.0
+                strat["group_mtm"] = 0.0
+                strat["total_mtm"] = 0.0
                 strat["max_mtm"] = 0.0
                 strat["min_mtm"] = 0.0
                 strat["status"] = "READY"
@@ -8719,6 +8785,8 @@ class StraddleManager:
                     strat["strategy"]["last_error"] = None
                     strat["strategy"]["repair_needed"] = False
                     strat["strategy"]["mtm"] = 0.0
+                    strat["strategy"]["group_mtm"] = 0.0
+                    strat["strategy"]["total_mtm"] = 0.0
                     strat["strategy"]["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
 
                 # Reset runtime state on all configured legs

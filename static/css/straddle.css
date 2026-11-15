@@ -65,16 +65,22 @@ body {
 .straddle-topbar {
     background: #0d0e12;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 10px 20px;
+    padding: 8px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    gap: 10px;
     position: sticky;
     top: 0;
     z-index: 1000;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+.straddle-topbar::-webkit-scrollbar {
+    display: none;
 }
 
 .straddle-brand {
@@ -10072,21 +10078,40 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         box-sizing: border-box !important;
     }
 
-    /* 1. Topbar Navigation (Non-Sticky on Mobile as requested) */
+    /* 1. Topbar Navigation (Non-Sticky on Mobile, Single Row No-Wrap) */
     .straddle-topbar {
         position: relative !important;
         top: auto !important;
-        padding: 6px 10px !important;
-        flex-wrap: wrap !important;
+        padding: 5px 8px !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        scrollbar-width: none !important;
+        -ms-overflow-style: none !important;
         gap: 6px !important;
         height: auto !important;
-        min-height: 42px !important;
+        min-height: 40px !important;
         box-shadow: none !important;
+    }
+    .straddle-topbar::-webkit-scrollbar {
+        display: none !important;
+    }
+
+    .straddle-topbar-left {
+        flex-shrink: 0 !important;
+        flex-wrap: nowrap !important;
+        gap: 6px !important;
+    }
+
+    .topbar-pills-cluster {
+        flex-shrink: 0 !important;
+        flex-wrap: nowrap !important;
+        gap: 4px !important;
     }
 
     .straddle-brand {
         font-size: 13.5px !important;
         gap: 6px !important;
+        flex-shrink: 0 !important;
     }
 
     .straddle-brand-badge {
@@ -10096,7 +10121,8 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
 
     .straddle-header-controls {
         gap: 5px !important;
-        flex-wrap: wrap !important;
+        flex-wrap: nowrap !important;
+        flex-shrink: 0 !important;
     }
 
     #topbarMtmPill {

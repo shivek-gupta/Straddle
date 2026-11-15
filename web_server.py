@@ -62,7 +62,7 @@ def manifest():
     if manifest_path.exists():
         content = manifest_path.read_text(encoding="utf-8")
         resp = Response(content, mimetype="application/manifest+json")
-        resp.headers["Cache-Control"] = "no-cache"
+        resp.headers["Cache-Control"] = "public, max-age=86400"
         return resp
     return jsonify({"error": "manifest not found"}), 404
 
@@ -73,8 +73,8 @@ def service_worker():
     if sw_path.exists():
         content = sw_path.read_text(encoding="utf-8")
         resp = Response(content, mimetype="application/javascript")
-        resp.headers["Cache-Control"] = "no-cache"
         resp.headers["Service-Worker-Allowed"] = "/"
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return resp
     return Response("// no-op sw", mimetype="application/javascript")
 

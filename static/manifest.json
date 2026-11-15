@@ -1,5 +1,6 @@
 {
-  "name": "⚡ Straddle Pro • Kotak Neo Algorithmic Trading",
+  "id": "/",
+  "name": "Straddle Pro • Kotak Neo Algorithmic Trading",
   "short_name": "StraddlePro",
   "description": "High-Speed Kotak Neo Algorithmic Options Trading Platform with MTM Lock & Trail, Dynamic Hedging and Multi-Leg Slicing",
   "start_url": "/",
