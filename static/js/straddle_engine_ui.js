@@ -5485,62 +5485,6 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             }
         }
 
-    // Render MTM Banner Strip
-    const grpMtmEl = document.getElementById("straddleGroupMtmDisplay");
-    const totMtmEl = document.getElementById("straddleTotalMtmDisplay");
-    if (grpMtmEl) {
-        const gm = Number(groupMtm || 0.0);
-        grpMtmEl.textContent = gm.toFixed(2);
-        grpMtmEl.style.color = (gm >= 0) ? "#38bdf8" : "#f43f5e";
-    }
-    if (totMtmEl) {
-        const tm = Number(totalMtm || 0.0);
-        totMtmEl.textContent = tm.toFixed(2);
-        totMtmEl.style.color = (tm >= 0) ? "#10b981" : "#f43f5e";
-    }
-
-    // Sync MTM Target display if activeStrategy has mtm_target configured
-    const activeStratForTarget = window._straddleState?.activeStrategy;
-    if (activeStratForTarget && activeStratForTarget.mtm_target) {
-        const mtmTgtEl = document.getElementById("straddleMtmTargetDisplay");
-        if (mtmTgtEl) {
-            const m = activeStratForTarget.mtm_target;
-            const isPerLot = (activeStratForTarget.mtm_calc_mode === "Per Lot");
-            const lots = (typeof getActiveStrategyLots === "function") ? getActiveStrategyLots() : 1;
-            const mult = isPerLot ? lots : 1;
-
-            if (activeStratForTarget.mtm_locked_floor !== undefined && activeStratForTarget.mtm_locked_floor !== null) {
-                mtmTgtEl.innerHTML = `<span style="color:#10b981; font-weight:800;" title="Floor locked & trailing">🔒 Floor: ₹ ${Number(activeStratForTarget.mtm_locked_floor).toFixed(2)}</span>`;
-            } else if (m.type === "Lock and Trail" || m.profit_reaches || m.profit_lock_trail) {
-                const reach = Number((m.profit_reaches !== undefined ? m.profit_reaches : (m.profit_lock_trail?.threshold || 0)) * mult);
-                const lock = Number((m.lock_profit !== undefined ? m.lock_profit : (m.profit_lock_trail?.lock_profit || 0)) * mult);
-                if (reach > 0) {
-                    mtmTgtEl.innerHTML = `<span title="Lock ₹${lock.toFixed(0)} when profit reaches ₹${reach.toFixed(0)}">Lock ₹${lock.toFixed(0)} @ ₹${reach.toFixed(0)}${isPerLot ? ' (per lot)' : ''}</span>`;
-                } else {
-                    mtmTgtEl.textContent = "Lock & Trail (0)";
-                }
-            } else if (m.type === "Lock Profit") {
-                const reach = Number((m.profit_reaches || 0) * mult);
-                const lock = Number((m.lock_profit || 0) * mult);
-                mtmTgtEl.textContent = `Lock ₹${lock.toFixed(0)} @ ₹${reach.toFixed(0)}`;
-            } else if (m.type === "Trail Profit") {
-                const step = Number((m.trail_step || 0) * mult);
-                const val = Number((m.trail_val || 0) * mult);
-                mtmTgtEl.textContent = `Trail +₹${val.toFixed(0)} / +₹${step.toFixed(0)}`;
-            } else {
-                const tv = Number((m.value !== undefined ? m.value : (m.target_value || 0)) * mult);
-                if (!isNaN(tv) && tv > 0) {
-                    mtmTgtEl.textContent = `₹ ${tv.toFixed(2)}${isPerLot ? ' (per lot)' : ''}`;
-                } else {
-                    mtmTgtEl.textContent = "None";
-                }
-            }
-        }
-    }
-
-    // Update Re-Execution Counts Badges adjacent to MTM Target
-    updateStraddleReexecBadges(positions);
-
     // Sync master select all checkbox state
     const masterCb = document.getElementById("straddleSelectAllLegs");
     if (masterCb) {
@@ -8275,11 +8219,6 @@ async function saveStraddleStrategySettings() {
     } catch (e) {
         showStraddleToast("Network error: " + e.message, "error", 3500);
     }
-}
-
-async function saveStraddleStrategyAndGoBack() {
-    saveStraddleStrategySettings();
-    switchStraddleSubView("algos");
 }
 
 async function saveAsNewStraddlePreset() {
