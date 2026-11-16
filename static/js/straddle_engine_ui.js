@@ -34,6 +34,29 @@ window._straddleState = {
 window._straddleSelectedLegIndices = new Set();
 window._straddleSelectedLegIds = new Set();
 
+function canonicalUnderlying(und) {
+    if (!und) return "NIFTY";
+    const clean = String(und).toUpperCase().replace(/[\s\-_]/g, '');
+    if (clean === "NIFTY50" || clean === "NIFTY" || clean === "CNXNIFTY") return "NIFTY";
+    if (clean === "BANKNIFTY" || clean === "NIFTYBANK") return "BANKNIFTY";
+    if (clean === "FINNIFTY" || clean === "NIFTYFINSERVICE") return "FINNIFTY";
+    if (clean === "MIDCPNIFTY" || clean === "MIDCAPNIFTY" || clean === "NIFTYMIDSELECT") return "MIDCPNIFTY";
+    if (clean === "SENSEX" || clean === "BSESENSEX") return "SENSEX";
+    if (clean === "BANKEX" || clean === "BSEBANKEX") return "BANKEX";
+    if (clean === "CRUDEOIL" || clean === "CRUDE") return "CRUDEOIL";
+    if (clean === "CRUDEOILM") return "CRUDEOILM";
+    if (clean === "NATURALGAS" || clean === "NATGAS") return "NATURALGAS";
+    if (clean === "NATGASMINI") return "NATGASMINI";
+    if (clean === "GOLD") return "GOLD";
+    if (clean === "GOLDM") return "GOLDM";
+    if (clean === "SILVER") return "SILVER";
+    if (clean === "SILVERM") return "SILVERM";
+    if (clean === "COPPER") return "COPPER";
+    return clean;
+}
+window.canonicalUnderlying = canonicalUnderlying;
+
+
 // =========================================================================
 // LIGHTNING RESPONSIVE NON-BLOCKING TOAST NOTIFICATIONS
 // =========================================================================
@@ -184,6 +207,12 @@ async function initStraddlePlatform() {
     if (pnlStart && !pnlStart.value) pnlStart.value = todayStr;
     if (pnlEnd && !pnlEnd.value) pnlEnd.value = todayStr;
 
+    // Synchronize initial subview with active HTML tab
+    const isAlgosActive = document.getElementById("straddleSubTab_algos")?.classList.contains("active");
+    if (isAlgosActive) {
+        window._straddleState.currentSubView = "algos";
+    }
+
     // Restore saved active underlying from storage or default to NIFTY
     const savedActiveUnd = localStorage.getItem("straddle_active_underlying") || "NIFTY";
     window._activeGlobalUnderlying = savedActiveUnd;
@@ -198,6 +227,9 @@ async function initStraddlePlatform() {
     // Fetch initial state asynchronously without blocking spot tickers
     try {
         await fetchStraddleState();
+        if (window._straddleState.currentSubView === "algos" || isAlgosActive) {
+            renderStraddleAlgosTable(true);
+        }
     } catch (errState) {
         console.warn("fetchStraddleState non-blocking note:", errState);
     }
@@ -481,7 +513,10 @@ async function fetchStraddleState() {
             renderStraddleMarginAutoExitAlert(active);
 
             // In-place smart update for Algos view (never wipes focus/open dropdowns)
-            if (window._straddleState.currentSubView === "algos") {
+            const algosPanel = document.getElementById("straddleSubView_algos");
+            const isAlgosVisible = (window._straddleState.currentSubView === "algos") || 
+                (algosPanel && algosPanel.style.display !== "none" && !algosPanel.classList.contains("hidden"));
+            if (isAlgosVisible) {
                 renderStraddleAlgosTable(false);
             }
         }
@@ -1372,10 +1407,28 @@ function renderStraddleAlgosTable(forceRebuild = false) {
     const strategies = window._straddleState.allStrategies || [];
     const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
 
-    const activeUnd = String(window._activeGlobalUnderlying || "NIFTY").toUpperCase().replace(/\s+/g, '');
-    const hasUnderlyingMatch = strategies.some(s => String(s.underlying || "NIFTY").toUpperCase().replace(/\s+/g, '') === activeUnd);
+    const activeUnd = canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY");
+    const hasUnderlyingMatch = strategies.some(s => canonicalUnderlying(s.underlying || "NIFTY") === activeUnd);
     // Intelligent fallback: if active focused asset has 0 algos, automatically show all assets so table is never blank!
-    const showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
+    let showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
+
+    // Filter strategies focused on active underlying
+    let filtered = strategies.filter(s => {
+        const und = canonicalUnderlying(s.underlying || "NIFTY");
+        if (!showAll && und !== activeUnd) return false;
+        if (searchVal) {
+            const name = (s.name || s.strategy_id).toLowerCase();
+            const status = (s.status || "Ready").toLowerCase();
+            if (!name.includes(searchVal) && !und.toLowerCase().includes(searchVal) && !status.includes(searchVal)) return false;
+        }
+        return true;
+    });
+
+    // Guaranteed fallback: If filtered has 0 strategies but strategies exist in platform, automatically show all
+    if (filtered.length === 0 && strategies.length > 0 && !searchVal) {
+        showAll = true;
+        filtered = strategies;
+    }
 
     const badgeEl = document.getElementById("algosFocusedUnderlyingBadge");
     const toggleBtn = document.getElementById("btnToggleShowAllAlgos");
@@ -1397,21 +1450,9 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         toggleBtn.classList.toggle("btn-outline", !showAll);
     }
 
-    // Filter strategies focused on active underlying
-    let filtered = strategies.filter(s => {
-        const und = String(s.underlying || "NIFTY").toUpperCase().replace(/\s+/g, '');
-        if (!showAll && und !== activeUnd) return false;
-        if (searchVal) {
-            const name = (s.name || s.strategy_id).toLowerCase();
-            const status = (s.status || "Ready").toLowerCase();
-            if (!name.includes(searchVal) && !und.toLowerCase().includes(searchVal) && !status.includes(searchVal)) return false;
-        }
-        return true;
-    });
-
     // Calculate total MTM of filtered
     let totalMtm = 0;
-    strategies.forEach(s => { totalMtm += (s.mtm || 0.0); });
+    filtered.forEach(s => { totalMtm += (s.mtm || 0.0); });
     const totMtmEl = document.getElementById("straddleAlgosTotalMtm");
     if (totMtmEl) {
         totMtmEl.textContent = (totalMtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(totalMtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -3295,7 +3336,7 @@ async function loadStraddleOrderbook(animate = false) {
         if (tbody && (!window._straddleState.orderbookDataCache || window._straddleState.orderbookDataCache.length === 0)) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="14" style="text-align:center; padding:36px; color:#94a3b8;">
+                    <td colspan="12" style="text-align:center; padding:36px; color:#94a3b8;">
                         <span class="straddle-spinner" style="display:inline-block; width:18px; height:18px; border:2px solid #38bdf8; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:middle; margin-right:8px;"></span>
                         Fetching live orderbook from broker & active algos...
                     </td>
@@ -3348,13 +3389,14 @@ function renderStraddleOrderbookTable() {
 
     const orders = window._straddleState.orderbookDataCache || [];
     const searchVal = (document.getElementById("orderbookSearchInput")?.value || "").toLowerCase().trim();
-    const sourceVal = document.getElementById("orderbookSourceSelect")?.value || "ALL";
+    const optTypeVal = document.getElementById("orderbookOptionTypeSelect")?.value || "ALL";
+    const sideVal = document.getElementById("orderbookSideSelect")?.value || "ALL";
     const statusVal = document.getElementById("orderbookStatusSelect")?.value || "ALL";
     const clientVal = window._straddleOrderbookClientId || "ALL";
 
     // Update Header Sort Icons
     const currentSort = window._straddleOrderbookSort || { col: 'time', dir: 'desc' };
-    const sortCols = ['algo_name', 'order_id', 'category', 'client_id', 'symbol', 'side', 'status', 'message', 'time', 'quantity', 'order_type', 'source', 'price', 'trigger_price'];
+    const sortCols = ['algo_name', 'order_id', 'category', 'symbol', 'side', 'status', 'message', 'time', 'quantity', 'order_type', 'price', 'trigger_price'];
     sortCols.forEach(c => {
         const el = document.getElementById(`sort_${c}`);
         if (el) {
@@ -3371,41 +3413,46 @@ function renderStraddleOrderbookTable() {
     });
 
     let filtered = orders.filter(o => {
-        // Client ID Filter
+        // Client ID Filter (if active)
         if (clientVal !== "ALL") {
             const oClient = (o.client_id || "Kotak Neo Live").trim();
             if (oClient !== clientVal && !oClient.includes(clientVal)) return false;
         }
 
-        // Source Filter
-        if (sourceVal !== "ALL") {
-            const isAlgo = (o.source_type === "ALGO" || (o.algo_name && !o.algo_name.toLowerCase().includes("manual") && !o.algo_name.toLowerCase().includes("direct")));
-            if (sourceVal === "ALGO" && !isAlgo) return false;
-            if (sourceVal === "MANUAL" && isAlgo) return false;
+        // Option Type Filter (Call / Put)
+        if (optTypeVal !== "ALL") {
+            const sym = String(o.symbol || o.trading_symbol || "").toUpperCase();
+            if (optTypeVal === "CE" && !sym.includes("CE")) return false;
+            if (optTypeVal === "PE" && !sym.includes("PE")) return false;
         }
 
-        // Status Filter
+        // Side Filter (Buy / Sell)
+        if (sideVal !== "ALL") {
+            const side = String(o.side || o.transaction_type || "").toUpperCase();
+            if (sideVal === "BUY" && !side.includes("BUY")) return false;
+            if (sideVal === "SELL" && !side.includes("SELL")) return false;
+        }
+
+        // Status Filter (Completed / Rejected / Cancelled / Open)
         if (statusVal !== "ALL") {
-            const st = (o.status || "").toUpperCase();
+            const st = String(o.status || "").toUpperCase();
             if (statusVal === "OPEN" && !(st.includes("OPEN") || st.includes("PENDING") || st.includes("TRIG"))) return false;
-            if (statusVal === "COMPLETE" && !st.includes("COMP")) return false;
+            if (statusVal === "COMPLETE" && !(st.includes("COMP") || st.includes("TRAD") || st.includes("EXEC"))) return false;
             if (statusVal === "REJECTED" && !st.includes("REJ")) return false;
             if (statusVal === "CANCELLED" && !st.includes("CAN")) return false;
         }
 
         // Search Filter
         if (searchVal) {
-            const sym = (o.symbol || "").toLowerCase();
+            const sym = String(o.symbol || o.trading_symbol || "").toLowerCase();
             const id = String(o.order_id || "").toLowerCase();
-            const st = (o.status || "").toLowerCase();
-            const algo = (o.algo_name || "").toLowerCase();
-            const src = (o.source || "").toLowerCase();
-            const cat = (o.category || "").toLowerCase();
-            const msg = (o.message || "").toLowerCase();
-            const client = (o.client_id || "").toLowerCase();
-            const side = (o.side || "").toLowerCase();
-            const otype = (o.order_type || "").toLowerCase();
-            if (!sym.includes(searchVal) && !id.includes(searchVal) && !st.includes(searchVal) && !algo.includes(searchVal) && !src.includes(searchVal) && !cat.includes(searchVal) && !msg.includes(searchVal) && !client.includes(searchVal) && !side.includes(searchVal) && !otype.includes(searchVal)) return false;
+            const st = String(o.status || "").toLowerCase();
+            const algo = String(o.algo_name || "").toLowerCase();
+            const cat = String(o.category || "").toLowerCase();
+            const msg = String(o.message || "").toLowerCase();
+            const side = String(o.side || o.transaction_type || "").toLowerCase();
+            const otype = String(o.order_type || "").toLowerCase();
+            if (!sym.includes(searchVal) && !id.includes(searchVal) && !st.includes(searchVal) && !algo.includes(searchVal) && !cat.includes(searchVal) && !msg.includes(searchVal) && !side.includes(searchVal) && !otype.includes(searchVal)) return false;
         }
         return true;
     });
@@ -3431,7 +3478,7 @@ function renderStraddleOrderbookTable() {
     if (filtered.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="14" style="text-align:center; padding:45px 14px; color:#64748b;">
+                <td colspan="12" style="text-align:center; padding:45px 14px; color:#64748b;">
                     <div style="font-size:15px; font-weight:700; color:#cbd5e1; margin-bottom:6px;">⚡ No Orders Found</div>
                     <div style="font-size:12px; color:#94a3b8;">All live and historical orders, broker executions, and rejection logs appear here.</div>
                 </td>
@@ -3484,14 +3531,6 @@ function renderStraddleOrderbookTable() {
             orderTypeDisplay = "Market (M)";
         }
 
-        // Sanitize source - all platform orders belong to Straddle Pro
-        let sourceDisplay = o.source || "Straddle Pro";
-        if (sourceDisplay === "Quantiply" || sourceDisplay === "Manual") {
-            sourceDisplay = "Straddle Pro";
-        }
-
-        const clientIdDisplay = o.client_id || "Kotak Neo Live";
-
         // Active strategy fallback for algo name
         const activeStratName = window._straddleState?.activeStrategy?.name || "abc";
         let algoNameDisplay = o.algo_name || activeStratName;
@@ -3508,14 +3547,16 @@ function renderStraddleOrderbookTable() {
         const rowRejectedClass = isRejected ? "orderbook-row-rejected" : "";
         const messageColor = isRejected ? "color:#ef4444; font-weight:500;" : "color:#cbd5e1;";
 
+        const orderIdRaw = String(o.order_id || "-");
+        const orderIdFormatted = orderIdRaw.replace(/,\s*/g, ', ');
+
         rowsHtml += `
             <tr class="${rowRejectedClass}" style="transition:background 0.15s ease;">
-                <td>
+                <td class="col-orderbook-algo">
                     <a href="javascript:void(0)" onclick="openStrategyFromOrderbook('${o.strategy_id || ''}')" class="orderbook-algo-link" title="Open Algo ${algoNameDisplay}">${algoNameDisplay}</a>
                 </td>
-                <td style="font-family:var(--font-mono); font-size:11px; font-weight:600; color:#94a3b8; letter-spacing:0.3px;">${o.order_id || '-'}</td>
+                <td class="col-orderbook-orderid" style="font-weight:600; color:#94a3b8; letter-spacing:0.3px;">${orderIdFormatted}</td>
                 <td style="font-size:12px; color:#f1f5f9; font-weight:500;">${categoryDisplay}</td>
-                <td style="font-size:12px; color:#cbd5e1; font-weight:500;">${clientIdDisplay}</td>
                 <td style="font-weight:700; color:#f8fafc; font-size:12px; letter-spacing:0.3px;">${symFormatted}</td>
                 <td><span class="orderbook-side-pill ${sideClass}">${sideText}</span></td>
                 <td><span class="orderbook-status-pill ${stClass}">${stDisplay}</span></td>
@@ -3523,7 +3564,6 @@ function renderStraddleOrderbookTable() {
                 <td style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1;">${o.time || '-'}</td>
                 <td style="text-align:right; font-family:var(--font-mono); font-weight:700; font-size:12.5px; color:#f8fafc;">${o.quantity || 65}</td>
                 <td style="font-size:11.5px; color:#cbd5e1;">${orderTypeDisplay}</td>
-                <td style="font-size:11.5px; color:#cbd5e1;">${sourceDisplay}</td>
                 <td style="text-align:right; font-family:var(--font-mono); font-size:12px; color:#94a3b8;">${priceDisplay}</td>
                 <td style="text-align:right; font-family:var(--font-mono); font-size:12px; color:#94a3b8;">${trigPriceDisplay}</td>
             </tr>
@@ -3540,7 +3580,7 @@ function exportStraddleOrderbookCsv() {
         return;
     }
 
-    let csv = "Algo name,Order ID,Category,Client ID / Broker,Symbol,Side,Status,Message,Time,Qty,Order type,Source,Price,Trigger Price\n";
+    let csv = "Algo name,Order ID,Category,Symbol,Side,Status,Message,Time,Qty,Order type,Price,Trigger Price\n";
     orders.forEach(o => {
         const activeStratName = window._straddleState?.activeStrategy?.name || "abc";
         let algoName = o.algo_name || activeStratName;
@@ -3555,7 +3595,6 @@ function exportStraddleOrderbookCsv() {
         if (catVal === "Manual") catVal = (side.toUpperCase() === "SELL" ? "Target" : "Entry");
         const cat = catVal.replace(/"/g, '""');
 
-        const client = (o.client_id || "Kotak Neo Live").replace(/"/g, '""');
         const sym = (o.symbol || "").replace(/"/g, '""');
         const st = (o.status || "Complete").replace(/"/g, '""');
         const msg = (o.message || "").replace(/"/g, '""');
@@ -3563,15 +3602,10 @@ function exportStraddleOrderbookCsv() {
         const qty = o.quantity || 65;
         const otype = (o.order_type || "Limit (L)").replace(/"/g, '""');
 
-        let srcVal = o.source || "Straddle Pro";
-        if (srcVal === "Quantiply" || srcVal === "Manual") {
-            srcVal = "Straddle Pro";
-        }
-        const src = srcVal.replace(/"/g, '""');
         const price = parseFloat(o.price || 0).toFixed(2);
         const trigPrice = parseFloat(o.trigger_price || 0).toFixed(2);
 
-        csv += `"${algo}","${oid}","${cat}","${client}","${sym}","${side}","${st}","${msg}","${time}",${qty},"${otype}","${src}",${price},${trigPrice}\n`;
+        csv += `"${algo}","${oid}","${cat}","${sym}","${side}","${st}","${msg}","${time}",${qty},"${otype}",${price},${trigPrice}\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -13721,7 +13755,7 @@ const COMMODITY_COLOR_MAP = {
 
 function selectGlobalUnderlying(undKey) {
     if (!undKey) return;
-    const cleanKey = undKey.toUpperCase().replace(/\s+/g, '');
+    const cleanKey = canonicalUnderlying(undKey);
     window._activeGlobalUnderlying = cleanKey;
     try {
         localStorage.setItem("straddle_active_underlying", cleanKey);

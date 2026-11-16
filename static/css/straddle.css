@@ -11043,4 +11043,31 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     }
 }
 
+/* ==========================================================
+   ORDERBOOK WRAPPED COLUMNS & FILTER ENHANCEMENTS
+   ========================================================== */
+
+.orderbook-table th.col-orderbook-algo,
+.orderbook-table td.col-orderbook-algo {
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    min-width: 120px !important;
+    max-width: 220px !important;
+    line-height: 1.35 !important;
+}
+
+.orderbook-table th.col-orderbook-orderid,
+.orderbook-table td.col-orderbook-orderid {
+    white-space: normal !important;
+    word-break: break-all !important;
+    overflow-wrap: anywhere !important;
+    min-width: 140px !important;
+    max-width: 240px !important;
+    line-height: 1.35 !important;
+    font-family: var(--font-mono) !important;
+    font-size: 11px !important;
+}
+
+
 

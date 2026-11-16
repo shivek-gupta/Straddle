@@ -685,10 +685,7 @@ class StraddleManager:
 
     def _load_deleted_strategies(self):
         with _ENGINE_LOCK:
-            self._deleted_strategy_ids = {
-                "straddle_nifty_920",
-                "nifty 9:20 short straddle (45% tgt / 66% sl)"
-            }
+            self._deleted_strategy_ids = set()
             if STRADDLE_DELETED_FILE.exists():
                 try:
                     with open(STRADDLE_DELETED_FILE, "r", encoding="utf-8") as f:
