@@ -4435,6 +4435,17 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         totMtmEl.style.color = (tm >= 0) ? "#10b981" : "#f43f5e";
     }
 
+    // Auto-clear stale pre-market error banners once strategy is active, running, or has trades
+    const errBanner = document.getElementById("stratSettingsErrorBanner");
+    const activeStrat = window._straddleState?.activeStrategy;
+    if (errBanner && activeStrat) {
+        const hasPositions = (positions && positions.length > 0) || (activeStrat.positions && activeStrat.positions.length > 0);
+        if (activeStrat.status === "TRADE_ACTIVE" || hasPositions || !activeStrat.entry_error || activeStrat.entry_error === "-") {
+            errBanner.style.display = "none";
+            errBanner.textContent = "";
+        }
+    }
+
     // Sync MTM Target display if activeStrategy has mtm_target configured
     const activeStratForTarget = window._straddleState?.activeStrategy;
     if (activeStratForTarget && activeStratForTarget.mtm_target) {
@@ -6652,6 +6663,14 @@ window.toggleStraddleSettingsPanel = toggleStraddleSettingsPanel;
 
 function populateStraddleSettingsForm(s) {
     if (!s) return;
+    const errBanner = document.getElementById("stratSettingsErrorBanner");
+    if (errBanner) {
+        const hasPositions = s.positions && s.positions.length > 0;
+        if (s.status === "TRADE_ACTIVE" || hasPositions || !s.entry_error || s.entry_error === "-") {
+            errBanner.style.display = "none";
+            errBanner.textContent = "";
+        }
+    }
     if (document.getElementById("cfgStrategyId")) {
         document.getElementById("cfgStrategyId").value = s.strategy_id || "";
     }
@@ -10433,34 +10452,221 @@ function downloadAuditLogsExcel() {
 
 window._straddleAuditLogsFilter = "all"; // "all" | "actual" | "paper" | "trades"
 window._straddleAuditSideFilter = "ALL"; // "ALL" | "BUY" | "SELL"
+window._straddleAuditLevelFilter = "ALL"; // "ALL" | "INFO" | "SUCCESS" | "INFO_SUCCESS" | "WARNING" | "ERROR"
+window._straddleAuditOptionFilter = "ALL"; // "ALL" | "CE" | "PE"
+window._straddleAuditRoleFilter = "ALL"; // "ALL" | "MAIN" | "HEDGE"
+window._straddleAuditTriggerFilter = "ALL"; // "ALL" | "TARGET" | "STOPLOSS"
+window._straddleAuditFilterCollapsed = false;
 window._cachedAuditLogsList = [];
 
-function setStraddleAuditFilter(filterType) {
-    window._straddleAuditLogsFilter = filterType;
-    ["btnAuditFilterAll", "btnAuditFilterActual", "btnAuditFilterPaper", "btnAuditFilterTrades"].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.classList.remove("active-toggle");
-            el.classList.add("btn-outline");
-        }
-    });
-    const map = {
-        all: "btnAuditFilterAll",
-        actual: "btnAuditFilterActual",
-        paper: "btnAuditFilterPaper",
-        trades: "btnAuditFilterTrades"
-    };
-    const activeEl = document.getElementById(map[filterType]);
-    if (activeEl) {
-        activeEl.classList.add("active-toggle");
-        activeEl.classList.remove("btn-outline");
-    }
+function toggleAuditFilterBar() {
+    const pane = document.getElementById("auditCollapsibleFilterPane");
+    const icon = document.getElementById("iconToggleAuditFilter");
+    const text = document.getElementById("textToggleAuditFilter");
+    if (!pane) return;
+    const isHidden = (pane.style.display === "none");
+    pane.style.display = isHidden ? "flex" : "none";
+    window._straddleAuditFilterCollapsed = !isHidden;
+    if (icon) icon.textContent = isHidden ? "🔼" : "🔽";
+    if (text) text.textContent = isHidden ? "Hide" : "Filters";
+}
+window.toggleAuditFilterBar = toggleAuditFilterBar;
+
+function _updateAuditSummaryLabel() {
+    const label = document.getElementById("auditFilterSummaryLabel");
+    if (!label) return;
+    const parts = [];
+    if (window._straddleAuditLevelFilter !== "ALL") parts.push(`Level: ${window._straddleAuditLevelFilter}`);
+    if (window._straddleAuditOptionFilter !== "ALL") parts.push(`Opt: ${window._straddleAuditOptionFilter}`);
+    if (window._straddleAuditRoleFilter !== "ALL") parts.push(`Role: ${window._straddleAuditRoleFilter}`);
+    if (window._straddleAuditTriggerFilter !== "ALL") parts.push(`Trig: ${window._straddleAuditTriggerFilter}`);
+    if (window._straddleAuditSideFilter !== "ALL") parts.push(`Side: ${window._straddleAuditSideFilter}`);
+    if (window._straddleAuditLogsFilter !== "all") parts.push(`Mode: ${window._straddleAuditLogsFilter.toUpperCase()}`);
+    label.textContent = parts.length > 0 ? `Filters: ${parts.join(" • ")}` : "All Events";
+}
+
+function setStraddleAuditLevelFilter(lvl) {
+    window._straddleAuditLevelFilter = lvl || "ALL";
+    _updateAuditSummaryLabel();
     renderStraddleAuditLogsFiltered();
 }
+window.setStraddleAuditLevelFilter = setStraddleAuditLevelFilter;
+
+function setStraddleAuditOptionFilter(opt) {
+    window._straddleAuditOptionFilter = opt || "ALL";
+    window._straddleAuditQuickCePeOnly = false;
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.setStraddleAuditOptionFilter = setStraddleAuditOptionFilter;
+
+function setStraddleAuditRoleFilter(role) {
+    window._straddleAuditRoleFilter = role || "ALL";
+    window._straddleAuditQuickHedgeMainOnly = false;
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.setStraddleAuditRoleFilter = setStraddleAuditRoleFilter;
+
+function setStraddleAuditTriggerFilter(trig) {
+    window._straddleAuditTriggerFilter = trig || "ALL";
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.setStraddleAuditTriggerFilter = setStraddleAuditTriggerFilter;
 
 function setStraddleAuditSideFilter(side) {
     window._straddleAuditSideFilter = side || "ALL";
+    _updateAuditSummaryLabel();
     renderStraddleAuditLogsFiltered();
+}
+window.setStraddleAuditSideFilter = setStraddleAuditSideFilter;
+
+function setStraddleAuditFilter(filterType) {
+    window._straddleAuditLogsFilter = filterType || "all";
+    const selMode = document.getElementById("selAuditModeFilter");
+    if (selMode) selMode.value = window._straddleAuditLogsFilter;
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.setStraddleAuditFilter = setStraddleAuditFilter;
+
+function setAuditQuickFilter(type) {
+    const selLvl = document.getElementById("selAuditLevelFilter");
+    const selOpt = document.getElementById("selAuditOptionFilter");
+    const selRole = document.getElementById("selAuditRoleFilter");
+    const selTrig = document.getElementById("selAuditTriggerFilter");
+    const selSide = document.getElementById("selAuditSideFilter");
+    const selMode = document.getElementById("selAuditModeFilter");
+
+    ["btnAuditQuickAll", "btnAuditQuickInfoSuccess", "btnAuditQuickCePe", "btnAuditQuickHedgeMain"].forEach(id => {
+        const b = document.getElementById(id);
+        if (b) {
+            b.classList.remove("active");
+            b.style.background = "transparent";
+            b.style.color = "#94a3b8";
+        }
+    });
+
+    window._straddleAuditQuickCePeOnly = false;
+    window._straddleAuditQuickHedgeMainOnly = false;
+
+    if (type === "all") {
+        window._straddleAuditLevelFilter = "ALL";
+        window._straddleAuditOptionFilter = "ALL";
+        window._straddleAuditRoleFilter = "ALL";
+        window._straddleAuditTriggerFilter = "ALL";
+        window._straddleAuditSideFilter = "ALL";
+        window._straddleAuditLogsFilter = "all";
+        if (selLvl) selLvl.value = "ALL";
+        if (selOpt) selOpt.value = "ALL";
+        if (selRole) selRole.value = "ALL";
+        if (selTrig) selTrig.value = "ALL";
+        if (selSide) selSide.value = "ALL";
+        if (selMode) selMode.value = "all";
+        const b = document.getElementById("btnAuditQuickAll");
+        if (b) { b.classList.add("active"); b.style.background = "#1e293b"; b.style.color = "#f8fafc"; }
+    } else if (type === "info_success") {
+        window._straddleAuditLevelFilter = "INFO_SUCCESS";
+        if (selLvl) selLvl.value = "INFO_SUCCESS";
+        const b = document.getElementById("btnAuditQuickInfoSuccess");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(16,185,129,0.2)"; b.style.color = "#10b981"; }
+    } else if (type === "ce_pe") {
+        window._straddleAuditOptionFilter = "ALL";
+        window._straddleAuditQuickCePeOnly = true;
+        const b = document.getElementById("btnAuditQuickCePe");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(56,189,248,0.2)"; b.style.color = "#38bdf8"; }
+    } else if (type === "hedge_main") {
+        window._straddleAuditRoleFilter = "ALL";
+        window._straddleAuditQuickHedgeMainOnly = true;
+        const b = document.getElementById("btnAuditQuickHedgeMain");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(245,158,11,0.2)"; b.style.color = "#fbbf24"; }
+    }
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.setAuditQuickFilter = setAuditQuickFilter;
+
+function _parseAuditLogBadges(l) {
+    const msg = String(l.message || "");
+    const msgU = msg.toUpperCase();
+    const lvl = String(l.level || "INFO").toUpperCase();
+
+    // 1. Level Color & Badge
+    const lvlColor = lvl === "ERROR" ? "#f43f5e" : (lvl === "WARN" || lvl === "WARNING" ? "#f59e0b" : (lvl === "SUCCESS" ? "#10b981" : "#38bdf8"));
+    const lvlBg = lvl === "ERROR" ? "rgba(244,63,94,0.14)" : (lvl === "WARN" || lvl === "WARNING" ? "rgba(245,158,11,0.14)" : (lvl === "SUCCESS" ? "rgba(16,185,129,0.14)" : "rgba(56,189,248,0.12)"));
+    const lvlBorder = lvl === "ERROR" ? "rgba(244,63,94,0.4)" : (lvl === "WARN" || lvl === "WARNING" ? "rgba(245,158,11,0.4)" : (lvl === "SUCCESS" ? "rgba(16,185,129,0.4)" : "rgba(56,189,248,0.3)"));
+    const levelBadge = `<span style="background:${lvlBg}; border:1px solid ${lvlBorder}; color:${lvlColor}; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:0.4px;">${lvl}</span>`;
+
+    // 2. Trade Type Badge (Live vs Paper)
+    const tt = (l.trade_type || (msgU.includes("[PAPER") || msgU.includes("PAPER FILL") ? "PAPER" : (msgU.includes("ENTERED") || msgU.includes("EXITED") || msgU.includes("FILLED") || msgU.includes("STOPLOSS") || msgU.includes("TARGET") ? "LIVE" : ""))).toUpperCase();
+    let modeBadge = "";
+    if (tt === "LIVE") {
+        modeBadge = `<span style="background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.5); color:#10b981; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; letter-spacing:0.5px;">LIVE</span>`;
+    } else if (tt === "PAPER") {
+        modeBadge = `<span style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.5); color:#c084fc; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; letter-spacing:0.5px;">PAPER</span>`;
+    }
+
+    // 3. Role Badge (Main vs Hedge)
+    let role = "";
+    if (l.is_associated_hedge || msgU.includes("HEDGE")) {
+        role = "HEDGE";
+    } else if (msgU.includes("MAIN") || msgU.includes("SHORT STRADDLE") || msgU.includes("ENTERED SELL") || msgU.includes("RE-EXECUTE") || msgU.includes("RE-ENTRY")) {
+        role = "MAIN";
+    }
+    let roleBadge = "";
+    if (role === "HEDGE") {
+        roleBadge = `<span style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.5); color:#fbbf24; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">🛡️ HEDGE</span>`;
+    } else if (role === "MAIN") {
+        roleBadge = `<span style="background:rgba(139,92,246,0.18); border:1px solid rgba(139,92,246,0.5); color:#a78bfa; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">⚡ MAIN</span>`;
+    }
+
+    // 4. Side Badge (Buy vs Sell)
+    let side = String(l.side || "").toUpperCase();
+    if (!side || side === "-") {
+        if (msgU.includes("ENTERED BUY") || msgU.includes("BUYING") || msgU.includes("BUY NEW HEDGE") || msgU.includes(" BUY ")) side = "BUY";
+        else if (msgU.includes("ENTERED SELL") || msgU.includes("SELLING") || msgU.includes("SHORT RE-ENTRY") || msgU.includes(" SELL ")) side = "SELL";
+    }
+    let sideBadge = "";
+    if (side === "BUY") {
+        sideBadge = `<span style="background:rgba(34,197,94,0.18); border:1px solid rgba(34,197,94,0.5); color:#4ade80; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">BUY</span>`;
+    } else if (side === "SELL") {
+        sideBadge = `<span style="background:rgba(249,115,22,0.18); border:1px solid rgba(249,115,22,0.5); color:#fb923c; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">SELL</span>`;
+    }
+
+    // 5. Option Type Badge (CE vs PE)
+    let opt = "";
+    if (msgU.includes(" CE ") || msgU.includes(" CALL ") || msgU.includes("CE]") || msgU.includes("(CE)") || /\b\d+\s*CE\b/.test(msgU)) {
+        opt = "CE";
+    } else if (msgU.includes(" PE ") || msgU.includes(" PUT ") || msgU.includes("PE]") || msgU.includes("(PE)") || /\b\d+\s*PE\b/.test(msgU)) {
+        opt = "PE";
+    }
+    let optBadge = "";
+    if (opt === "CE") {
+        optBadge = `<span style="background:rgba(2,132,199,0.18); border:1px solid rgba(2,132,199,0.5); color:#38bdf8; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">📈 CE</span>`;
+    } else if (opt === "PE") {
+        optBadge = `<span style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.5); color:#c084fc; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">📉 PE</span>`;
+    }
+
+    // 6. Trigger Badge (Target vs Stoploss)
+    let trig = "";
+    if (msgU.includes("TARGET HIT") || msgU.includes("TARGET ORDER") || msgU.includes("TGT:") || msgU.includes("TGT HIT") || msgU.includes("(TARGET)")) {
+        trig = "TARGET";
+    } else if (msgU.includes("STOPLOSS HIT") || msgU.includes("STOPLOSS ORDER") || msgU.includes("SL HIT") || msgU.includes("SL:") || msgU.includes("(STOPLOSS)") || msgU.includes("SL CANCEL")) {
+        trig = "STOPLOSS";
+    }
+    let trigBadge = "";
+    if (trig === "TARGET") {
+        trigBadge = `<span style="background:rgba(16,185,129,0.2); border:1px solid rgba(16,185,129,0.55); color:#10b981; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🎯 TARGET</span>`;
+    } else if (trig === "STOPLOSS") {
+        trigBadge = `<span style="background:rgba(244,63,94,0.2); border:1px solid rgba(244,63,94,0.55); color:#f43f5e; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🛑 STOPLOSS</span>`;
+    }
+
+    return {
+        levelBadge, modeBadge, roleBadge, sideBadge, optBadge, trigBadge,
+        level: lvl, tradeType: tt, role, side, optType: opt, trigger: trig,
+        color: lvlColor, bg: lvlBg, border: lvlBorder
+    };
 }
 
 function renderStraddleAuditLogsFiltered() {
@@ -10475,62 +10681,67 @@ function _buildAuditLogsHtml(logsList) {
     }
     const filterType = window._straddleAuditLogsFilter || "all";
     const sideFilter = window._straddleAuditSideFilter || "ALL";
+    const levelFilter = window._straddleAuditLevelFilter || "ALL";
+    const optionFilter = window._straddleAuditOptionFilter || "ALL";
+    const roleFilter = window._straddleAuditRoleFilter || "ALL";
+    const triggerFilter = window._straddleAuditTriggerFilter || "ALL";
+    const quickCePeOnly = !!window._straddleAuditQuickCePeOnly;
+    const quickHedgeMainOnly = !!window._straddleAuditQuickHedgeMainOnly;
 
     const filtered = logsList.filter(l => {
-        const tt = (l.trade_type || (l.message && (l.message.includes("[Paper") || l.message.includes("Paper Fill")) ? "PAPER" : "LIVE")).toUpperCase();
-        const side = (l.side || "").toUpperCase();
-        
-        // Filter by trade type
-        if (filterType === "actual" && tt !== "LIVE") return false;
-        if (filterType === "paper" && tt !== "PAPER") return false;
-        if (filterType === "trades" && tt !== "LIVE" && tt !== "PAPER") return false;
+        const parsed = _parseAuditLogBadges(l);
 
-        // Filter by side
-        if (sideFilter !== "ALL" && side !== sideFilter) return false;
+        // Level filter
+        if (levelFilter === "INFO" && parsed.level !== "INFO") return false;
+        if (levelFilter === "SUCCESS" && parsed.level !== "SUCCESS") return false;
+        if (levelFilter === "INFO_SUCCESS" && parsed.level !== "INFO" && parsed.level !== "SUCCESS") return false;
+        if (levelFilter === "WARNING" && parsed.level !== "WARNING" && parsed.level !== "WARN") return false;
+        if (levelFilter === "ERROR" && parsed.level !== "ERROR") return false;
+
+        // Trade Mode filter
+        if (filterType === "actual" && parsed.tradeType !== "LIVE") return false;
+        if (filterType === "paper" && parsed.tradeType !== "PAPER") return false;
+        if (filterType === "trades" && parsed.tradeType !== "LIVE" && parsed.tradeType !== "PAPER") return false;
+
+        // Side filter
+        if (sideFilter !== "ALL" && parsed.side !== sideFilter) return false;
+
+        // Option Type filter (CE / PE)
+        if (optionFilter !== "ALL" && parsed.optType !== optionFilter) return false;
+        if (quickCePeOnly && !parsed.optType) return false;
+
+        // Role filter (Main / Hedge)
+        if (roleFilter !== "ALL" && parsed.role !== roleFilter) return false;
+        if (quickHedgeMainOnly && !parsed.role) return false;
+
+        // Trigger filter (Target / Stoploss)
+        if (triggerFilter !== "ALL" && parsed.trigger !== triggerFilter) return false;
 
         return true;
     });
 
     if (filtered.length === 0) {
-        return `<div style="color:#64748b; text-align:center; padding:25px;">No matching log events for current filter (${filterType.toUpperCase()}, Side: ${sideFilter}).</div>`;
+        return `<div style="color:#64748b; text-align:center; padding:25px;">No matching log events for current filter settings.</div>`;
     }
 
     let html = "";
     filtered.forEach(l => {
-        const level = (l.level || "INFO").toUpperCase();
-        const color = level === "ERROR" ? "#f43f5e" : (level === "WARN" ? "#f59e0b" : (level === "SUCCESS" ? "#10b981" : "#38bdf8"));
-        const bg = level === "ERROR" ? "rgba(244,63,94,0.08)" : (level === "WARN" ? "rgba(245,158,11,0.08)" : (level === "SUCCESS" ? "rgba(16,185,129,0.08)" : "rgba(56,189,248,0.04)"));
-        const border = level === "ERROR" ? "rgba(244,63,94,0.3)" : (level === "WARN" ? "rgba(245,158,11,0.3)" : (level === "SUCCESS" ? "rgba(16,185,129,0.3)" : "rgba(56,189,248,0.2)"));
+        const parsed = _parseAuditLogBadges(l);
         const dateStr = l.date ? `${l.date} ` : "";
 
-        // Trade Type Badge
-        let tradeTypeBadge = "";
-        const tt = (l.trade_type || (l.message && (l.message.includes("[Paper") || l.message.includes("Paper Fill")) ? "PAPER" : "LIVE")).toUpperCase();
-        if (tt === "LIVE") {
-            tradeTypeBadge = `<span style="background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.5); color:#10b981; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; letter-spacing:0.5px; white-space:nowrap;">LIVE</span>`;
-        } else if (tt === "PAPER") {
-            tradeTypeBadge = `<span style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.5); color:#c084fc; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; letter-spacing:0.5px; white-space:nowrap;">PAPER</span>`;
-        }
-
-        // Side Badge
-        let sideBadge = "";
-        const side = (l.side || "").toUpperCase();
-        if (side === "BUY") {
-            sideBadge = `<span style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#4ade80; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; white-space:nowrap;">BUY</span>`;
-        } else if (side === "SELL") {
-            sideBadge = `<span style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#f87171; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; white-space:nowrap;">SELL</span>`;
-        }
-
         html += `
-            <div class="audit-log-card" style="padding:8px 12px; background:${bg}; border:1px solid ${border}; border-radius:6px; margin-bottom:6px; display:flex; flex-direction:column; gap:4px;">
+            <div class="audit-log-card" style="padding:8px 12px; background:${parsed.bg}; border:1px solid ${parsed.border}; border-radius:6px; margin-bottom:6px; display:flex; flex-direction:column; gap:4px;">
                 <div class="audit-log-card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
                     <div style="display:inline-flex; align-items:center; gap:6px;">
                         <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:700;">🕒 [${dateStr}${l.timestamp || ''}]</span>
-                        <span style="color:${color}; font-weight:900; font-size:10.5px; text-transform:uppercase;">${level}</span>
+                        ${parsed.levelBadge}
                     </div>
-                    <div style="display:inline-flex; align-items:center; gap:5px;">
-                        ${tradeTypeBadge}
-                        ${sideBadge}
+                    <div style="display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                        ${parsed.modeBadge}
+                        ${parsed.roleBadge}
+                        ${parsed.sideBadge}
+                        ${parsed.optBadge}
+                        ${parsed.trigBadge}
                     </div>
                 </div>
                 <div style="color:#f1f5f9; font-size:12px; line-height:1.45; word-break:break-word; overflow-wrap:break-word;">

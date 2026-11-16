@@ -9677,6 +9677,7 @@ class StraddleManager:
         if is_re_enabled and cur_count < re_max:
             new_count = cur_count + 1
             pos["_re_entry_in_progress"] = True
+            strat.setdefault("_active_re_entries", set()).add(pos.get("id") or pos.get("symbol"))
             strat["_re_entry_in_progress"] = True
             self._log_event(f"Triggering {re_type_u} #{new_count}/{re_max} for leg '{pos.get('symbol')}' ({trigger} hit)...")
 
@@ -10167,21 +10168,40 @@ class StraddleManager:
                         new_pos["associated_hedge_id"] = active_hedge.get("id")
                         new_pos["associated_hedge"] = h_cfg
 
+                    target_sid = strat.get("strategy_id")
                     if new_pos.get("status") == "OPEN":
                         with _ENGINE_LOCK:
-                            strat.setdefault("positions", []).append(new_pos)
-                            if self._active_strategy_id == strat.get("strategy_id"):
-                                self._state["positions"] = strat.get("positions", [])
+                            auth_strat = self.get_strategy(target_sid) or strat
+                            strat_pos_list = auth_strat.setdefault("positions", [])
+                            # Prevent duplicate entries for the same order/symbol execution
+                            is_dup = any(
+                                (new_pos.get("order_id") and p.get("order_id") == new_pos.get("order_id"))
+                                or (p.get("symbol") == new_pos.get("symbol") and p.get("status") == "OPEN" and p.get("re_execute_count") == new_count)
+                                for p in strat_pos_list
+                            )
+                            if not is_dup:
+                                strat_pos_list.append(new_pos)
+                            if self._active_strategy_id == target_sid:
+                                self._state["positions"] = list(strat_pos_list)
+                            # Sync exit reason on parent leg inside authoritative strategy
+                            for p_in_s in strat_pos_list:
+                                if p_in_s.get("id") == pos.get("id"):
+                                    if p_in_s.get("exit_reason") and "➔" not in str(p_in_s.get("exit_reason")):
+                                        p_in_s["exit_reason"] = f"{p_in_s['exit_reason']} ➔ Triggered {clean_opt} Re-Execute #{new_count}"
+                            auth_strat["status"] = "TRADE_ACTIVE"
+                            auth_strat["entry_error"] = "-"
                             self._save_strategies()
-                            self._save_state()
+                            self._save_state(force=True)
                         self._log_event(f"Re-Execute #{new_count} filled for {new_pos['symbol']} @ ₹{new_pos.get('avg_ent_price', 0):.2f}", level="SUCCESS")
                     else:
                         with _ENGINE_LOCK:
-                            strat.setdefault("positions", []).append(new_pos)
-                            if self._active_strategy_id == strat.get("strategy_id"):
-                                self._state["positions"] = strat.get("positions", [])
+                            auth_strat = self.get_strategy(target_sid) or strat
+                            strat_pos_list = auth_strat.setdefault("positions", [])
+                            strat_pos_list.append(new_pos)
+                            if self._active_strategy_id == target_sid:
+                                self._state["positions"] = list(strat_pos_list)
                             self._save_strategies()
-                            self._save_state()
+                            self._save_state(force=True)
                         err_msg = new_pos.get("error") or "Order rejected by broker"
                         self._log_event(f"Re-Execute #{new_count} order rejected for {new_pos['symbol']}: {err_msg}", level="ERROR")
                         if self._is_margin_error(err_msg):
@@ -10197,7 +10217,8 @@ class StraddleManager:
                     self._log_event(f"[RE-ENTRY WORKER ERROR] Failed executing re-entry for {pos.get('symbol')}: {e_run}", level="ERROR")
                 finally:
                     pos["_re_entry_in_progress"] = False
-                    strat["_re_entry_in_progress"] = False
+                    strat.setdefault("_active_re_entries", set()).discard(pos.get("id") or pos.get("symbol"))
+                    strat["_re_entry_in_progress"] = bool(strat.get("_active_re_entries"))
 
             threading.Thread(target=_runner_wrapper, daemon=True).start()
         else:
@@ -10238,6 +10259,26 @@ class StraddleManager:
                         counts["pe_target"] += 1
                     elif trig == "STOPLOSS":
                         counts["pe_sl"] += 1
+
+        # Secondary cross-verification: also count triggers documented in completed leg exit reasons
+        exit_counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
+        for p in positions:
+            exit_r = str(p.get("exit_reason", "")).upper()
+            sym = str(p.get("symbol", "")).upper()
+            if "TRIGGERED CE RE-EXECUTE" in exit_r or "TRIGGERED CE RE-ENTRY" in exit_r:
+                if "TARGET" in exit_r:
+                    exit_counts["ce_target"] += 1
+                else:
+                    exit_counts["ce_sl"] += 1
+            elif "TRIGGERED PE RE-EXECUTE" in exit_r or "TRIGGERED PE RE-ENTRY" in exit_r:
+                if "TARGET" in exit_r:
+                    exit_counts["pe_target"] += 1
+                else:
+                    exit_counts["pe_sl"] += 1
+
+        for k in counts:
+            counts[k] = max(counts[k], exit_counts.get(k, 0))
+
         return counts
 
     def _auto_square_off_associated_hedge(
@@ -12938,14 +12979,120 @@ class StraddleManager:
                         break
 
                 if not matched_leg_pos:
+                    # RECOVERY & POSITION RECONCILIATION GUARD:
+                    # An open position exists on Kotak Neo broker (e.g. NIFTY 25300 PUT -65),
+                    # but is currently missing from strategy positions list.
+                    # Automatically adopt this position into the matching active strategy so capital is 100% managed!
+                    cand_strat = None
                     for s in self._strategies:
-                        for p in s.get("positions", []):
-                            if _is_same_instrument(p.get("symbol"), p.get("instrument_key"), bp_sym, bp_ikey):
-                                matched_strat = s
-                                matched_leg_pos = p
-                                break
-                        if matched_strat:
+                        s_und = str(s.get("underlying") or "NIFTY").upper()
+                        if s.get("status") in ("TRADE_ACTIVE", "READY") and (s_und in bp_sym.upper() or bp_sym.upper().startswith(s_und)):
+                            cand_strat = s
                             break
+                    if not cand_strat and self._active_strategy_id:
+                        cand_strat = self.get_strategy(self._active_strategy_id)
+                    if not cand_strat and self._strategies:
+                        cand_strat = self._strategies[0]
+
+                    if cand_strat and cand_strat.get("status") not in ("TERMINATED", "STOPPED"):
+                        opt_type = "PE" if " PE" in bp_sym.upper() or bp_sym.upper().endswith("PE") else ("CE" if " CE" in bp_sym.upper() or bp_sym.upper().endswith("CE") else "")
+                        stk_price = 0.0
+                        for part in bp_sym.split():
+                            if part.isdigit() and len(part) >= 4:
+                                stk_price = float(part)
+                                break
+
+                        real_ent = bp_day_avg
+                        real_oid = ""
+                        try:
+                            ob = broker.get_order_book() or []
+                            for o in ob:
+                                o_sym = o.get("trading_symbol") or o.get("symbol") or ""
+                                o_st = str(o.get("status", "")).upper()
+                                o_side = str(o.get("transaction_type", "")).upper()
+                                if _is_same_instrument(o_sym, o.get("instrument_key"), bp_sym, bp_ikey) and o_side == side and ("COMP" in o_st or "TRAD" in o_st):
+                                    real_oid = str(o.get("order_id", ""))
+                                    p_fill = float(o.get("average_price") or o.get("price") or 0.0)
+                                    if p_fill > 0:
+                                        real_ent = p_fill
+                                    break
+                        except Exception:
+                            pass
+
+                        tgt_val = 25.0
+                        sl_val = 25.0
+                        for l in cand_strat.get("legs", []):
+                            if str(l.get("option_type", "")).upper() == opt_type:
+                                tgt_val = float(l.get("target_value") or 25.0)
+                                sl_val = float(l.get("sl_value") or 25.0)
+                                break
+
+                        calc_tgt = round_to_tick(real_ent * (1.0 - tgt_val / 100.0) if side == "SELL" else real_ent * (1.0 + tgt_val / 100.0))
+                        calc_sl = round_to_tick(real_ent * (1.0 + sl_val / 100.0) if side == "SELL" else real_ent * (1.0 - sl_val / 100.0))
+                        leg_mtm = round((ltp - real_ent) * abs(net_qty) if side == "BUY" else (real_ent - ltp) * abs(net_qty), 2)
+                        pnl_pct = round(((ltp - real_ent) / real_ent) * 100.0, 2) if side == "BUY" else round(((real_ent - ltp) / real_ent) * 100.0, 2)
+
+                        prior_reexecs = sum(1 for p in cand_strat.get("positions", []) if (p.get("option_type") or "").upper() == opt_type and (p.get("is_re_entry") or (p.get("re_execute_count") or 0) > 0))
+                        re_num = prior_reexecs + 1
+
+                        auto_pos = {
+                            "id": f"leg_reexec_adopted_{int(time.time()*1000)}",
+                            "status": "OPEN",
+                            "side": side,
+                            "product": bp.get("product", "NRML"),
+                            "symbol": bp_sym,
+                            "instrument_key": bp_ikey,
+                            "strike_price": stk_price,
+                            "option_type": opt_type,
+                            "lots": abs(net_qty) // max(1, int(bp.get("lot_size", 65))),
+                            "lot_size": int(bp.get("lot_size", 65)),
+                            "quantity": abs(net_qty),
+                            "entry_qty": abs(net_qty),
+                            "avg_ent_price": real_ent,
+                            "reference_price": real_ent,
+                            "entry_time": now_ist_str(),
+                            "_entry_epoch_ts": time.time(),
+                            "target_type": "TGT: %",
+                            "target_type_label": f"TGT: {tgt_val:.0f}%",
+                            "target_value": tgt_val,
+                            "target_price": calc_tgt,
+                            "sl_type": "SL: -%",
+                            "sl_type_label": f"SL: -{sl_val:.0f}%",
+                            "sl_value": sl_val,
+                            "sl_price": calc_sl,
+                            "original_sl_label": f"ORIGINAL SL: -{sl_val:.0f}%",
+                            "original_sl_price": calc_sl,
+                            "ltp": ltp,
+                            "mtm": leg_mtm,
+                            "pnl_pct": pnl_pct,
+                            "order_id": real_oid,
+                            "child_order_ids": [real_oid] if real_oid else [],
+                            "re_execute_count": re_num,
+                            "re_execute_leg_type": opt_type,
+                            "re_execute_trigger": "STOPLOSS",
+                            "is_re_entry": True,
+                            "entry_reason": f"⚡ {opt_type} Re-Execute #{re_num} [Auto-Reconciled Broker Trade]",
+                            "strategy_id": cand_strat.get("strategy_id"),
+                            "strategy_name": cand_strat.get("name"),
+                            "date": today_ist_str(),
+                        }
+
+                        with _ENGINE_LOCK:
+                            cand_strat.setdefault("positions", []).append(auto_pos)
+                            if self._active_strategy_id == cand_strat.get("strategy_id"):
+                                self._state["positions"] = list(cand_strat.get("positions", []))
+                            cand_strat["status"] = "TRADE_ACTIVE"
+                            cand_strat["entry_error"] = "-"
+                            self._save_strategies()
+                            self._save_state(force=True)
+
+                        self._log_event(
+                            f"[Auto-Reconciled Position] 🛡️ Recovered and adopted live open broker position '{bp_sym}' ({net_qty} Qty @ ₹{real_ent:.2f}) into strategy '{cand_strat.get('name')}'. SL: ₹{calc_sl:.2f}, Target: ₹{calc_tgt:.2f} active.",
+                            level="SUCCESS"
+                        )
+                        changes_made = True
+                        matched_strat = cand_strat
+                        matched_leg_pos = auto_pos
 
                 if matched_strat and matched_leg_pos:
                     if matched_leg_pos.get("_exit_in_progress") or matched_leg_pos.get("status") in ("COMPLETE", "EXIT_PENDING", "ERROR", "TERMINATED"):

@@ -2325,20 +2325,89 @@
                     </div>
                     <button class="straddle-modal-close" onclick="closeStraddleLogsModal()">×</button>
                 </div>
-                <div class="straddle-audit-filter-bar" style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:#0b101b; border-bottom:1px solid rgba(255,255,255,0.08); flex-wrap:wrap; gap:10px;">
-                    <div style="display:flex; gap:6px; align-items:center;">
-                        <button type="button" class="straddle-btn active-toggle" id="btnAuditFilterAll" style="padding:4px 10px; font-size:11px;" onclick="setStraddleAuditFilter('all')">All Events</button>
-                        <button type="button" class="straddle-btn btn-outline" id="btnAuditFilterActual" style="padding:4px 10px; font-size:11px; color:#10b981; border-color:rgba(16,185,129,0.3);" onclick="setStraddleAuditFilter('actual')">🟢 Actual / Live</button>
-                        <button type="button" class="straddle-btn btn-outline" id="btnAuditFilterPaper" style="padding:4px 10px; font-size:11px; color:#c084fc; border-color:rgba(168,85,247,0.3);" onclick="setStraddleAuditFilter('paper')">🟣 Paper</button>
-                        <button type="button" class="straddle-btn btn-outline" id="btnAuditFilterTrades" style="padding:4px 10px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.3);" onclick="setStraddleAuditFilter('trades')">⚡ Both (All Trades)</button>
+                <!-- Compact & Collapsible Audit Filter Bar -->
+                <div style="background:#0b101b; border-bottom:1px solid rgba(255,255,255,0.08);">
+                    <!-- Compact Summary Row (Always Visible) -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 14px; gap:8px; flex-wrap:wrap;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <button type="button" id="btnToggleAuditFilterBar" class="straddle-btn btn-outline" style="padding:2px 8px; font-size:10.5px; font-weight:800; border-radius:4px; display:inline-flex; align-items:center; gap:4px; color:#38bdf8; border-color:#0284c7; background:rgba(56,189,248,0.1);" onclick="toggleAuditFilterBar()">
+                                <span id="iconToggleAuditFilter">🔽</span> <span id="textToggleAuditFilter">Filters</span>
+                            </button>
+                            <span id="auditFilterSummaryLabel" style="color:#94a3b8; font-family:var(--font-mono); font-size:11px;">All Events</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                            <span style="font-size:10px; color:#64748b; font-weight:800; text-transform:uppercase;">Quick:</span>
+                            <button type="button" class="algo-filter-pill active" id="btnAuditQuickAll" onclick="setAuditQuickFilter('all')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:#1e293b; color:#f8fafc; cursor:pointer;">All</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickInfoSuccess" onclick="setAuditQuickFilter('info_success')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; cursor:pointer;" title="Show Info and Success logs">Info+Success</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickCePe" onclick="setAuditQuickFilter('ce_pe')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; cursor:pointer;" title="Show only Option CE and PE trade logs">CE/PE Trades</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickHedgeMain" onclick="setAuditQuickFilter('hedge_main')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(245,158,11,0.15); color:#fbbf24; cursor:pointer;" title="Show Main and Hedge execution logs">Main/Hedge</button>
+                        </div>
                     </div>
-                    <div style="display:flex; gap:8px; align-items:center;">
-                        <span style="font-size:11px; color:#94a3b8; font-weight:600;">Side:</span>
-                        <select id="selAuditSideFilter" class="straddle-select" style="padding:3px 8px; font-size:11px; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditSideFilter(this.value)">
-                            <option value="ALL">All Sides</option>
-                            <option value="BUY">BUY Only</option>
-                            <option value="SELL">SELL Only</option>
-                        </select>
+
+                    <!-- Collapsible Controls Drawer (Compact) -->
+                    <div id="auditCollapsibleFilterPane" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; padding:6px 14px 8px 14px; border-top:1px dashed rgba(255,255,255,0.06); background:#070a13;">
+                        <!-- Level Filter -->
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Level:</span>
+                            <select id="selAuditLevelFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditLevelFilter(this.value)">
+                                <option value="ALL">All Levels</option>
+                                <option value="INFO">INFO Only</option>
+                                <option value="SUCCESS">SUCCESS Only</option>
+                                <option value="INFO_SUCCESS">INFO + SUCCESS (Both)</option>
+                                <option value="WARNING">WARNING Only</option>
+                                <option value="ERROR">ERROR Only</option>
+                            </select>
+                        </div>
+
+                        <!-- Option Type Filter (CE / PE / Both) -->
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Option:</span>
+                            <select id="selAuditOptionFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditOptionFilter(this.value)">
+                                <option value="ALL">All (CE & PE)</option>
+                                <option value="CE">CE (Calls) Only</option>
+                                <option value="PE">PE (Puts) Only</option>
+                            </select>
+                        </div>
+
+                        <!-- Role Filter (Main / Hedge / Both) -->
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Role:</span>
+                            <select id="selAuditRoleFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditRoleFilter(this.value)">
+                                <option value="ALL">All (Main & Hedge)</option>
+                                <option value="MAIN">Main / Short Only</option>
+                                <option value="HEDGE">Hedges Only</option>
+                            </select>
+                        </div>
+
+                        <!-- Trigger Filter (SL / Target / Both) -->
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Trigger:</span>
+                            <select id="selAuditTriggerFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditTriggerFilter(this.value)">
+                                <option value="ALL">All Triggers</option>
+                                <option value="TARGET">🎯 Target Only</option>
+                                <option value="STOPLOSS">🛑 Stoploss Only</option>
+                            </select>
+                        </div>
+
+                        <!-- Side Filter (BUY / SELL) -->
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Side:</span>
+                            <select id="selAuditSideFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditSideFilter(this.value)">
+                                <option value="ALL">All Sides</option>
+                                <option value="BUY">BUY Only</option>
+                                <option value="SELL">SELL Only</option>
+                            </select>
+                        </div>
+
+                        <!-- Mode Filter (Live / Paper) -->
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Mode:</span>
+                            <select id="selAuditModeFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditFilter(this.value)">
+                                <option value="all">All Modes</option>
+                                <option value="actual">🟢 Live Only</option>
+                                <option value="paper">🟣 Paper Only</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
                 <div class="straddle-modal-body" style="background:#090d15; max-height:65vh; overflow-y:auto; font-family:var(--font-mono); font-size:12px;">
