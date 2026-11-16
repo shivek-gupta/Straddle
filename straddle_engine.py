@@ -6517,11 +6517,11 @@ class StraddleManager:
             elif side == "SELL" and sl_price <= ref_price:
                 sl_price = round_to_tick(ref_price + 0.05, 0.05)
 
-        is_hedge_leg = (
+        is_hedge_leg = bool(
             leg_cfg.get("is_associated_hedge")
             or "hedge" in str(leg_cfg.get("id", "")).lower()
             or bool(leg_cfg.get("hedge_parent_type"))
-            or side == "BUY"
+            or bool(leg_cfg.get("parent_leg_id"))
         )
         if is_hedge_leg:
             target_price = 0.0
@@ -7791,15 +7791,15 @@ class StraddleManager:
 
     def _place_advance_sl_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0, force: bool = False):
         """Quantiply-parity: place Stoploss order with broker in advance after delay_sec."""
-        # Strictly never place SL orders for hedges or Buy legs
-        is_hedge = (
+        # Strictly never place advance SL orders for associated hedge positions
+        is_hedge = bool(
             pos.get("is_associated_hedge")
             or "hedge" in str(pos.get("id", "")).lower()
             or bool(pos.get("hedge_parent_type"))
-            or str(pos.get("side", "")).upper() == "BUY"
+            or bool(pos.get("parent_leg_id"))
         )
         if is_hedge:
-            pos["sl_placement_error"] = "Advance SL not applicable to hedge or long buy positions"
+            pos["sl_placement_error"] = "Advance SL not applicable to associated hedge positions"
             return
         if not self.is_broker_connected():
             pos["sl_placement_error"] = "Kotak Neo broker disconnected in Settings"
@@ -7966,15 +7966,15 @@ class StraddleManager:
 
     def _place_advance_target_order(self, broker: BaseBrokerAdapter, pos: Dict[str, Any], delay_sec: int = 0, force: bool = False):
         """Quantiply-parity: place Target (LIMIT) order with broker in advance after delay_sec."""
-        # Strictly never place Target orders for hedges or Buy legs
-        is_hedge = (
+        # Strictly never place advance Target orders for associated hedge positions
+        is_hedge = bool(
             pos.get("is_associated_hedge")
             or "hedge" in str(pos.get("id", "")).lower()
             or bool(pos.get("hedge_parent_type"))
-            or str(pos.get("side", "")).upper() == "BUY"
+            or bool(pos.get("parent_leg_id"))
         )
         if is_hedge:
-            pos["target_placement_error"] = "Advance Target not applicable to hedge or long buy positions"
+            pos["target_placement_error"] = "Advance Target not applicable to associated hedge positions"
             return
         if not self.is_broker_connected():
             pos["target_placement_error"] = "Kotak Neo broker disconnected in Settings"
@@ -9268,11 +9268,11 @@ class StraddleManager:
                         side = (pos.get("side") or "SELL").upper()
                         pnl = float(broker_pos.get("pnl") or broker_pos.get("realized_pnl") or 0.0)
 
-                        is_pos_hedge = (
+                        is_pos_hedge = bool(
                             pos.get("is_associated_hedge")
                             or "hedge" in str(pos.get("id", "")).lower()
                             or bool(pos.get("hedge_parent_type"))
-                            or side == "BUY"
+                            or bool(pos.get("parent_leg_id"))
                         )
                         is_loss = (side == "BUY" and exit_p < ent_p) or (side == "SELL" and exit_p > ent_p) or (pnl < 0)
                         is_profit = (side == "BUY" and exit_p > ent_p) or (side == "SELL" and exit_p < ent_p) or (pnl > 0)
@@ -9608,16 +9608,16 @@ class StraddleManager:
 
     def _handle_leg_re_entry(self, strat: Dict[str, Any], pos: Dict[str, Any], trigger: str = "STOPLOSS", exit_order_id: Optional[str] = None):
         """Handle Re-Entry / Re-Execute for a leg when SL or Target is hit."""
-        # STRICT HEDGE & BUY LEG GUARD:
-        # A hedge or long buy leg must NEVER trigger a re-entry or auto-exit other hedges!
-        is_pos_hedge = (
+        # STRICT HEDGE GUARD:
+        # An associated hedge leg must NEVER trigger a re-entry or auto-exit other hedges!
+        is_pos_hedge = bool(
             pos.get("is_associated_hedge")
             or "hedge" in str(pos.get("id", "")).lower()
             or bool(pos.get("hedge_parent_type"))
-            or str(pos.get("side", "SELL")).upper() == "BUY"
+            or bool(pos.get("parent_leg_id"))
         )
         if is_pos_hedge:
-            logger.info(f"[Hedge Re-entry Guard] Position '{pos.get('symbol')}' is a hedge or buy leg. Skipping re-entry attempt.")
+            logger.info(f"[Hedge Re-entry Guard] Position '{pos.get('symbol')}' is an associated hedge leg. Skipping re-entry attempt.")
             return
         # Resolve authoritative strategy configuration
         strat_id = strat.get("strategy_id") or strat.get("id") or self._active_strategy_id
@@ -10391,7 +10391,14 @@ class StraddleManager:
             # Find matching open hedge positions
             hedges_to_exit = []
             for p in strat_positions:
-                if p.get("status") == "OPEN" and (p.get("is_associated_hedge") or str(p.get("side", "")).upper() == "BUY" or "HEDGE" in str(p.get("id", "")).upper()):
+                is_hedge_cand = bool(
+                    p.get("is_associated_hedge")
+                    or str(p.get("id", "")).lower().startswith("hedge_")
+                    or "hedge" in str(p.get("id", "")).lower()
+                    or p.get("parent_leg_id")
+                    or p.get("hedge_parent_type")
+                )
+                if p.get("status") == "OPEN" and is_hedge_cand:
                     is_match = False
                     p_parent = str(p.get("parent_leg_id") or "")
                     if parent_id and p_parent == str(parent_id):
@@ -10438,10 +10445,22 @@ class StraddleManager:
                 if not strat_positions:
                     continue
 
+                strat_legs = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
+                # If strategy has NO short (SELL) legs configured, it is an options BUYING strategy (e.g. Long Straddle/Strangle/Calls/Puts).
+                # Pure options buying strategies have NO hedges, and BUY legs are normal trading positions, not hedges!
+                if not any(str(l.get("side", "")).upper() == "SELL" for l in strat_legs):
+                    continue
+
                 open_hedges = [
                     p for p in strat_positions 
                     if p.get("status") == "OPEN" 
-                    and (p.get("is_associated_hedge") or str(p.get("side", "")).upper() == "BUY" or "HEDGE" in str(p.get("id", "")).upper())
+                    and (
+                        p.get("is_associated_hedge")
+                        or str(p.get("id", "")).lower().startswith("hedge_")
+                        or "hedge" in str(p.get("id", "")).lower()
+                        or p.get("parent_leg_id")
+                        or p.get("hedge_parent_type")
+                    )
                 ]
                 if not open_hedges:
                     continue
@@ -13264,11 +13283,11 @@ class StraddleManager:
                                 else:
                                     pnl = float(matched_bp.get("pnl") or matched_bp.get("realized_pnl") or 0.0)
 
-                                is_pos_hedge = (
+                                is_pos_hedge = bool(
                                     p.get("is_associated_hedge")
                                     or "hedge" in str(p.get("id", "")).lower()
                                     or bool(p.get("hedge_parent_type"))
-                                    or side == "BUY"
+                                    or bool(p.get("parent_leg_id"))
                                 )
                                 is_loss = (side == "BUY" and exit_price < ent_price) or (side == "SELL" and exit_price > ent_price) or (pnl < 0)
                                 is_profit = (side == "BUY" and exit_price > ent_price) or (side == "SELL" and exit_price < ent_price) or (pnl > 0)
@@ -13298,8 +13317,8 @@ class StraddleManager:
                                 # Cancel any resting broker SL / Target orders for this closed position
                                 self._cancel_leg_broker_orders(p, broker)
 
-                                # Re-entries and associated hedge logic ONLY apply to short SELL legs!
-                                if str(p.get("side", "")).upper() == "SELL" and not p.get("is_associated_hedge"):
+                                # Re-entries ONLY apply to trade legs (not associated hedges)!
+                                if not is_pos_hedge:
                                     self._handle_leg_re_entry(s, p, trigger=trigger)
 
             if changes_made:
@@ -13674,11 +13693,11 @@ class StraddleManager:
                     strat_mtm += pos["mtm"]
 
                     # Associated Dynamic Hedge: never trigger SL or Target on hedges!
-                    is_hedge_pos = (
+                    is_hedge_pos = bool(
                         pos.get("is_associated_hedge")
                         or "hedge" in str(pos.get("id", "")).lower()
                         or bool(pos.get("hedge_parent_type"))
-                        or side == "BUY"
+                        or bool(pos.get("parent_leg_id"))
                     )
                     if is_hedge_pos:
                         continue

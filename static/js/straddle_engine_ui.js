@@ -4648,7 +4648,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         if (filter === "ce" && optType !== "CE") return false;
         if (filter === "pe" && optType !== "PE") return false;
 
-        const isHedge = !!(p.is_associated_hedge || p.parent_leg_id || String(p.id || "").includes("hedge") || String(p.side || "").toUpperCase() === "BUY");
+        const isHedge = !!(p.is_associated_hedge || p.parent_leg_id || String(p.id || "").toLowerCase().includes("hedge") || String(p.entry_reason || "").toUpperCase().startsWith("HEDGE"));
         if (filter === "main" && isHedge) return false;
         if (filter === "hedge" && !isHedge) return false;
 
@@ -4666,8 +4666,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const isClosedA = (rawA === "COMPLETE" || rawA === "CLOSED" || rawA === "EXITED") ? 1 : 0;
             const isClosedB = (rawB === "COMPLETE" || rawB === "CLOSED" || rawB === "EXITED") ? 1 : 0;
 
-            const isHedgeA = (a.is_associated_hedge || a.parent_leg_id || String(a.id || "").includes("hedge") || String(a.side || "").toUpperCase() === "BUY") ? 1 : 0;
-            const isHedgeB = (b.is_associated_hedge || b.parent_leg_id || String(b.id || "").includes("hedge") || String(b.side || "").toUpperCase() === "BUY") ? 1 : 0;
+            const isHedgeA = (a.is_associated_hedge || a.parent_leg_id || String(a.id || "").toLowerCase().includes("hedge") || String(a.entry_reason || "").toUpperCase().startsWith("HEDGE")) ? 1 : 0;
+            const isHedgeB = (b.is_associated_hedge || b.parent_leg_id || String(b.id || "").toLowerCase().includes("hedge") || String(b.entry_reason || "").toUpperCase().startsWith("HEDGE")) ? 1 : 0;
 
             const symA = String(a.symbol || a.trading_symbol || "").toUpperCase();
             const symB = String(b.symbol || b.trading_symbol || "").toUpperCase();
