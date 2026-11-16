@@ -4222,10 +4222,17 @@ class StraddleManager:
 
                 side = "BUY" if net_qty > 0 else ("SELL" if net_qty < 0 else "CLOSED")
 
+                stk_price = float(p.get("strike_price") or p.get("stkPrc") or 0.0)
+                if stk_price <= 0:
+                    m_stk = re.search(r'(\d{4,6})\s*(?:CE|PE)', sym, re.IGNORECASE)
+                    if m_stk:
+                        stk_price = float(m_stk.group(1))
+
                 pos_entry = {
                     "symbol": sym,
                     "trading_symbol": sym,
                     "instrument_key": ikey,
+                    "strike_price": stk_price,
                     "side": side,
                     "product": prod,
                     "quantity": net_qty,
@@ -4285,10 +4292,18 @@ class StraddleManager:
                     l_ltp = float(leg.get("ltp") or exit_p or ent_p)
                     l_mtm = float(leg.get("mtm") or 0.0)
 
+                    stk_price_synth = float(leg.get("strike_price") or 0.0)
+                    if stk_price_synth <= 0:
+                        m_stk_s = re.search(r'(\d{4,6})\s*(?:CE|PE)', leg_sym, re.IGNORECASE)
+                        if m_stk_s:
+                            s_digits = m_stk_s.group(1)
+                            stk_price_synth = float(s_digits[2:] if len(s_digits) == 7 else s_digits)
+
                     synth_pos = {
                         "symbol": leg_sym,
                         "trading_symbol": leg_k,
                         "instrument_key": leg.get("instrument_key", ""),
+                        "strike_price": stk_price_synth,
                         "side": l_side if is_op else "CLOSED",
                         "product": leg.get("product", "NRML"),
                         "quantity": qty if is_op else 0,
@@ -4373,8 +4388,17 @@ class StraddleManager:
             # Deterministic, stable sorting to eliminate any order jumping / flipping glitch
             def _extract_num_strike(s_sym: str) -> float:
                 import re
-                m = re.search(r'(\d{5,6})', str(s_sym or ""))
-                return float(m.group(1)) if m else 0.0
+                s = str(s_sym or "").upper()
+                m = re.search(r'(\d{4,6})\s*(?:CE|PE)', s)
+                if m:
+                    digits = m.group(1)
+                    if len(digits) == 7:
+                        return float(digits[2:])
+                    return float(digits)
+                m5 = re.findall(r'\b\d{5}\b', s)
+                if m5:
+                    return float(m5[-1])
+                return 0.0
 
             def _pos_sort_key(p: Dict[str, Any], prioritize_open: bool = False):
                 status_rank = 0 if (p.get("is_open") or p.get("status") == "OPEN") else 1
@@ -9717,6 +9741,22 @@ class StraddleManager:
 
         chk = self.get_strategy_schedule_status(strat)
         strat_active = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
+        et_sec = chk.get("et_sec", 15 * 3600 + 29 * 60 + 50)
+        ist_now_re = now_ist()
+        now_sec_re = ist_now_re.hour * 3600 + ist_now_re.minute * 60 + ist_now_re.second
+
+        # INVIOLABLE END-TIME RE-ENTRY GUARD:
+        # Never initiate re-entry if within 15s of Strategy End Time (or after end time)!
+        if now_sec_re >= (et_sec - 15) or chk.get("is_after_end", False):
+            self._log_event(
+                f"[{strat.get('name')}] ⛔ Re-entry BLOCKED: Current time ({ist_now_re.strftime('%H:%M:%S')}) is within 15s of End Time ({chk.get('et_str', '15:29:50')}). Squaring off associated hedge to prevent overnight risk.",
+                level="WARNING"
+            )
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"End-time cutoff reached ({chk.get('et_str')})")
+            return
+
         can_proceed = (chk.get("can_enter", False) or (strat_active and not chk.get("is_after_end", False) and chk.get("is_day_scheduled", True))) and self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED")
         if not can_proceed:
             self._log_event(f"[{strat.get('name')}] Re-entry not triggered: {chk['reason']}", level="INFO")
@@ -9823,6 +9863,18 @@ class StraddleManager:
                     total_wait = max(0.0, float(delay_sec))
 
                 target_dt = now_dt + timedelta(seconds=total_wait)
+                target_sec = target_dt.hour * 3600 + target_dt.minute * 60 + target_dt.second
+                chk_target = self.get_strategy_schedule_status(strat)
+                et_target_sec = chk_target.get("et_sec", 15 * 3600 + 29 * 60 + 50)
+                if target_sec >= (et_target_sec - 15) or chk_target.get("is_after_end", False):
+                    self._log_event(
+                        f"[{strat.get('name')}] ⛔ Re-Execution ABORTED: Target execution time {target_dt.strftime('%H:%M:%S')} is within 15s of End Time ({chk_target.get('et_str', '15:29:50')}). Auto squaring off associated hedge.",
+                        level="WARNING"
+                    )
+                    mode_w = self._state.get("execution_mode", "LIVE_BROKER")
+                    broker_w = get_broker_adapter(mode_w)
+                    self._auto_square_off_associated_hedge(strat, pos, broker_w, reason="End Time cutoff reached before re-entry execution")
+                    return
 
                 und = strat.get("underlying", pos.get("underlying", "NIFTY"))
                 mult = self.get_effective_multiplier(strat)
@@ -9866,10 +9918,22 @@ class StraddleManager:
                     )
 
                 chk_w2 = self.get_strategy_schedule_status(strat)
+                et_w2_sec = chk_w2.get("et_sec", 15 * 3600 + 29 * 60 + 50)
+                now_sec_w2 = now_ist().hour * 3600 + now_ist().minute * 60 + now_ist().second
                 strat_active_w2 = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
                 can_enter_w2 = (chk_w2.get("can_enter", False) or (strat_active_w2 and not chk_w2.get("is_after_end", False) and chk_w2.get("is_day_scheduled", True)))
-                if not can_enter_w2 or not self._state.get("algo_running") or self._state.get("status") in ("TERMINATED", "STOPPED"):
-                    self._log_event(f"[{strat.get('name')}] Re-entry aborted: {chk_w2['reason']}", level="INFO")
+                if (
+                    not can_enter_w2 
+                    or now_sec_w2 >= (et_w2_sec - 10) 
+                    or chk_w2.get("is_after_end", False) 
+                    or not self._state.get("algo_running") 
+                    or self._state.get("status") in ("TERMINATED", "STOPPED")
+                    or strat.get("status") in ("TERMINATED", "STOPPED")
+                ):
+                    self._log_event(f"[{strat.get('name')}] ⛔ Re-entry execution aborted: {chk_w2['reason']} (Time: {now_ist().strftime('%H:%M:%S')})", level="INFO")
+                    mode_w = self._state.get("execution_mode", "LIVE_BROKER")
+                    broker_w = get_broker_adapter(mode_w)
+                    self._auto_square_off_associated_hedge(strat, pos, broker_w, reason="End Time cutoff reached before order placement")
                     return
 
                 contract = self.resolve_strike_and_contract(
@@ -10219,10 +10283,10 @@ class StraddleManager:
                         new_pos["associated_hedge_id"] = active_hedge.get("id")
                         new_pos["associated_hedge"] = h_cfg
 
-                    target_sid = strat.get("strategy_id")
+                    target_sid = strat.get("strategy_id") or strat.get("id") or self._active_strategy_id
+                    auth_strat = self.get_strategy(target_sid) or self.get_strategy(strat.get("name")) or strat
                     if new_pos.get("status") == "OPEN":
                         with _ENGINE_LOCK:
-                            auth_strat = self.get_strategy(target_sid) or strat
                             strat_pos_list = auth_strat.setdefault("positions", [])
                             # Prevent duplicate entries for the same order/symbol execution
                             is_dup = any(
@@ -10232,8 +10296,9 @@ class StraddleManager:
                             )
                             if not is_dup:
                                 strat_pos_list.append(new_pos)
-                            if self._active_strategy_id == target_sid:
-                                self._state["positions"] = list(strat_pos_list)
+                                if strat is not auth_strat:
+                                    strat.setdefault("positions", []).append(new_pos)
+                            self._state["positions"] = list(strat_pos_list)
                             # Sync exit reason on parent leg inside authoritative strategy
                             for p_in_s in strat_pos_list:
                                 if p_in_s.get("id") == pos.get("id"):
@@ -10241,16 +10306,19 @@ class StraddleManager:
                                         p_in_s["exit_reason"] = f"{p_in_s['exit_reason']} ➔ Triggered {clean_opt} Re-Execute #{new_count}"
                             auth_strat["status"] = "TRADE_ACTIVE"
                             auth_strat["entry_error"] = "-"
+                            if strat is not auth_strat:
+                                strat["status"] = "TRADE_ACTIVE"
+                                strat["entry_error"] = "-"
                             self._save_strategies()
                             self._save_state(force=True)
                         self._log_event(f"Re-Execute #{new_count} filled for {new_pos['symbol']} @ ₹{new_pos.get('avg_ent_price', 0):.2f}", level="SUCCESS")
                     else:
                         with _ENGINE_LOCK:
-                            auth_strat = self.get_strategy(target_sid) or strat
                             strat_pos_list = auth_strat.setdefault("positions", [])
                             strat_pos_list.append(new_pos)
-                            if self._active_strategy_id == target_sid:
-                                self._state["positions"] = list(strat_pos_list)
+                            if strat is not auth_strat:
+                                strat.setdefault("positions", []).append(new_pos)
+                            self._state["positions"] = list(strat_pos_list)
                             self._save_strategies()
                             self._save_state(force=True)
                         err_msg = new_pos.get("error") or "Order rejected by broker"
@@ -13150,8 +13218,9 @@ class StraddleManager:
                             "re_execute_count": re_num,
                             "re_execute_leg_type": opt_type,
                             "re_execute_trigger": "STOPLOSS",
-                            "is_re_entry": True,
-                            "entry_reason": f"⚡ {opt_type} Re-Execute #{re_num} [Auto-Reconciled Broker Trade]",
+                            "is_re_entry": False,
+                            "is_adopted": True,
+                            "entry_reason": f"📥 Adopted from Kotak Neo ({opt_type}) [Broker Position]",
                             "strategy_id": cand_strat.get("strategy_id"),
                             "strategy_name": cand_strat.get("name"),
                             "date": today_ist_str(),
@@ -13246,6 +13315,29 @@ class StraddleManager:
                             if _is_same_instrument(p.get("symbol"), p.get("instrument_key"), bp_sym, bp_ikey):
                                 matched_bp = bp
                                 break
+
+                        # Fallback to Order Book: Kotak Neo positions() omits closed positions once settled!
+                        if matched_bp is None and broker:
+                            try:
+                                ob = broker.get_order_book() or []
+                                side_needed = "BUY" if (p.get("side") or "SELL").upper() == "SELL" else "SELL"
+                                for o in ob:
+                                    o_sym = o.get("trading_symbol") or o.get("symbol") or ""
+                                    o_st = str(o.get("status", "")).upper()
+                                    o_side = str(o.get("transaction_type", "")).upper()
+                                    if _is_same_instrument(o_sym, o.get("instrument_key"), p.get("symbol"), p.get("instrument_key")) and o_side == side_needed and ("COMP" in o_st or "TRAD" in o_st):
+                                        f_p = float(o.get("average_price") or o.get("price") or 0.0)
+                                        matched_bp = {
+                                            "net_qty": 0,
+                                            "avg_price": f_p,
+                                            "buy_avg": f_p if side_needed == "BUY" else 0.0,
+                                            "sell_avg": f_p if side_needed == "SELL" else 0.0,
+                                        }
+                                        if not p.get("exit_order_id"):
+                                            p["exit_order_id"] = str(o.get("order_id", ""))
+                                        break
+                            except Exception as e_ob_chk:
+                                logger.debug(f"Order book check fallback error: {e_ob_chk}")
 
                         if matched_bp is not None:
                             net_qty = int(matched_bp.get("net_qty") or matched_bp.get("quantity") or 0)
@@ -13515,19 +13607,29 @@ class StraddleManager:
                     strat["last_trade_date"] = today_s
 
                 has_open_positions = any(p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0 for p in strat_positions)
-                has_completed_positions = any(p.get("status") == "COMPLETE" for p in strat_positions)
+                has_completed_positions = any(p.get("status") in ("COMPLETE", "CLOSED", "EXITED") for p in strat_positions)
+
+                # If all legs completed and no open positions, mark strategy as STOPPED for the day
+                if has_completed_positions and not has_open_positions and not strat.get("_re_entry_in_progress") and not strat.get("_manual_reset"):
+                    if strat.get("status") not in ("STOPPED", "TERMINATED"):
+                        strat["status"] = "STOPPED"
+                        strat["has_traded_today"] = True
+                        strat["entry_error"] = "-"
+                        self._save_strategies()
 
                 # UNCONDITIONAL SAFETY RULE 1: If Strategy has OPEN positions and End Time is reached (now_sec >= et_sec),
                 # square off immediately without delay, regardless of enable toggle or schedule state!
                 if has_open_positions and is_after_end:
                     if not strat.get("_exit_in_progress"):
                         strat["_exit_in_progress"] = True
-                        strat["entry_error"] = f"Trading hours ended ({et})"
-                        self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off all open positions immediately.")
-                        self._save_strategies()
-                        self._square_off_strategy_positions(strat, broker, reason=f"AUTO END TIME ({et})")
-                        strat["_exit_in_progress"] = False
-                        self._save_strategies()
+                        try:
+                            strat["entry_error"] = f"Trading hours ended ({et})"
+                            self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off all open positions immediately.")
+                            self._save_strategies()
+                            self._square_off_strategy_positions(strat, broker, reason=f"AUTO END TIME ({et})")
+                        finally:
+                            strat["_exit_in_progress"] = False
+                            self._save_strategies()
                     continue
 
                 # Check Margin Auto-Exit Grace Countdown (Quantiply: 15s buffer before squaring off all open positions)
@@ -13763,7 +13865,7 @@ class StraddleManager:
                         if t_ord:
                             t_st = str(t_ord.get("status", "")).upper()
                             if any(w in t_st for w in ("TRAD", "COMP")):
-                                fill_prc = float(t_ord.get("price") or 0.0)
+                                fill_prc = float(t_ord.get("average_price") or t_ord.get("price") or 0.0)
                                 avg_ent = float(pos.get("avg_ent_price", 0.0))
                                 tgt_p = float(pos.get("target_price", 0.0))
                                 is_valid = True
@@ -13810,7 +13912,7 @@ class StraddleManager:
                             try:
                                 t_stat = broker.wait_for_order_fill(str(adv_tgt_oid), timeout_sec=0.01)
                                 if t_stat.get("filled"):
-                                    fill_prc = float(t_stat.get("price") or 0.0)
+                                    fill_prc = float(t_stat.get("average_price") or t_stat.get("price") or 0.0)
                                     avg_ent = float(pos.get("avg_ent_price", 0.0))
                                     tgt_p = float(pos.get("target_price", 0.0))
                                     is_valid = True
@@ -13865,7 +13967,7 @@ class StraddleManager:
                         if s_ord:
                             s_st = str(s_ord.get("status", "")).upper()
                             if any(w in s_st for w in ("TRAD", "COMP")):
-                                fill_prc = float(s_ord.get("price") or 0.0)
+                                fill_prc = float(s_ord.get("average_price") or s_ord.get("price") or 0.0)
                                 avg_ent = float(pos.get("avg_ent_price", 0.0))
                                 sl_p = float(pos.get("sl_price", 0.0))
                                 is_valid = True
@@ -13915,7 +14017,7 @@ class StraddleManager:
                             try:
                                 s_stat = broker.wait_for_order_fill(str(adv_sl_oid), timeout_sec=0.01)
                                 if s_stat.get("filled"):
-                                    fill_prc = float(s_stat.get("price") or 0.0)
+                                    fill_prc = float(s_stat.get("average_price") or s_stat.get("price") or 0.0)
                                     avg_ent = float(pos.get("avg_ent_price", 0.0))
                                     sl_p = float(pos.get("sl_price", 0.0))
                                     is_valid = True
@@ -13975,6 +14077,8 @@ class StraddleManager:
                         pos["exit_order_id"] = str(adv_tgt_oid)
                         pos["exit_time"] = now_ist_str()
                         self._log_event(f"Target order {adv_tgt_oid} FILLED for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. SL cancelled.")
+                        self._save_strategies()
+                        self._save_state(force=True)
                         self._handle_leg_re_entry(strat, pos, trigger="TARGET", exit_order_id=str(adv_tgt_oid))
                         continue
 
@@ -13991,6 +14095,8 @@ class StraddleManager:
                         pos["exit_order_id"] = str(adv_sl_oid)
                         pos["exit_time"] = now_ist_str()
                         self._log_event(f"Stoploss order {adv_sl_oid} FILLED for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. Target cancelled.")
+                        self._save_strategies()
+                        self._save_state(force=True)
                         self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS", exit_order_id=str(adv_sl_oid))
                         continue
 
@@ -14226,6 +14332,85 @@ class StraddleManager:
                     })
                     if len(s_pnl) > 500:
                         s["_pnl_history"] = s_pnl[-500:]
+
+            # FAIL-SAFE BROKER POSITION SWEEP AT END OF DAY (ZERO OVERNIGHT RISK):
+            # If current time is past 15:29:50 (market close window for Indian equity F&O),
+            # check broker open positions directly. If any open position exists with net_qty != 0,
+            # square it off immediately with MARKET order (Short Sell legs first, then Long hedges).
+            now_dt_sweep = now_ist()
+            now_sec_sweep = now_dt_sweep.hour * 3600 + now_dt_sweep.minute * 60 + now_dt_sweep.second
+            mode_sweep = self._state.get("execution_mode", "LIVE_BROKER")
+            is_eod_time = (now_sec_sweep >= (15 * 3600 + 29 * 60 + 50))
+            if mode_sweep == "LIVE_BROKER" and is_eod_time and self.is_broker_connected():
+                last_sweep_ts = getattr(self, "_last_eod_sweep_ts", 0.0)
+                # Run fail-safe sweep every 3 seconds during market close window
+                if time.time() - last_sweep_ts >= 3.0:
+                    self._last_eod_sweep_ts = time.time()
+                    try:
+                        broker_sweep = get_broker_adapter("LIVE_BROKER")
+                        raw_b_pos = broker_sweep.get_positions(force=True) or []
+                        open_b_pos = [
+                            bp for bp in raw_b_pos
+                            if int(bp.get("net_qty") or bp.get("quantity") or 0) != 0
+                            and not any(c in str(bp.get("symbol", "") or bp.get("trading_symbol", "")).upper() for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+                        ]
+                        if open_b_pos:
+                            self._log_event(
+                                f"⚠️ [FAIL-SAFE END-TIME SWEEP] Detected {len(open_b_pos)} open position(s) on Kotak Neo at {now_dt_sweep.strftime('%H:%M:%S')}. Initiating emergency square-off to guarantee ZERO overnight risk!",
+                                level="WARNING"
+                            )
+                            # Phase 1: Short SELL positions first
+                            short_sells = [bp for bp in open_b_pos if int(bp.get("net_qty") or bp.get("quantity") or 0) < 0]
+                            for bp in short_sells:
+                                sym_b = bp.get("symbol") or bp.get("trading_symbol") or ""
+                                ikey_b = bp.get("instrument_key") or bp.get("instrument_token") or ""
+                                sq_qty = abs(int(bp.get("net_qty") or bp.get("quantity") or 0))
+                                prod_b = bp.get("product", "NRML")
+                                self._log_event(f"🛡️ [FAIL-SAFE SWEEP] Exiting residual short leg '{sym_b}' (Qty: {sq_qty}) with MARKET order...")
+                                try:
+                                    broker_sweep.place_order(
+                                        symbol=sym_b,
+                                        instrument_key=ikey_b,
+                                        transaction_type="BUY",
+                                        quantity=sq_qty,
+                                        product=prod_b,
+                                        order_type="MARKET",
+                                        price=0.0,
+                                        tag="eod_sweep_sell",
+                                    )
+                                except Exception as e_sq:
+                                    logger.error(f"[FAIL-SAFE SWEEP ERROR] Failed squaring off short position {sym_b}: {e_sq}")
+                            
+                            # Wait 1.5s for sell fills before closing hedges
+                            if short_sells:
+                                time.sleep(1.5)
+                            
+                            # Phase 2: Long BUY hedges
+                            long_buys = [bp for bp in open_b_pos if int(bp.get("net_qty") or bp.get("quantity") or 0) > 0]
+                            for bp in long_buys:
+                                sym_b = bp.get("symbol") or bp.get("trading_symbol") or ""
+                                ikey_b = bp.get("instrument_key") or bp.get("instrument_token") or ""
+                                sq_qty = abs(int(bp.get("net_qty") or bp.get("quantity") or 0))
+                                prod_b = bp.get("product", "NRML")
+                                self._log_event(f"🛡️ [FAIL-SAFE SWEEP] Exiting residual hedge leg '{sym_b}' (Qty: {sq_qty}) with MARKET order...")
+                                try:
+                                    broker_sweep.place_order(
+                                        symbol=sym_b,
+                                        instrument_key=ikey_b,
+                                        transaction_type="SELL",
+                                        quantity=sq_qty,
+                                        product=prod_b,
+                                        order_type="MARKET",
+                                        price=0.0,
+                                        tag="eod_sweep_hedge",
+                                    )
+                                except Exception as e_sq:
+                                    logger.error(f"[FAIL-SAFE SWEEP ERROR] Failed squaring off hedge position {sym_b}: {e_sq}")
+                            
+                            # Trigger position reconciliation immediately after sweep
+                            self._reconcile_broker_positions(broker_sweep)
+                    except Exception as e_sweep:
+                        logger.error(f"[FAIL-SAFE SWEEP EXCEPTION] Error in end-of-day broker sweep: {e_sweep}")
 
     def _square_off_strategy_positions(self, strat: Dict[str, Any], broker: BaseBrokerAdapter, reason: str = "AUTO SQUARE OFF"):
         """Square off all open positions belonging to a single strategy respecting exit delay sequencing."""

@@ -448,6 +448,10 @@ async function fetchStraddleState() {
             const activePositions = active ? (active.positions || []) : (s.positions || []);
             window._straddleState.positions = activePositions;
 
+            if (s.logs && Array.isArray(s.logs)) {
+                window._straddleState.logs = s.logs;
+            }
+
             // Sync live broker margin from state
             if (s.margin) {
                 window._straddleState.margin = s.margin;
@@ -493,11 +497,15 @@ function renderStraddleHeader(state) {
     if (statusBadge) {
         if (activeStrat) {
             const rawStatus = (activeStrat.status || "").toUpperCase();
-            const hasOpen = Array.isArray(activeStrat.positions) && activeStrat.positions.some(p => p.status === "OPEN");
+            const hasOpen = Array.isArray(activeStrat.positions) && activeStrat.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+            const hasCompleted = Array.isArray(activeStrat.positions) && activeStrat.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
             const isEnabled = activeStrat.enabled !== false;
 
             if (rawStatus === "TERMINATED") {
                 statusBadge.textContent = "Terminated";
+                statusBadge.className = "straddle-pill-badge straddle-badge-terminated";
+            } else if (rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || activeStrat.has_traded_today) && !activeStrat._manual_reset)) {
+                statusBadge.textContent = "Stopped";
                 statusBadge.className = "straddle-pill-badge straddle-badge-terminated";
             } else if (rawStatus === "ENTRY_FAILED") {
                 statusBadge.textContent = "Entry Failed";
@@ -807,6 +815,27 @@ function renderStraddleOpenPositionsTable() {
     const sortDir = window._straddlePosSortDir || "asc";
     const sortMult = (sortDir === "desc") ? -1 : 1;
 
+    const _posSafeNum = (val) => {
+        const n = Number(val);
+        return isNaN(n) ? 0 : n;
+    };
+
+    const _extractStrikeNum = (p) => {
+        if (!p) return 0;
+        const stk = _posSafeNum(p.strike_price);
+        if (stk > 0) return stk;
+        const sym = String(p.symbol || p.trading_symbol || "");
+        const m = sym.match(/(\d{4,6})\s*(?:CE|PE)/i);
+        if (m) {
+            const numStr = m[1];
+            if (numStr.length === 7) return Number(numStr.slice(2));
+            return Number(numStr);
+        }
+        const m5 = sym.match(/\b\d{5}\b/);
+        if (m5) return Number(m5[0]);
+        return 0;
+    };
+
     filtered.sort((a, b) => {
         // Mathematically stable tie-breaker: guarantees order NEVER flips randomly on polling
         const keyA = String(a.instrument_key || a.symbol || a.trading_symbol || '');
@@ -822,10 +851,8 @@ function renderStraddleOpenPositionsTable() {
             const stratB = String(b.strategy_name || b.source || "").toLowerCase();
             if (stratA !== stratB) return stratA.localeCompare(stratB);
 
-            const mA = String(a.symbol || a.trading_symbol || "").match(/\d{5,6}/);
-            const mB = String(b.symbol || b.trading_symbol || "").match(/\d{5,6}/);
-            const strikeA = Number(a.strike_price || (mA ? mA[0] : 0));
-            const strikeB = Number(b.strike_price || (mB ? mB[0] : 0));
+            const strikeA = _extractStrikeNum(a);
+            const strikeB = _extractStrikeNum(b);
             if (strikeA !== strikeB) return strikeA - strikeB;
 
             const symA = String(a.symbol || a.trading_symbol || "").toUpperCase();
@@ -838,6 +865,7 @@ function renderStraddleOpenPositionsTable() {
         }
 
         let valA, valB;
+        let isNumeric = false;
         if (sortCol === "symbol") {
             valA = String(a.symbol || a.trading_symbol || "").toUpperCase();
             valB = String(b.symbol || b.trading_symbol || "").toUpperCase();
@@ -864,31 +892,40 @@ function renderStraddleOpenPositionsTable() {
             const comp = valA.localeCompare(valB);
             return comp !== 0 ? comp * sortMult : tieBreaker;
         } else if (sortCol === "quantity") {
-            valA = Number(a.net_qty !== undefined ? a.net_qty : (a.quantity || 0));
-            valB = Number(b.net_qty !== undefined ? b.net_qty : (b.quantity || 0));
+            isNumeric = true;
+            valA = _posSafeNum(a.net_qty !== undefined ? a.net_qty : (a.quantity || 0));
+            valB = _posSafeNum(b.net_qty !== undefined ? b.net_qty : (b.quantity || 0));
         } else if (sortCol === "buy_avg") {
-            valA = Number(a.buy_avg || 0.0);
-            valB = Number(b.buy_avg || 0.0);
+            isNumeric = true;
+            valA = _posSafeNum(a.buy_avg);
+            valB = _posSafeNum(b.buy_avg);
         } else if (sortCol === "sell_avg") {
-            valA = Number(a.sell_avg || 0.0);
-            valB = Number(b.sell_avg || 0.0);
+            isNumeric = true;
+            valA = _posSafeNum(a.sell_avg);
+            valB = _posSafeNum(b.sell_avg);
         } else if (sortCol === "avg_price") {
-            valA = Number(a.avg_price || a.net_avg || 0.0);
-            valB = Number(b.avg_price || b.net_avg || 0.0);
+            isNumeric = true;
+            valA = _posSafeNum(a.avg_price || a.net_avg);
+            valB = _posSafeNum(b.avg_price || b.net_avg);
         } else if (sortCol === "ltp") {
-            valA = Number(a.ltp || a.last_price || 0.0);
-            valB = Number(b.ltp || b.last_price || 0.0);
+            isNumeric = true;
+            valA = _posSafeNum(a.ltp || a.last_price);
+            valB = _posSafeNum(b.ltp || b.last_price);
         } else if (sortCol === "mtm") {
+            isNumeric = true;
             const isOpA = (a.is_open !== false && (a.net_qty || a.quantity || 0) !== 0);
             const isOpB = (b.is_open !== false && (b.net_qty || b.quantity || 0) !== 0);
-            valA = Number(isOpA ? (a.mtm !== undefined ? a.mtm : (a.pnl || 0.0)) : (a.realised_pnl !== undefined ? a.realised_pnl : (a.pnl || 0.0)));
-            valB = Number(isOpB ? (b.mtm !== undefined ? b.mtm : (b.pnl || 0.0)) : (b.realised_pnl !== undefined ? b.realised_pnl : (b.pnl || 0.0)));
+            valA = _posSafeNum(isOpA ? (a.mtm !== undefined ? a.mtm : a.pnl) : (a.realised_pnl !== undefined ? a.realised_pnl : a.pnl));
+            valB = _posSafeNum(isOpB ? (b.mtm !== undefined ? b.mtm : b.pnl) : (b.realised_pnl !== undefined ? b.realised_pnl : b.pnl));
         } else {
             return tieBreaker;
         }
 
-        if (valA !== valB) {
-            return (valA > valB ? 1 : -1) * sortMult;
+        if (isNumeric) {
+            const diff = valA - valB;
+            if (diff !== 0) {
+                return (diff > 0 ? 1 : -1) * sortMult;
+            }
         }
         return tieBreaker;
     });
@@ -1425,7 +1462,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 let statusClass = "straddle-badge-ready";
                 let dotColor = "#38bdf8";
 
-                if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && hasCompleted && !s._manual_reset)) {
+                if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
                     displayStatus = "Stopped";
                     statusClass = "straddle-badge-terminated";
                     dotColor = "#64748b";
@@ -1536,7 +1573,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         let statusClass = "straddle-badge-ready";
         let dotColor = "#38bdf8";
 
-        if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && hasCompleted && !s._manual_reset)) {
+        if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
             displayStatus = "Stopped";
             statusClass = "straddle-badge-terminated";
             dotColor = "#64748b";
@@ -10902,10 +10939,11 @@ function renderStraddleAuditLogs() {
     const container = document.getElementById("straddleAuditLogsContainer");
     if (!container) return;
 
-    // Instant optimistic render from in-memory state
-    const cachedLogs = (window._straddleState && window._straddleState.state && window._straddleState.state.logs)
-        ? window._straddleState.state.logs
-        : [];
+    // Instant optimistic render from in-memory cache
+    const cachedLogs = window._cachedAuditLogsList 
+        || (window._straddleState && window._straddleState.logs) 
+        || (window._straddleState && window._straddleState.state && window._straddleState.state.logs)
+        || [];
     if (cachedLogs && cachedLogs.length > 0) {
         window._cachedAuditLogsList = cachedLogs;
         container.innerHTML = _buildAuditLogsHtml(cachedLogs);
@@ -10914,7 +10952,7 @@ function renderStraddleAuditLogs() {
     }
 
     const abortCtrl = new AbortController();
-    const timeoutId = setTimeout(() => abortCtrl.abort(), 4000);
+    const timeoutId = setTimeout(() => abortCtrl.abort(), 25000);
 
     fetch("/api/straddle/logs", { signal: abortCtrl.signal })
         .then(r => r.json())
@@ -10930,7 +10968,11 @@ function renderStraddleAuditLogs() {
         })
         .catch(e => {
             clearTimeout(timeoutId);
-            if (!cachedLogs || cachedLogs.length === 0) {
+            // On abort or network blip, fall back to cached logs gracefully
+            const fallback = window._cachedAuditLogsList || (window._straddleState && window._straddleState.logs) || cachedLogs || [];
+            if (fallback && fallback.length > 0) {
+                container.innerHTML = _buildAuditLogsHtml(fallback);
+            } else {
                 container.innerHTML = `<div style="color:#f43f5e; text-align:center; padding:20px;">Error loading logs: ${e.message}</div>`;
             }
         });
