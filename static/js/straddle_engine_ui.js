@@ -4999,9 +4999,15 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </div>
                     `;
                 } else if (pos.target_broker_order_id) {
-                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Order #${pos.target_broker_order_id}">🏦 #${pos.target_broker_order_id}</span>`;
+                    const tOidStr = String(pos.target_broker_order_id);
+                    const isMultiT = tOidStr.includes(",");
+                    const dispT = isMultiT ? `${tOidStr.split(",")[0]} (+${tOidStr.split(",").length - 1} slices)` : tOidStr;
+                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Orders #${tOidStr}">🏦 #${dispT}</span>`;
                 } else if (pos.last_target_broker_order_id) {
-                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Target Order #${pos.last_target_broker_order_id}">🏦 #${pos.last_target_broker_order_id}</span>`;
+                    const lastTOidStr = String(pos.last_target_broker_order_id);
+                    const isMultiLT = lastTOidStr.includes(",");
+                    const dispLT = isMultiLT ? `${lastTOidStr.split(",")[0]} (+${lastTOidStr.split(",").length - 1} slices)` : lastTOidStr;
+                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Target Orders #${lastTOidStr}">🏦 #${dispLT}</span>`;
                 } else if (pos.target_placement_error && isTgtBroker) {
                     tgtStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
@@ -5064,9 +5070,15 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </div>
                     `;
                 } else if (pos.sl_broker_order_id) {
-                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Order #${pos.sl_broker_order_id}">🏦 #${pos.sl_broker_order_id}</span>`;
+                    const sOidStr = String(pos.sl_broker_order_id);
+                    const isMultiS = sOidStr.includes(",");
+                    const dispS = isMultiS ? `${sOidStr.split(",")[0]} (+${sOidStr.split(",").length - 1} slices)` : sOidStr;
+                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Orders #${sOidStr}">🏦 #${dispS}</span>`;
                 } else if (pos.last_sl_broker_order_id) {
-                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Stoploss Order #${pos.last_sl_broker_order_id}">🏦 #${pos.last_sl_broker_order_id}</span>`;
+                    const lastSOidStr = String(pos.last_sl_broker_order_id);
+                    const isMultiLS = lastSOidStr.includes(",");
+                    const dispLS = isMultiLS ? `${lastSOidStr.split(",")[0]} (+${lastSOidStr.split(",").length - 1} slices)` : lastSOidStr;
+                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Stoploss Orders #${lastSOidStr}">🏦 #${dispLS}</span>`;
                 } else if (pos.sl_placement_error && isSlBroker) {
                     slStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">

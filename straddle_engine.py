@@ -7763,7 +7763,14 @@ class StraddleManager:
                 return
             if pos.get("sl_broker_order_id") and not force:
                 return
-            if force:
+            if force and pos.get("sl_broker_order_id"):
+                old_oid = str(pos.get("sl_broker_order_id"))
+                try:
+                    broker.cancel_order(old_oid)
+                except Exception as e_old:
+                    logger.debug(f"[Advance SL] Note cancelling prior partial SL {old_oid} on force retry: {e_old}")
+                pos["sl_broker_order_id"] = None
+            elif force:
                 pos["sl_broker_order_id"] = None
             sl_price = float(pos.get("sl_price") or 0.0)
             if sl_price <= 0:
@@ -7788,7 +7795,7 @@ class StraddleManager:
 
                 logger.info(f"[Advance SL] Placing advance SL-Limit order on broker for {sym} @ trigger ₹{sl_price:.2f}, limit ₹{limit_sl_p:.2f} (qty={qty})...")
                 
-                # Exchange freeze limit auto-slicing for high quantity / high lot sizes (e.g. 150 lots)
+                # Exchange freeze limit auto-slicing for high quantity / high lot sizes (e.g. 100-150 lots)
                 und = pos.get("underlying") or "NIFTY"
                 lot_size = int(pos.get("lot_size") or 0)
                 if lot_size <= 0:
@@ -7796,9 +7803,9 @@ class StraddleManager:
                 qty_slices = slice_quantity_by_freeze(qty, lot_size, und)
 
                 if len(qty_slices) > 1:
-                    logger.info(f"[Advance SL Slicer] Slicing {qty} qty of {sym} into {len(qty_slices)} orders ({qty_slices}) for exchange freeze compliance...")
-                    placed_oids = []
-                    for s_idx, s_qty in enumerate(qty_slices):
+                    logger.info(f"[Advance SL Slicer] Slicing {qty} qty ({pos.get('lots', 0)} lots) of {sym} into {len(qty_slices)} orders ({qty_slices}) for exchange freeze compliance...")
+                    def _fire_sl_slice(s_idx, s_qty):
+                        tag_str = f"adv_sl_{s_idx+1}"
                         res = broker.place_order(
                             symbol=sym,
                             instrument_key=pos.get("instrument_key", ""),
@@ -7808,7 +7815,7 @@ class StraddleManager:
                             order_type="SL",
                             price=limit_sl_p,
                             trigger_price=sl_price,
-                            tag=f"adv_sl_{s_idx+1}"
+                            tag=tag_str
                         )
                         if not res.get("success"):
                             res = broker.place_order(
@@ -7820,23 +7827,33 @@ class StraddleManager:
                                 order_type="SL-M",
                                 price=0.0,
                                 trigger_price=sl_price,
-                                tag=f"adv_sl_{s_idx+1}"
+                                tag=tag_str
                             )
-                        if res.get("success") and res.get("order_id"):
-                            placed_oids.append(str(res.get("order_id")))
+                        return (s_idx, s_qty, res)
+
+                    futs = [_PERSISTENT_LEG_POOL.submit(_fire_sl_slice, i, q) for i, q in enumerate(qty_slices)]
+                    slice_results = [f.result() for f in futs]
+                    slice_results.sort(key=lambda x: x[0])
+                    placed_oids = [str(res.get("order_id")) for (i, q, res) in slice_results if res.get("success") and res.get("order_id")]
 
                     if placed_oids:
                         pos["sl_broker_order_id"] = ",".join(placed_oids)
                         pos["last_sl_broker_order_id"] = ",".join(placed_oids)
                         pos["sl_order_placement"] = "Place in advance"
                         pos["sl_cancelled_unexpectedly"] = False
+                        pos["sl_all_slices_placed"] = (len(placed_oids) == len(qty_slices))
                         pos.pop("sl_cancel_notice", None)
-                        pos.pop("sl_placement_error", None)
-                        logger.info(f"[Advance SL Slicer] Orders placed with broker IDs: {pos['sl_broker_order_id']}")
+                        if len(placed_oids) == len(qty_slices):
+                            pos.pop("sl_placement_error", None)
+                            logger.info(f"[Advance SL Slicer] All {len(placed_oids)} SL freeze slices placed with broker IDs: {pos['sl_broker_order_id']}")
+                        else:
+                            pos["sl_placement_error"] = f"Partial SL placement: {len(placed_oids)}/{len(qty_slices)} slices placed on broker"
+                            logger.warning(f"[Advance SL Slicer] Partial SL slices placed: {len(placed_oids)}/{len(qty_slices)} IDs: {pos['sl_broker_order_id']}")
                         self._save_strategies()
                         self._save_state()
                         return
                     else:
+                        pos["sl_all_slices_placed"] = False
                         pos["sl_placement_error"] = "All SL freeze slices rejected by broker"
                         self._save_strategies()
                         self._save_state()
@@ -7873,6 +7890,7 @@ class StraddleManager:
                     pos["last_sl_broker_order_id"] = str(res.get("order_id"))
                     pos["sl_order_placement"] = "Place in advance"
                     pos["sl_cancelled_unexpectedly"] = False
+                    pos["sl_all_slices_placed"] = True
                     pos.pop("sl_cancel_notice", None)
                     pos.pop("sl_placement_error", None)
                     logger.info(f"[Advance SL] Order placed with broker ID: {pos['sl_broker_order_id']}")
@@ -7880,6 +7898,7 @@ class StraddleManager:
                     self._save_state()
                 else:
                     err_msg = res.get("error") or "Order rejected by broker"
+                    pos["sl_all_slices_placed"] = False
                     pos["sl_placement_error"] = err_msg
                     logger.warning(f"[Advance SL] Broker failed to place SL for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
                     self._log_event(
@@ -7919,7 +7938,14 @@ class StraddleManager:
                 return
             if pos.get("target_broker_order_id") and not force:
                 return
-            if force:
+            if force and pos.get("target_broker_order_id"):
+                old_tgt = str(pos.get("target_broker_order_id"))
+                try:
+                    broker.cancel_order(old_tgt)
+                except Exception as e_old:
+                    logger.debug(f"[Advance Target] Note cancelling prior partial Target {old_tgt} on force retry: {e_old}")
+                pos["target_broker_order_id"] = None
+            elif force:
                 pos["target_broker_order_id"] = None
             tgt_price = float(pos.get("target_price") or 0.0)
             if tgt_price <= 0:
@@ -7931,7 +7957,7 @@ class StraddleManager:
                 sym = pos.get("trading_symbol") or _resolve_kotak_trading_symbol(pos.get("symbol", ""))
                 logger.info(f"[Advance Target] Placing advance LIMIT order on broker for {sym} @ price ₹{tgt_price:.2f} (qty={qty})...")
 
-                # Exchange freeze limit auto-slicing for high quantity / high lot sizes (e.g. 150 lots)
+                # Exchange freeze limit auto-slicing for high quantity / high lot sizes (e.g. 100-150 lots)
                 und = pos.get("underlying") or "NIFTY"
                 lot_size = int(pos.get("lot_size") or 0)
                 if lot_size <= 0:
@@ -7939,9 +7965,9 @@ class StraddleManager:
                 qty_slices = slice_quantity_by_freeze(qty, lot_size, und)
 
                 if len(qty_slices) > 1:
-                    logger.info(f"[Advance Target Slicer] Slicing {qty} qty of {sym} into {len(qty_slices)} orders ({qty_slices}) for exchange freeze compliance...")
-                    placed_oids = []
-                    for s_idx, s_qty in enumerate(qty_slices):
+                    logger.info(f"[Advance Target Slicer] Slicing {qty} qty ({pos.get('lots', 0)} lots) of {sym} into {len(qty_slices)} orders ({qty_slices}) for exchange freeze compliance...")
+                    def _fire_tgt_slice(s_idx, s_qty):
+                        tag_str = f"adv_tgt_{s_idx+1}"
                         res = broker.place_order(
                             symbol=sym,
                             instrument_key=pos.get("instrument_key", ""),
@@ -7951,23 +7977,33 @@ class StraddleManager:
                             order_type="LIMIT",
                             price=tgt_price,
                             trigger_price=0.0,
-                            tag=f"adv_tgt_{s_idx+1}"
+                            tag=tag_str
                         )
-                        if res.get("success") and res.get("order_id"):
-                            placed_oids.append(str(res.get("order_id")))
+                        return (s_idx, s_qty, res)
+
+                    futs = [_PERSISTENT_LEG_POOL.submit(_fire_tgt_slice, i, q) for i, q in enumerate(qty_slices)]
+                    slice_results = [f.result() for f in futs]
+                    slice_results.sort(key=lambda x: x[0])
+                    placed_oids = [str(res.get("order_id")) for (i, q, res) in slice_results if res.get("success") and res.get("order_id")]
 
                     if placed_oids:
                         pos["target_broker_order_id"] = ",".join(placed_oids)
                         pos["last_target_broker_order_id"] = ",".join(placed_oids)
                         pos["target_order_placement"] = "Place in advance"
                         pos["target_cancelled_unexpectedly"] = False
+                        pos["target_all_slices_placed"] = (len(placed_oids) == len(qty_slices))
                         pos.pop("target_cancel_notice", None)
-                        pos.pop("target_placement_error", None)
-                        logger.info(f"[Advance Target Slicer] Orders placed with broker IDs: {pos['target_broker_order_id']}")
+                        if len(placed_oids) == len(qty_slices):
+                            pos.pop("target_placement_error", None)
+                            logger.info(f"[Advance Target Slicer] All {len(placed_oids)} Target freeze slices placed with broker IDs: {pos['target_broker_order_id']}")
+                        else:
+                            pos["target_placement_error"] = f"Partial Target placement: {len(placed_oids)}/{len(qty_slices)} slices placed on broker"
+                            logger.warning(f"[Advance Target Slicer] Partial Target slices placed: {len(placed_oids)}/{len(qty_slices)} IDs: {pos['target_broker_order_id']}")
                         self._save_strategies()
                         self._save_state()
                         return
                     else:
+                        pos["target_all_slices_placed"] = False
                         pos["target_placement_error"] = "All Target freeze slices rejected by broker"
                         self._save_strategies()
                         self._save_state()
@@ -7989,6 +8025,7 @@ class StraddleManager:
                     pos["last_target_broker_order_id"] = str(res.get("order_id"))
                     pos["target_order_placement"] = "Place in advance"
                     pos["target_cancelled_unexpectedly"] = False
+                    pos["target_all_slices_placed"] = True
                     pos.pop("target_cancel_notice", None)
                     pos.pop("target_placement_error", None)
                     logger.info(f"[Advance Target] Order placed with broker ID: {pos['target_broker_order_id']}")
@@ -7996,6 +8033,7 @@ class StraddleManager:
                     self._save_state()
                 else:
                     err_msg = res.get("error") or "Order rejected by broker"
+                    pos["target_all_slices_placed"] = False
                     pos["target_placement_error"] = err_msg
                     logger.warning(f"[Advance Target] Broker failed to place Target for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
                     self._log_event(
@@ -9722,53 +9760,17 @@ class StraddleManager:
                 # If Re-Execute method is "Candle Close (Stockmock)" OR reference price mode is "ENTRY_CANDLE_CLOSE" with all entries scope or "CANDLE_CLOSE_ALL"
                 is_candle_close = ("candle" in re_method.lower()) or (ref_mode in ("CANDLE_CLOSE_ALL", "ENTRY_CANDLE_CLOSE") and bm_scope != "INITIAL_ONLY")
 
+                now_dt = now_ist()
                 if is_candle_close:
-                    now_dt = now_ist()
                     # Sleep until second :00 of the next minute (close of current 1-minute candle)
                     sec_left = 60.0 - now_dt.second - (now_dt.microsecond / 1_000_000.0)
                     extra_delay = int(adv.get("re_execute_order_delay_sec", 0) or 0)
                     total_wait = max(0.0, sec_left + extra_delay)
-                    if total_wait > 0:
-                        target_dt = now_dt + timedelta(seconds=total_wait)
-                        self._log_event(
-                            f"[{strat.get('name')}] Re-Execution 'Candle Close' active. Waiting {total_wait:.2f}s until 1-min candle close @ {target_dt.strftime('%H:%M:%S')}...",
-                            level="INFO"
-                        )
-                        # Pre-warm connection and pre-fetch quotes 2.5s before candle close for 0ms execution
-                        if total_wait > 3.0:
-                            time.sleep(total_wait - 2.5)
-                            try:
-                                kotak_auth.warm_up_connection()
-                            except Exception:
-                                pass
-                            rem_wait = max(0.0, (target_dt - now_ist()).total_seconds())
-                            if rem_wait > 0:
-                                time.sleep(rem_wait)
-                        else:
-                            time.sleep(total_wait)
                 else:
                     delay_sec = int(adv.get("re_execute_order_delay_sec", 0) or 0)
-                    if delay_sec > 0:
-                        self._log_event(f"[{strat.get('name')}] Re-Execution 'Immediate' waiting {delay_sec}s delay...", level="INFO")
-                        if delay_sec > 3.0:
-                            time.sleep(delay_sec - 2.0)
-                            try:
-                                kotak_auth.warm_up_connection()
-                            except Exception:
-                                pass
-                            rem_d = max(0.0, delay_sec - (delay_sec - 2.0))
-                            time.sleep(rem_d)
-                        else:
-                            time.sleep(delay_sec)
-                    else:
-                        self._log_event(f"[{strat.get('name')}] Re-Execution 'Immediate' (0s delay). Dispatching re-entry order immediately.", level="INFO")
+                    total_wait = max(0.0, float(delay_sec))
 
-                chk_w2 = self.get_strategy_schedule_status(strat)
-                strat_active_w2 = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
-                can_enter_w2 = (chk_w2.get("can_enter", False) or (strat_active_w2 and not chk_w2.get("is_after_end", False) and chk_w2.get("is_day_scheduled", True)))
-                if not can_enter_w2 or not self._state.get("algo_running") or self._state.get("status") in ("TERMINATED", "STOPPED"):
-                    self._log_event(f"[{strat.get('name')}] Re-entry aborted after delay: {chk_w2['reason']}", level="INFO")
-                    return
+                target_dt = now_dt + timedelta(seconds=total_wait)
 
                 und = strat.get("underlying", pos.get("underlying", "NIFTY"))
                 mult = self.get_effective_multiplier(strat)
@@ -9780,6 +9782,44 @@ class StraddleManager:
                     if pos.get("strike_price"):
                         strike_sel = str(int(pos.get("strike_price")))
 
+                # -----------------------------------------------------------------
+                # Pre-shifting Hedge & Margin Auto-Release Window (User Requirement):
+                # When hedge is to be shifted first, and re-execution at candle close
+                # or with delay is set, shift the hedge 2-3 seconds before main leg
+                # re-execution so there is ZERO delay on main leg re-entry!
+                # When immediate (total_wait <= 3.0s), shift hedge and re-execute
+                # instantaneously back-to-back.
+                # -----------------------------------------------------------------
+                PRE_SHIFT_LEAD_SEC = 2.5
+                should_pre_shift = (total_wait > 3.0)
+
+                if should_pre_shift:
+                    lead_sleep = total_wait - PRE_SHIFT_LEAD_SEC
+                    self._log_event(
+                        f"[{strat.get('name')}] Re-Execution scheduled @ {target_dt.strftime('%H:%M:%S')} (in {total_wait:.2f}s). "
+                        f"Waiting {lead_sleep:.2f}s until pre-shift window (T-{PRE_SHIFT_LEAD_SEC}s) to shift hedge & release margin ahead of time...",
+                        level="INFO"
+                    )
+                    time.sleep(lead_sleep)
+                elif total_wait > 0:
+                    self._log_event(
+                        f"[{strat.get('name')}] Re-Execution waiting {total_wait:.2f}s delay...",
+                        level="INFO"
+                    )
+                    time.sleep(total_wait)
+                else:
+                    self._log_event(
+                        f"[{strat.get('name')}] Re-Execution 'Immediate' (0s delay). Dispatching hedge shift and re-entry instantaneously.",
+                        level="INFO"
+                    )
+
+                chk_w2 = self.get_strategy_schedule_status(strat)
+                strat_active_w2 = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
+                can_enter_w2 = (chk_w2.get("can_enter", False) or (strat_active_w2 and not chk_w2.get("is_after_end", False) and chk_w2.get("is_day_scheduled", True)))
+                if not can_enter_w2 or not self._state.get("algo_running") or self._state.get("status") in ("TERMINATED", "STOPPED"):
+                    self._log_event(f"[{strat.get('name')}] Re-entry aborted: {chk_w2['reason']}", level="INFO")
+                    return
+
                 contract = self.resolve_strike_and_contract(
                     underlying=und,
                     strike_selection=strike_sel,
@@ -9787,7 +9827,7 @@ class StraddleManager:
                     expiry_type=leg_cfg.get("expiry", "Weekly"),
                 )
                 if not contract:
-                    self._log_event(f"Re-Execute contract resolution failed for {und} {opt_type}")
+                    self._log_event(f"Re-Execute contract resolution failed for {und} {opt_type}", level="ERROR")
                     return
 
                 # -----------------------------------------------------------------
@@ -9832,8 +9872,9 @@ class StraddleManager:
                         )
                     else:
                         # Distance exceeded threshold: execute ultra-fast concurrent shift
+                        shift_lead_label = "Pre-Shift (T-2.5s)" if should_pre_shift else "Instant Shift"
                         self._log_event(
-                            f"[Hedge Shift] ⚠️ Existing hedge '{active_hedge.get('symbol')}' is {strike_dist:.0f} strikes away (> threshold {max_thresh}). Executing concurrent shift to OTM {reset_otm}..."
+                            f"[Hedge Shift] ⚠️ [{shift_lead_label}] Existing hedge '{active_hedge.get('symbol')}' is {strike_dist:.0f} strikes away (> threshold {max_thresh}). Executing concurrent shift to OTM {reset_otm}..."
                         )
                         new_h_contract = self._resolve_exact_hedge_contract(
                             underlying=und,
@@ -9893,7 +9934,7 @@ class StraddleManager:
                                         self._state["positions"] = strat.get("positions", [])
                                 active_hedge = new_h_pos
                                 self._log_event(
-                                    f"[Hedge Shifted] ⚡ New hedge {new_h_pos.get('symbol')} (OTM {reset_otm}) active. Old hedge squared off. Placing short re-entry...",
+                                    f"[Hedge Shifted] ⚡ New hedge {new_h_pos.get('symbol')} (OTM {reset_otm}) active and SPAN margin confirmed. Ready for short re-entry.",
                                     level="SUCCESS"
                                 )
                             else:
@@ -9994,7 +10035,8 @@ class StraddleManager:
                 # -----------------------------------------------------------------
                 # Margin Auto-Release for Re-Execution:
                 # Temporarily cancel resting advance broker orders on other open legs
-                # to release broker margin and avoid RMS margin shortfall rejection
+                # (across all sliced orders e.g. 100-150 lots) to release broker margin
+                # and avoid RMS margin shortfall rejection
                 # -----------------------------------------------------------------
                 auto_release_margin = bool(adv.get("auto_release_margin_reentry", True))
                 unblocked_items = []
@@ -10002,7 +10044,7 @@ class StraddleManager:
                 if auto_release_margin and mode == "LIVE_BROKER" and self.is_broker_connected():
                     with _ENGINE_LOCK:
                         for p_cand in strat.get("positions", []):
-                            if p_cand.get("status") == "OPEN" and p_cand.get("id") != pos.get("id"):
+                            if p_cand.get("status") == "OPEN" and p_cand.get("id") != pos.get("id") and not p_cand.get("is_associated_hedge"):
                                 sl_oid = p_cand.get("sl_broker_order_id")
                                 tgt_oid = p_cand.get("target_broker_order_id")
                                 if sl_oid or tgt_oid:
@@ -10014,26 +10056,44 @@ class StraddleManager:
                                     p_cand["_margin_relief_in_progress"] = True
 
                     if unblocked_items:
-                        self._log_event(
-                            f"[Margin Auto-Release] ⚡ Temporarily releasing broker margin on {len(unblocked_items)} opposite leg(s) by cancelling resting advance orders for Re-entry...",
-                            level="INFO"
-                        )
+                        cancel_futs = []
+                        total_sl_slices = 0
+                        total_tgt_slices = 0
                         for item in unblocked_items:
                             p_cand = item["pos"]
                             if item["sl_order_id"]:
-                                try:
-                                    c_res = broker.cancel_order(str(item["sl_order_id"]))
-                                    logger.info(f"[Margin Auto-Release] Cancelled broker SL {item['sl_order_id']} for {p_cand.get('symbol')}: {c_res}")
-                                except Exception as e_c:
-                                    logger.warning(f"[Margin Auto-Release] Error cancelling SL {item['sl_order_id']}: {e_c}")
-                                p_cand["sl_broker_order_id"] = None
+                                s_oids = [o.strip() for o in str(item["sl_order_id"]).split(",") if o.strip()]
+                                total_sl_slices += len(s_oids)
+                                cancel_futs.append((p_cand, "SL", item["sl_order_id"], _PERSISTENT_LEG_POOL.submit(broker.cancel_order, str(item["sl_order_id"]))))
                             if item["tgt_order_id"]:
-                                try:
-                                    c_res = broker.cancel_order(str(item["tgt_order_id"]))
-                                    logger.info(f"[Margin Auto-Release] Cancelled broker Target {item['tgt_order_id']} for {p_cand.get('symbol')}: {c_res}")
-                                except Exception as e_c:
-                                    logger.warning(f"[Margin Auto-Release] Error cancelling Target {item['tgt_order_id']}: {e_c}")
+                                t_oids = [o.strip() for o in str(item["tgt_order_id"]).split(",") if o.strip()]
+                                total_tgt_slices += len(t_oids)
+                                cancel_futs.append((p_cand, "TARGET", item["tgt_order_id"], _PERSISTENT_LEG_POOL.submit(broker.cancel_order, str(item["tgt_order_id"]))))
+
+                        self._log_event(
+                            f"[Margin Auto-Release] ⚡ Releasing broker margin for Re-entry by cancelling ALL resting advance orders across {len(unblocked_items)} open position(s) ({total_sl_slices} SL slices, {total_tgt_slices} Target slices)...",
+                            level="INFO"
+                        )
+                        for p_cand, o_type, raw_oid, fut in cancel_futs:
+                            try:
+                                c_res = fut.result(timeout=6.0)
+                                logger.info(f"[Margin Auto-Release] Cancelled broker {o_type} {raw_oid} for {p_cand.get('symbol')}: {c_res}")
+                            except Exception as e_c:
+                                logger.warning(f"[Margin Auto-Release] Error cancelling {o_type} {raw_oid}: {e_c}")
+                            if o_type == "SL":
+                                p_cand["sl_broker_order_id"] = None
+                            else:
                                 p_cand["target_broker_order_id"] = None
+
+                # If pre-shifting was executed ahead of time, now wait until exact target_dt (e.g. candle close :00.000)
+                if should_pre_shift:
+                    try:
+                        kotak_auth.warm_up_connection()
+                    except Exception:
+                        pass
+                    rem_wait = max(0.0, (target_dt - now_ist()).total_seconds())
+                    if rem_wait > 0:
+                        time.sleep(rem_wait)
 
                 new_pos = None
                 clean_opt = (opt_type or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")).upper()
@@ -10065,23 +10125,23 @@ class StraddleManager:
                         def _restore_unblocked_orders():
                             time.sleep(0.08)
                             self._log_event(
-                                f"[Margin Auto-Release] Re-entry dispatched. Re-placing advance SL & Target orders on broker for all legs...",
+                                f"[Margin Auto-Release] Re-entry dispatched. Re-placing advance SL & Target orders on broker for all legs and all slices ({len(unblocked_items)} position(s))...",
                                 level="INFO"
                             )
-                            # Retry up to 3 times to ensure 100% placement with broker
+                            # Retry up to 3 times to ensure 100% placement with broker across all slices (e.g. 100-150 lots)
                             for attempt in range(1, 4):
                                 all_placed = True
                                 for item in unblocked_items:
                                     p_cand = item["pos"]
                                     if p_cand.get("status") == "OPEN":
-                                        if item.get("sl_order_id") and not p_cand.get("sl_broker_order_id"):
+                                        if item.get("sl_order_id") and (not p_cand.get("sl_broker_order_id") or not p_cand.get("sl_all_slices_placed", True)):
                                             self._place_advance_sl_order(broker, p_cand, delay_sec=0, force=True)
-                                            if not p_cand.get("sl_broker_order_id"):
+                                            if not p_cand.get("sl_broker_order_id") or not p_cand.get("sl_all_slices_placed", True):
                                                 all_placed = False
-                                        if item.get("tgt_order_id") and not p_cand.get("target_broker_order_id"):
+                                        if item.get("tgt_order_id") and (not p_cand.get("target_broker_order_id") or not p_cand.get("target_all_slices_placed", True)):
                                             time.sleep(0.10)
                                             self._place_advance_target_order(broker, p_cand, delay_sec=0, force=True)
-                                            if not p_cand.get("target_broker_order_id"):
+                                            if not p_cand.get("target_broker_order_id") or not p_cand.get("target_all_slices_placed", True):
                                                 all_placed = False
                                 if all_placed:
                                     break

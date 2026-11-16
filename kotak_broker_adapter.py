@@ -822,9 +822,19 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
     ) -> Dict[str, Any]:
         if "," in str(order_id):
             oids = [o.strip() for o in str(order_id).split(",") if o.strip()]
-            child_res = [self.modify_order(o, quantity=None, price=price, trigger_price=trigger_price, order_type=order_type) for o in oids]
+            if not oids:
+                return {"success": True, "order_id": str(order_id), "child_results": []}
+            # Concurrent parallel modification for all slices (e.g. 150 lots with 6+ slices)
+            child_res = []
+            futs = [_ORDER_THREAD_POOL.submit(self.modify_order, o, None, price, trigger_price, order_type) for o in oids]
+            for fut in futs:
+                try:
+                    child_res.append(fut.result())
+                except Exception as e_m:
+                    child_res.append({"success": False, "error": str(e_m)})
             return {
                 "success": any(r.get("success") for r in child_res),
+                "all_success": all(r.get("success") for r in child_res),
                 "order_id": str(order_id),
                 "child_results": child_res
             }
@@ -890,9 +900,19 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
         if "," in str(order_id):
             oids = [o.strip() for o in str(order_id).split(",") if o.strip()]
-            child_res = [self.cancel_order(o) for o in oids]
+            if not oids:
+                return {"success": True, "order_id": str(order_id), "child_results": []}
+            # Concurrent parallel cancellation for all slices (e.g. 150 lots with 6+ slices)
+            child_res = []
+            futs = [_ORDER_THREAD_POOL.submit(self.cancel_order, o) for o in oids]
+            for fut in futs:
+                try:
+                    child_res.append(fut.result())
+                except Exception as e_c:
+                    child_res.append({"success": False, "error": str(e_c)})
             return {
                 "success": any(r.get("success") for r in child_res),
+                "all_success": all(r.get("success") for r in child_res),
                 "order_id": str(order_id),
                 "child_results": child_res
             }
@@ -1892,7 +1912,12 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         if "," in str(order_id):
             oids = [o.strip() for o in str(order_id).split(",") if o.strip()]
             child_res = [self.modify_order(o, quantity=None, price=price, trigger_price=trigger_price, order_type=order_type) for o in oids]
-            return {"success": any(r.get("success") for r in child_res), "order_id": str(order_id), "child_results": child_res}
+            return {
+                "success": any(r.get("success") for r in child_res),
+                "all_success": all(r.get("success") for r in child_res),
+                "order_id": str(order_id),
+                "child_results": child_res
+            }
         with self._lock:
             orders = self._read_json(self._orderbook_file)
             for o in orders:
@@ -1911,7 +1936,12 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         if "," in str(order_id):
             oids = [o.strip() for o in str(order_id).split(",") if o.strip()]
             child_res = [self.cancel_order(o) for o in oids]
-            return {"success": any(r.get("success") for r in child_res), "order_id": str(order_id), "child_results": child_res}
+            return {
+                "success": any(r.get("success") for r in child_res),
+                "all_success": all(r.get("success") for r in child_res),
+                "order_id": str(order_id),
+                "child_results": child_res
+            }
         with self._lock:
             orders = self._read_json(self._orderbook_file)
             for o in orders:
