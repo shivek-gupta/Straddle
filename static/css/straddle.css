@@ -70,13 +70,11 @@ body {
     justify-content: space-between;
     align-items: center;
     flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+    overflow: visible !important;
     gap: 10px;
     position: sticky;
     top: 0;
-    z-index: 1000;
+    z-index: 2000;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
 }
 .straddle-topbar::-webkit-scrollbar {
@@ -150,6 +148,25 @@ body {
     background: rgba(255, 255, 255, 0.12);
     border-color: #60a5fa;
     color: #60a5fa;
+}
+
+#topbarSettingsMenuWrap {
+    position: relative;
+    display: inline-block;
+    flex-shrink: 0;
+    z-index: 2100;
+}
+
+#topbarSettingsDropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 260px;
+    background: #0b0f19;
+    border: 1px solid #252836;
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 0, 0, 0.5);
+    z-index: 99999;
 }
 
 /* Modal enhancements */
@@ -10084,16 +10101,12 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         top: auto !important;
         padding: 5px 8px !important;
         flex-wrap: nowrap !important;
-        overflow-x: auto !important;
-        scrollbar-width: none !important;
-        -ms-overflow-style: none !important;
+        overflow: visible !important;
         gap: 6px !important;
         height: auto !important;
         min-height: 40px !important;
         box-shadow: none !important;
-    }
-    .straddle-topbar::-webkit-scrollbar {
-        display: none !important;
+        z-index: 2000 !important;
     }
 
     .straddle-topbar-left {
@@ -10123,6 +10136,7 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         gap: 5px !important;
         flex-wrap: nowrap !important;
         flex-shrink: 0 !important;
+        overflow: visible !important;
     }
 
     #topbarMtmPill {
@@ -10136,9 +10150,15 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
         font-size: 10.5px !important;
     }
 
+    #topbarSettingsMenuWrap {
+        position: relative !important;
+        z-index: 2100 !important;
+    }
+
     #topbarSettingsDropdown {
-        width: 230px !important;
+        width: 250px !important;
         right: 0 !important;
+        z-index: 99999 !important;
     }
 
     /* 2. Commodity Pills Carousel */

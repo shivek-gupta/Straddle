@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261116_v11">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261116_v12">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -239,13 +239,13 @@
             </div>
 
             <!-- Merged Settings & System Dropdown (Kotak API + Git main + Trading Mode) -->
-            <div style="position:relative; display:inline-block; flex-shrink:0;" id="topbarSettingsMenuWrap">
+            <div style="position:relative; display:inline-block; flex-shrink:0; z-index:2100;" id="topbarSettingsMenuWrap">
                 <button type="button" class="straddle-sys-btn" id="btnTopbarSettingsToggle" onclick="toggleTopbarSettingsDropdown(event)" style="display:inline-flex; align-items:center; gap:5px; background:#0c0d12; border:1px solid #252836; padding:4px 9px; border-radius:6px; cursor:pointer; color:#f8fafc; font-size:11px; font-weight:700; white-space:nowrap;" title="System Settings & Integrations">
                     <span>⚙️</span>
                     <span>Settings</span>
                     <span style="font-size:9px; color:#94a3b8; margin-left:1px;">▼</span>
                 </button>
-                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:36px; right:0; width:260px; background:#0b0f19; border:1px solid #252836; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.85); z-index:11500; overflow:hidden;">
+                <div id="topbarSettingsDropdown" style="display:none; position:absolute; top:calc(100% + 6px); right:0; width:260px; background:#0b0f19; border:1px solid #252836; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.9), 0 0 20px rgba(0,0,0,0.5); z-index:99999; overflow:hidden;">
                     <!-- Kotak Neo Live Connection Kill Switch -->
                     <div id="kotakBrokerConnectionCard" style="padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.08); background:rgba(15,23,42,0.6);">
                         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
@@ -262,7 +262,7 @@
                     </div>
 
                     <!-- Kotak API Credentials -->
-                    <div id="kotakAuthStatusPill" class="{% if not (auth_status and auth_status.is_authenticated) %}disconnected{% endif %}" onclick="openKotakSettingsModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Configure Kotak Neo API Keys">
+                    <div id="kotakAuthStatusPill" class="{% if not (auth_status and auth_status.is_authenticated) %}disconnected{% endif %}" onclick="openKotakSettingsModal(); closeTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Configure Kotak Neo API Keys">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span>⚙️</span>
                             <span style="font-weight:700; color:#f8fafc; font-size:12px;">Kotak Neo API</span>
@@ -273,7 +273,7 @@
                         </div>
                     </div>
                     <!-- Git Cloud Sync -->
-                    <div id="gitStatusBtn" onclick="openSystemUpdateModal(); toggleTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Git Cloud Sync & Updates">
+                    <div id="gitStatusBtn" onclick="openSystemUpdateModal(); closeTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Git Cloud Sync & Updates">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span>🔄</span>
                             <span style="font-weight:700; color:#f8fafc; font-size:12px;">Git Cloud Sync</span>
@@ -281,7 +281,7 @@
                         <span id="gitBranchBadge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:1px 6px; font-size:10.5px; font-weight:800; font-family:var(--font-mono);">main</span>
                     </div>
                     <!-- Broker Execution Mode -->
-                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
+                    <div id="topbarModeToggleBtn" onclick="toggleStraddleExecutionMode(); closeTopbarSettingsDropdown();" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; cursor:pointer; transition:background 0.15s ease;" onmouseenter="this.style.background='#161822'" onmouseleave="this.style.background='transparent'" title="Toggle Execution Mode">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span id="topbarModeIcon">⚡</span>
                             <span style="font-weight:700; color:#f8fafc; font-size:12px;">Trading Mode</span>
@@ -292,6 +292,39 @@
             </div>
         </div>
     </header>
+
+    <!-- IMMIDIATE TOPBAR CONTROLLER SCRIPT (Zero-Latency Guarantee) -->
+    <script>
+        function toggleTopbarSettingsDropdown(event) {
+            if (event && event.stopPropagation) event.stopPropagation();
+            var dd = document.getElementById("topbarSettingsDropdown");
+            var btn = document.getElementById("btnTopbarSettingsToggle");
+            if (!dd) return;
+            var isShown = dd.style.display === "block" || (window.getComputedStyle && window.getComputedStyle(dd).display === "block");
+            dd.style.display = isShown ? "none" : "block";
+            if (btn) btn.classList.toggle("open", !isShown);
+            if (!isShown && typeof closeTopbarAssetMenu === "function") {
+                closeTopbarAssetMenu();
+            }
+        }
+        window.toggleTopbarSettingsDropdown = toggleTopbarSettingsDropdown;
+
+        function closeTopbarSettingsDropdown() {
+            var dd = document.getElementById("topbarSettingsDropdown");
+            var btn = document.getElementById("btnTopbarSettingsToggle");
+            if (dd) dd.style.display = "none";
+            if (btn) btn.classList.remove("open");
+        }
+        window.closeTopbarSettingsDropdown = closeTopbarSettingsDropdown;
+
+        document.addEventListener("click", function(e) {
+            var wrap = document.getElementById("topbarSettingsMenuWrap");
+            var dd = document.getElementById("topbarSettingsDropdown");
+            if (dd && wrap && !wrap.contains(e.target)) {
+                closeTopbarSettingsDropdown();
+            }
+        });
+    </script>
 
     <!-- MAIN STRADDLE PLATFORM BODY -->
     <main style="padding: 10px 16px; max-width: 1920px; margin: 0 auto;">
@@ -3441,7 +3474,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261116_v11"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261116_v12"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
