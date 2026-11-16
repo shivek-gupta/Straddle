@@ -669,12 +669,16 @@ function setStraddlePositionsViewFilter(filter) {
         if (summaryControls) summaryControls.style.display = "none";
         if (marginSection) marginSection.style.display = "none";
         if (ordersSection) ordersSection.style.display = "block";
+        document.getElementById("btnSubTabOrderbook")?.classList.add("active");
+        document.getElementById("btnSubTabMargin")?.classList.remove("active");
         loadStraddleOrderbook();
     } else if (filter === "margin") {
         if (posCard) posCard.style.display = "none";
         if (summaryControls) summaryControls.style.display = "none";
         if (ordersSection) ordersSection.style.display = "none";
         if (marginSection) marginSection.style.display = "block";
+        document.getElementById("btnSubTabOrderbook")?.classList.remove("active");
+        document.getElementById("btnSubTabMargin")?.classList.add("active");
         loadStraddleMargin();
     } else {
         if (ordersSection) ordersSection.style.display = "none";
@@ -685,6 +689,21 @@ function setStraddlePositionsViewFilter(filter) {
         loadStraddleOpenPositions();
     }
 }
+
+// Interactive column sorting state for Open Positions Table
+window._straddlePosSortCol = window._straddlePosSortCol || "default";
+window._straddlePosSortDir = window._straddlePosSortDir || "asc";
+
+function sortStraddlePositionsBy(col) {
+    if (window._straddlePosSortCol === col) {
+        window._straddlePosSortDir = (window._straddlePosSortDir === "asc") ? "desc" : "asc";
+    } else {
+        window._straddlePosSortCol = col;
+        window._straddlePosSortDir = "asc";
+    }
+    renderStraddleOpenPositionsTable();
+}
+window.sortStraddlePositionsBy = sortStraddlePositionsBy;
 
 async function loadStraddleOpenPositions() {
     try {
@@ -767,6 +786,111 @@ function renderStraddleOpenPositionsTable() {
             if (!sym.includes(searchVal) && !src.includes(searchVal) && !prod.includes(searchVal)) return false;
         }
         return true;
+    });
+
+    // Update sort header indicator icons on table columns
+    const sortCols = ['status', 'side', 'symbol', 'product', 'quantity', 'buy_avg', 'sell_avg', 'avg_price', 'ltp', 'mtm', 'source'];
+    sortCols.forEach(c => {
+        const el = document.getElementById(`pos_sort_${c}`);
+        if (el) {
+            if (window._straddlePosSortCol === c) {
+                el.textContent = window._straddlePosSortDir === 'asc' ? '▲' : '▼';
+                el.style.color = '#38bdf8';
+            } else {
+                el.textContent = '↕';
+                el.style.color = '#64748b';
+            }
+        }
+    });
+
+    const sortCol = window._straddlePosSortCol || "default";
+    const sortDir = window._straddlePosSortDir || "asc";
+    const sortMult = (sortDir === "desc") ? -1 : 1;
+
+    filtered.sort((a, b) => {
+        // Mathematically stable tie-breaker: guarantees order NEVER flips randomly on polling
+        const keyA = String(a.instrument_key || a.symbol || a.trading_symbol || '');
+        const keyB = String(b.instrument_key || b.symbol || b.trading_symbol || '');
+        const tieBreaker = keyA.localeCompare(keyB);
+
+        if (sortCol === "default") {
+            const isOpA = (a.is_open !== false && (a.net_qty || a.quantity || 0) !== 0) ? 0 : 1;
+            const isOpB = (b.is_open !== false && (b.net_qty || b.quantity || 0) !== 0) ? 0 : 1;
+            if (isOpA !== isOpB) return isOpA - isOpB;
+
+            const stratA = String(a.strategy_name || a.source || "").toLowerCase();
+            const stratB = String(b.strategy_name || b.source || "").toLowerCase();
+            if (stratA !== stratB) return stratA.localeCompare(stratB);
+
+            const mA = String(a.symbol || a.trading_symbol || "").match(/\d{5,6}/);
+            const mB = String(b.symbol || b.trading_symbol || "").match(/\d{5,6}/);
+            const strikeA = Number(a.strike_price || (mA ? mA[0] : 0));
+            const strikeB = Number(b.strike_price || (mB ? mB[0] : 0));
+            if (strikeA !== strikeB) return strikeA - strikeB;
+
+            const symA = String(a.symbol || a.trading_symbol || "").toUpperCase();
+            const symB = String(b.symbol || b.trading_symbol || "").toUpperCase();
+            const isCeA = symA.includes("CE") ? 0 : (symA.includes("PE") ? 1 : 2);
+            const isCeB = symB.includes("CE") ? 0 : (symB.includes("PE") ? 1 : 2);
+            if (isCeA !== isCeB) return isCeA - isCeB;
+
+            return tieBreaker;
+        }
+
+        let valA, valB;
+        if (sortCol === "symbol") {
+            valA = String(a.symbol || a.trading_symbol || "").toUpperCase();
+            valB = String(b.symbol || b.trading_symbol || "").toUpperCase();
+            const comp = valA.localeCompare(valB);
+            return comp !== 0 ? comp * sortMult : tieBreaker;
+        } else if (sortCol === "status") {
+            valA = (a.is_open !== false && (a.net_qty || a.quantity || 0) !== 0) ? "OPEN" : "CLOSED";
+            valB = (b.is_open !== false && (b.net_qty || b.quantity || 0) !== 0) ? "OPEN" : "CLOSED";
+            const comp = valA.localeCompare(valB);
+            return comp !== 0 ? comp * sortMult : tieBreaker;
+        } else if (sortCol === "side") {
+            valA = String(a.side || "").toUpperCase();
+            valB = String(b.side || "").toUpperCase();
+            const comp = valA.localeCompare(valB);
+            return comp !== 0 ? comp * sortMult : tieBreaker;
+        } else if (sortCol === "product") {
+            valA = String(a.product || "").toUpperCase();
+            valB = String(b.product || "").toUpperCase();
+            const comp = valA.localeCompare(valB);
+            return comp !== 0 ? comp * sortMult : tieBreaker;
+        } else if (sortCol === "source") {
+            valA = String(a.strategy_name || a.source || "").toLowerCase();
+            valB = String(b.strategy_name || b.source || "").toLowerCase();
+            const comp = valA.localeCompare(valB);
+            return comp !== 0 ? comp * sortMult : tieBreaker;
+        } else if (sortCol === "quantity") {
+            valA = Number(a.net_qty !== undefined ? a.net_qty : (a.quantity || 0));
+            valB = Number(b.net_qty !== undefined ? b.net_qty : (b.quantity || 0));
+        } else if (sortCol === "buy_avg") {
+            valA = Number(a.buy_avg || 0.0);
+            valB = Number(b.buy_avg || 0.0);
+        } else if (sortCol === "sell_avg") {
+            valA = Number(a.sell_avg || 0.0);
+            valB = Number(b.sell_avg || 0.0);
+        } else if (sortCol === "avg_price") {
+            valA = Number(a.avg_price || a.net_avg || 0.0);
+            valB = Number(b.avg_price || b.net_avg || 0.0);
+        } else if (sortCol === "ltp") {
+            valA = Number(a.ltp || a.last_price || 0.0);
+            valB = Number(b.ltp || b.last_price || 0.0);
+        } else if (sortCol === "mtm") {
+            const isOpA = (a.is_open !== false && (a.net_qty || a.quantity || 0) !== 0);
+            const isOpB = (b.is_open !== false && (b.net_qty || b.quantity || 0) !== 0);
+            valA = Number(isOpA ? (a.mtm !== undefined ? a.mtm : (a.pnl || 0.0)) : (a.realised_pnl !== undefined ? a.realised_pnl : (a.pnl || 0.0)));
+            valB = Number(isOpB ? (b.mtm !== undefined ? b.mtm : (b.pnl || 0.0)) : (b.realised_pnl !== undefined ? b.realised_pnl : (b.pnl || 0.0)));
+        } else {
+            return tieBreaker;
+        }
+
+        if (valA !== valB) {
+            return (valA > valB ? 1 : -1) * sortMult;
+        }
+        return tieBreaker;
     });
 
     if (filtered.length === 0) {
@@ -1292,7 +1416,8 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             filtered.forEach(s => {
                 const sid = s.strategy_id;
                 const rawStatus = (s.status || "").toUpperCase();
-                const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN");
+                const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+                const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
                 const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.some(p => p.status === "ERROR") : false;
 
                 const isAlgoEnabled = s.enabled !== false;
@@ -1300,7 +1425,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 let statusClass = "straddle-badge-ready";
                 let dotColor = "#38bdf8";
 
-                if (!isAlgoEnabled) {
+                if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && hasCompleted && !s._manual_reset)) {
                     displayStatus = "Stopped";
                     statusClass = "straddle-badge-terminated";
                     dotColor = "#64748b";
@@ -1401,7 +1526,8 @@ function renderStraddleAlgosTable(forceRebuild = false) {
     filtered.forEach(s => {
         const isSelected = window._selectedAlgoIds.has(s.strategy_id);
         const rawStatus = (s.status || "").toUpperCase();
-        const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN");
+        const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+        const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
         const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR") : false;
         const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((s.entry_error && s.entry_error !== "-" && !s.entry_error.toLowerCase().includes("waiting")) ? 1 : 0);
 
@@ -1410,7 +1536,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         let statusClass = "straddle-badge-ready";
         let dotColor = "#38bdf8";
 
-        if (!isAlgoEnabled) {
+        if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && hasCompleted && !s._manual_reset)) {
             displayStatus = "Stopped";
             statusClass = "straddle-badge-terminated";
             dotColor = "#64748b";
@@ -3065,19 +3191,10 @@ function openStrategyFromOrderbook(strategyId) {
 
 function switchOrderbookSubTab(tab) {
     window._straddleState.orderbookSubTab = tab;
-    document.getElementById("btnSubTabOrderbook")?.classList.toggle("active", tab === "orders");
-    document.getElementById("btnSubTabMargin")?.classList.toggle("active", tab === "margin");
-
-    const ordersSec = document.getElementById("orderbookOrdersSection");
-    const marginSec = document.getElementById("orderbookMarginSection");
-
-    if (ordersSec) ordersSec.style.display = (tab === "orders") ? "block" : "none";
-    if (marginSec) marginSec.style.display = (tab === "margin") ? "block" : "none";
-
     if (tab === "orders") {
-        renderStraddleOrderbookTable();
+        setStraddlePositionsViewFilter("orders");
     } else {
-        renderStraddleMargin();
+        setStraddlePositionsViewFilter("margin");
     }
 }
 
@@ -5167,9 +5284,24 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     }
                 }
 
-                // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift)
+                // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift, adopted from Kotak Neo)
                 let entryReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
-                if (pos.entry_reason && pos.entry_reason !== "-") {
+                const isAdopted = !!(
+                    pos.is_adopted ||
+                    (pos.id && String(pos.id).startsWith("leg_adopted_")) ||
+                    (pos.leg_id && String(pos.leg_id).startsWith("leg_adopted_")) ||
+                    (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("adopt"))
+                );
+
+                if (isAdopted) {
+                    const sSide = String(pos.side || "SELL").toUpperCase();
+                    const sType = String(pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE")).toUpperCase();
+                    let adoptLabel = pos.entry_reason && String(pos.entry_reason).trim() !== "-" && !String(pos.entry_reason).startsWith("Initial") 
+                        ? String(pos.entry_reason).trim() 
+                        : (pos.is_associated_hedge ? `Adopted Hedge from Kotak Neo (${sType})` : `Adopted from Kotak Neo [${sSide} ${sType}]`);
+                    if (!adoptLabel.startsWith("📥")) adoptLabel = `📥 ${adoptLabel}`;
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-adopted" title="${adoptLabel}">${adoptLabel}</span>`;
+                } else if (pos.entry_reason && pos.entry_reason !== "-") {
                     const eStr = String(pos.entry_reason).trim();
                     const eLower = eStr.toLowerCase();
                     const eUpper = eStr.toUpperCase();
@@ -10890,6 +11022,7 @@ window.syncDirectOrderFunds = syncDirectOrderFunds;
 // Positions exports
 window.loadStraddleOpenPositions = loadStraddleOpenPositions;
 window.renderStraddleOpenPositionsTable = renderStraddleOpenPositionsTable;
+window.sortStraddlePositionsBy = sortStraddlePositionsBy;
 window.setStraddlePositionsViewFilter = setStraddlePositionsViewFilter;
 window.confirmSquareOffAllOpenPositions = confirmSquareOffAllOpenPositions;
 window.clearStraddleClosedAndExpiredPositions = clearStraddleClosedAndExpiredPositions;
@@ -11199,7 +11332,9 @@ async function submitAdoptBrokerPosition() {
                     sl_re_execute_type: slReType,
                     sl_re_execute_count: slReCount,
                     tsl_profit_pts: tslProfit,
-                    tsl_trail_pts: tslTrail
+                    tsl_trail_pts: tslTrail,
+                    is_adopted: true,
+                    entry_reason: isHedge ? `Adopted Hedge from Kotak Neo (${pos.option_type || 'Hedge'})` : `Adopted from Kotak Neo [${pos.side || 'TRADE'} ${pos.option_type || ''}]`
                 }
             })
         });

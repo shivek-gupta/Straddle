@@ -647,6 +647,9 @@ class StraddleManager:
         self._ob_cache: Dict[str, Dict[str, Any]] = {}
         self._last_inst_stat_ts: float = 0.0
         self._fast_resolved_contract_cache: Dict[Any, Dict[str, Any]] = {}
+        self._cleared_closed_keys: Set[str] = set()
+        self._cached_open_positions_response: Optional[Dict[str, Any]] = None
+        self._cached_open_positions_ts: float = 0.0
         self._benchmarks_file = config.DATA_DIR / "straddle_shadow_benchmarks.json"
         self._shadow_benchmarks: List[Dict[str, Any]] = self._load_shadow_benchmarks()
         self._active_underlying: str = "NIFTY"
@@ -4356,6 +4359,40 @@ class StraddleManager:
             else:
                 total_open_mtm = sum(op.get("mtm", 0.0) for op in open_positions)
 
+            # Filter out positions explicitly cleared by user during session
+            if self._cleared_closed_keys:
+                closed_positions = [
+                    cp for cp in closed_positions
+                    if str(cp.get("instrument_key") or cp.get("symbol") or cp.get("trading_symbol")) not in self._cleared_closed_keys
+                ]
+                all_positions = [
+                    ap for ap in all_positions
+                    if ap.get("is_open") or str(ap.get("instrument_key") or ap.get("symbol") or ap.get("trading_symbol")) not in self._cleared_closed_keys
+                ]
+
+            # Deterministic, stable sorting to eliminate any order jumping / flipping glitch
+            def _extract_num_strike(s_sym: str) -> float:
+                import re
+                m = re.search(r'(\d{5,6})', str(s_sym or ""))
+                return float(m.group(1)) if m else 0.0
+
+            def _pos_sort_key(p: Dict[str, Any], prioritize_open: bool = False):
+                status_rank = 0 if (p.get("is_open") or p.get("status") == "OPEN") else 1
+                strat_name = str(p.get("strategy_name") or p.get("source") or "Z").lower()
+                sym_str = str(p.get("symbol") or p.get("trading_symbol") or "").upper()
+                strike_val = float(p.get("strike_price") or 0.0)
+                if strike_val <= 0:
+                    strike_val = _extract_num_strike(sym_str)
+                opt_rank = 0 if "CE" in sym_str else (1 if "PE" in sym_str else 2)
+                tie = sym_str or str(p.get("instrument_key") or "")
+                if prioritize_open:
+                    return (status_rank, strat_name, strike_val, opt_rank, tie)
+                return (strat_name, strike_val, opt_rank, tie)
+
+            open_positions.sort(key=lambda p: _pos_sort_key(p, prioritize_open=False))
+            closed_positions.sort(key=lambda p: _pos_sort_key(p, prioritize_open=False))
+            all_positions.sort(key=lambda p: _pos_sort_key(p, prioritize_open=True))
+
             total_realised_pnl = sum(cp.get("realised_pnl", 0.0) for cp in closed_positions) + sum(op.get("realised_pnl", 0.0) for op in open_positions)
             total_portfolio_pnl = round(total_open_mtm + total_realised_pnl, 2)
 
@@ -4909,7 +4946,12 @@ class StraddleManager:
             cleared_strat_legs = 0
             for strat in self._strategies:
                 open_legs = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
-                cleared_strat_legs += len(strat.get("positions", [])) - len(open_legs)
+                for p in strat.get("positions", []):
+                    if p.get("status") != "OPEN":
+                        cleared_strat_legs += 1
+                        k = p.get("instrument_key") or p.get("symbol") or p.get("trading_symbol")
+                        if k:
+                            self._cleared_closed_keys.add(str(k))
                 strat["positions"] = open_legs
                 if not open_legs:
                     strat["mtm"] = 0.0
@@ -4921,7 +4963,16 @@ class StraddleManager:
                     strat["re_execution_counts"] = self.get_strategy_reexecution_counts(strat)
 
             if self._state.get("positions"):
+                for p in self._state["positions"]:
+                    if p.get("status") != "OPEN":
+                        k = p.get("instrument_key") or p.get("symbol") or p.get("trading_symbol")
+                        if k:
+                            self._cleared_closed_keys.add(str(k))
                 self._state["positions"] = [p for p in self._state["positions"] if p.get("status") == "OPEN"]
+
+            # Invalidate cached response
+            self._cached_open_positions_response = None
+            self._cached_open_positions_ts = 0.0
 
             try:
                 paper_broker = get_broker_adapter("PAPER_TRADING")
@@ -11115,6 +11166,11 @@ class StraddleManager:
                 "pnl": float(pos.get("pnl") or 0.0),
                 "mtm": float(pos.get("pnl") or 0.0),
                 "is_adopted": True,
+                "entry_reason": (
+                    f"Adopted Hedge from Kotak Neo ({opt_type}) [Protecting {parent_leg_id or 'Main'}]"
+                    if is_hedge else
+                    f"Adopted from Kotak Neo [{side} {opt_type}]"
+                ),
                 "is_associated_hedge": is_hedge,
                 "parent_leg_id": parent_leg_id if is_hedge else "",
                 "hedge_parent_type": opt_type if is_hedge else "",
@@ -11702,8 +11758,13 @@ class StraddleManager:
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
+            # Reset session cleared filters and invalidate caches on explicit sync
+            self._cleared_closed_keys.clear()
+            self._cached_open_positions_response = None
+            self._cached_open_positions_ts = 0.0
+
             # 1. Fetch positions
-            pos_data = self.get_all_open_positions()
+            pos_data = self.get_all_open_positions(force=True)
 
             # 2. Fetch orderbook and tradebook
             orders = self.get_orderbook()
@@ -13517,6 +13578,10 @@ class StraddleManager:
                         strat["entry_error"] = f"Trading hours ended ({et})"
                         if strat_status not in ("TERMINATED", "ENTRY_FAILED"):
                             strat["status"] = "TERMINATED"
+                elif has_completed_positions and not has_open_positions and not strat.get("_re_entry_in_progress") and not strat.get("_manual_reset"):
+                    if strat_status not in ("STOPPED", "TERMINATED", "ENTRY_FAILED"):
+                        strat["status"] = "STOPPED"
+                    strat["entry_error"] = "All legs completed for today"
                 elif can_enter:
                     now_ts = time.time()
                     last_attempt = strat.get("_last_entry_attempt_ts", 0)

@@ -10819,6 +10819,13 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     border: 1px solid rgba(56, 189, 248, 0.35);
 }
 
+.straddle-reason-pill.entry-adopted {
+    color: #38bdf8;
+    background: rgba(2, 132, 199, 0.18);
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    font-weight: 800;
+}
+
 .exit-reason-tgt {
     color: #10b981;
     background: rgba(16, 185, 129, 0.14);

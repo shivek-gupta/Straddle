@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261116_v8">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261116_v10">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -589,17 +589,17 @@
                     <table class="straddle-table" id="straddleOpenPositionsTable">
                         <thead>
                             <tr>
-                                <th>Status</th>
-                                <th>Side</th>
-                                <th>Symbol / Contract</th>
-                                <th>Product</th>
-                                <th style="text-align:right;">Net Qty</th>
-                                <th style="text-align:right;">Buy Avg (₹)</th>
-                                <th style="text-align:right;">Sell Avg (₹)</th>
-                                <th style="text-align:right;">Net Avg (₹)</th>
-                                <th style="text-align:right;">LTP (₹)</th>
-                                <th style="text-align:right;">MTM / P&L (₹)</th>
-                                <th>Source / Strategy</th>
+                                <th onclick="sortStraddlePositionsBy('status')" style="cursor:pointer;" title="Click to sort by Status">Status <span id="pos_sort_status" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th onclick="sortStraddlePositionsBy('side')" style="cursor:pointer;" title="Click to sort by Side">Side <span id="pos_sort_side" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th onclick="sortStraddlePositionsBy('symbol')" style="cursor:pointer;" title="Click to sort by Symbol">Symbol / Contract <span id="pos_sort_symbol" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th onclick="sortStraddlePositionsBy('product')" style="cursor:pointer;" title="Click to sort by Product">Product <span id="pos_sort_product" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th style="text-align:right; cursor:pointer;" onclick="sortStraddlePositionsBy('quantity')" title="Click to sort by Net Quantity">Net Qty <span id="pos_sort_quantity" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th style="text-align:right; cursor:pointer;" onclick="sortStraddlePositionsBy('buy_avg')" title="Click to sort by Buy Avg">Buy Avg (₹) <span id="pos_sort_buy_avg" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th style="text-align:right; cursor:pointer;" onclick="sortStraddlePositionsBy('sell_avg')" title="Click to sort by Sell Avg">Sell Avg (₹) <span id="pos_sort_sell_avg" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th style="text-align:right; cursor:pointer;" onclick="sortStraddlePositionsBy('avg_price')" title="Click to sort by Net Avg">Net Avg (₹) <span id="pos_sort_avg_price" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th style="text-align:right; cursor:pointer;" onclick="sortStraddlePositionsBy('ltp')" title="Click to sort by LTP">LTP (₹) <span id="pos_sort_ltp" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th style="text-align:right; cursor:pointer;" onclick="sortStraddlePositionsBy('mtm')" title="Click to sort by MTM / P&L">MTM / P&L (₹) <span id="pos_sort_mtm" style="font-size:10px; color:#64748b;">↕</span></th>
+                                <th onclick="sortStraddlePositionsBy('source')" style="cursor:pointer;" title="Click to sort by Strategy">Source / Strategy <span id="pos_sort_source" style="font-size:10px; color:#64748b;">↕</span></th>
                                 <th style="text-align:center;">Action</th>
                             </tr>
                         </thead>
@@ -615,7 +615,7 @@
                 <!-- Quantiply Orderbook Navigation Header & Tabs -->
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <div style="display:flex; align-items:center; gap:10px;">
-                        <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" style="padding:4px 8px; font-size:14px; border:none; background:transparent; color:#f8fafc; cursor:pointer;" title="Back to Algos">←</button>
+                        <button type="button" class="straddle-btn btn-outline" onclick="setStraddlePositionsViewFilter('open')" style="padding:4px 8px; font-size:14px; border:none; background:transparent; color:#f8fafc; cursor:pointer;" title="Back to Open Positions">←</button>
                         <h2 style="font-size:18px; font-weight:700; color:#f8fafc; margin:0; letter-spacing:0.3px;">Orderbook</h2>
                     </div>
                 </div>
@@ -3441,7 +3441,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261116_v9"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261116_v10"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
