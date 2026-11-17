@@ -1345,10 +1345,16 @@ async function bulkDeleteSelectedAlgos() {
         if (res.success) {
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         } else {
             alert("Error: " + (res.error || "Failed"));
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         }
     } catch (e) {
         alert("Error: " + e.message);
@@ -1823,6 +1829,9 @@ async function restartOrRetryStraddleAlgo(strategyId) {
             }
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         } catch (e) {
             showStraddleToast("Error: " + e.message, "error", 3000);
         }
@@ -1965,6 +1974,9 @@ async function onToggleAlgoEnable(strategyId, isChecked) {
         if (res.success) {
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
             renderStraddleHeader(window._straddleState);
         }
     } catch (e) {
@@ -2162,6 +2174,9 @@ async function startStraddleAlgoDirect(strategyId) {
             showStraddleToast("Notice: " + (res.error || "Order execution triggered"), "warning", 3500);
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         }
     } catch (e) {
         showStraddleToast("Error: " + e.message, "error", 3500);
@@ -2339,6 +2354,9 @@ async function duplicateStraddleAlgo(strategyId) {
             showStraddleToast("✅ Strategy duplicated successfully!", "success", 2000);
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         } else {
             showStraddleToast("Error duplicating: " + (res.error || "Failed"), "error", 3000);
         }
@@ -2365,10 +2383,16 @@ async function deleteStraddleAlgo(strategyId) {
         if (res.success) {
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         } else {
             alert("Error deleting: " + (res.error || "Failed"));
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         }
     } catch (e) {
         alert("Error: " + e.message);
@@ -8456,7 +8480,12 @@ async function saveStraddleStrategySettings() {
     // Optimistically update local state for instant responsiveness
     if (window._straddleState && window._straddleState.allStrategies) {
         const idx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === strat.strategy_id);
-        if (idx >= 0) window._straddleState.allStrategies[idx] = strat;
+        if (idx >= 0) {
+            strat.positions = window._straddleState.allStrategies[idx].positions || [];
+            strat.status = window._straddleState.allStrategies[idx].status || strat.status;
+            strat.mtm = window._straddleState.allStrategies[idx].mtm || 0.0;
+            window._straddleState.allStrategies[idx] = strat;
+        }
         window._straddleState.activeStrategy = strat;
         renderStraddleAlgosTable(true);
     }
@@ -8479,6 +8508,9 @@ async function saveStraddleStrategySettings() {
             }
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         } else {
             showStraddleToast("Error saving: " + (res.error || "Failed"), "error", 3500);
         }
@@ -8767,6 +8799,9 @@ async function straddleTerminateAlgo() {
             showStraddleToast("⏹ Algorithm terminated successfully.", "success", 2000);
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         }
     } catch (e) {
         showStraddleToast("Error: " + e.message, "error", 3000);
