@@ -971,14 +971,38 @@ body {
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    padding: 8px 10px;
+    padding: 6px 6px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .straddle-legs-builder-table td {
-    padding: 8px 10px;
+    padding: 5px 6px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     vertical-align: middle;
+}
+
+/* Drag and Drop Leg Row Styling */
+.straddle-leg-builder-row.leg-row-dragging {
+    opacity: 0.45;
+    background: rgba(56, 189, 248, 0.08) !important;
+}
+.straddle-leg-builder-row.leg-drag-over-top {
+    border-top: 2px solid #38bdf8 !important;
+}
+.straddle-leg-builder-row.leg-drag-over-bottom {
+    border-bottom: 2px solid #38bdf8 !important;
+}
+.straddle-legs-builder-table th.col-sticky-actions,
+.straddle-legs-builder-table td.leg-col-actions {
+    position: sticky !important;
+    right: 0 !important;
+    background: #0d121f !important;
+    z-index: 4 !important;
+    box-shadow: -2px 0 6px rgba(0, 0, 0, 0.4);
+}
+.straddle-legs-builder-table th.col-sticky-actions {
+    background: #141926 !important;
+    z-index: 5 !important;
 }
 
 .straddle-input, .straddle-select {

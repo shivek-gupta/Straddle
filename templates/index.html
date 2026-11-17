@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261117_fix_final">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261117_positions_legs_v2">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -1036,9 +1036,11 @@
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_legs" class="chevron-icon">▼</span>
                         <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">POSITIONS / LEGS</span>
+                        <span id="cfgLegsCountBadge" style="font-size:11px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); border-radius:12px; padding:1px 8px; margin-left:4px;">0 Legs</span>
                     </div>
-                    <div style="display:flex; gap:8px;" onclick="event.stopPropagation()">
-                        <button type="button" class="straddle-btn btn-outline" style="padding:3px 8px; font-size:11px;" onclick="addStraddleLegRow()">+ Add Leg</button>
+                    <div style="display:flex; gap:8px; align-items:center;" onclick="event.stopPropagation()">
+                        <button type="button" class="straddle-btn btn-secondary" style="padding:3px 10px; font-size:11px; font-weight:700;" onclick="addStraddleStraddlePair()" title="Add 1 CE + 1 PE ATM Straddle Pair">+ Straddle (CE+PE)</button>
+                        <button type="button" class="straddle-btn btn-outline" style="padding:3px 10px; font-size:11px; font-weight:700;" onclick="addStraddleLegRow()">+ Add Leg</button>
                     </div>
                 </div>
 
@@ -1060,7 +1062,13 @@
                         </div>
                         <div class="straddle-form-group" id="grpManualMultiplier" style="margin-bottom:0;">
                             <label>Lots Multiplier:</label>
-                            <input type="number" id="cfgMultiplier" class="straddle-input" style="width:70px; text-align:center; font-weight:800;" value="1" min="1" max="100" onchange="onFormManualMultiplierChange(this.value)">
+                            <div class="straddle-stepper-box" style="height:30px; display:inline-flex; width:85px;">
+                                <input type="number" id="cfgMultiplier" class="straddle-input straddle-stepper-input" style="width:55px; text-align:center; font-weight:800; border:none; background:transparent; padding:2px;" value="1" min="1" max="100" onchange="onFormManualMultiplierChange(this.value)">
+                                <div class="straddle-stepper-arrows" style="width:18px;">
+                                    <button type="button" class="lot-step-btn" onclick="stepFormMultiplier(1)" title="Multiplier +">▲</button>
+                                    <button type="button" class="lot-step-btn" onclick="stepFormMultiplier(-1)" title="Multiplier -">▼</button>
+                                </div>
+                            </div>
                         </div>
                         <div class="straddle-form-group" id="grpAutoMultiplier" style="margin-bottom:0; display:none;">
                             <label>Cushion Margin / Lot (₹):</label>
@@ -1079,6 +1087,15 @@
                                 <option value="SL_SELF">Set All SL to With Self</option>
                                 <option value="TGT_BROKER">Set All Targets to With Broker (Limit)</option>
                                 <option value="TGT_SELF">Set All Targets to With Self</option>
+                                <option value="HEDGE_ON">🛡️ Turn ON Dynamic Hedge (All Sell Legs)</option>
+                                <option value="HEDGE_OFF">Turn OFF Dynamic Hedge (All Legs)</option>
+                                <option value="LOTS_1">Set All Legs to 1 Lot</option>
+                                <option value="LOTS_2">Set All Legs to 2 Lots</option>
+                                <option value="LOTS_5">Set All Legs to 5 Lots</option>
+                                <option value="ACTION_SQUARE_LEG">Set All Actions to Square off leg</option>
+                                <option value="ACTION_SQUARE_ALL">Set All Actions to Square off all</option>
+                                <option value="REEXEC_NONE">Set All Re-Execution to NONE</option>
+                                <option value="REEXEC_DEFAULT">Reset Re-Execution to Default (TGT: 6, SL: 1)</option>
                                 <option value="TGT_45">Set All Targets to 45%</option>
                                 <option value="SL_66">Set All Stoploss to 66%</option>
                                 <option value="EXP_WEEKLY">Set All to Weekly Expiry</option>
@@ -1090,26 +1107,26 @@
                     </div>
 
                     <!-- Dynamic Legs Table -->
-                    <div class="straddle-table-wrap" style="max-height:400px; overflow-y:auto; overflow-x:auto !important; max-width:100% !important; -webkit-overflow-scrolling:touch !important;">
+                    <div class="straddle-table-wrap" style="max-height:420px; overflow-y:auto; overflow-x:auto !important; max-width:100% !important; -webkit-overflow-scrolling:touch !important;">
                         <table class="straddle-legs-builder-table">
                             <thead>
                                 <tr>
-                                    <th style="width:30px;"></th>
-                                    <th>Side</th>
-                                    <th>Prod</th>
-                                    <th>Strike Selection</th>
-                                    <th>Type</th>
-                                    <th>Lots</th>
-                                    <th title="Dynamic Associated Hedge for Margin Reduction &amp; Auto-Roll">Hedge 🛡️</th>
-                                    <th>Target</th>
-                                    <th>TGT Re-Exec</th>
-                                    <th>Stoploss</th>
-                                    <th>Trailing SL</th>
-                                    <th>SL Re-Exec</th>
-                                    <th>Action</th>
-                                    <th>Underlying</th>
-                                    <th>Expiry</th>
-                                    <th>Actions</th>
+                                    <th style="width:28px; text-align:center;"></th>
+                                    <th style="width:65px;">Side</th>
+                                    <th style="width:70px;">Prod</th>
+                                    <th style="width:130px;">Strike Selection</th>
+                                    <th style="width:55px;">Type</th>
+                                    <th style="width:62px;">Lots</th>
+                                    <th style="width:110px;" title="Dynamic Associated Hedge for Margin Reduction &amp; Auto-Roll">Hedge 🛡️</th>
+                                    <th style="width:145px;">Target</th>
+                                    <th style="width:170px;">TGT Re-Exec</th>
+                                    <th style="width:140px;">Stoploss</th>
+                                    <th style="width:110px;">Trailing SL</th>
+                                    <th style="width:170px;">SL Re-Exec</th>
+                                    <th style="width:125px;">Action</th>
+                                    <th style="width:100px;">Underlying</th>
+                                    <th style="width:95px;">Expiry</th>
+                                    <th class="col-sticky-actions" style="width:42px; text-align:center; position:sticky; right:0; background:#141926; z-index:5;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="straddleLegsBuilderBody">
@@ -3496,7 +3513,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261117_loop_and_persist_fix"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261117_positions_legs_v2"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

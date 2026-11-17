@@ -4087,10 +4087,12 @@ function syncStrategyLegChange(rowId) {
     legObj.target_re_execute_type = tr.querySelector(".leg-tgt-re-type")?.value || "RE EXECUTE";
     legObj.target_re_execute_count = parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value, 10) || 5;
 
-    legObj.sl_type = tr.querySelector(".leg-sl-type")?.value || "SL: -%";
+    legObj.sl_type = tr.querySelector(".leg-sl-type")?.value || "SL: %";
     legObj.sl_value = parseFloat(tr.querySelector(".leg-sl-val")?.value) || 25.0;
     legObj.sl_order_placement = tr.querySelector(".leg-sl-placement")?.value || "Place in advance";
     legObj.tsl_type = tr.querySelector(".leg-tsl-type")?.value || "None";
+    legObj.tsl_profit_pts = parseFloat(tr.querySelector(".leg-tsl-profit")?.value) || 0.0;
+    legObj.tsl_trail_pts = parseFloat(tr.querySelector(".leg-tsl-trail")?.value) || 0.0;
     legObj.sl_re_execute_type = tr.querySelector(".leg-sl-re-type")?.value || "RE EXECUTE";
     legObj.sl_re_execute_count = parseInt(tr.querySelector(".leg-sl-re-cnt")?.value, 10) || 2;
     legObj.action = tr.querySelector(".leg-action")?.value || "Square off leg";
@@ -6773,32 +6775,43 @@ function openLegSettingsModal(rowId) {
         subtitleEl.textContent = `(${und} ${side.toUpperCase()} ${prod.toUpperCase()} ${type.toUpperCase()})`;
     }
 
-    // Populate strike select in modal with ATM, OTM 1-20, ITM 1-20
+    // Populate strike select in modal with ATM, OTM 1-40, ITM 1-40 matching the main table
     const strikeSel = document.getElementById("modalLegStrikeSelect") || document.getElementById("legSettingsStrikeSelect");
     if (strikeSel) {
         strikeSel.innerHTML = "";
         const normStrike = curStrike.toUpperCase().replace("_", " ").trim();
 
-        // OTM 20 down to 1
-        for (let i = 20; i >= 1; i--) {
+        // ATM
+        const atmOpt = document.createElement("option");
+        atmOpt.value = "ATM";
+        atmOpt.textContent = "ATM STRIKE";
+        if (normStrike === "ATM" || normStrike === "ATM STRIKE") atmOpt.selected = true;
+        strikeSel.appendChild(atmOpt);
+
+        // OTM 1 to 40
+        for (let i = 1; i <= 40; i++) {
             const opt = document.createElement("option");
             opt.value = `OTM ${i}`;
             opt.textContent = `OTM ${i}`;
             if (normStrike === `OTM ${i}` || normStrike === `OTM${i}`) opt.selected = true;
             strikeSel.appendChild(opt);
         }
-        // ATM
-        const atmOpt = document.createElement("option");
-        atmOpt.value = "ATM";
-        atmOpt.textContent = "ATM";
-        if (normStrike === "ATM" || normStrike === "ATM STRIKE") atmOpt.selected = true;
-        strikeSel.appendChild(atmOpt);
-        // ITM 1 to 20
-        for (let i = 1; i <= 20; i++) {
+
+        // ITM 1 to 40
+        for (let i = 1; i <= 40; i++) {
             const opt = document.createElement("option");
             opt.value = `ITM ${i}`;
             opt.textContent = `ITM ${i}`;
             if (normStrike === `ITM ${i}` || normStrike === `ITM${i}`) opt.selected = true;
+            strikeSel.appendChild(opt);
+        }
+
+        // Custom numeric strike fallback
+        if (!isNaN(parseFloat(normStrike)) && !Array.from(strikeSel.options).some(o => o.value === normStrike)) {
+            const opt = document.createElement("option");
+            opt.value = normStrike;
+            opt.textContent = normStrike;
+            opt.selected = true;
             strikeSel.appendChild(opt);
         }
     }
@@ -7262,6 +7275,9 @@ function populateStraddleSettingsForm(s) {
         tbody.innerHTML = "";
         const legs = s.legs || [];
         legs.forEach(leg => addStraddleLegRow(leg));
+        if (typeof updateLegsCountBadge === "function") {
+            updateLegsCountBadge();
+        }
     }
 }
 
@@ -7294,6 +7310,8 @@ function addStraddleLegRow(leg = null) {
         sl_order_placement: document.getElementById("cfgSlOrderPlacement")?.value || "Place in advance",
         target_order_placement: document.getElementById("cfgTargetOrderPlacement")?.value || "Place in advance",
         tsl_type: "None",
+        tsl_profit_pts: 0.0,
+        tsl_trail_pts: 0.0,
         sl_re_execute_type: "RE EXECUTE",
         sl_re_execute_count: 1,
         action: "Square off leg",
@@ -7430,7 +7448,7 @@ function addStraddleLegRow(leg = null) {
     tr.id = rowId;
     tr.className = "straddle-leg-builder-row";
     tr.innerHTML = `
-        <td class="leg-col-handle" style="text-align:center; cursor:grab; color:#64748b;">☰</td>
+        <td class="leg-col-handle" style="text-align:center; cursor:grab; color:#64748b; font-size:14px; user-select:none;" title="Drag to reorder leg">☰</td>
         <td class="leg-col-side">
             <select class="straddle-select leg-side" onchange="onLegSideChanged('${rowId}', this.value)">
                 <option value="Buy" ${l.side === "Buy" ? "selected" : ""}>Buy</option>
@@ -7523,11 +7541,17 @@ function addStraddleLegRow(leg = null) {
             </div>
         </td>
         <td class="leg-col-tsl">
-            <select class="straddle-select leg-tsl-type" style="width:80px;" onchange="syncStrategyLegChange('${rowId}')">
-                <option value="None" ${l.tsl_type === "None" ? "selected" : ""}>None</option>
-                <option value="TSL: %" ${l.tsl_type === "TSL: %" ? "selected" : ""}>TSL: %</option>
-                <option value="TSL: pts" ${l.tsl_type === "TSL: pts" ? "selected" : ""}>TSL: pts</option>
-            </select>
+            <div style="display:flex; flex-direction:column; gap:3px;">
+                <select class="straddle-select leg-tsl-type" style="width:82px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}')">
+                    <option value="None" ${l.tsl_type === "None" ? "selected" : ""}>None</option>
+                    <option value="TSL: %" ${l.tsl_type === "TSL: %" ? "selected" : ""}>TSL: %</option>
+                    <option value="TSL: pts" ${l.tsl_type === "TSL: pts" ? "selected" : ""}>TSL: pts</option>
+                </select>
+                <div class="leg-tsl-inputs" style="display:${(l.tsl_type && l.tsl_type !== 'None') ? 'flex' : 'none'}; gap:2px;" title="Lock (Reach) profit &amp; Trail step">
+                    <input type="number" class="straddle-input leg-tsl-profit" style="width:38px; font-size:10px; padding:2px; text-align:center;" placeholder="Lock" value="${l.tsl_profit_pts !== undefined ? l.tsl_profit_pts : 10}" title="Reach/Lock Profit Value" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
+                    <input type="number" class="straddle-input leg-tsl-trail" style="width:38px; font-size:10px; padding:2px; text-align:center;" placeholder="Trail" value="${l.tsl_trail_pts !== undefined ? l.tsl_trail_pts : 5}" title="Trail Step Value" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
+                </div>
+            </div>
         </td>
         <td class="leg-col-sl-reexec">
             <div style="display:flex; gap:2px;">
@@ -7538,7 +7562,7 @@ function addStraddleLegRow(leg = null) {
             </div>
         </td>
         <td class="leg-col-action">
-            <select class="straddle-select leg-action" style="width:110px;" onchange="syncStrategyLegChange('${rowId}')">
+            <select class="straddle-select leg-action" style="width:118px;" onchange="syncStrategyLegChange('${rowId}')">
                 <option value="Square off leg" ${l.action === "Square off leg" ? "selected" : ""}>Square off leg</option>
                 <option value="Square off all" ${l.action === "Square off all" ? "selected" : ""}>Square off all</option>
             </select>
@@ -7553,12 +7577,18 @@ function addStraddleLegRow(leg = null) {
                 ${expOptionsHtml}
             </select>
         </td>
-        <td class="leg-col-actions" style="text-align:center;">
-            <button type="button" class="straddle-btn btn-danger" style="padding:2px 6px; font-size:10px;" onclick="removeStraddleLegRow('${rowId}')">✕</button>
+        <td class="leg-col-actions" style="text-align:center; position:sticky; right:0; background:#0c101c; z-index:4;">
+            <button type="button" class="straddle-btn btn-danger" style="padding:2px 7px; font-size:11px; font-weight:700;" onclick="removeStraddleLegRow('${rowId}')" title="Delete leg">✕</button>
         </td>
     `;
     tbody.appendChild(tr);
     syncLegRowDisabledFields(tr);
+    if (typeof setupLegRowDragAndDrop === "function") {
+        setupLegRowDragAndDrop(tr);
+    }
+    if (typeof updateLegsCountBadge === "function") {
+        updateLegsCountBadge();
+    }
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
     }
@@ -7578,6 +7608,9 @@ function removeStraddleLegRow(rowId) {
             } else if (rowIdx >= 0 && rowIdx < legs.length) {
                 legs.splice(rowIdx, 1);
             }
+        }
+        if (typeof updateLegsCountBadge === "function") {
+            updateLegsCountBadge();
         }
         if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
             scheduleAutoMultiplierLiveRecalc();
@@ -7643,8 +7676,209 @@ function syncLegRowDisabledFields(tr) {
             slReInput.removeAttribute("title");
         }
     }
+
+    // 5. Trailing Stoploss inputs
+    const tslTypeSel = tr.querySelector(".leg-tsl-type");
+    const tslInputsDiv = tr.querySelector(".leg-tsl-inputs");
+    if (tslTypeSel && tslInputsDiv) {
+        const isNone = (tslTypeSel.value || "").toLowerCase() === "none";
+        tslInputsDiv.style.display = isNone ? "none" : "flex";
+    }
 }
 window.syncLegRowDisabledFields = syncLegRowDisabledFields;
+
+// Controls bar Lots Multiplier stepper
+function stepFormMultiplier(delta) {
+    const el = document.getElementById("cfgMultiplier");
+    if (!el) return;
+    let val = parseInt(el.value, 10) || 1;
+    val = Math.max(1, Math.min(100, val + delta));
+    el.value = val;
+    if (typeof onFormManualMultiplierChange === "function") {
+        onFormManualMultiplierChange(val);
+    }
+}
+window.stepFormMultiplier = stepFormMultiplier;
+
+// Live Legs Count Badge
+function updateLegsCountBadge() {
+    const badge = document.getElementById("cfgLegsCountBadge");
+    if (!badge) return;
+    const rows = document.querySelectorAll("#straddleLegsBuilderBody tr.straddle-leg-builder-row");
+    const count = rows.length;
+    let buyCount = 0;
+    let sellCount = 0;
+    rows.forEach(r => {
+        const side = (r.querySelector(".leg-side")?.value || "Sell").toUpperCase();
+        if (side === "BUY") buyCount++;
+        else sellCount++;
+    });
+    if (count === 0) {
+        badge.textContent = "0 Legs";
+        badge.style.color = "#94a3b8";
+        badge.style.background = "rgba(148,163,184,0.1)";
+        badge.style.borderColor = "rgba(148,163,184,0.2)";
+    } else {
+        const parts = [];
+        if (sellCount > 0) parts.push(`${sellCount}S`);
+        if (buyCount > 0) parts.push(`${buyCount}B`);
+        const breakdown = parts.length > 0 ? ` (${parts.join("+")})` : "";
+        badge.textContent = `${count} Leg${count > 1 ? "s" : ""}${breakdown}`;
+        badge.style.color = "#38bdf8";
+        badge.style.background = "rgba(56,189,248,0.12)";
+        badge.style.borderColor = "rgba(56,189,248,0.25)";
+    }
+}
+window.updateLegsCountBadge = updateLegsCountBadge;
+
+// One-click Add Straddle Pair (1 CE + 1 PE)
+function addStraddleStraddlePair() {
+    const curUnd = document.getElementById("cfgStrategyUnderlying")?.value || window._straddleState?.activeStrategy?.underlying || "NIFTY";
+    const tgtPlacement = document.getElementById("cfgTargetOrderPlacement")?.value || "Place in advance";
+    const slPlacement = document.getElementById("cfgSlOrderPlacement")?.value || "Place in advance";
+
+    addStraddleLegRow({
+        side: "Sell",
+        product: "NRML",
+        strike_selection: "ATM",
+        multiple_strike_selection: "None",
+        option_type: "CE",
+        lots: 1,
+        associated_hedge: { enabled: true, initial_otm: 20, max_distance_threshold: 22, reset_otm: 20, exit_with_parent: true },
+        target_type: "TGT: %",
+        target_value: 45.0,
+        target_order_placement: tgtPlacement,
+        target_re_execute_type: "RE EXECUTE",
+        target_re_execute_count: 6,
+        sl_type: "SL: %",
+        sl_value: 66.0,
+        sl_order_placement: slPlacement,
+        tsl_type: "None",
+        tsl_profit_pts: 0.0,
+        tsl_trail_pts: 0.0,
+        sl_re_execute_type: "RE EXECUTE",
+        sl_re_execute_count: 1,
+        action: "Square off leg",
+        underlying: curUnd,
+        expiry: "Weekly"
+    });
+
+    addStraddleLegRow({
+        side: "Sell",
+        product: "NRML",
+        strike_selection: "ATM",
+        multiple_strike_selection: "None",
+        option_type: "PE",
+        lots: 1,
+        associated_hedge: { enabled: true, initial_otm: 20, max_distance_threshold: 22, reset_otm: 20, exit_with_parent: true },
+        target_type: "TGT: %",
+        target_value: 45.0,
+        target_order_placement: tgtPlacement,
+        target_re_execute_type: "RE EXECUTE",
+        target_re_execute_count: 6,
+        sl_type: "SL: %",
+        sl_value: 66.0,
+        sl_order_placement: slPlacement,
+        tsl_type: "None",
+        tsl_profit_pts: 0.0,
+        tsl_trail_pts: 0.0,
+        sl_re_execute_type: "RE EXECUTE",
+        sl_re_execute_count: 1,
+        action: "Square off leg",
+        underlying: curUnd,
+        expiry: "Weekly"
+    });
+    updateLegsCountBadge();
+}
+window.addStraddleStraddlePair = addStraddleStraddlePair;
+
+// HTML5 Drag and Drop for Leg Row Reordering
+function setupLegRowDragAndDrop(tr) {
+    if (!tr) return;
+    const handle = tr.querySelector(".leg-col-handle");
+    if (handle) {
+        handle.addEventListener("mousedown", () => {
+            tr.setAttribute("draggable", "true");
+        });
+        handle.addEventListener("mouseup", () => {
+            tr.setAttribute("draggable", "false");
+        });
+    }
+
+    tr.addEventListener("dragstart", (e) => {
+        tr.classList.add("leg-row-dragging");
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", tr.id);
+        window._draggedLegRow = tr;
+    });
+
+    tr.addEventListener("dragend", () => {
+        tr.classList.remove("leg-row-dragging");
+        tr.setAttribute("draggable", "false");
+        document.querySelectorAll("#straddleLegsBuilderBody tr").forEach(r => {
+            r.classList.remove("leg-drag-over-top", "leg-drag-over-bottom");
+        });
+        window._draggedLegRow = null;
+        reorderStrategyLegsFromDom();
+    });
+
+    tr.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (!window._draggedLegRow || window._draggedLegRow === tr) return;
+        const rect = tr.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
+            tr.classList.add("leg-drag-over-top");
+            tr.classList.remove("leg-drag-over-bottom");
+        } else {
+            tr.classList.add("leg-drag-over-bottom");
+            tr.classList.remove("leg-drag-over-top");
+        }
+    });
+
+    tr.addEventListener("dragleave", () => {
+        tr.classList.remove("leg-drag-over-top", "leg-drag-over-bottom");
+    });
+
+    tr.addEventListener("drop", (e) => {
+        e.preventDefault();
+        tr.classList.remove("leg-drag-over-top", "leg-drag-over-bottom");
+        const dragged = window._draggedLegRow;
+        if (!dragged || dragged === tr) return;
+        const tbody = tr.parentElement;
+        if (!tbody) return;
+        const rect = tr.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
+            tbody.insertBefore(dragged, tr);
+        } else {
+            tbody.insertBefore(dragged, tr.nextSibling);
+        }
+        reorderStrategyLegsFromDom();
+    });
+}
+window.setupLegRowDragAndDrop = setupLegRowDragAndDrop;
+
+function reorderStrategyLegsFromDom() {
+    if (!window._straddleState?.activeStrategy) return;
+    const currentLegs = window._straddleState.activeStrategy.legs || [];
+    const newLegs = [];
+    const rows = document.querySelectorAll("#straddleLegsBuilderBody tr.straddle-leg-builder-row");
+    rows.forEach(r => {
+        const match = currentLegs.find(l => l.id === r.id);
+        if (match) {
+            newLegs.push(match);
+        } else {
+            if (typeof syncStrategyLegChange === "function") syncStrategyLegChange(r.id);
+            const found = (window._straddleState.activeStrategy.legs || []).find(l => l.id === r.id);
+            if (found) newLegs.push(found);
+        }
+    });
+    window._straddleState.activeStrategy.legs = newLegs;
+    updateLegsCountBadge();
+}
+window.reorderStrategyLegsFromDom = reorderStrategyLegsFromDom;
 
 function onToggleMtmSection(enabled) {
     const sec = document.getElementById("sec_builder_mtm");
@@ -8116,6 +8350,43 @@ function applyStraddleBulkEdit(action) {
         document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Place in advance"; el.style.color = "#10b981"; });
     } else if (action === "TGT_SELF") {
         document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
+    } else if (action === "HEDGE_ON") {
+        document.querySelectorAll("#straddleLegsBuilderBody tr.straddle-leg-builder-row").forEach(tr => {
+            const side = tr.querySelector(".leg-side")?.value || "Sell";
+            if (side.toUpperCase() === "SELL") {
+                const chk = tr.querySelector(".leg-hedge-enabled");
+                if (chk) {
+                    chk.checked = true;
+                    if (typeof toggleLegHedgeRow === "function") toggleLegHedgeRow(tr.id, true);
+                }
+            }
+        });
+    } else if (action === "HEDGE_OFF") {
+        document.querySelectorAll("#straddleLegsBuilderBody tr.straddle-leg-builder-row").forEach(tr => {
+            const chk = tr.querySelector(".leg-hedge-enabled");
+            if (chk) {
+                chk.checked = false;
+                if (typeof toggleLegHedgeRow === "function") toggleLegHedgeRow(tr.id, false);
+            }
+        });
+    } else if (action === "LOTS_1") {
+        document.querySelectorAll(".leg-lots").forEach(el => el.value = 1);
+    } else if (action === "LOTS_2") {
+        document.querySelectorAll(".leg-lots").forEach(el => el.value = 2);
+    } else if (action === "LOTS_5") {
+        document.querySelectorAll(".leg-lots").forEach(el => el.value = 5);
+    } else if (action === "ACTION_SQUARE_LEG") {
+        document.querySelectorAll(".leg-action").forEach(el => el.value = "Square off leg");
+    } else if (action === "ACTION_SQUARE_ALL") {
+        document.querySelectorAll(".leg-action").forEach(el => el.value = "Square off all");
+    } else if (action === "REEXEC_NONE") {
+        document.querySelectorAll(".leg-tgt-re-type").forEach(el => el.value = "NONE");
+        document.querySelectorAll(".leg-sl-re-type").forEach(el => el.value = "NONE");
+    } else if (action === "REEXEC_DEFAULT") {
+        document.querySelectorAll(".leg-tgt-re-type").forEach(el => el.value = "RE EXECUTE");
+        document.querySelectorAll(".leg-tgt-re-cnt").forEach(el => el.value = 6);
+        document.querySelectorAll(".leg-sl-re-type").forEach(el => el.value = "RE EXECUTE");
+        document.querySelectorAll(".leg-sl-re-cnt").forEach(el => el.value = 1);
     } else if (action === "TGT_45") {
         document.querySelectorAll(".leg-tgt-type").forEach(el => el.value = "TGT: %");
         document.querySelectorAll(".leg-tgt-val").forEach(el => el.value = 45);
@@ -8131,8 +8402,13 @@ function applyStraddleBulkEdit(action) {
     } else if (action === "PROD_MIS") {
         document.querySelectorAll(".leg-product").forEach(el => el.value = "MIS");
     }
-    document.querySelectorAll("#straddleLegsBuilderBody tr").forEach(tr => syncLegRowDisabledFields(tr));
-    document.getElementById("cfgBulkEdit").value = "";
+    document.querySelectorAll("#straddleLegsBuilderBody tr").forEach(tr => {
+        syncLegRowDisabledFields(tr);
+        if (typeof syncStrategyLegChange === "function") syncStrategyLegChange(tr.id);
+    });
+    if (typeof updateLegsCountBadge === "function") updateLegsCountBadge();
+    const bulkSelect = document.getElementById("cfgBulkEdit");
+    if (bulkSelect) bulkSelect.value = "";
 }
 
 window._lastSecToggleTs = window._lastSecToggleTs || {};
@@ -8544,6 +8820,10 @@ function serializeCurrentStrategySettings() {
         const slReCntParsed = parseInt(tr.querySelector(".leg-sl-re-cnt")?.value, 10);
         const lotsParsed = parseInt(tr.querySelector(".leg-lots")?.value, 10);
 
+        const tslVal = tr.querySelector(".leg-tsl-type")?.value || "None";
+        const tslProfitVal = parseFloat(tr.querySelector(".leg-tsl-profit")?.value);
+        const tslTrailVal = parseFloat(tr.querySelector(".leg-tsl-trail")?.value);
+
         strategy.legs.push({
             id: tr.id,
             side: legSide,
@@ -8567,7 +8847,9 @@ function serializeCurrentStrategySettings() {
             sl_type: tr.querySelector(".leg-sl-type")?.value,
             sl_value: !isNaN(slValParsed) ? slValParsed : 66.0,
             sl_order_placement: effectiveSlPlacement,
-            tsl_type: tr.querySelector(".leg-tsl-type")?.value,
+            tsl_type: tslVal,
+            tsl_profit_pts: !isNaN(tslProfitVal) ? tslProfitVal : 0.0,
+            tsl_trail_pts: !isNaN(tslTrailVal) ? tslTrailVal : 0.0,
             sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
             sl_re_execute_count: !isNaN(slReCntParsed) ? slReCntParsed : 1,
             action: tr.querySelector(".leg-action")?.value,
