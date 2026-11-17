@@ -365,9 +365,9 @@ def _calc_bs_greeks(spot: float, strike: float, dte_days: float = 3.0, iv: float
 
 DEFAULT_STRATEGIES = [
     {
-        "strategy_id": "preset_nifty_short_straddle",
-        "name": "NIFTY Short Straddle Preset",
-        "enabled": False,
+        "strategy_id": "straddle_nifty_920",
+        "name": "NIFTY 9:20 Short Straddle (45% TGT / 66% SL)",
+        "enabled": True,
         "execution_mode": "LIVE_BROKER",  # 'LIVE_BROKER' or 'PAPER_TRADING'
         "client_id": "Kotak Neo Live",
         "schedule_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
@@ -466,22 +466,11 @@ DEFAULT_STRATEGIES = [
         "mtm_stoploss": {
             "enabled": True,
             "type": "None",
-            "value": 0.0,
+            "value": -5000.0,
             "action": "Square off all positions",
-        },
-        "premium_matching": {
-            "mode": "No matching of premiums",
-            "max_difference": 0.0,
-            "close_to": 0.0,
-            "range_min": 0.0,
-            "range_max": 0.0,
-            "combined_premium_type": "None",
-            "combined_premium_value": 0.0,
-            "condition_frequency": "LTP (Continuous Monitoring)",
         },
         "advanced": {
             "entry_order_type": "Limit (L) / Stoploss Limit (SL-L)",
-            "hedge_order_type": "Marketable Limit",
             "entry_buffer_type": "Percentage",
             "entry_buffer_value": 5.0,
             "entry_market_timeout_sec": 0,
@@ -493,9 +482,9 @@ DEFAULT_STRATEGIES = [
             "sl_placement_delay_sec": 0,
             "mtm_sl_delay_sec": 0,
             "entry_order_delay_side": "Delay entry of Sell positions",
-            "entry_order_delay_sec": 0,
+            "entry_order_delay_sec": 3,
             "exit_order_delay_side": "Delay exit of Buy positions",
-            "exit_order_delay_sec": 0,
+            "exit_order_delay_sec": 3,
             "calc_base": "Average Entry Price",
             "trail_freq_interval": 1,
             "trail_freq_unit": "Minutes",
@@ -509,8 +498,132 @@ DEFAULT_STRATEGIES = [
             "re_cost_activation": "Immediate",
             "auto_handling_sl_cancellation": True,
             "auto_exit_on_margin_error": False,
-            "auto_release_margin_reentry": True,
         },
+        "status": "READY",
+        "mtm": 0.0,
+        "entry_error": "-",
+        "positions": [],
+    },
+    {
+        "strategy_id": "test_strat_update",
+        "name": "Test Strategy",
+        "underlying": "NIFTY",
+        "status": "STOPPED",
+        "enabled": False,
+        "_manual_reset": True,
+        "entry_error": "-",
+        "repair_needed": False,
+        "mtm": 0.0,
+        "_pnl_history": [],
+        "multiplier_type": "MANUAL",
+        "multiplier": 1,
+        "cushion_margin": 15000.0,
+        "available_capital": 1400000.0,
+        "broker_margin_per_lot": 175369.87,
+        "effective_multiplier": 1,
+        "start_time": "09:15:56",
+        "end_time": "15:29:50",
+        "schedule_days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+        ],
+        "mtm_calc_mode": "Overall",
+        "mtm_enabled": True,
+        "mtm_target": {
+            "enabled": True,
+            "type": "Lock and Trail",
+            "profit_reaches": 100000.0,
+            "lock_profit": 80000.0,
+            "trail_step": 8000.0,
+            "trail_val": 5000.0,
+            "value": 10000.0,
+            "re_entry": "None",
+            "action": "Square off all positions"
+        },
+        "mtm_stoploss": {
+            "enabled": True,
+            "type": "None",
+            "value": -5000.0,
+            "action": "Square off all positions"
+        },
+        "no_reentry_after": {
+            "enabled": False,
+            "time": "15:00:00"
+        },
+        "advanced": {
+            "sl_order_placement": "Place in advance",
+            "target_order_placement": "Place in advance"
+        },
+        "advanced_settings": {
+            "sl_order_placement": "Place in advance",
+            "target_order_placement": "Place in advance"
+        },
+        "legs": [
+            {
+                "id": "leg_1",
+                "side": "Sell",
+                "product": "NRML",
+                "strike_selection": "ATM",
+                "multiple_strike_selection": "None",
+                "option_type": "CE",
+                "lots": 1,
+                "expiry": "Weekly",
+                "associated_hedge": {
+                    "enabled": True,
+                    "initial_otm": 20,
+                    "max_distance_threshold": 22,
+                    "reset_otm": 20,
+                    "exit_with_parent": True
+                },
+                "target_type": "TGT: %",
+                "target_value": 25.0,
+                "target_order_placement": "Place in advance",
+                "target_re_execute_type": "RE EXECUTE",
+                "target_re_execute_count": 2,
+                "sl_type": "SL: %",
+                "sl_value": 20.0,
+                "sl_order_placement": "Place in advance",
+                "sl_re_execute_type": "None",
+                "sl_re_execute_count": 0,
+                "tsl_type": "None",
+                "action": "Square off leg",
+                "underlying": "NIFTY"
+            },
+            {
+                "id": "leg_2",
+                "side": "Sell",
+                "product": "NRML",
+                "strike_selection": "ATM",
+                "multiple_strike_selection": "None",
+                "option_type": "PE",
+                "lots": 1,
+                "expiry": "Weekly",
+                "associated_hedge": {
+                    "enabled": True,
+                    "initial_otm": 20,
+                    "max_distance_threshold": 22,
+                    "reset_otm": 20,
+                    "exit_with_parent": True
+                },
+                "target_type": "TGT: %",
+                "target_value": 25.0,
+                "target_order_placement": "Place in advance",
+                "target_re_execute_type": "RE EXECUTE",
+                "target_re_execute_count": 2,
+                "sl_type": "SL: %",
+                "sl_value": 20.0,
+                "sl_order_placement": "Place in advance",
+                "sl_re_execute_type": "None",
+                "sl_re_execute_count": 0,
+                "tsl_type": "None",
+                "action": "Square off leg",
+                "underlying": "NIFTY"
+            }
+        ],
+        "positions": []
     }
 ]
 
@@ -918,8 +1031,8 @@ class StraddleManager:
                 try:
                     with open(STRADDLE_STRATEGIES_FILE, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        if isinstance(data, list):
-                            self._strategies = data
+                        if isinstance(data, list) and len(data) > 0:
+                            self._strategies = [s for s in data if isinstance(s, dict)]
                         else:
                             self._strategies = []
                 except Exception as e:
@@ -928,13 +1041,61 @@ class StraddleManager:
             else:
                 self._strategies = []
 
-            # Purge any deleted strategies permanently
-            self._strategies = [
-                s for s in self._strategies
-                if isinstance(s, dict)
-                and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
-                and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
-            ]
+            # Remove any blacklist entries targeting DEFAULT_STRATEGIES
+            default_ids = {str(d.get("strategy_id", "")).strip().lower() for d in DEFAULT_STRATEGIES}
+            default_ids.update(str(d.get("name", "")).strip().lower() for d in DEFAULT_STRATEGIES)
+            if self._deleted_strategy_ids:
+                filtered_del = {x for x in self._deleted_strategy_ids if x not in default_ids}
+                if len(filtered_del) != len(self._deleted_strategy_ids):
+                    self._deleted_strategy_ids = filtered_del
+                    self._save_deleted_strategies()
+
+            # Purge any user-deleted custom strategies permanently
+            if self._deleted_strategy_ids and self._strategies:
+                purged = [
+                    s for s in self._strategies
+                    if isinstance(s, dict)
+                    and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
+                    and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
+                ]
+                if purged:
+                    self._strategies = purged
+                else:
+                    self._deleted_strategy_ids.clear()
+                    self._save_deleted_strategies()
+
+            # Guaranteed self-healing: Ensure every essential default strategy is present
+            existing_ids = {str(s.get("strategy_id", "")).strip().lower() for s in self._strategies if isinstance(s, dict)}
+            existing_ids.update(str(s.get("name", "")).strip().lower() for s in self._strategies if isinstance(s, dict))
+            import copy
+            added_any_default = False
+            for def_s in DEFAULT_STRATEGIES:
+                did = str(def_s.get("strategy_id", "")).strip().lower()
+                dname = str(def_s.get("name", "")).strip().lower()
+                if did not in existing_ids and dname not in existing_ids:
+                    self._strategies.insert(0, copy.deepcopy(def_s))
+                    existing_ids.add(did)
+                    existing_ids.add(dname)
+                    added_any_default = True
+                    logger.info(f"Auto-restored essential strategy: {def_s.get('name')}")
+
+            if added_any_default or not STRADDLE_STRATEGIES_FILE.exists() or len(self._strategies) == 0:
+                if not self._strategies:
+                    self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
+                self._save_strategies()
+
+            # Synchronize with Oracle Cloud persistent storage if directory exists
+            persist_dir = Path("/home/ubuntu/straddle_data_persist")
+            if persist_dir.exists():
+                try:
+                    p_strat_file = persist_dir / "straddle_strategies.json"
+                    with open(p_strat_file, "w", encoding="utf-8") as f_p:
+                        json.dump(self._strategies, f_p, indent=2)
+                    p_del_file = persist_dir / "straddle_deleted_strategies.json"
+                    with open(p_del_file, "w", encoding="utf-8") as f_d:
+                        json.dump(list(self._deleted_strategy_ids), f_d, indent=2)
+                except Exception as e_p:
+                    logger.warning(f"Note updating persist directory: {e_p}")
 
             # Ensure unique names and valid default timings across all strategies
             seen_names = set()
@@ -986,6 +1147,8 @@ class StraddleManager:
                         saved = json.load(f)
                         if isinstance(saved, dict):
                             self._state.update(saved)
+                            if "all_strategies" in self._state:
+                                del self._state["all_strategies"]
                             saved_mode = saved.get("execution_mode", "LIVE_BROKER")
                             self._state["execution_mode"] = saved_mode if saved_mode in ("LIVE_BROKER", "PAPER_TRADING") else "LIVE_BROKER"
                             self._state["broker_connected"] = bool(saved.get("broker_connected", True))
@@ -14458,11 +14621,16 @@ class StraddleManager:
 
     def get_full_state(self) -> Dict[str, Any]:
         with _ENGINE_LOCK:
+            if not self._strategies:
+                self._load_strategies()
+
             active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else {})
             active_positions = active_strat.get("positions", []) if active_strat else []
 
             # Ensure all strategies have default schedule days and multiplier settings if not set
             for s in self._strategies:
+                if not isinstance(s, dict):
+                    continue
                 if not s.get("schedule_days"):
                     s["schedule_days"] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
                 if "mtm" not in s:
@@ -14473,11 +14641,25 @@ class StraddleManager:
                     s["multiplier"] = 1
                 if "cushion_margin" not in s:
                     s["cushion_margin"] = 15000.0
-                s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(s)
-                s["effective_multiplier"] = self.get_effective_multiplier(s)
-                s["re_execution_counts"] = self.get_strategy_reexecution_counts(s)
+                try:
+                    s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(s)
+                except Exception:
+                    s["broker_margin_per_lot"] = 130750.0
+                try:
+                    s["effective_multiplier"] = self.get_effective_multiplier(s)
+                except Exception:
+                    s["effective_multiplier"] = s.get("multiplier", 1)
+                try:
+                    s["re_execution_counts"] = self.get_strategy_reexecution_counts(s)
+                except Exception:
+                    s["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
 
-            reexec_counts = self.get_strategy_reexecution_counts(active_strat) if active_strat else {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
+            reexec_counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
+            if active_strat:
+                try:
+                    reexec_counts = self.get_strategy_reexecution_counts(active_strat)
+                except Exception:
+                    pass
 
             return {
                 "engine_status": self._state.get("status", "READY"),

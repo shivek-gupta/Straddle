@@ -56,6 +56,17 @@ function canonicalUnderlying(und) {
 }
 window.canonicalUnderlying = canonicalUnderlying;
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+window.escapeHtml = escapeHtml;
+
 
 // =========================================================================
 // LIGHTNING RESPONSIVE NON-BLOCKING TOAST NOTIFICATIONS
@@ -229,6 +240,15 @@ async function initStraddlePlatform() {
         await fetchStraddleState();
         if (window._straddleState.currentSubView === "algos" || isAlgosActive) {
             renderStraddleAlgosTable(true);
+        }
+        // If allStrategies is empty, retry once after 500ms in case server was still starting up or seeding
+        if (!window._straddleState.allStrategies || window._straddleState.allStrategies.length === 0) {
+            setTimeout(async () => {
+                await fetchStraddleState();
+                if (window._straddleState.currentSubView === "algos" || isAlgosActive) {
+                    renderStraddleAlgosTable(true);
+                }
+            }, 500);
         }
     } catch (errState) {
         console.warn("fetchStraddleState non-blocking note:", errState);
@@ -1401,79 +1421,84 @@ async function bulkResetSelectedAlgos() {
 window.bulkResetSelectedAlgos = bulkResetSelectedAlgos;
 
 function renderStraddleAlgosTable(forceRebuild = false) {
-    const tbody = document.getElementById("straddleAlgosTableBody");
-    if (!tbody) return;
+    try {
+        const tbody = document.getElementById("straddleAlgosTableBody");
+        if (!tbody) return;
 
-    const strategies = window._straddleState.allStrategies || [];
-    const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
+        const strategies = window._straddleState.allStrategies || [];
+        const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
 
-    const activeUnd = canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY");
-    const hasUnderlyingMatch = strategies.some(s => canonicalUnderlying(s.underlying || "NIFTY") === activeUnd);
-    // Intelligent fallback: if active focused asset has 0 algos, automatically show all assets so table is never blank!
-    let showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
+        const activeUnd = canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY");
+        const hasUnderlyingMatch = strategies.some(s => canonicalUnderlying(s.underlying || "NIFTY") === activeUnd);
+        // Intelligent fallback: if active focused asset has 0 algos, automatically show all assets so table is never blank!
+        let showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
 
-    // Filter strategies focused on active underlying
-    let filtered = strategies.filter(s => {
-        const und = canonicalUnderlying(s.underlying || "NIFTY");
-        if (!showAll && und !== activeUnd) return false;
-        if (searchVal) {
-            const name = (s.name || s.strategy_id).toLowerCase();
-            const status = (s.status || "Ready").toLowerCase();
-            if (!name.includes(searchVal) && !und.toLowerCase().includes(searchVal) && !status.includes(searchVal)) return false;
+        // Filter strategies focused on active underlying
+        let filtered = strategies.filter(s => {
+            const und = canonicalUnderlying(s.underlying || "NIFTY");
+            if (!showAll && und !== activeUnd) return false;
+            if (searchVal) {
+                const name = (s.name || s.strategy_id || "").toLowerCase();
+                const status = (s.status || "Ready").toLowerCase();
+                if (!name.includes(searchVal) && !und.toLowerCase().includes(searchVal) && !status.includes(searchVal)) return false;
+            }
+            return true;
+        });
+
+        // Guaranteed fallback: If filtered has 0 strategies but strategies exist in platform, automatically show all
+        if (filtered.length === 0 && strategies.length > 0 && !searchVal) {
+            showAll = true;
+            filtered = strategies;
         }
-        return true;
-    });
 
-    // Guaranteed fallback: If filtered has 0 strategies but strategies exist in platform, automatically show all
-    if (filtered.length === 0 && strategies.length > 0 && !searchVal) {
-        showAll = true;
-        filtered = strategies;
-    }
+        const badgeEl = document.getElementById("algosFocusedUnderlyingBadge");
+        const toggleBtn = document.getElementById("btnToggleShowAllAlgos");
+        if (badgeEl) {
+            if (showAll) {
+                badgeEl.textContent = `Showing All Assets (${strategies.length})`;
+                badgeEl.style.color = "#38bdf8";
+                badgeEl.style.borderColor = "rgba(56,189,248,0.4)";
+            } else {
+                const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
+                badgeEl.textContent = `Focused: ${dispName}`;
+                badgeEl.style.color = "#f43f5e";
+                badgeEl.style.borderColor = "rgba(244,63,94,0.4)";
+            }
+        }
+        if (toggleBtn) {
+            toggleBtn.textContent = showAll ? "Filter by Active Asset" : "Show All Assets";
+            toggleBtn.classList.toggle("btn-primary", showAll);
+            toggleBtn.classList.toggle("btn-outline", !showAll);
+        }
 
-    const badgeEl = document.getElementById("algosFocusedUnderlyingBadge");
-    const toggleBtn = document.getElementById("btnToggleShowAllAlgos");
-    if (badgeEl) {
-        if (showAll) {
-            badgeEl.textContent = `Showing All Assets (${strategies.length})`;
-            badgeEl.style.color = "#38bdf8";
-            badgeEl.style.borderColor = "rgba(56,189,248,0.4)";
-        } else {
+        // Calculate total MTM of filtered
+        let totalMtm = 0;
+        filtered.forEach(s => { totalMtm += (s.mtm || 0.0); });
+        const totMtmEl = document.getElementById("straddleAlgosTotalMtm");
+        if (totMtmEl) {
+            totMtmEl.textContent = (totalMtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(totalMtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            totMtmEl.style.color = totalMtm >= 0 ? "#10b981" : "#f43f5e";
+        }
+
+        updateMasterCheckboxState();
+        updateBulkActionsBar();
+
+        if (filtered.length === 0) {
             const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
-            badgeEl.textContent = `Focused: ${dispName}`;
-            badgeEl.style.color = "#f43f5e";
-            badgeEl.style.borderColor = "rgba(244,63,94,0.4)";
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="12" style="text-align:center; padding:36px 14px; color:#64748b;">
+                        <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Algorithmic Strategies Found for ${dispName}</div>
+                        <div style="font-size:12px; margin-bottom:12px;">Click <b>+ Add Algo</b> above to instantiate a strategy for ${dispName}, or click <b>Show All Assets</b> to view all algos.</div>
+                        <div style="display:inline-flex; gap:8px;">
+                            <button type="button" class="straddle-btn btn-primary" onclick="openAddStraddleAlgoModal()" style="font-size:11px; padding:4px 12px;">+ Add Algo</button>
+                            <button type="button" class="straddle-btn btn-outline" onclick="toggleShowAllUnderlyingsAlgos()" style="font-size:11px; padding:4px 12px;">Show All Assets</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            return;
         }
-    }
-    if (toggleBtn) {
-        toggleBtn.textContent = showAll ? "Filter by Active Asset" : "Show All Assets";
-        toggleBtn.classList.toggle("btn-primary", showAll);
-        toggleBtn.classList.toggle("btn-outline", !showAll);
-    }
-
-    // Calculate total MTM of filtered
-    let totalMtm = 0;
-    filtered.forEach(s => { totalMtm += (s.mtm || 0.0); });
-    const totMtmEl = document.getElementById("straddleAlgosTotalMtm");
-    if (totMtmEl) {
-        totMtmEl.textContent = (totalMtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(totalMtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        totMtmEl.style.color = totalMtm >= 0 ? "#10b981" : "#f43f5e";
-    }
-
-    updateMasterCheckboxState();
-    updateBulkActionsBar();
-
-    if (filtered.length === 0) {
-        const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="12" style="text-align:center; padding:36px 14px; color:#64748b;">
-                    <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Algorithmic Strategies Found for ${dispName}</div>
-                    <div style="font-size:12px;">Click <b>+ Add Algo</b> above to instantiate a strategy for ${dispName}, or click <b>Show All Assets</b> to view all algos.</div>
-                </td>
-            </tr>
-        `;
-        return;
-    }
 
     // Check if we can do an in-place update without rebuilding the DOM
     const existingRows = tbody.querySelectorAll("tr[data-strategy-id]");
@@ -1564,14 +1589,14 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 }
 
                 const errCell = document.getElementById(`algo_entry_err_${sid}`);
+                const err = s.entry_error ? String(s.entry_error) : "-";
                 if (errCell) {
-                    const err = s.entry_error || "-";
                     errCell.textContent = err;
                     errCell.style.color = (err !== "-" && !err.toLowerCase().includes("waiting")) ? "#f43f5e" : "#64748b";
                 }
 
                 const errBadgeEl = document.getElementById(`algo_err_badge_${sid}`);
-                const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((s.entry_error && s.entry_error !== "-" && !s.entry_error.toLowerCase().includes("waiting")) ? 1 : 0);
+                const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((err !== "-" && !err.toLowerCase().includes("waiting")) ? 1 : 0);
                 if (errBadgeEl) {
                     if (errCount > 0) {
                         errBadgeEl.style.display = "inline-flex";
@@ -1660,11 +1685,11 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         const mtm = s.mtm || 0.0;
         const mtmClass = mtm >= 0 ? "color:#10b981;" : "color:#f43f5e;";
         const mtmFormatted = (mtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const name = s.name || s.strategy_id;
+        const name = s.name || s.strategy_id || "";
         const startTime = s.start_time || "09:15:56";
         const endTime = s.end_time || "15:29:50";
         const schedDays = s.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-        const entryErr = s.entry_error || "-";
+        const entryErr = s.entry_error ? String(s.entry_error) : "-";
         const adv = s.advanced || s.advanced_settings || {};
         const isAdvSl = (adv.sl_order_placement === "Place in advance");
         const isErrActive = (entryErr !== "-" && !entryErr.toLowerCase().includes("waiting"));
@@ -1672,6 +1697,10 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         const isWaitingPrem = entryErr.toLowerCase().includes("waiting for premium");
         const entryErrColor = isErrActive ? '#f43f5e' : (isWaitingPrem ? '#38bdf8' : '#64748b');
         const entryErrWeight = (isErrActive || isWaitingPrem) ? '700' : '400';
+
+        const safeJsSid = (s.strategy_id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const safeJsName = (name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const safeDispName = escapeHtml(name);
 
         // Build interactive day selector badges
         let daysHtml = `<div style="display:inline-flex; gap:3px; flex-wrap:wrap;">`;
@@ -1681,7 +1710,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             const badgeColor = isDayActive ? "#ffffff" : "#64748b";
             const border = isDayActive ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.06)";
             daysHtml += `
-                <button type="button" onclick="toggleAlgoDay('${s.strategy_id}', '${d.key}')" style="background:${badgeBg}; color:${badgeColor}; border:${border}; border-radius:4px; padding:1px 5px; font-size:10px; font-weight:700; cursor:pointer;" title="Click to Toggle ${d.key}">
+                <button type="button" onclick="toggleAlgoDay('${safeJsSid}', '${d.key}')" style="background:${badgeBg}; color:${badgeColor}; border:${border}; border-radius:4px; padding:1px 5px; font-size:10px; font-weight:700; cursor:pointer;" title="Click to Toggle ${d.key}">
                     ${d.short}
                 </button>
             `;
@@ -1691,17 +1720,17 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         rowsHtml += `
             <tr data-strategy-id="${s.strategy_id}" style="${isSelected ? 'background:rgba(59,130,246,0.08);' : ''}">
                 <td class="algo-col-select" style="text-align:center;">
-                    <input type="checkbox" class="straddle-algo-checkbox" data-id="${s.strategy_id}" ${isSelected ? "checked" : ""} onchange="onToggleAlgoSelect('${s.strategy_id}', this.checked)">
+                    <input type="checkbox" class="straddle-algo-checkbox" data-id="${s.strategy_id}" ${isSelected ? "checked" : ""} onchange="onToggleAlgoSelect('${safeJsSid}', this.checked)">
                 </td>
                 <td class="algo-col-enable">
                     <label class="quantiply-switch" title="Toggle Auto Execution">
-                        <input type="checkbox" data-enable-sid="${s.strategy_id}" ${isAlgoEnabled ? "checked" : ""} onchange="onToggleAlgoEnable('${s.strategy_id}', this.checked)">
+                        <input type="checkbox" data-enable-sid="${s.strategy_id}" ${isAlgoEnabled ? "checked" : ""} onchange="onToggleAlgoEnable('${safeJsSid}', this.checked)">
                         <span class="quantiply-slider"></span>
                     </label>
                 </td>
                 <td class="algo-col-adv-sl" style="text-align:center;">
                     <label class="quantiply-switch" title="Place Stoploss order directly on Exchange matching engine (<1ms fill)">
-                        <input type="checkbox" data-adv-sl-sid="${s.strategy_id}" ${isAdvSl ? "checked" : ""} onchange="toggleAlgoAdvanceSl('${s.strategy_id}', this.checked)">
+                        <input type="checkbox" data-adv-sl-sid="${s.strategy_id}" ${isAdvSl ? "checked" : ""} onchange="toggleAlgoAdvanceSl('${safeJsSid}', this.checked)">
                         <span class="quantiply-slider" style="${isAdvSl ? 'background:#10b981;' : ''}"></span>
                     </label>
                 </td>
@@ -1714,15 +1743,15 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 <td class="algo-col-mult" id="algo_mult_cell_${s.strategy_id}" style="text-align:center; min-width:115px; padding:6px 6px;">
                     <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                         <div style="display:inline-flex; background:#0b1120; border:1px solid #334155; border-radius:4px; padding:1px;">
-                            <button type="button" onclick="setAlgoMultiplierMode('${s.strategy_id}', 'MANUAL')" style="background:${isManual ? '#2563eb' : 'transparent'}; color:${isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Manual Lots Multiplier">Manual</button>
-                            <button type="button" onclick="setAlgoMultiplierMode('${s.strategy_id}', 'AUTO')" style="background:${!isManual ? '#059669' : 'transparent'}; color:${!isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Auto Multiplier based on Available Capital & Cushion Margin">Auto</button>
+                            <button type="button" onclick="setAlgoMultiplierMode('${safeJsSid}', 'MANUAL')" style="background:${isManual ? '#2563eb' : 'transparent'}; color:${isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Manual Lots Multiplier">Manual</button>
+                            <button type="button" onclick="setAlgoMultiplierMode('${safeJsSid}', 'AUTO')" style="background:${!isManual ? '#059669' : 'transparent'}; color:${!isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Auto Multiplier based on Available Capital & Cushion Margin">Auto</button>
                         </div>
                         ${isManual ? `
-                            <input type="number" class="straddle-input" style="width:52px; text-align:center; padding:2px 4px; font-weight:800;" value="${multiplier}" min="1" max="100" onchange="onChangeAlgoMultiplier('${s.strategy_id}', this.value)" title="Manual Lots Multiplier">
+                            <input type="number" class="straddle-input" style="width:52px; text-align:center; padding:2px 4px; font-weight:800;" value="${multiplier}" min="1" max="100" onchange="onChangeAlgoMultiplier('${safeJsSid}', this.value)" title="Manual Lots Multiplier">
                         ` : `
                             <div style="display:flex; align-items:center; gap:4px;" title="Auto Determined: ${effMult} Lots&#10;Broker Req: ₹${(brokerMargin/100000).toFixed(2)}L + Cushion: ₹${(cushionMargin/1000).toFixed(0)}k = ₹${(totalMarginPerLot/100000).toFixed(2)}L per lot">
                                 <span style="font-size:11px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:1px 5px; border-radius:3px; white-space:nowrap;">⚡ ${effMult}x</span>
-                                <input type="number" class="straddle-input" style="width:58px; text-align:center; padding:1px 2px; font-size:10.5px; font-weight:700;" value="${cushionMargin}" step="1000" min="0" onchange="onChangeAlgoCushionMargin('${s.strategy_id}', this.value)" title="Cushion Margin per lot (₹)">
+                                <input type="number" class="straddle-input" style="width:58px; text-align:center; padding:1px 2px; font-size:10.5px; font-weight:700;" value="${cushionMargin}" step="1000" min="0" onchange="onChangeAlgoCushionMargin('${safeJsSid}', this.value)" title="Cushion Margin per lot (₹)">
                             </div>
                         `}
                     </div>
@@ -1732,28 +1761,28 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 </td>
                 <td class="algo-col-name">
                     <div style="display:flex; align-items:center; gap:6px;">
-                        <span id="algo_err_badge_${s.strategy_id}" style="display:${errCount > 0 ? 'inline-flex' : 'none'}; align-items:center; gap:4px; color:#f87171; cursor:pointer;" title="Click to inspect and retry error" onclick="openStrategyInTerminal('${s.strategy_id}')">
+                        <span id="algo_err_badge_${s.strategy_id}" style="display:${errCount > 0 ? 'inline-flex' : 'none'}; align-items:center; gap:4px; color:#f87171; cursor:pointer;" title="Click to inspect and retry error" onclick="openStrategyInTerminal('${safeJsSid}')">
                             <span style="font-size:12px;">⚠️</span><span class="algo-error-counter">${errCount}</span>
                         </span>
                         <span id="algo_dot_${s.strategy_id}" style="color:${dotColor}; font-size:8px;">●</span>
-                        <a href="javascript:void(0)" onclick="openStrategyInTerminal('${s.strategy_id}')" style="color:#60a5fa; font-weight:700; font-size:13px; text-decoration:none; cursor:pointer;" title="Click to open Builder & Live Legs" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${name}</a>
+                        <a href="javascript:void(0)" onclick="openStrategyInTerminal('${safeJsSid}')" style="color:#60a5fa; font-weight:700; font-size:13px; text-decoration:none; cursor:pointer;" title="Click to open Builder & Live Legs" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${safeDispName}</a>
                         ${s.mtm_calc_mode === 'Per Lot' ? `<span style="font-size:9px; background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); border-radius:3px; padding:1px 4px; font-weight:800;" title="MTM Per Lot Mode Active">Per Lot</span>` : ''}
                         <div class="straddle-dropdown" style="display:inline-block; margin-left:4px;">
                             <button type="button" class="algo-btn-menu" title="Strategy Options" onclick="toggleDropdownMenu('dd_${s.strategy_id}', event)" style="padding:1px 6px; font-size:13px; line-height:1; height:20px; border-radius:4px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; cursor:pointer;">⋮</button>
                             <div id="dd_${s.strategy_id}" class="straddle-dropdown-menu">
-                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="openRenameStraddleAlgoModal('${s.strategy_id}', '${name}')">✏️ Rename Strategy</a>
-                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="duplicateStraddleAlgo('${s.strategy_id}')">📑 Duplicate Preset</a>
-                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="openStrategyInTerminal('${s.strategy_id}')">⚡ Builder & Live Legs</a>
-                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="straddleResetStrategyDirect('${s.strategy_id}')">🔄 Reset Strategy (Clean Start)</a>
-                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="restartOrRetryStraddleAlgo('${s.strategy_id}')">🔄 Retry Failed Orders</a>
-                                <a href="javascript:void(0)" class="straddle-dropdown-item danger" onclick="straddleSquareOffStrategyDirect('${s.strategy_id}')">🚨 Square Off & Terminate</a>
-                                <a href="javascript:void(0)" class="straddle-dropdown-item danger" onclick="deleteStraddleAlgo('${s.strategy_id}')">🗑️ Delete Strategy</a>
+                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="openRenameStraddleAlgoModal('${safeJsSid}', '${safeJsName}')">✏️ Rename Strategy</a>
+                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="duplicateStraddleAlgo('${safeJsSid}')">📑 Duplicate Preset</a>
+                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="openStrategyInTerminal('${safeJsSid}')">⚡ Builder & Live Legs</a>
+                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="straddleResetStrategyDirect('${safeJsSid}')">🔄 Reset Strategy (Clean Start)</a>
+                                <a href="javascript:void(0)" class="straddle-dropdown-item" onclick="restartOrRetryStraddleAlgo('${safeJsSid}')">🔄 Retry Failed Orders</a>
+                                <a href="javascript:void(0)" class="straddle-dropdown-item danger" onclick="straddleSquareOffStrategyDirect('${safeJsSid}')">🚨 Square Off & Terminate</a>
+                                <a href="javascript:void(0)" class="straddle-dropdown-item danger" onclick="deleteStraddleAlgo('${safeJsSid}')">🗑️ Delete Strategy</a>
                             </div>
                         </div>
                     </div>
                 </td>
-                <td class="algo-col-entry-err" id="algo_entry_err_${s.strategy_id}" style="color:${entryErrColor}; font-size:11px; font-weight:${entryErrWeight}; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;" title="${entryErr}">${entryErr}</td>
-                <td class="algo-col-exit-err" style="color:#64748b; font-size:11px; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;">${s.exit_error || '-'}</td>
+                <td class="algo-col-entry-err" id="algo_entry_err_${s.strategy_id}" style="color:${entryErrColor}; font-size:11px; font-weight:${entryErrWeight}; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;" title="${escapeHtml(entryErr)}">${escapeHtml(entryErr)}</td>
+                <td class="algo-col-exit-err" style="color:#64748b; font-size:11px; max-width:220px; min-width:120px; white-space:normal; word-break:break-word; line-height:1.3;">${escapeHtml(String(s.exit_error || '-'))}</td>
                 <td class="algo-col-start" style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">${startTime}</td>
                 <td class="algo-col-end" style="font-family:var(--font-mono); font-size:11px; color:#cbd5e1; white-space:nowrap;">
                     <div>${endTime}</div>
@@ -1764,6 +1793,9 @@ function renderStraddleAlgosTable(forceRebuild = false) {
     });
 
     tbody.innerHTML = rowsHtml;
+    } catch (err) {
+        console.error("renderStraddleAlgosTable error:", err);
+    }
 }
 
 async function restartOrRetryStraddleAlgo(strategyId) {

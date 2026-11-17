@@ -1,5 +1,23 @@
 [
   {
+    "timestamp": "09:14:08",
+    "date": "2026-11-17",
+    "level": "SUCCESS",
+    "message": "[Auto-Reconciled Position] \ud83d\udee1\ufe0f Recovered and adopted live open broker position 'NIFTY26N1725300PE' (-65 Qty @ \u20b9106.55) into strategy 'NIFTY 9:20 Short Straddle (45% TGT / 66% SL)'. SL: \u20b9176.85, Target: \u20b958.60 active.",
+    "trade_type": "SYSTEM",
+    "side": "",
+    "details": {}
+  },
+  {
+    "timestamp": "09:14:08",
+    "date": "2026-11-17",
+    "level": "SUCCESS",
+    "message": "[Auto-Reconciled Position] \ud83d\udee1\ufe0f Recovered and adopted live open broker position 'NIFTY26N1724200PE' (65 Qty @ \u20b91.40) into strategy 'NIFTY 9:20 Short Straddle (45% TGT / 66% SL)'. SL: \u20b90.50, Target: \u20b92.05 active.",
+    "trade_type": "SYSTEM",
+    "side": "",
+    "details": {}
+  },
+  {
     "timestamp": "12:19:20",
     "date": "2026-10-16",
     "level": "INFO",
