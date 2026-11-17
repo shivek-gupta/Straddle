@@ -1515,6 +1515,7 @@ class StraddleManager:
         self._shadow_benchmarks: List[Dict[str, Any]] = self._load_shadow_benchmarks()
         self._active_underlying: str = "NIFTY"
         self._minute_candles: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._spot_minute_candles: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -7650,40 +7651,99 @@ class StraddleManager:
         # AlgoTest Parity: Benchmark Reference Price determination
         ref_mode = adv.get("reference_price_mode", "ENTRY_PRICE")
         bm_time = str(adv.get("benchmark_time") or "09:16:00").strip()
-        bm_scope = str(adv.get("benchmark_scope") or "INITIAL_ONLY").upper()
+        bm_scope = str(adv.get("benchmark_scope") or ("INITIAL_ONLY" if adv.get("benchmark_initial_only", True) else "ALL_ENTRIES")).upper()
+        interim_mode = str(adv.get("benchmark_interim_mode") or "FILL_PRICE").upper()
+        defer_advance_orders = False
 
-        if is_re_entry and bm_scope == "INITIAL_ONLY":
-            ref_mode = "ENTRY_PRICE"
+        if is_re_entry:
+            if bm_scope == "INITIAL_ONLY":
+                ref_mode = "ENTRY_PRICE"
+            elif bm_scope == "INHERIT_INITIAL":
+                # Stockmock parity: re-entries inherit the exact reference price of the initial leg
+                for old_pos in strat.get("positions", []):
+                    if old_pos.get("leg_index") == leg_index and old_pos.get("reference_price"):
+                        ref_price = float(old_pos["reference_price"])
+                        ref_candle_time = "Initial Ref"
+                        bm_pending = False
+                        ref_mode = "INHERITED"
+                        break
 
         ref_price = entry_price
         ref_candle_time = None
         bm_pending = False
         now_str = now_ist_str()
+        ent_hm = entry_time[:5]
+        inst_k = contract.get("instrument_key", "")
 
-        if ref_mode == "ENTRY_CANDLE_CLOSE":
-            ent_hm = entry_time[:5]
-            ref_candle_time = ent_hm
-            c_close = self.get_minute_candle_close(contract.get("instrument_key", ""), ent_hm, contract_meta=contract)
-            if (c_close is None or c_close <= 0) and is_re_entry:
-                # Stockmock/AlgoTest parity: For re-entries executed at minute boundaries, use the just-closed minute's close
+        # Always register initial fill tick into our live 1-min OHLC candle cache
+        if inst_k and entry_price > 0:
+            self.record_live_minute_tick(inst_k, entry_price)
+
+        if ref_mode == "ENTRY_PRICE":
+            ref_price = entry_price
+            bm_pending = False
+
+        elif ref_mode == "PREV_CANDLE_CLOSE":
+            # T-1 1-minute candle close (Stockmock/Quantiply parity - 0ms instant delay)
+            try:
+                prev_dt = datetime.strptime(ent_hm, "%H:%M") - timedelta(minutes=1)
+                prev_hm = prev_dt.strftime("%H:%M")
+            except Exception:
                 prev_hm = (now_ist() - timedelta(minutes=1)).strftime("%H:%M")
-                c_prev = self.get_minute_candle_close(contract.get("instrument_key", ""), prev_hm, contract_meta=contract)
+            ref_candle_time = prev_hm
+            c_prev = self.get_minute_candle_close(inst_k, prev_hm, contract_meta=contract, require_closed=False)
+            if c_prev is not None and c_prev > 0:
+                ref_price = c_prev
+                bm_pending = False
+            else:
+                ref_price = entry_price
+                bm_pending = False
+
+        elif ref_mode == "ENTRY_CANDLE_OPEN":
+            # Opening price of the entry minute bar (AlgoTest Open parity)
+            ref_candle_time = ent_hm
+            c_open = self.get_minute_candle_open(inst_k, ent_hm, contract_meta=contract)
+            if c_open is not None and c_open > 0:
+                ref_price = c_open
+                bm_pending = False
+            else:
+                ref_price = entry_price
+                bm_pending = False
+
+        elif ref_mode == "ENTRY_CANDLE_CLOSE":
+            ref_candle_time = ent_hm
+            c_close = self.get_minute_candle_close(inst_k, ent_hm, contract_meta=contract, require_closed=True)
+            if (c_close is None or c_close <= 0) and is_re_entry:
+                try:
+                    prev_hm = (datetime.strptime(ent_hm, "%H:%M") - timedelta(minutes=1)).strftime("%H:%M")
+                except Exception:
+                    prev_hm = (now_ist() - timedelta(minutes=1)).strftime("%H:%M")
+                c_prev = self.get_minute_candle_close(inst_k, prev_hm, contract_meta=contract, require_closed=False)
                 if c_prev is not None and c_prev > 0:
                     c_close = c_prev
                     ref_candle_time = prev_hm
+
             if c_close is not None and c_close > 0:
                 ref_price = c_close
                 bm_pending = False
             else:
-                ref_price = entry_price
                 bm_pending = True
                 bm_time = ent_hm
+                if interim_mode == "WAIT_CLOSE":
+                    defer_advance_orders = True
+                    ref_price = entry_price
+                elif interim_mode == "CANDLE_OPEN":
+                    c_open = self.get_minute_candle_open(inst_k, ent_hm, contract_meta=contract)
+                    ref_price = c_open if (c_open and c_open > 0) else entry_price
+                else:
+                    ref_price = entry_price
+
         elif ref_mode == "SPECIFIC_TIME":
             bm_hm = bm_time[:5]
             ref_candle_time = bm_hm
             if now_str[:5] > bm_hm:
-                # Benchmark minute has already finished; fetch its authentic 1-minute close
-                c_close = self.get_minute_candle_close(contract.get("instrument_key", ""), bm_hm, contract_meta=contract)
+                # Benchmark minute has already finished; fetch authentic 1-min close
+                c_close = self.get_minute_candle_close(inst_k, bm_hm, contract_meta=contract, require_closed=False)
                 if c_close is not None and c_close > 0:
                     ref_price = c_close
                     bm_pending = False
@@ -7691,9 +7751,21 @@ class StraddleManager:
                     ref_price = entry_price
                     bm_pending = False
             else:
-                # Early entry before or during benchmark minute: use actual fill for interim protection
-                ref_price = entry_price
                 bm_pending = True
+                if interim_mode == "WAIT_CLOSE":
+                    defer_advance_orders = True
+                    ref_price = entry_price
+                elif interim_mode == "CANDLE_OPEN":
+                    c_open = self.get_minute_candle_open(inst_k, ent_hm, contract_meta=contract)
+                    ref_price = c_open if (c_open and c_open > 0) else entry_price
+                else:
+                    ref_price = entry_price
+
+        elif ref_mode == "UNDERLYING_CLOSE":
+            ref_candle_time = ent_hm
+            spot_p = self._get_underlying_minute_close(strat.get("underlying") or "NIFTY", ent_hm)
+            ref_price = spot_p if (spot_p and spot_p > 0) else entry_price
+            bm_pending = False
 
         target_price = 0.0
         if "TGT: %" in tgt_type or "%" in tgt_type:
@@ -7804,6 +7876,7 @@ class StraddleManager:
             "benchmark_scope": bm_scope,
             "benchmark_pending": bm_pending,
             "interim_protection_active": bm_pending,
+            "advance_orders_deferred": defer_advance_orders,
             "entry_time": entry_time,
             "_entry_epoch_ts": time.time(),
             "target_type": tgt_type,
@@ -7929,15 +8002,16 @@ class StraddleManager:
             sl_delay = int(adv.get("sl_placement_delay_sec", 0))
             if sl_delay > 0:
                 time.sleep(sl_delay)
-            # 1. Place Stoploss with broker if selected
-            curr_sl_p = float(pos_record.get("sl_price") or sl_price)
-            if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and curr_sl_p > 0:
-                self._place_advance_sl_order(broker, pos_record, delay_sec=0)
-                time.sleep(0.15)  # Safe broker sequence buffer
-            # 2. Place Target with broker if selected
-            curr_tgt_p = float(pos_record.get("target_price") or target_price)
-            if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and curr_tgt_p > 0:
-                self._place_advance_target_order(broker, pos_record, delay_sec=0)
+            if not pos_record.get("advance_orders_deferred"):
+                # 1. Place Stoploss with broker if selected
+                curr_sl_p = float(pos_record.get("sl_price") or sl_price)
+                if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and curr_sl_p > 0:
+                    self._place_advance_sl_order(broker, pos_record, delay_sec=0)
+                    time.sleep(0.15)  # Safe broker sequence buffer
+                # 2. Place Target with broker if selected
+                curr_tgt_p = float(pos_record.get("target_price") or target_price)
+                if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and curr_tgt_p > 0:
+                    self._place_advance_target_order(broker, pos_record, delay_sec=0)
 
         threading.Thread(target=_dispatch_advance_orders, daemon=True).start()
 
@@ -9342,9 +9416,11 @@ class StraddleManager:
         instrument_key: str,
         target_time_str: str,
         contract_meta: Optional[Dict[str, Any]] = None,
+        require_closed: bool = True,
     ) -> Optional[float]:
         """
         Resolves exact 1-minute candle close price for an option contract at target_time_str (HH:MM or HH:MM:SS).
+        If require_closed=True, strictly ensures the minute candle has finished trading (now_hm > hh_mm).
         Checks:
         1. In-memory live minute bar cache (0ms instant lookup)
         2. Kotak Neo broker authentic 1-minute historical candle API
@@ -9354,6 +9430,11 @@ class StraddleManager:
             return None
 
         hh_mm = target_time_str.strip()[:5]
+        now_hm = now_ist_str()[:5]
+
+        # Parity Integrity: A 1-minute candle (e.g. 09:16) only finalizes once 09:16:59 has elapsed (now_hm >= 09:17)
+        if require_closed and now_hm <= hh_mm:
+            return None
 
         # 1. Check in-memory minute bar cache
         if instrument_key in self._minute_candles:
@@ -9372,7 +9453,6 @@ class StraddleManager:
                     if ("T" in c_time and c_time.split("T")[1][:5] == hh_mm) or (hh_mm in c_time):
                         close_p = float(c.get("close") or 0.0)
                         if close_p > 0:
-                            # Cache in-memory so subsequent checks are 0ms
                             if instrument_key not in self._minute_candles:
                                 self._minute_candles[instrument_key] = {}
                             self._minute_candles[instrument_key][hh_mm] = {
@@ -9403,6 +9483,47 @@ class StraddleManager:
             pass
 
         return None
+
+    def get_minute_candle_open(
+        self,
+        instrument_key: str,
+        target_time_str: str,
+        contract_meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[float]:
+        """Resolves exact 1-minute candle open price for an option contract at target_time_str (HH:MM)."""
+        if not target_time_str or not instrument_key:
+            return None
+        hh_mm = target_time_str.strip()[:5]
+        if instrument_key in self._minute_candles:
+            bars = self._minute_candles[instrument_key]
+            if hh_mm in bars and bars[hh_mm].get("open"):
+                return round(float(bars[hh_mm]["open"]), 2)
+
+        mode = self._state.get("execution_mode", "LIVE_BROKER")
+        broker = get_broker_adapter(mode)
+        if hasattr(broker, "get_historical_candles"):
+            try:
+                candles = broker.get_historical_candles(instrument_key=instrument_key, interval="1min")
+                for c in candles:
+                    c_time = str(c.get("time", ""))
+                    if ("T" in c_time and c_time.split("T")[1][:5] == hh_mm) or (hh_mm in c_time):
+                        open_p = float(c.get("open") or 0.0)
+                        if open_p > 0:
+                            return round(open_p, 2)
+            except Exception:
+                pass
+        return None
+
+    def _get_underlying_minute_close(self, underlying: str, target_time_str: str) -> Optional[float]:
+        """Resolves underlying spot index close at target_time_str (HH:MM)."""
+        clean_und = self._clean_underlying_symbol(underlying)
+        hh_mm = target_time_str.strip()[:5]
+        if hasattr(self, "_spot_minute_candles") and clean_und in self._spot_minute_candles:
+            bars = self._spot_minute_candles[clean_und]
+            if hh_mm in bars and bars[hh_mm].get("close"):
+                return round(float(bars[hh_mm]["close"]), 2)
+        p = self.get_cached_spot_price(clean_und)
+        return round(float(p), 2) if p > 0 else None
 
     def _recalculate_pos_sl_target(self, strat: Dict[str, Any], pos: Dict[str, Any], broker: BaseBrokerAdapter, ref_price: float):
         """Recalculate SL and Target based on ref_price, update resting broker orders, and sync."""
@@ -9439,15 +9560,17 @@ class StraddleManager:
                 pos["sl_price"] = round_to_tick(ref_price + 0.05, 0.05)
             pos["original_sl_price"] = pos["sl_price"]
 
-        # Modify active broker orders on Kotak Neo matching engine
+        # Update or modify active broker orders on Kotak Neo matching engine
+        adv_cfg = (strat.get("advanced_settings") or strat.get("advanced") or {}) if strat else {}
+        broker_action = str(adv_cfg.get("benchmark_broker_action") or "AUTO_MODIFY").upper()
+
         adv_sl_oid = pos.get("sl_broker_order_id")
         if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_") and pos.get("sl_price"):
-            def _modify_sl_bg():
+            def _handle_sl_broker_bg():
                 with _ADVANCE_ORDER_LOCK:
                     try:
                         time.sleep(0.12)
                         sl_side = "BUY" if side == "SELL" else "SELL"
-                        adv_cfg = (strat.get("advanced_settings") or strat.get("advanced") or {}) if strat else {}
                         sl_buf_pct = float(adv_cfg.get("exit_buffer_val") or adv_cfg.get("exit_buffer_value") or 5.0)
                         if sl_buf_pct <= 0:
                             sl_buf_pct = 5.0
@@ -9457,44 +9580,81 @@ class StraddleManager:
                             else min(max(0.05, pos["sl_price"] - 0.05), pos["sl_price"] * (1.0 - sl_buf_pct / 100.0)),
                             0.05
                         )
-                        broker.modify_order(
-                            order_id=str(adv_sl_oid),
-                            order_type="SL",
-                            trigger_price=pos["sl_price"],
-                            price=lim_p,
-                            quantity=pos.get("quantity")
-                        )
-                        logger.info(f"[Benchmark Sync] Modified broker SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}, limit to ₹{lim_p:.2f}")
+                        if broker_action == "CANCEL_REPLACE":
+                            try:
+                                broker.cancel_order(str(adv_sl_oid))
+                            except Exception:
+                                pass
+                            time.sleep(0.15)
+                            self._place_advance_sl_order(broker, pos, delay_sec=0)
+                            logger.info(f"[Benchmark Sync] Cancelled & re-placed broker SL order for {pos.get('symbol')} @ trigger ₹{pos['sl_price']:.2f}")
+                        else:
+                            broker.modify_order(
+                                order_id=str(adv_sl_oid),
+                                order_type="SL",
+                                trigger_price=pos["sl_price"],
+                                price=lim_p,
+                                quantity=pos.get("quantity")
+                            )
+                            logger.info(f"[Benchmark Sync] Auto-modified broker SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}, limit to ₹{lim_p:.2f}")
                     except Exception as e_m:
-                        logger.warning(f"[Benchmark Sync] Failed to modify broker SL order {adv_sl_oid}: {e_m}")
-            threading.Thread(target=_modify_sl_bg, daemon=True).start()
+                        logger.warning(f"[Benchmark Sync] Failed to sync broker SL order {adv_sl_oid}: {e_m}")
+            threading.Thread(target=_handle_sl_broker_bg, daemon=True).start()
 
         adv_tgt_oid = pos.get("target_broker_order_id")
         if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_") and pos.get("target_price"):
-            def _modify_tgt_bg():
+            def _handle_tgt_broker_bg():
                 with _ADVANCE_ORDER_LOCK:
                     try:
                         time.sleep(0.12)
-                        broker.modify_order(
-                            order_id=str(adv_tgt_oid),
-                            order_type="LIMIT",
-                            price=pos["target_price"],
-                            quantity=pos.get("quantity")
-                        )
-                        logger.info(f"[Benchmark Sync] Modified broker Target order {adv_tgt_oid} price to ₹{pos['target_price']:.2f}")
+                        if broker_action == "CANCEL_REPLACE":
+                            try:
+                                broker.cancel_order(str(adv_tgt_oid))
+                            except Exception:
+                                pass
+                            time.sleep(0.15)
+                            self._place_advance_target_order(broker, pos, delay_sec=0)
+                            logger.info(f"[Benchmark Sync] Cancelled & re-placed broker Target order for {pos.get('symbol')} @ ₹{pos['target_price']:.2f}")
+                        else:
+                            broker.modify_order(
+                                order_id=str(adv_tgt_oid),
+                                order_type="LIMIT",
+                                price=pos["target_price"],
+                                quantity=pos.get("quantity")
+                            )
+                            logger.info(f"[Benchmark Sync] Auto-modified broker Target order {adv_tgt_oid} price to ₹{pos['target_price']:.2f}")
                     except Exception as e_m:
-                        logger.warning(f"[Benchmark Sync] Failed to modify broker Target order {adv_tgt_oid}: {e_m}")
-            threading.Thread(target=_modify_tgt_bg, daemon=True).start()
+                        logger.warning(f"[Benchmark Sync] Failed to sync broker Target order {adv_tgt_oid}: {e_m}")
+            threading.Thread(target=_handle_tgt_broker_bg, daemon=True).start()
 
     def _lock_benchmark_reference_price(self, strat: Dict[str, Any], pos: Dict[str, Any], broker: BaseBrokerAdapter, current_ltp: float):
         """AlgoTest Backtest Parity: Lock in benchmark 1-minute candle close and update SL/Target."""
         bm_t = str(pos.get("benchmark_time") or "09:16:00").strip()
         hh_mm = bm_t[:5]
-        c_close = self.get_minute_candle_close(pos.get("instrument_key", ""), hh_mm, contract_meta=pos.get("contract"))
+        inst_k = pos.get("instrument_key", "")
+        sym = pos.get("symbol", "")
+        ent_p = float(pos.get("avg_ent_price", 0.0) or 0.0)
+
+        c_close = self.get_minute_candle_close(inst_k, hh_mm, contract_meta=pos.get("contract"), require_closed=False)
         if c_close is not None and c_close > 0:
             ref_price = c_close
         else:
             ref_price = round(float(current_ltp or pos.get("avg_ent_price") or 100.0), 2)
+
+        # Max Allowed Wick Deviation Safeguard
+        adv = (strat.get("advanced_settings") or strat.get("advanced") or {}) if strat else {}
+        max_dev = float(adv.get("max_benchmark_deviation_pct") or 0.0)
+        if max_dev > 0 and ent_p > 0 and ref_price > 0:
+            dev_pct = abs(ref_price - ent_p) / ent_p * 100.0
+            if dev_pct > max_dev:
+                self._log_event(
+                    f"⚠️ [AlgoTest Parity Guard] Candle close ₹{ref_price:.2f} deviates by {dev_pct:.1f}% (> max {max_dev:.1f}%) from fill ₹{ent_p:.2f} for {sym}. Clamping to safeguard threshold.",
+                    level="WARNING"
+                )
+                if ref_price > ent_p:
+                    ref_price = round_to_tick(ent_p * (1.0 + max_dev / 100.0), 0.05)
+                else:
+                    ref_price = round_to_tick(ent_p * (1.0 - max_dev / 100.0), 0.05)
 
         pos["reference_price"] = ref_price
         pos["reference_candle_time"] = hh_mm
@@ -9504,8 +9664,17 @@ class StraddleManager:
 
         self._recalculate_pos_sl_target(strat, pos, broker, ref_price)
 
-        sym = pos.get("symbol", "")
-        ent_p = float(pos.get("avg_ent_price", 0.0) or 0.0)
+        # If advance orders were deferred (WAIT_CLOSE policy), place them now on broker
+        if pos.get("advance_orders_deferred"):
+            pos["advance_orders_deferred"] = False
+            leg_sl_placement = pos.get("sl_order_placement") or adv.get("sl_order_placement") or "Place in advance"
+            if leg_sl_placement in ("Place in advance", "With Broker", "BROKER") and pos.get("sl_price"):
+                self._place_advance_sl_order(broker, pos, delay_sec=0)
+                time.sleep(0.15)
+            leg_tgt_placement = pos.get("target_order_placement") or adv.get("target_order_placement") or "Place in advance"
+            if leg_tgt_placement in ("Place in advance", "With Broker", "BROKER") and pos.get("target_price"):
+                self._place_advance_target_order(broker, pos, delay_sec=0)
+
         self._log_event(
             f"🎯 [AlgoTest Parity] Benchmark {hh_mm} 1-min candle close locked @ ₹{ref_price:.2f} for {sym} (Entry fill was ₹{ent_p:.2f}). "
             f"Updated SL to ₹{pos.get('sl_price', 0):.2f}, Target to ₹{pos.get('target_price', 0):.2f}."
@@ -9568,7 +9737,56 @@ class StraddleManager:
             ref_m = (reference_mode or "AVERAGE_ENTRY").upper()
             msg_detail = ""
 
-            if ref_m in ("AVERAGE_ENTRY", "ENTRY_PRICE", "AVG"):
+            if ref_m in ("PREV_CANDLE_CLOSE", "PREV_CANDLE", "T-1"):
+                ent_t = str(pos.get("entry_time") or "09:37:00")
+                ent_hh_mm = ent_t[:5]
+                try:
+                    prev_dt = datetime.strptime(ent_hh_mm, "%H:%M") - timedelta(minutes=1)
+                    prev_hh_mm = prev_dt.strftime("%H:%M")
+                except Exception:
+                    prev_hh_mm = (now_ist() - timedelta(minutes=1)).strftime("%H:%M")
+                inst_k = pos.get("instrument_key") or (pos.get("contract") or {}).get("instrument_key") or (pos.get("contract") or {}).get("token") or pos.get("token") or ""
+                c_prev = self.get_minute_candle_close(inst_k, prev_hh_mm, contract_meta=pos.get("contract"), require_closed=False)
+                if c_prev is not None and c_prev > 0:
+                    ref_price = c_prev
+                else:
+                    ref_price = float(pos.get("avg_ent_price") or 0.0)
+                pos["reference_price"] = ref_price
+                pos["reference_price_mode"] = "PREV_CANDLE_CLOSE"
+                pos["reference_candle_time"] = prev_hh_mm
+                pos["benchmark_pending"] = False
+                pos["interim_protection_active"] = False
+                msg_detail = f"T-1 Candle Close ({prev_hh_mm} @ ₹{ref_price:.2f})"
+
+            elif ref_m in ("ENTRY_CANDLE_OPEN", "CANDLE_OPEN", "OPEN"):
+                ent_t = str(pos.get("entry_time") or "09:37:00")
+                ent_hh_mm = ent_t[:5]
+                inst_k = pos.get("instrument_key") or (pos.get("contract") or {}).get("instrument_key") or (pos.get("contract") or {}).get("token") or pos.get("token") or ""
+                c_open = self.get_minute_candle_open(inst_k, ent_hh_mm, contract_meta=pos.get("contract"))
+                if c_open is not None and c_open > 0:
+                    ref_price = c_open
+                else:
+                    ref_price = float(pos.get("avg_ent_price") or 0.0)
+                pos["reference_price"] = ref_price
+                pos["reference_price_mode"] = "ENTRY_CANDLE_OPEN"
+                pos["reference_candle_time"] = ent_hh_mm
+                pos["benchmark_pending"] = False
+                pos["interim_protection_active"] = False
+                msg_detail = f"Entry Candle Open ({ent_hh_mm} @ ₹{ref_price:.2f})"
+
+            elif ref_m in ("UNDERLYING_CLOSE", "SPOT_CLOSE", "INDEX_CLOSE"):
+                ent_t = str(pos.get("entry_time") or "09:37:00")
+                ent_hh_mm = ent_t[:5]
+                spot_close = self._get_underlying_minute_close(strat.get("underlying") or "NIFTY", ent_hh_mm)
+                ref_price = spot_close if (spot_close and spot_close > 0) else float(pos.get("avg_ent_price") or 0.0)
+                pos["reference_price"] = ref_price
+                pos["reference_price_mode"] = "UNDERLYING_CLOSE"
+                pos["reference_candle_time"] = ent_hh_mm
+                pos["benchmark_pending"] = False
+                pos["interim_protection_active"] = False
+                msg_detail = f"Underlying Spot Close ({ent_hh_mm} @ ₹{ref_price:.2f})"
+
+            elif ref_m in ("AVERAGE_ENTRY", "ENTRY_PRICE", "AVG"):
                 ref_price = float(pos.get("avg_ent_price") or 0.0)
                 pos["reference_price"] = ref_price
                 pos["reference_price_mode"] = "ENTRY_PRICE"
@@ -14986,7 +15204,8 @@ class StraddleManager:
                         bm_time = str(pos.get("benchmark_time") or "09:16:00").strip()
                         hh_mm = bm_time[:5]
                         now_hm = now_ist_str()[:5]
-                        if now_hm > hh_mm or (len(bm_time) > 5 and now_ist_str() >= bm_time):
+                        # 1-minute candle (e.g. 09:16) runs 09:16:00-09:16:59 and is completed only at 09:17:00 (now_hm > hh_mm)
+                        if now_hm > hh_mm:
                             self._lock_benchmark_reference_price(strat, pos, broker, ltp)
 
                     side = pos.get("side", "SELL")

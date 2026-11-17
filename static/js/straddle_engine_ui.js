@@ -5329,7 +5329,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                 <option value="" disabled selected>Ref: ${curRefLabel} ▾</option>
                                 <option value="AVERAGE_ENTRY">Avg Fill (₹${avgEntPrice})</option>
                                 <option value="ENTRY_CANDLE_CLOSE">Entry Candle Close (${entryMinStr}${cCloseStr})</option>
+                                <option value="PREV_CANDLE_CLOSE">Prior Minute (T-1) Close (0ms Parity)</option>
+                                <option value="ENTRY_CANDLE_OPEN">Entry Candle Open</option>
                                 <option value="SPECIFIC_TIME">Minute Candle Time (HH:MM)...</option>
+                                <option value="UNDERLYING_CLOSE">Underlying Spot Close</option>
                                 <option value="CURRENT_LTP">Current LTP (₹${Number(pos.ltp || 0).toFixed(1)})</option>
                                 <option value="CUSTOM">Custom Price...</option>
                             </select>
@@ -7263,8 +7266,22 @@ function populateStraddleSettingsForm(s) {
     if (refModeEl) refModeEl.value = adv.reference_price_mode || "ENTRY_PRICE";
     const bmTimeEl = document.getElementById("cfgBenchmarkTime");
     if (bmTimeEl) bmTimeEl.value = adv.benchmark_time || "09:16:00";
+    const bmScopeEl = document.getElementById("cfgBenchmarkScope");
+    if (bmScopeEl) {
+        bmScopeEl.value = adv.benchmark_scope || (adv.benchmark_initial_only === false ? "ALL_ENTRIES" : "INITIAL_ONLY");
+    }
     const bmInitEl = document.getElementById("cfgBenchmarkInitialOnly");
-    if (bmInitEl) bmInitEl.checked = (adv.benchmark_scope !== "ALL_ENTRIES");
+    if (bmInitEl) bmInitEl.checked = (adv.benchmark_scope !== "ALL_ENTRIES" && adv.benchmark_initial_only !== false);
+    const bmInterimEl = document.getElementById("cfgBenchmarkInterimMode");
+    if (bmInterimEl) bmInterimEl.value = adv.benchmark_interim_mode || "FILL_PRICE";
+    const bmMaxDevEl = document.getElementById("cfgBenchmarkMaxDevPct");
+    if (bmMaxDevEl) bmMaxDevEl.value = (adv.max_benchmark_deviation_pct !== undefined && adv.max_benchmark_deviation_pct !== null) ? adv.max_benchmark_deviation_pct : 0;
+    const bmBrokerActionEl = document.getElementById("cfgBenchmarkBrokerAction");
+    if (bmBrokerActionEl) bmBrokerActionEl.value = adv.benchmark_broker_action || "AUTO_MODIFY";
+
+    if (typeof onRefPriceModeChange === "function") {
+        onRefPriceModeChange();
+    }
 
     const slEl = document.getElementById("cfgSlOrderPlacement");
     if (slEl && !slEl._syncAttached) {
@@ -8593,6 +8610,161 @@ function applyStraddleBulkEdit(action) {
 
 window._lastSecToggleTs = window._lastSecToggleTs || {};
 
+
+// -------------------------------------------------------------
+// 🎯 ALGOTEST & STOCKMOCK BACKTEST PARITY CONTROLS & HANDLERS
+// -------------------------------------------------------------
+function onRefPriceModeChange() {
+    const modeEl = document.getElementById("cfgRefPriceMode");
+    const mode = modeEl ? modeEl.value : "ENTRY_PRICE";
+    const grpBmTime = document.getElementById("grpBenchmarkTime");
+    const bmInput = document.getElementById("cfgBenchmarkTime");
+    const badgeEl = document.getElementById("badgeRefModeParity");
+    const helpEl = document.getElementById("cfgRefPriceModeHelp");
+
+    if (mode === "SPECIFIC_TIME") {
+        if (grpBmTime) grpBmTime.style.opacity = "1";
+        if (bmInput) bmInput.disabled = false;
+        if (badgeEl) {
+            badgeEl.textContent = "Benchmark Minute Parity";
+            badgeEl.style.color = "#38bdf8";
+            badgeEl.style.background = "rgba(56,189,248,0.12)";
+            badgeEl.style.borderColor = "rgba(56,189,248,0.3)";
+        }
+        if (helpEl) helpEl.textContent = "Locks SL & Target % to the exact 1-min candle close of the specified benchmark time.";
+    } else if (mode === "ENTRY_CANDLE_CLOSE") {
+        if (grpBmTime) grpBmTime.style.opacity = "0.45";
+        if (bmInput) bmInput.disabled = true;
+        if (badgeEl) {
+            badgeEl.textContent = "Entry Candle Parity";
+            badgeEl.style.color = "#38bdf8";
+            badgeEl.style.background = "rgba(56,189,248,0.12)";
+            badgeEl.style.borderColor = "rgba(56,189,248,0.3)";
+        }
+        if (helpEl) helpEl.textContent = "Calculates SL & Target % from the 1-minute candle close of the entry minute (AlgoTest default).";
+    } else if (mode === "PREV_CANDLE_CLOSE") {
+        if (grpBmTime) grpBmTime.style.opacity = "0.45";
+        if (bmInput) bmInput.disabled = true;
+        if (badgeEl) {
+            badgeEl.textContent = "T-1 Close (0ms Parity)";
+            badgeEl.style.color = "#a855f7";
+            badgeEl.style.background = "rgba(168,85,247,0.12)";
+            badgeEl.style.borderColor = "rgba(168,85,247,0.3)";
+        }
+        if (helpEl) helpEl.textContent = "Uses the just-completed prior 1-min candle close. 100% known at entry time with zero delay.";
+    } else if (mode === "ENTRY_CANDLE_OPEN") {
+        if (grpBmTime) grpBmTime.style.opacity = "0.45";
+        if (bmInput) bmInput.disabled = true;
+        if (badgeEl) {
+            badgeEl.textContent = "Entry Open Parity";
+            badgeEl.style.color = "#06b6d4";
+            badgeEl.style.background = "rgba(6,182,212,0.12)";
+            badgeEl.style.borderColor = "rgba(6,182,212,0.3)";
+        }
+        if (helpEl) helpEl.textContent = "Uses the open price of the entry minute bar. Available on first tick of the entry minute.";
+    } else if (mode === "UNDERLYING_CLOSE") {
+        if (grpBmTime) grpBmTime.style.opacity = "0.45";
+        if (bmInput) bmInput.disabled = true;
+        if (badgeEl) {
+            badgeEl.textContent = "Underlying Spot Parity";
+            badgeEl.style.color = "#f59e0b";
+            badgeEl.style.background = "rgba(245,158,11,0.12)";
+            badgeEl.style.borderColor = "rgba(245,158,11,0.3)";
+        }
+        if (helpEl) helpEl.textContent = "Tracks underlying spot index candle close for SL and Target parity.";
+    } else {
+        if (grpBmTime) grpBmTime.style.opacity = "0.45";
+        if (bmInput) bmInput.disabled = true;
+        if (badgeEl) {
+            badgeEl.textContent = "Standard Broker Fill";
+            badgeEl.style.color = "#10b981";
+            badgeEl.style.background = "rgba(16,185,129,0.12)";
+            badgeEl.style.borderColor = "rgba(16,185,129,0.3)";
+        }
+        if (helpEl) helpEl.textContent = "Calculates SL and Target directly from actual broker executed fill price.";
+    }
+    updateBenchmarkPreview();
+}
+window.onRefPriceModeChange = onRefPriceModeChange;
+
+function setBenchmarkTimePreset(timeStr) {
+    const input = document.getElementById("cfgBenchmarkTime");
+    if (input) {
+        input.value = timeStr;
+    }
+    const modeEl = document.getElementById("cfgRefPriceMode");
+    if (modeEl && modeEl.value !== "SPECIFIC_TIME") {
+        modeEl.value = "SPECIFIC_TIME";
+        onRefPriceModeChange();
+    } else {
+        updateBenchmarkPreview();
+    }
+}
+window.setBenchmarkTimePreset = setBenchmarkTimePreset;
+
+function validateBenchmarkTimeInput(el) {
+    if (!el) return;
+    let v = el.value.trim();
+    const match = v.match(/^([0-1]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/);
+    if (!match) {
+        if (typeof showStraddleToast === "function") {
+            showStraddleToast("Invalid time format. Please use HH:MM:SS (e.g. 09:16:00)", "warning", 3000);
+        }
+        el.value = "09:16:00";
+    } else if (!match[3]) {
+        el.value = `${match[1].padStart(2, "0")}:${match[2]}:00`;
+    }
+    updateBenchmarkPreview();
+}
+window.validateBenchmarkTimeInput = validateBenchmarkTimeInput;
+
+function updateBenchmarkPreview() {
+    const mode = document.getElementById("cfgRefPriceMode")?.value || "ENTRY_PRICE";
+    const bmTime = document.getElementById("cfgBenchmarkTime")?.value || "09:16:00";
+    const scope = document.getElementById("cfgBenchmarkScope")?.value || "INITIAL_ONLY";
+    const interim = document.getElementById("cfgBenchmarkInterimMode")?.value || "FILL_PRICE";
+    const maxDev = parseFloat(document.getElementById("cfgBenchmarkMaxDevPct")?.value) || 0;
+    
+    const badgeEl = document.getElementById("prevRefModeBadge");
+    const formulaEl = document.getElementById("prevFormulaText");
+    const timingEl = document.getElementById("prevTimingText");
+
+    if (!formulaEl || !timingEl) return;
+
+    const bmDisplay = bmTime.length > 5 ? bmTime.substring(0, 5) : bmTime;
+
+    if (mode === "ENTRY_PRICE") {
+        if (badgeEl) badgeEl.textContent = "Standard Fill Mode";
+        formulaEl.innerHTML = "Target = Broker Traded Fill × (1 - Target %) &nbsp;|&nbsp; Stoploss = Broker Traded Fill × (1 + SL %)";
+        timingEl.innerHTML = "⏱️ <strong>Zero Latency:</strong> SL & Target placed immediately with broker upon entry. No waiting.";
+    } else if (mode === "PREV_CANDLE_CLOSE") {
+        if (badgeEl) badgeEl.textContent = "T-1 Candle Close (Instant)";
+        formulaEl.innerHTML = "Target = Prev 1-Min Candle Close × (1 - Target %) &nbsp;|&nbsp; Stoploss = Prev 1-Min Close × (1 + SL %)";
+        timingEl.innerHTML = "⚡ <strong>0ms Delay:</strong> Prior minute bar is already finalized at entry. Instant orders with zero naked risk.";
+    } else if (mode === "ENTRY_CANDLE_OPEN") {
+        if (badgeEl) badgeEl.textContent = "Entry Candle Open";
+        formulaEl.innerHTML = "Target = Entry Minute Open × (1 - Target %) &nbsp;|&nbsp; Stoploss = Entry Minute Open × (1 + SL %)";
+        timingEl.innerHTML = "⚡ <strong>Instant:</strong> Set at first tick of the entry minute. Matches AlgoTest open price backtest.";
+    } else if (mode === "ENTRY_CANDLE_CLOSE") {
+        if (badgeEl) badgeEl.textContent = "Entry Minute Close Parity";
+        formulaEl.innerHTML = "Target = Entry Minute Close × (1 - Target %) &nbsp;|&nbsp; Stoploss = Entry Minute Close × (1 + SL %)";
+        let interimText = interim === "WAIT_CLOSE" ? "Orders deferred until candle closes" : (interim === "CANDLE_OPEN" ? "Interim protection using candle open" : "Interim protection active with fill price");
+        let devText = maxDev > 0 ? ` (Max wick deviation capped at ${maxDev}%)` : "";
+        timingEl.innerHTML = `⏳ <strong>Candle Close Wait:</strong> Entry candle finalizes at MM:00. ${interimText}${devText}.`;
+    } else if (mode === "SPECIFIC_TIME") {
+        if (badgeEl) badgeEl.textContent = `Benchmark @ ${bmDisplay}`;
+        formulaEl.innerHTML = `Target = ${bmDisplay} Candle Close × (1 - Target %) &nbsp;|&nbsp; Stoploss = ${bmDisplay} Close × (1 + SL %)`;
+        let interimText = interim === "WAIT_CLOSE" ? "No resting orders until benchmark minute closes" : (interim === "CANDLE_OPEN" ? "Interim protection using candle open" : "Interim fill price protects open position");
+        timingEl.innerHTML = `🎯 <strong>Benchmark Locking:</strong> Locks reference at ${bmDisplay}. ${interimText}.`;
+    } else if (mode === "UNDERLYING_CLOSE") {
+        if (badgeEl) badgeEl.textContent = "Spot Index Close";
+        formulaEl.innerHTML = "Target / SL calibrated against Underlying Spot Index 1-minute close.";
+        timingEl.innerHTML = "📊 <strong>Spot Parity:</strong> Movements tracked against the Cash Index underlying.";
+    }
+}
+window.updateBenchmarkPreview = updateBenchmarkPreview;
+
+
 function toggleAlgoBuilderSection(secId, forceState = null) {
     const sec = document.getElementById(secId);
     const chevron = document.getElementById("chevron_" + secId);
@@ -9004,7 +9176,11 @@ function serializeCurrentStrategySettings() {
             auto_release_margin_reentry: document.getElementById("cfgAutoReleaseMarginReEntry") ? document.getElementById("cfgAutoReleaseMarginReEntry").checked : true,
             reference_price_mode: document.getElementById("cfgRefPriceMode")?.value || "ENTRY_PRICE",
             benchmark_time: document.getElementById("cfgBenchmarkTime")?.value || "09:16:00",
-            benchmark_scope: document.getElementById("cfgBenchmarkInitialOnly")?.checked ? "INITIAL_ONLY" : "ALL_ENTRIES"
+            benchmark_scope: document.getElementById("cfgBenchmarkScope")?.value || (document.getElementById("cfgBenchmarkInitialOnly")?.checked ? "INITIAL_ONLY" : "ALL_ENTRIES"),
+            benchmark_initial_only: (document.getElementById("cfgBenchmarkScope")?.value || (document.getElementById("cfgBenchmarkInitialOnly")?.checked ? "INITIAL_ONLY" : "ALL_ENTRIES")) === "INITIAL_ONLY",
+            benchmark_interim_mode: document.getElementById("cfgBenchmarkInterimMode")?.value || "FILL_PRICE",
+            max_benchmark_deviation_pct: parseFloat(document.getElementById("cfgBenchmarkMaxDevPct")?.value) || 0,
+            benchmark_broker_action: document.getElementById("cfgBenchmarkBrokerAction")?.value || "AUTO_MODIFY"
         },
         advanced: null,
         legs: []

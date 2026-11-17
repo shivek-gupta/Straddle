@@ -1713,33 +1713,143 @@
                         <span id="chevron_sec_builder_parity" class="chevron-icon">▶</span>
                         <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#38bdf8;">🎯 SL & TARGET PRICE BASIS (ALGOTEST BACKTEST PARITY) 🔗</span>
                     </div>
+                    <span style="font-size:11px; color:#64748b; font-weight:600;">Calibrate SL & Target % against 1-min Candle Close vs Traded Fill</span>
                 </div>
 
                 <div id="sec_builder_parity" class="straddle-collapsible-body collapsed" style="display:none;">
-                    <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:12px; font-weight:700; color:#38bdf8;">🎯 Benchmark Reference Price Basis</div>
-                            <span style="font-size:10px; color:#94a3b8; font-style:italic;">Calculate SL/Target % based on 1-min candle close vs actual broker fill price</span>
+                    <div style="background:#090a0e; border:1px solid rgba(56,189,248,0.25); border-radius:8px; padding:16px;">
+                        
+                        <!-- Header Banner -->
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                            <div>
+                                <div style="font-size:13px; font-weight:800; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+                                    <span>🎯 Benchmark Reference Price Basis</span>
+                                    <span style="font-size:10px; font-weight:700; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); border-radius:3px; padding:1px 6px;">AlgoTest & Stockmock Parity</span>
+                                </div>
+                                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+                                    Eliminate live-vs-backtest slippage discrepancy by calculating Stoploss & Target from authentic 1-minute OHLC candle data.
+                                </div>
+                            </div>
+                            <div style="text-align:right;">
+                                <span id="badgeRefModeParity" style="font-size:10.5px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:4px; padding:3px 8px;">
+                                    Standard Broker Fill
+                                </span>
+                            </div>
                         </div>
-                        <div class="straddle-grid-3col">
+
+                        <!-- Core Parameters Grid (Row 1) -->
+                        <div class="straddle-grid-3col" style="gap:14px; margin-bottom:14px;">
+                            <!-- 1. Calculation Basis -->
                             <div class="straddle-form-group">
-                                <label>Price Calculation Basis:</label>
-                                <select id="cfgRefPriceMode" class="straddle-select">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Price Calculation Basis:
+                                </label>
+                                <select id="cfgRefPriceMode" class="straddle-select" style="font-weight:700; color:#38bdf8;" onchange="onRefPriceModeChange()">
                                     <option value="ENTRY_PRICE" selected>Average Entry Price (Standard - Fill with Slippage)</option>
                                     <option value="ENTRY_CANDLE_CLOSE">Entry Minute Candle Close (AlgoTest/Stockmock Parity)</option>
+                                    <option value="PREV_CANDLE_CLOSE">Previous 1-Min Candle Close (T-1 Close - Instant 0ms Parity)</option>
+                                    <option value="ENTRY_CANDLE_OPEN">Entry Minute Candle Open (AlgoTest Open Parity)</option>
                                     <option value="SPECIFIC_TIME">Specific Benchmark Time Candle Close (AlgoTest Parity)</option>
+                                    <option value="UNDERLYING_CLOSE">Underlying Index Spot Close (AlgoTest Spot Parity)</option>
                                 </select>
+                                <div id="cfgRefPriceModeHelp" style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Calculates SL and Target directly from actual broker executed fill price.
+                                </div>
                             </div>
-                            <div class="straddle-form-group">
-                                <label>Benchmark Time (HH:MM:SS):</label>
-                                <input type="text" id="cfgBenchmarkTime" class="straddle-input" value="09:16:00" placeholder="09:16:00" style="font-weight:700; color:#38bdf8;">
-                            </div>
-                            <div class="straddle-form-group" style="display:flex; align-items:center; padding-top:18px;">
-                                <label class="straddle-checkbox-label" title="When checked, candle close benchmark price applies ONLY to the initial trade entry. Any subsequent Re-entries or Re-cost legs will use their own actual fill price. When unchecked, ALL entries and re-entries reference their respective 1-minute candle close.">
-                                    <input type="checkbox" id="cfgBenchmarkInitialOnly" checked> Apply benchmark only to Initial Entry
+
+                            <!-- 2. Benchmark Time (Dynamically active for SPECIFIC_TIME) -->
+                            <div id="grpBenchmarkTime" class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Benchmark Candle Time (HH:MM:SS):
                                 </label>
+                                <div style="display:flex; gap:6px; align-items:center;">
+                                    <input type="text" id="cfgBenchmarkTime" class="straddle-input" value="09:16:00" placeholder="09:16:00" style="font-weight:700; color:#38bdf8; flex:1;" onchange="validateBenchmarkTimeInput(this)">
+                                </div>
+                                <!-- Quick Preset Pills -->
+                                <div style="display:flex; gap:4px; margin-top:5px; flex-wrap:wrap;">
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setBenchmarkTimePreset('09:16:00')">09:16 (Open)</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setBenchmarkTimePreset('09:20:00')">09:20</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setBenchmarkTimePreset('09:30:00')">09:30</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setBenchmarkTimePreset('10:00:00')">10:00</button>
+                                </div>
+                            </div>
+
+                            <!-- 3. Application Scope for Re-Entries -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Re-Entry Benchmark Scope:
+                                </label>
+                                <select id="cfgBenchmarkScope" class="straddle-select" style="font-weight:700;" onchange="updateBenchmarkPreview()">
+                                    <option value="INITIAL_ONLY" selected>Initial Entry Only (Re-entries use fill price) [Recommended]</option>
+                                    <option value="ALL_ENTRIES">All Entries & Re-entries (Each uses its own candle close)</option>
+                                    <option value="INHERIT_INITIAL">Inherit Initial Benchmark (Re-entries reuse 1st entry benchmark)</option>
+                                </select>
+                                <div style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Governs how subsequent re-executed or re-entered legs establish their reference price.
+                                </div>
                             </div>
                         </div>
+
+                        <!-- Secondary Row: Interim Protection & Safety Deviation (Row 2) -->
+                        <div class="straddle-grid-3col" style="gap:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.06); margin-bottom:14px;">
+                            <!-- 4. Interim Protection Policy -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Interim Protection (During Candle Formation):
+                                </label>
+                                <select id="cfgBenchmarkInterimMode" class="straddle-select" style="font-weight:700;" onchange="updateBenchmarkPreview()">
+                                    <option value="FILL_PRICE" selected>Actual Traded Fill as Interim SL/Target (Zero Naked Risk) [Recommended]</option>
+                                    <option value="WAIT_CLOSE">Strict Pure Backtest (No SL/Target until Candle Completes)</option>
+                                    <option value="CANDLE_OPEN">Entry Candle Open as Interim SL/Target</option>
+                                </select>
+                                <div style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Protects open capital with temporary SL/Target during the ~60s while the 1-min candle is forming.
+                                </div>
+                            </div>
+
+                            <!-- 5. Max Allowed Deviation Safeguard -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Max Allowed Wick Deviation (%):
+                                </label>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <input type="number" id="cfgBenchmarkMaxDevPct" class="straddle-input" value="0" min="0" max="100" step="1" style="flex:1; font-weight:700;" placeholder="0 = Disabled" onchange="updateBenchmarkPreview()">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">%</span>
+                                </div>
+                                <div style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Caps extreme illiquid wick distortions. If candle close deviates by > X%, safely falls back to fill price (0 = Off).
+                                </div>
+                            </div>
+
+                            <!-- 6. Broker Advance Order Action -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Broker Advance Orders Action:
+                                </label>
+                                <select id="cfgBenchmarkBrokerAction" class="straddle-select" style="font-weight:700;">
+                                    <option value="AUTO_MODIFY" selected>Auto-Modify Resting Broker SL/Target on Candle Close (Zero-Latency)</option>
+                                    <option value="CANCEL_REPLACE">Cancel & Re-place Orders on Broker upon Candle Close</option>
+                                </select>
+                                <div style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Kotak Neo OMS automatically modifies resting SL-Limit and Target limit triggers the instant candle closes.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Live Interactive Formula & Parity Summary Card -->
+                        <div id="benchmarkLivePreviewCard" style="background:#030712; border:1px solid rgba(56,189,248,0.25); border-radius:6px; padding:10px 14px; font-size:11px; display:flex; flex-direction:column; gap:4px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-weight:800; color:#38bdf8;">📐 Live Formula & Parity Execution Breakdown:</span>
+                                <span id="prevRefModeBadge" style="font-size:9.5px; font-weight:800; color:#38bdf8; background:rgba(56,189,248,0.15); padding:1px 6px; border-radius:3px;">Standard Fill Mode</span>
+                            </div>
+                            <div id="prevFormulaText" style="color:#e2e8f0; font-family:monospace; font-size:11px;">
+                                Target Price = Actual Fill Price × (1 - Target %) | Stoploss Price = Actual Fill Price × (1 + SL %)
+                            </div>
+                            <div id="prevTimingText" style="color:#94a3b8; font-size:10.5px;">
+                                ⏱️ Zero Latency: SL and Target orders are placed immediately on broker with no waiting.
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 
