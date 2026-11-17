@@ -33,25 +33,26 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            echo "Step 3: Restoring persisted data..."
-            cp -p /home/ubuntu/straddle_data_persist/* data/ 2>/dev/null || true
+            echo "Step 3: Restoring persisted data and merging strategies..."
+            cp -p /home/ubuntu/straddle_data_persist/kotak_credentials.json data/ 2>/dev/null || true
+            cp -p /home/ubuntu/straddle_data_persist/straddle_state.json data/ 2>/dev/null || true
+            cp -p /home/ubuntu/straddle_data_persist/straddle_pnl_history.json data/ 2>/dev/null || true
             python3 -c "import json, os; \
-            del_f = 'data/straddle_deleted_strategies.json'; \
-            strat_f = 'data/straddle_strategies.json'; \
+            disk_f = 'data/straddle_strategies.json'; \
             persist_f = '/home/ubuntu/straddle_data_persist/straddle_strategies.json'; \
-            d_ids = set(); \
-            for df in (del_f, '/home/ubuntu/straddle_data_persist/straddle_deleted_strategies.json'): \
-              if os.path.exists(df): \
-                try: d_ids.update(str(x).strip().lower() for x in json.load(open(df)) if x); \
-                except Exception: pass; \
-            for pf in (strat_f, persist_f): \
-              if os.path.exists(pf): \
-                try: \
-                  items = json.load(open(pf)); \
-                  if isinstance(items, list): \
-                    clean = [s for s in items if isinstance(s, dict) and str(s.get('strategy_id','')).strip().lower() not in d_ids and str(s.get('name','')).strip().lower() not in d_ids]; \
-                    json.dump(clean, open(pf, 'w'), indent=2); \
-                except Exception: pass" 2>/dev/null || true
+            disk_strats = json.load(open(disk_f)) if os.path.exists(disk_f) else []; \
+            persist_strats = json.load(open(persist_f)) if os.path.exists(persist_f) else []; \
+            merged = {str(s.get('strategy_id')).lower(): s for s in disk_strats if isinstance(s, dict)}; \
+            for ps in persist_strats: \
+              if isinstance(ps, dict): \
+                pid = str(ps.get('strategy_id')).lower(); \
+                pname = str(ps.get('name','')).strip().lower(); \
+                existing_key = next((k for k, v in merged.items() if k == pid or str(v.get('name','')).strip().lower() == pname), None); \
+                if existing_key: merged[existing_key].update(ps); \
+                else: merged[pid] = ps; \
+            final_list = list(merged.values()); \
+            json.dump(final_list, open(disk_f, 'w'), indent=2); \
+            json.dump(final_list, open(persist_f, 'w'), indent=2);" 2>/dev/null || true
 
             echo "Step 4: Installing requirements..."
             python3 -m pip install -r requirements.txt --quiet || true

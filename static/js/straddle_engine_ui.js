@@ -82,19 +82,19 @@ function showStraddleToast(message, type = 'info', duration = 2500) {
     }
     const toast = document.createElement("div");
     const bg = type === 'success' ? 'linear-gradient(135deg, #059669, #10b981)' :
-               type === 'error' ? 'linear-gradient(135deg, #dc2626, #ef4444)' :
-               type === 'warning' ? 'linear-gradient(135deg, #d97706, #f59e0b)' :
-               'linear-gradient(135deg, #1e40af, #3b82f6)';
+        type === 'error' ? 'linear-gradient(135deg, #dc2626, #ef4444)' :
+            type === 'warning' ? 'linear-gradient(135deg, #d97706, #f59e0b)' :
+                'linear-gradient(135deg, #1e40af, #3b82f6)';
     const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : '⚡';
     toast.style.cssText = `background:${bg}; color:#fff; padding:9px 15px; border-radius:8px; box-shadow:0 10px 25px -5px rgba(0,0,0,0.5), 0 0 15px rgba(0,0,0,0.2); font-size:12.5px; font-weight:700; display:flex; align-items:center; gap:8px; pointer-events:auto; transition:all 0.22s cubic-bezier(0.16, 1, 0.3, 1); transform:translateY(-8px) scale(0.95); opacity:0;`;
     toast.innerHTML = `<span style="font-size:14px;">${icon}</span><span>${message}</span>`;
     container.appendChild(toast);
-    
+
     requestAnimationFrame(() => {
         toast.style.transform = "translateY(0) scale(1)";
         toast.style.opacity = "1";
     });
-    
+
     setTimeout(() => {
         toast.style.transform = "translateY(-8px) scale(0.95)";
         toast.style.opacity = "0";
@@ -327,8 +327,8 @@ function updateSpotPriceDisplay(spot, atm, und) {
     if (spot && Number(spot) > 0) {
         const numSpot = Number(spot);
         const prev = window._lastKnownSpot;
-        const fmtPrice = (numSpot >= 1000) ? 
-            numSpot.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 
+        const fmtPrice = (numSpot >= 1000) ?
+            numSpot.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) :
             numSpot.toFixed(2);
 
         if (spotEl) {
@@ -450,7 +450,7 @@ async function pollStraddleCycle() {
 
         // Automatic 5-second live refresh for Orderbook & Margins
         const orderbookSec = document.getElementById("orderbookOrdersSection");
-        const isOrderbookVisible = (window._straddleState.currentSubView === "orderbook") || 
+        const isOrderbookVisible = (window._straddleState.currentSubView === "orderbook") ||
             (orderbookSec && orderbookSec.style.display !== "none");
         if (isOrderbookVisible && (now - _lastOrderbookAutoRefreshTs >= 5000)) {
             _lastOrderbookAutoRefreshTs = now;
@@ -510,9 +510,9 @@ async function fetchStraddleState() {
                 window._straddleMargin = s.margin;
                 if (typeof updateFormAutoMultiplierPreview === "function") {
                     updateFormAutoMultiplierPreview();
-    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
-        scheduleAutoMultiplierLiveRecalc();
-    }
+                    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+                        scheduleAutoMultiplierLiveRecalc();
+                    }
                 }
             }
 
@@ -534,7 +534,7 @@ async function fetchStraddleState() {
 
             // In-place smart update for Algos view (never wipes focus/open dropdowns)
             const algosPanel = document.getElementById("straddleSubView_algos");
-            const isAlgosVisible = (window._straddleState.currentSubView === "algos") || 
+            const isAlgosVisible = (window._straddleState.currentSubView === "algos") ||
                 (algosPanel && algosPanel.style.display !== "none" && !algosPanel.classList.contains("hidden"));
             if (isAlgosVisible) {
                 renderStraddleAlgosTable(false);
@@ -726,7 +726,7 @@ function setStraddlePositionsViewFilter(filter) {
             if (isMatch && typeof btn.scrollIntoView === "function") {
                 try {
                     btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-                } catch (_) {}
+                } catch (_) { }
             }
         }
     });
@@ -1076,7 +1076,7 @@ function renderStraddleOpenPositionsTable() {
 
         const netQty = p.net_qty !== undefined ? p.net_qty : (p.quantity || 0);
         const absQty = Math.abs(netQty);
-        
+
         let buyAvg = Number(p.buy_avg || p.buy_price || p.buyAvgPrc || (side === "BUY" ? (p.avg_ent_price || p.avg_price || p.price) : 0) || 0.0);
         let sellAvg = Number(p.sell_avg || p.sell_price || p.sellAvgPrc || (side === "SELL" ? (p.avg_ent_price || p.avg_price || p.price) : 0) || 0.0);
 
@@ -1131,7 +1131,7 @@ function renderStraddleOpenPositionsTable() {
         const actionBtn = isOpen
             ? `<div style="display:flex; align-items:center; gap:4px; justify-content:center;">
                  ${(!p.strategy_id || p.source === 'Kotak Neo Direct / Manual' || (p.strategy_name && p.strategy_name.includes('Kotak Neo Direct')) || !p.strategy_name) ?
-                   `<button type="button" class="straddle-btn" style="background:linear-gradient(135deg, #0284c7, #2563eb); color:#fff; padding:3px 8px; font-size:10px; font-weight:800; border:none; border-radius:4px; cursor:pointer;" title="Add this live broker trade to an algo strategy" onclick="openAdoptBrokerPositionModal()">📥 Add to Algo</button>` : ''}
+                `<button type="button" class="straddle-btn" style="background:linear-gradient(135deg, #0284c7, #2563eb); color:#fff; padding:3px 8px; font-size:10px; font-weight:800; border:none; border-radius:4px; cursor:pointer;" title="Add this live broker trade to an algo strategy" onclick="openAdoptBrokerPositionModal()">📥 Add to Algo</button>` : ''}
                  <button type="button" class="straddle-btn btn-danger" style="padding:3px 8px; font-size:11px; font-weight:800;" onclick="squareOffSingleOpenPosition('${p.symbol}', '${p.instrument_key}', '${p.product}', ${absQty}, '${side}')">Exit</button>
                </div>`
             : `<span style="color:#64748b; font-size:11px;">-</span>`;
@@ -1150,7 +1150,7 @@ function renderStraddleOpenPositionsTable() {
                     <span style="background:#1e293b; color:#94a3b8; font-size:10.5px; padding:2px 6px; border-radius:4px; font-weight:700;">${p.product || 'NRML'}</span>
                 </td>
                 <td style="text-align:right; font-family:var(--font-mono); font-weight:800; color:#f8fafc;">
-                    ${isOpen ? `${absQty} (${netQty > 0 ? '+'+netQty : netQty})` : '0 (Squared)'}
+                    ${isOpen ? `${absQty} (${netQty > 0 ? '+' + netQty : netQty})` : '0 (Squared)'}
                 </td>
                 <td style="text-align:right; font-family:var(--font-mono); color:#cbd5e1;">
                     ${buyAvg > 0 ? '₹' + buyAvg.toFixed(2) : '-'}
@@ -1239,21 +1239,22 @@ function getCurrentlyDisplayedStrategies() {
     const strategies = window._straddleState?.allStrategies || [];
     if (!strategies.length) return [];
     const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
-    const activeUnd = typeof canonicalUnderlying === "function" ? canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY") : (window._activeGlobalUnderlying || "NIFTY").toUpperCase();
-    const hasUnderlyingMatch = strategies.some(s => {
-        const u = typeof canonicalUnderlying === "function" ? canonicalUnderlying(s.underlying || "NIFTY") : (s.underlying || "NIFTY").toUpperCase();
-        return u === activeUnd;
-    });
+    const activeUnd = canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY");
+    const hasUnderlyingMatch = strategies.some(s => canonicalUnderlying(s.underlying || "NIFTY") === activeUnd);
     let showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
 
     let filtered = strategies.filter(s => {
-        const und = typeof canonicalUnderlying === "function" ? canonicalUnderlying(s.underlying || "NIFTY") : (s.underlying || "NIFTY").toUpperCase();
-        if (!showAll && und !== activeUnd) return false;
         if (searchVal) {
             const name = (s.name || s.strategy_id || "").toLowerCase();
             const status = (s.status || "Ready").toLowerCase();
-            if (!name.includes(searchVal) && !und.toLowerCase().includes(searchVal) && !status.includes(searchVal)) return false;
+            const und = canonicalUnderlying(s.underlying || "NIFTY").toLowerCase();
+            return name.includes(searchVal) || und.includes(searchVal) || status.includes(searchVal);
         }
+        const hasActiveTrading = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "EXIT_PENDING" || p.status === "ERROR");
+        if (hasActiveTrading) return true;
+
+        const und = canonicalUnderlying(s.underlying || "NIFTY");
+        if (!showAll && und !== activeUnd) return false;
         return true;
     });
 
@@ -1282,7 +1283,6 @@ function onToggleAlgoSelect(strategyId, isChecked) {
 function toggleSelectAllStraddleAlgos(masterCb) {
     const isChecked = masterCb ? !!masterCb.checked : false;
     const displayed = getCurrentlyDisplayedStrategies();
-    
     if (isChecked) {
         displayed.forEach(s => {
             if (s && s.strategy_id) window._selectedAlgoIds.add(s.strategy_id);
@@ -1292,8 +1292,6 @@ function toggleSelectAllStraddleAlgos(masterCb) {
             if (s && s.strategy_id) window._selectedAlgoIds.delete(s.strategy_id);
         });
     }
-    
-    // Sync all row checkboxes and backgrounds in the DOM immediately
     const tbody = document.getElementById("straddleAlgosTableBody");
     if (tbody) {
         const rows = tbody.querySelectorAll("tr[data-strategy-id]");
@@ -1305,7 +1303,6 @@ function toggleSelectAllStraddleAlgos(masterCb) {
             if (cb) cb.checked = sel;
         });
     }
-    
     updateBulkActionsBar();
     updateMasterCheckboxState();
 }
@@ -1406,8 +1403,6 @@ async function bulkDeleteSelectedAlgos() {
             window._straddleState.allStrategies = window._straddleState.allStrategies.filter(s => !idSet.has(s.strategy_id));
         }
         window._selectedAlgoIds.clear();
-        updateBulkActionsBar();
-        updateMasterCheckboxState();
         renderStraddleAlgosTable(true);
 
         const resp = await fetch("/api/straddle/strategy/batch_delete", {
@@ -1515,13 +1510,19 @@ function renderStraddleAlgosTable(forceRebuild = false) {
 
         // Filter strategies focused on active underlying
         let filtered = strategies.filter(s => {
-            const und = canonicalUnderlying(s.underlying || "NIFTY");
-            if (!showAll && und !== activeUnd) return false;
+            // IF searching, search across all algos globally regardless of active asset filter
             if (searchVal) {
                 const name = (s.name || s.strategy_id || "").toLowerCase();
                 const status = (s.status || "Ready").toLowerCase();
-                if (!name.includes(searchVal) && !und.toLowerCase().includes(searchVal) && !status.includes(searchVal)) return false;
+                const und = canonicalUnderlying(s.underlying || "NIFTY").toLowerCase();
+                return name.includes(searchVal) || und.includes(searchVal) || status.includes(searchVal);
             }
+            // CRITICAL SAFETY RULE: Never hide strategies with OPEN positions, active trades, or errors!
+            const hasActiveTrading = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "EXIT_PENDING" || p.status === "ERROR");
+            if (hasActiveTrading) return true;
+
+            const und = canonicalUnderlying(s.underlying || "NIFTY");
+            if (!showAll && und !== activeUnd) return false;
             return true;
         });
 
@@ -1580,236 +1581,224 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             return;
         }
 
-    // Check if we can do an in-place update without rebuilding the DOM
-    const existingRows = tbody.querySelectorAll("tr[data-strategy-id]");
-    const activeEl = document.activeElement;
-    const isUserInteracting = activeEl && (tbody.contains(activeEl) || activeEl.id === "straddleAlgosSearch");
-    const hasOpenDropdown = !!document.querySelector(".straddle-dropdown-menu.show");
+        // Check if we can do an in-place update without rebuilding the DOM
+        const existingRows = tbody.querySelectorAll("tr[data-strategy-id]");
+        const activeEl = document.activeElement;
+        const isUserInteracting = activeEl && (tbody.contains(activeEl) || activeEl.id === "straddleAlgosSearch");
+        const hasOpenDropdown = !!document.querySelector(".straddle-dropdown-menu.show");
 
-    if (!forceRebuild && existingRows.length === filtered.length) {
-        let allMatch = true;
-        for (let i = 0; i < filtered.length; i++) {
-            if (existingRows[i].getAttribute("data-strategy-id") !== filtered[i].strategy_id) {
-                allMatch = false;
-                break;
+        if (!forceRebuild && existingRows.length === filtered.length) {
+            let allMatch = true;
+            for (let i = 0; i < filtered.length; i++) {
+                if (existingRows[i].getAttribute("data-strategy-id") !== filtered[i].strategy_id) {
+                    allMatch = false;
+                    break;
+                }
+            }
+            if (allMatch) {
+                // Update live numbers in place without touching DOM hierarchy
+                filtered.forEach(s => {
+                    const sid = s.strategy_id;
+                    const rawStatus = (s.status || "").toUpperCase();
+                    const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+                    const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
+                    const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.some(p => p.status === "ERROR") : false;
+
+                    const isAlgoEnabled = s.enabled !== false;
+                    let displayStatus = "Ready";
+                    let statusClass = "straddle-badge-ready";
+                    let dotColor = "#38bdf8";
+
+                    if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
+                        displayStatus = "Stopped";
+                        statusClass = "straddle-badge-terminated";
+                        dotColor = "#64748b";
+                    } else if (rawStatus === "TERMINATED") {
+                        displayStatus = "Terminated";
+                        statusClass = "straddle-badge-terminated";
+                        dotColor = "#ef4444";
+                    } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
+                        displayStatus = "Entry Failed";
+                        statusClass = "straddle-badge-terminated";
+                        dotColor = "#f43f5e";
+                    } else if (hasOpen) {
+                        displayStatus = "Trade Active";
+                        statusClass = "straddle-badge-active";
+                        dotColor = "#10b981";
+                    } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
+                        displayStatus = "Waiting Entry";
+                        statusClass = "straddle-badge-ready";
+                        dotColor = "#38bdf8";
+                    } else {
+                        displayStatus = "Ready";
+                        statusClass = "straddle-badge-ready";
+                        dotColor = "#38bdf8";
+                    }
+
+                    const switchInput = document.querySelector(`input[data-enable-sid="${sid}"]`);
+                    if (switchInput && switchInput !== document.activeElement) {
+                        switchInput.checked = isAlgoEnabled;
+                    }
+
+                    const advSwitchInput = document.querySelector(`input[data-adv-sl-sid="${sid}"]`);
+                    if (advSwitchInput && advSwitchInput !== document.activeElement) {
+                        const adv = s.advanced || s.advanced_settings || {};
+                        const isAdv = (adv.sl_order_placement === "Place in advance");
+                        advSwitchInput.checked = isAdv;
+                        const slider = advSwitchInput.nextElementSibling;
+                        if (slider) slider.style.background = isAdv ? "#10b981" : "";
+                    }
+
+                    const mtm = s.mtm || 0.0;
+                    const mtmFormatted = (mtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                    const mtmCell = document.getElementById(`algo_mtm_${sid}`);
+                    if (mtmCell) {
+                        mtmCell.textContent = mtmFormatted;
+                        mtmCell.style.color = mtm >= 0 ? "#10b981" : "#f43f5e";
+                    }
+
+                    const statusPill = document.getElementById(`algo_status_pill_${sid}`);
+                    if (statusPill) {
+                        statusPill.textContent = displayStatus;
+                        statusPill.className = `straddle-pill-badge ${statusClass}`;
+                    }
+
+                    const dot = document.getElementById(`algo_dot_${sid}`);
+                    if (dot) {
+                        dot.style.color = dotColor;
+                    }
+
+                    const errCell = document.getElementById(`algo_entry_err_${sid}`);
+                    const err = s.entry_error ? String(s.entry_error) : "-";
+                    if (errCell) {
+                        errCell.textContent = err;
+                        errCell.style.color = (err !== "-" && !err.toLowerCase().includes("waiting")) ? "#f43f5e" : "#64748b";
+                    }
+
+                    const errBadgeEl = document.getElementById(`algo_err_badge_${sid}`);
+                    const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((err !== "-" && !err.toLowerCase().includes("waiting")) ? 1 : 0);
+                    if (errBadgeEl) {
+                        if (errCount > 0) {
+                            errBadgeEl.style.display = "inline-flex";
+                            errBadgeEl.innerHTML = `<span style="font-size:12px;">⚠️</span><span class="algo-error-counter">${errCount}</span>`;
+                        } else {
+                            errBadgeEl.style.display = "none";
+                        }
+                    }
+                });
+                return;
             }
         }
-        if (allMatch) {
-            // Update live numbers in place without touching DOM hierarchy
-            filtered.forEach((s, idx) => {
-                const sid = s.strategy_id;
-                const isSelected = window._selectedAlgoIds.has(sid);
-                const tr = existingRows[idx];
-                if (tr) {
-                    tr.style.background = isSelected ? "rgba(59,130,246,0.08)" : "";
-                    const cb = tr.querySelector(".straddle-algo-checkbox");
-                    if (cb && cb !== document.activeElement) {
-                        cb.checked = isSelected;
-                    }
-                }
 
-                const rawStatus = (s.status || "").toUpperCase();
-                const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
-                const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
-                const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.some(p => p.status === "ERROR") : false;
-
-                const isAlgoEnabled = s.enabled !== false;
-                let displayStatus = "Ready";
-                let statusClass = "straddle-badge-ready";
-                let dotColor = "#38bdf8";
-
-                if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
-                    displayStatus = "Stopped";
-                    statusClass = "straddle-badge-terminated";
-                    dotColor = "#64748b";
-                } else if (rawStatus === "TERMINATED") {
-                    displayStatus = "Terminated";
-                    statusClass = "straddle-badge-terminated";
-                    dotColor = "#ef4444";
-                } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
-                    displayStatus = "Entry Failed";
-                    statusClass = "straddle-badge-terminated";
-                    dotColor = "#f43f5e";
-                } else if (hasOpen) {
-                    displayStatus = "Trade Active";
-                    statusClass = "straddle-badge-active";
-                    dotColor = "#10b981";
-                } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
-                    displayStatus = "Waiting Entry";
-                    statusClass = "straddle-badge-ready";
-                    dotColor = "#38bdf8";
-                } else {
-                    displayStatus = "Ready";
-                    statusClass = "straddle-badge-ready";
-                    dotColor = "#38bdf8";
-                }
-
-                const switchInput = document.querySelector(`input[data-enable-sid="${sid}"]`);
-                if (switchInput && switchInput !== document.activeElement) {
-                    switchInput.checked = isAlgoEnabled;
-                }
-
-                const advSwitchInput = document.querySelector(`input[data-adv-sl-sid="${sid}"]`);
-                if (advSwitchInput && advSwitchInput !== document.activeElement) {
-                    const adv = s.advanced || s.advanced_settings || {};
-                    const isAdv = (adv.sl_order_placement === "Place in advance");
-                    advSwitchInput.checked = isAdv;
-                    const slider = advSwitchInput.nextElementSibling;
-                    if (slider) slider.style.background = isAdv ? "#10b981" : "";
-                }
-
-                const mtm = s.mtm || 0.0;
-                const mtmFormatted = (mtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-                const mtmCell = document.getElementById(`algo_mtm_${sid}`);
-                if (mtmCell) {
-                    mtmCell.textContent = mtmFormatted;
-                    mtmCell.style.color = mtm >= 0 ? "#10b981" : "#f43f5e";
-                }
-
-                const statusPill = document.getElementById(`algo_status_pill_${sid}`);
-                if (statusPill) {
-                    statusPill.textContent = displayStatus;
-                    statusPill.className = `straddle-pill-badge ${statusClass}`;
-                }
-
-                const dot = document.getElementById(`algo_dot_${sid}`);
-                if (dot) {
-                    dot.style.color = dotColor;
-                }
-
-                const errCell = document.getElementById(`algo_entry_err_${sid}`);
-                const err = s.entry_error ? String(s.entry_error) : "-";
-                if (errCell) {
-                    errCell.textContent = err;
-                    errCell.style.color = (err !== "-" && !err.toLowerCase().includes("waiting")) ? "#f43f5e" : "#64748b";
-                }
-
-                const errBadgeEl = document.getElementById(`algo_err_badge_${sid}`);
-                const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((err !== "-" && !err.toLowerCase().includes("waiting")) ? 1 : 0);
-                if (errBadgeEl) {
-                    if (errCount > 0) {
-                        errBadgeEl.style.display = "inline-flex";
-                        errBadgeEl.innerHTML = `<span style="font-size:12px;">⚠️</span><span class="algo-error-counter">${errCount}</span>`;
-                    } else {
-                        errBadgeEl.style.display = "none";
-                    }
-                }
-            });
-            updateMasterCheckboxState();
-            updateBulkActionsBar();
+        // If user is actively typing or a dropdown is open, delay full rebuild to avoid losing focus
+        if (!forceRebuild && (isUserInteracting || hasOpenDropdown)) {
             return;
         }
-    }
 
-    // If user is actively typing or a dropdown is open, delay full rebuild to avoid losing focus
-    if (!forceRebuild && (isUserInteracting || hasOpenDropdown)) {
-        return;
-    }
+        const dayLabels = [
+            { key: "Monday", short: "Mon" },
+            { key: "Tuesday", short: "Tue" },
+            { key: "Wednesday", short: "Wed" },
+            { key: "Thursday", short: "Thu" },
+            { key: "Friday", short: "Fri" },
+            { key: "Saturday", short: "Sat" },
+            { key: "Sunday", short: "Sun" },
+        ];
 
-    const dayLabels = [
-        { key: "Monday", short: "Mon" },
-        { key: "Tuesday", short: "Tue" },
-        { key: "Wednesday", short: "Wed" },
-        { key: "Thursday", short: "Thu" },
-        { key: "Friday", short: "Fri" },
-        { key: "Saturday", short: "Sat" },
-        { key: "Sunday", short: "Sun" },
-    ];
+        let rowsHtml = "";
+        filtered.forEach(s => {
+            const isSelected = window._selectedAlgoIds.has(s.strategy_id);
+            const rawStatus = (s.status || "").toUpperCase();
+            const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+            const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
+            const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR") : false;
+            const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((s.entry_error && s.entry_error !== "-" && !s.entry_error.toLowerCase().includes("waiting")) ? 1 : 0);
 
-    let rowsHtml = "";
-    filtered.forEach(s => {
-        const isSelected = window._selectedAlgoIds.has(s.strategy_id);
-        const rawStatus = (s.status || "").toUpperCase();
-        const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
-        const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
-        const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR") : false;
-        const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((s.entry_error && s.entry_error !== "-" && !s.entry_error.toLowerCase().includes("waiting")) ? 1 : 0);
+            const isAlgoEnabled = s.enabled !== false;
+            let displayStatus = "Ready";
+            let statusClass = "straddle-badge-ready";
+            let dotColor = "#38bdf8";
 
-        const isAlgoEnabled = s.enabled !== false;
-        let displayStatus = "Ready";
-        let statusClass = "straddle-badge-ready";
-        let dotColor = "#38bdf8";
+            if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
+                displayStatus = "Stopped";
+                statusClass = "straddle-badge-terminated";
+                dotColor = "#64748b";
+            } else if (rawStatus === "TERMINATED") {
+                displayStatus = "Terminated";
+                statusClass = "straddle-badge-terminated";
+                dotColor = "#ef4444";
+            } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
+                displayStatus = "Entry Failed";
+                statusClass = "straddle-badge-terminated";
+                dotColor = "#f43f5e";
+            } else if (hasOpen) {
+                displayStatus = "Trade Active";
+                statusClass = "straddle-badge-active";
+                dotColor = "#10b981";
+            } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
+                displayStatus = "Waiting Entry";
+                statusClass = "straddle-badge-ready";
+                dotColor = "#38bdf8";
+            } else {
+                displayStatus = "Ready";
+                statusClass = "straddle-badge-ready";
+                dotColor = "#38bdf8";
+            }
 
-        if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
-            displayStatus = "Stopped";
-            statusClass = "straddle-badge-terminated";
-            dotColor = "#64748b";
-        } else if (rawStatus === "TERMINATED") {
-            displayStatus = "Terminated";
-            statusClass = "straddle-badge-terminated";
-            dotColor = "#ef4444";
-        } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
-            displayStatus = "Entry Failed";
-            statusClass = "straddle-badge-terminated";
-            dotColor = "#f43f5e";
-        } else if (hasOpen) {
-            displayStatus = "Trade Active";
-            statusClass = "straddle-badge-active";
-            dotColor = "#10b981";
-        } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
-            displayStatus = "Waiting Entry";
-            statusClass = "straddle-badge-ready";
-            dotColor = "#38bdf8";
-        } else {
-            displayStatus = "Ready";
-            statusClass = "straddle-badge-ready";
-            dotColor = "#38bdf8";
-        }
+            const multType = (s.multiplier_type || "MANUAL").toUpperCase();
+            const isManual = (multType !== "AUTO");
+            const multiplier = s.multiplier || 1;
+            const cushionMargin = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? s.cushion_margin : 15000;
+            const brokerMargin = s.broker_margin_per_lot || 130750.0;
+            const totalMarginPerLot = brokerMargin + cushionMargin;
+            let liveAvailCap = 0.0;
+            if (window._straddleState?.margin?.available_margin !== undefined && window._straddleState?.margin?.available_margin !== null) {
+                liveAvailCap = parseFloat(window._straddleState.margin.available_margin);
+            } else if (window._straddleMargin?.available_margin !== undefined && window._straddleMargin?.available_margin !== null) {
+                liveAvailCap = parseFloat(window._straddleMargin.available_margin);
+            } else if (window._straddleState?.margin?.available_cash !== undefined && window._straddleState?.margin?.available_cash !== null) {
+                liveAvailCap = parseFloat(window._straddleState.margin.available_cash);
+            }
+            if (liveAvailCap <= 0) liveAvailCap = 200000.0;
+            const effMult = s.effective_multiplier || (isManual ? multiplier : Math.max(1, Math.floor(liveAvailCap / Math.max(1, totalMarginPerLot))));
 
-        const multType = (s.multiplier_type || "MANUAL").toUpperCase();
-        const isManual = (multType !== "AUTO");
-        const multiplier = s.multiplier || 1;
-        const cushionMargin = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? s.cushion_margin : 15000;
-        const brokerMargin = s.broker_margin_per_lot || 130750.0;
-        const totalMarginPerLot = brokerMargin + cushionMargin;
-        let liveAvailCap = 0.0;
-        if (window._straddleState?.margin?.available_margin !== undefined && window._straddleState?.margin?.available_margin !== null) {
-            liveAvailCap = parseFloat(window._straddleState.margin.available_margin);
-        } else if (window._straddleMargin?.available_margin !== undefined && window._straddleMargin?.available_margin !== null) {
-            liveAvailCap = parseFloat(window._straddleMargin.available_margin);
-        } else if (window._straddleState?.margin?.available_cash !== undefined && window._straddleState?.margin?.available_cash !== null) {
-            liveAvailCap = parseFloat(window._straddleState.margin.available_cash);
-        }
-        if (liveAvailCap <= 0) liveAvailCap = 200000.0;
-        const effMult = s.effective_multiplier || (isManual ? multiplier : Math.max(1, Math.floor(liveAvailCap / Math.max(1, totalMarginPerLot))));
+            const mtm = s.mtm || 0.0;
+            const mtmClass = mtm >= 0 ? "color:#10b981;" : "color:#f43f5e;";
+            const mtmFormatted = (mtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const name = s.name || s.strategy_id || "";
+            const startTime = s.start_time || "09:15:56";
+            const endTime = s.end_time || "15:29:50";
+            const schedDays = s.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+            const entryErr = s.entry_error ? String(s.entry_error) : "-";
+            const adv = s.advanced || s.advanced_settings || {};
+            const isAdvSl = (adv.sl_order_placement === "Place in advance");
+            const isErrActive = (entryErr !== "-" && !entryErr.toLowerCase().includes("waiting"));
 
-        const mtm = s.mtm || 0.0;
-        const mtmClass = mtm >= 0 ? "color:#10b981;" : "color:#f43f5e;";
-        const mtmFormatted = (mtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const name = s.name || s.strategy_id || "";
-        const startTime = s.start_time || "09:15:56";
-        const endTime = s.end_time || "15:29:50";
-        const schedDays = s.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-        const entryErr = s.entry_error ? String(s.entry_error) : "-";
-        const adv = s.advanced || s.advanced_settings || {};
-        const isAdvSl = (adv.sl_order_placement === "Place in advance");
-        const isErrActive = (entryErr !== "-" && !entryErr.toLowerCase().includes("waiting"));
+            const isWaitingPrem = entryErr.toLowerCase().includes("waiting for premium");
+            const entryErrColor = isErrActive ? '#f43f5e' : (isWaitingPrem ? '#38bdf8' : '#64748b');
+            const entryErrWeight = (isErrActive || isWaitingPrem) ? '700' : '400';
 
-        const isWaitingPrem = entryErr.toLowerCase().includes("waiting for premium");
-        const entryErrColor = isErrActive ? '#f43f5e' : (isWaitingPrem ? '#38bdf8' : '#64748b');
-        const entryErrWeight = (isErrActive || isWaitingPrem) ? '700' : '400';
+            const safeJsSid = (s.strategy_id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const safeJsName = (name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const safeDispName = escapeHtml(name);
 
-        const safeJsSid = (s.strategy_id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const safeJsName = (name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const safeDispName = escapeHtml(name);
-
-        // Build interactive day selector badges
-        let daysHtml = `<div style="display:inline-flex; gap:3px; flex-wrap:wrap;">`;
-        dayLabels.forEach(d => {
-            const isDayActive = schedDays.includes(d.key);
-            const badgeBg = isDayActive ? "#2563eb" : "#1e293b";
-            const badgeColor = isDayActive ? "#ffffff" : "#64748b";
-            const border = isDayActive ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.06)";
-            daysHtml += `
+            // Build interactive day selector badges
+            let daysHtml = `<div style="display:inline-flex; gap:3px; flex-wrap:wrap;">`;
+            dayLabels.forEach(d => {
+                const isDayActive = schedDays.includes(d.key);
+                const badgeBg = isDayActive ? "#2563eb" : "#1e293b";
+                const badgeColor = isDayActive ? "#ffffff" : "#64748b";
+                const border = isDayActive ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.06)";
+                daysHtml += `
                 <button type="button" onclick="toggleAlgoDay('${safeJsSid}', '${d.key}')" style="background:${badgeBg}; color:${badgeColor}; border:${border}; border-radius:4px; padding:1px 5px; font-size:10px; font-weight:700; cursor:pointer;" title="Click to Toggle ${d.key}">
                     ${d.short}
                 </button>
             `;
-        });
-        daysHtml += `</div>`;
+            });
+            daysHtml += `</div>`;
 
-        rowsHtml += `
+            rowsHtml += `
             <tr data-strategy-id="${s.strategy_id}" style="${isSelected ? 'background:rgba(59,130,246,0.08);' : ''}">
                 <td class="algo-col-select" style="text-align:center;">
                     <input type="checkbox" class="straddle-algo-checkbox" data-id="${s.strategy_id}" ${isSelected ? "checked" : ""} onchange="onToggleAlgoSelect('${safeJsSid}', this.checked)">
@@ -1841,7 +1830,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                         ${isManual ? `
                             <input type="number" class="straddle-input" style="width:52px; text-align:center; padding:2px 4px; font-weight:800;" value="${multiplier}" min="1" max="100" onchange="onChangeAlgoMultiplier('${safeJsSid}', this.value)" title="Manual Lots Multiplier">
                         ` : `
-                            <div style="display:flex; align-items:center; gap:4px;" title="Auto Determined: ${effMult} Lots&#10;Broker Req: ₹${(brokerMargin/100000).toFixed(2)}L + Cushion: ₹${(cushionMargin/1000).toFixed(0)}k = ₹${(totalMarginPerLot/100000).toFixed(2)}L per lot">
+                            <div style="display:flex; align-items:center; gap:4px;" title="Auto Determined: ${effMult} Lots&#10;Broker Req: ₹${(brokerMargin / 100000).toFixed(2)}L + Cushion: ₹${(cushionMargin / 1000).toFixed(0)}k = ₹${(totalMarginPerLot / 100000).toFixed(2)}L per lot">
                                 <span style="font-size:11px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:1px 5px; border-radius:3px; white-space:nowrap;">⚡ ${effMult}x</span>
                                 <input type="number" class="straddle-input" style="width:58px; text-align:center; padding:1px 2px; font-size:10.5px; font-weight:700;" value="${cushionMargin}" step="1000" min="0" onchange="onChangeAlgoCushionMargin('${safeJsSid}', this.value)" title="Cushion Margin per lot (₹)">
                             </div>
@@ -1882,9 +1871,9 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 </td>
             </tr>
         `;
-    });
+        });
 
-    tbody.innerHTML = rowsHtml;
+        tbody.innerHTML = rowsHtml;
     } catch (err) {
         console.error("renderStraddleAlgosTable error:", err);
     }
@@ -1954,17 +1943,17 @@ function toggleDropdownMenu(id, evt) {
     if (evt) evt.stopPropagation();
     const target = document.getElementById(id);
     const isShown = target && target.classList.contains("show");
-    
+
     // Close all open dropdowns first
     document.querySelectorAll(".straddle-dropdown-menu").forEach(m => m.classList.remove("show"));
-    
+
     if (target && !isShown) {
         const btn = evt ? (evt.currentTarget || evt.target) : target.previousElementSibling;
         if (btn && btn.getBoundingClientRect) {
             const rect = btn.getBoundingClientRect();
             target.style.position = "fixed";
             target.style.zIndex = "999999";
-            
+
             // Check vertical positioning
             const menuHeight = 250;
             const spaceBelow = window.innerHeight - rect.bottom;
@@ -1973,7 +1962,7 @@ function toggleDropdownMenu(id, evt) {
             } else {
                 target.style.top = `${rect.bottom + 4}px`;
             }
-            
+
             // Check horizontal positioning
             const menuWidth = 190;
             const spaceRight = window.innerWidth - rect.left;
@@ -2049,7 +2038,7 @@ async function onToggleAlgoEnable(strategyId, isChecked) {
         }
     }
     showStraddleToast(`Strategy '${strat ? strat.name : strategyId}' ${isChecked ? 'Enabled' : 'Disabled'}`, isChecked ? "success" : "info", 1800);
-    
+
     try {
         const resp = await fetch("/api/straddle/strategy/toggle_enable", {
             method: "POST",
@@ -2125,9 +2114,9 @@ async function onChangeAlgoCushionMargin(strategyId, val) {
         const formInput = document.getElementById("cfgCushionMargin");
         if (formInput && parseFloat(formInput.value) !== cushion) formInput.value = cushion;
         updateFormAutoMultiplierPreview();
-    if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
-        scheduleAutoMultiplierLiveRecalc();
-    }
+        if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
+            scheduleAutoMultiplierLiveRecalc();
+        }
     }
 
     renderStraddleAlgosTable(true);
@@ -2204,24 +2193,27 @@ async function onChangeAlgoMultiplier(strategyId, val) {
 window.onChangeAlgoMultiplier = onChangeAlgoMultiplier;
 
 function openStrategyInTerminal(strategyId) {
-    const strat = (window._straddleState.allStrategies || []).find(s => s.strategy_id === strategyId);
+    const strat = (window._straddleState.allStrategies || []).find(s => 
+        (s.strategy_id && String(s.strategy_id).trim().toLowerCase() === String(strategyId).trim().toLowerCase()) ||
+        (s.name && String(s.name).trim().toLowerCase() === String(strategyId).trim().toLowerCase())
+    );
     if (strat) {
         window._straddleState.activeStrategy = strat;
         window._straddleState.activeStrategyId = strat.strategy_id;
     }
-    
+
     // Switch view to terminal / algo detail
     switchStraddleSubView("terminal");
-    
+
     // Populate the strategy settings builder form
     if (strat) {
         populateStraddleSettingsForm(strat);
         renderStraddlePositions(strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
     }
-    
+
     // Asynchronously notify backend of active strategy
     onStraddleStrategySelect(strategyId);
-    
+
     // Smooth scroll to top of page
     window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -2234,7 +2226,7 @@ async function saveStraddleStrategyAndGoBack() {
 async function startStraddleAlgoDirect(strategyId) {
     const strat = (window._straddleState.allStrategies || []).find(s => s.strategy_id === strategyId);
     const name = strat ? strat.name : strategyId;
-    
+
     // Instant optimistic UI feedback
     if (strat) {
         strat.status = "TRADE_ACTIVE";
@@ -2349,7 +2341,7 @@ async function straddleResetStrategyDirect(strategyId) {
         renderStraddlePositions([], 0.0, 0.0);
         renderStraddleHeader(window._straddleState);
     }
-    
+
     // Re-render table immediately to wipe error badge and Retry button
     renderStraddleAlgosTable(true);
 
@@ -2458,8 +2450,6 @@ async function deleteStraddleAlgo(strategyId) {
             window._straddleState.allStrategies = window._straddleState.allStrategies.filter(s => s.strategy_id !== strategyId);
         }
         window._selectedAlgoIds.delete(strategyId);
-        updateBulkActionsBar();
-        updateMasterCheckboxState();
         renderStraddleAlgosTable(true);
 
         const resp = await fetch("/api/straddle/strategy/delete", {
@@ -3135,7 +3125,7 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.lineTo(padLeft + 160, padTop - 17);
         ctx.stroke();
         ctx.fillStyle = "#38bdf8";
-        ctx.fillText(`⚡ ${uSym} Intraday Spot (₹ ${Number(curSpot).toLocaleString('en-IN', {minimumFractionDigits: 1})})`, padLeft + 166, padTop - 13);
+        ctx.fillText(`⚡ ${uSym} Intraday Spot (₹ ${Number(curSpot).toLocaleString('en-IN', { minimumFractionDigits: 1 })})`, padLeft + 166, padTop - 13);
     }
 
     // 6. X-axis timestamps
@@ -3259,8 +3249,8 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         if (hasUnderlying && currUndPrice !== null) {
             ctx.font = "bold 11px monospace";
             ctx.fillStyle = "#38bdf8";
-            ctx.fillText(`Spot: ₹ ${currUndPrice.toLocaleString('en-IN', {minimumFractionDigits: 2})}`, tipX + 10, tipY + 56);
-            
+            ctx.fillText(`Spot: ₹ ${currUndPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, tipX + 10, tipY + 56);
+
             const drawdownVal = Math.max(0, (pnlData.max_pnl - pt.pnl));
             ctx.font = "10px Inter, sans-serif";
             ctx.fillStyle = "#94a3b8";
@@ -3316,7 +3306,7 @@ function setupPnlCanvasEvents() {
                 const uIdx = Math.min(pnlData.underlying_points.length - 1, Math.max(0, Math.round((idx / (pnlData.points.length - 1)) * (pnlData.underlying_points.length - 1))));
                 const uPt = pnlData.underlying_points[uIdx];
                 if (uPt) {
-                    spotText = ` | Spot: <b style="color:#38bdf8;">₹ ${Number(uPt.price || uPt.close || 0).toLocaleString('en-IN', {minimumFractionDigits: 1})}</b>`;
+                    spotText = ` | Spot: <b style="color:#38bdf8;">₹ ${Number(uPt.price || uPt.close || 0).toLocaleString('en-IN', { minimumFractionDigits: 1 })}</b>`;
                 }
             }
             cursorLabel.innerHTML = `Time: <b style="color:#ffffff;">${pt.timestamp}</b> | P&L: <b style="color:${color};">${pnlFormatted}</b>${spotText}`;
@@ -3404,10 +3394,24 @@ function onOrderbookClientIdChange(clientId) {
 }
 
 function openStrategyFromOrderbook(strategyId) {
-    if (strategyId && window._straddleState && window._straddleState.strategies && window._straddleState.strategies[strategyId]) {
-        openStrategyInTerminal(strategyId);
+    if (!strategyId) {
+        switchStraddleSubView("algos");
+        return;
+    }
+    const strategies = window._straddleState?.allStrategies || [];
+    const strat = strategies.find(s => 
+        (s.strategy_id && String(s.strategy_id).trim().toLowerCase() === String(strategyId).trim().toLowerCase()) ||
+        (s.name && String(s.name).trim().toLowerCase() === String(strategyId).trim().toLowerCase())
+    );
+    if (strat && strat.strategy_id) {
+        openStrategyInTerminal(strat.strategy_id);
     } else {
         switchStraddleSubView("algos");
+        const searchInput = document.getElementById("straddleAlgosSearch");
+        if (searchInput) {
+            searchInput.value = strategyId;
+            renderStraddleAlgosTable(true);
+        }
     }
 }
 
@@ -3665,7 +3669,7 @@ function renderStraddleOrderbookTable() {
 
         const priceDisplay = o.price > 0 ? `₹${parseFloat(o.price).toFixed(2)}` : '0.00';
         const trigPriceDisplay = o.trigger_price > 0 ? `₹${parseFloat(o.trigger_price).toFixed(2)}` : '0.00';
-        
+
         let orderTypeDisplay = o.order_type || "Limit (L)";
         if (orderTypeDisplay.toUpperCase().includes("SL-L") || orderTypeDisplay.toUpperCase().includes("SLL")) {
             orderTypeDisplay = "SL Limit (SLL)";
@@ -3794,7 +3798,7 @@ async function loadStraddleMargin(btn) {
                 <div style="background:#0c0d12; border:1px solid rgba(16,185,129,0.35); border-radius:12px; padding:18px 22px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.6);">
                     <div>
                         <div style="font-size:11.5px; font-weight:800; color:#94a3b8; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:4px;">Available to trade (Cash + Collateral)</div>
-                        <div style="font-size:28px; font-weight:900; color:#10b981; font-family:var(--font-mono); letter-spacing:-0.5px;">₹ ${availCash.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-size:28px; font-weight:900; color:#10b981; font-family:var(--font-mono); letter-spacing:-0.5px;">₹ ${availCash.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                         <div style="font-size:11.5px; color:#34d399; font-weight:700; margin-top:4px; display:flex; align-items:center; gap:6px;">
                             <span style="width:7px; height:7px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981; display:inline-block;"></span>
                             Instant intraday & F&O execution limit active
@@ -3819,7 +3823,7 @@ async function loadStraddleMargin(btn) {
                             <span style="color:#94a3b8; font-size:11.5px; font-weight:700;">Cash Balance</span>
                             <span style="font-size:14px;">💵</span>
                         </div>
-                        <div style="font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:18px; margin-bottom:2px;">₹ ${availCash.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-family:var(--font-mono); font-weight:800; color:#f8fafc; font-size:18px; margin-bottom:2px;">₹ ${availCash.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                         <div style="font-size:10.5px; color:#64748b;">Direct ledger funds for trading</div>
                     </div>
 
@@ -3829,7 +3833,7 @@ async function loadStraddleMargin(btn) {
                             <span style="color:#94a3b8; font-size:11.5px; font-weight:700;">Margin from Pledge</span>
                             <span style="font-size:14px;">📈</span>
                         </div>
-                        <div style="font-family:var(--font-mono); font-weight:800; color:#38bdf8; font-size:18px; margin-bottom:2px;">₹ ${collateral.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-family:var(--font-mono); font-weight:800; color:#38bdf8; font-size:18px; margin-bottom:2px;">₹ ${collateral.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                         <div style="font-size:10.5px; color:#64748b;">Collateral from stock / ETF pledges</div>
                     </div>
 
@@ -3839,7 +3843,7 @@ async function loadStraddleMargin(btn) {
                             <span style="color:#94a3b8; font-size:11.5px; font-weight:700;">Margin Used</span>
                             <span style="font-size:14px;">⚡</span>
                         </div>
-                        <div style="font-family:var(--font-mono); font-weight:800; color:#f43f5e; font-size:18px; margin-bottom:2px;">₹ ${usedMargin.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-family:var(--font-mono); font-weight:800; color:#f43f5e; font-size:18px; margin-bottom:2px;">₹ ${usedMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                         <div style="font-size:10.5px; color:#64748b;">Margin committed for open positions</div>
                     </div>
 
@@ -3849,7 +3853,7 @@ async function loadStraddleMargin(btn) {
                             <span style="color:#94a3b8; font-size:11.5px; font-weight:700;">Unavailable to Trade</span>
                             <span style="font-size:14px;">🛑</span>
                         </div>
-                        <div style="font-family:var(--font-mono); font-weight:800; color:#fbbf24; font-size:18px; margin-bottom:2px;">₹ ${unavail.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                        <div style="font-family:var(--font-mono); font-weight:800; color:#fbbf24; font-size:18px; margin-bottom:2px;">₹ ${unavail.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                         <div style="font-size:10.5px; color:#64748b;">Funds in T+1 clearing / unsettled credits</div>
                     </div>
                 </div>
@@ -3860,19 +3864,19 @@ async function loadStraddleMargin(btn) {
                     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#111319; border:1px solid rgba(255,255,255,0.05); border-radius:6px;">
                             <span style="color:#94a3b8; font-size:11.5px;">SPAN Margin (Regulatory):</span>
-                            <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:12.5px;">₹ ${span.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                            <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:12.5px;">₹ ${span.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                         </div>
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#111319; border:1px solid rgba(255,255,255,0.05); border-radius:6px;">
                             <span style="color:#94a3b8; font-size:11.5px;">Exposure Margin:</span>
-                            <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:12.5px;">₹ ${exposure.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                            <span style="font-family:var(--font-mono); font-weight:700; color:#cbd5e1; font-size:12.5px;">₹ ${exposure.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                         </div>
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#111319; border:1px solid rgba(255,255,255,0.05); border-radius:6px;">
                             <span style="color:#94a3b8; font-size:11.5px;">Payin Received Today:</span>
-                            <span style="font-family:var(--font-mono); font-weight:700; color:#10b981; font-size:12.5px;">₹ ${payin.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                            <span style="font-family:var(--font-mono); font-weight:700; color:#10b981; font-size:12.5px;">₹ ${payin.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                         </div>
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:linear-gradient(135deg, rgba(37,99,235,0.15), rgba(16,185,129,0.15)); border:1px solid rgba(59,130,246,0.4); border-radius:6px;">
                             <span style="color:#f8fafc; font-size:12px; font-weight:800;">Total Account Value:</span>
-                            <span style="font-family:var(--font-mono); font-weight:900; color:#ffffff; font-size:13.5px;">₹ ${(availCash + usedMargin + unavail).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                            <span style="font-family:var(--font-mono); font-weight:900; color:#ffffff; font-size:13.5px;">₹ ${(availCash + usedMargin + unavail).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                         </div>
                     </div>
                 </div>
@@ -3896,7 +3900,7 @@ async function loadStraddleMargin(btn) {
 function updateStraddleStrategyDropdown(strategies, activeStrat) {
     const sel = document.getElementById("straddleStrategySelect");
     if (!sel) return;
-    
+
     const activeId = activeStrat ? activeStrat.strategy_id : (window._straddleState?.activeStrategyId || null);
     const curOpts = Array.from(sel.options).map(o => o.value).join(",");
     const newOpts = (strategies || []).map(s => s.strategy_id).join(",");
@@ -4500,9 +4504,9 @@ function autoFitErrorLegLots(idx, marginInfo) {
         lotInput.value = fittedLots;
         markRunningLegChanged(idx);
         if (marginInfo.available < marginPerLot) {
-            showStraddleToast(`⚠️ Available cash (₹${marginInfo.available.toLocaleString('en-IN', {maximumFractionDigits:2})}) is less than 1 lot required margin (₹${marginPerLot.toLocaleString('en-IN', {maximumFractionDigits:2})}). Set to 1 lot. Consider buying hedge first to reduce margin.`, "warning", 4500);
+            showStraddleToast(`⚠️ Available cash (₹${marginInfo.available.toLocaleString('en-IN', { maximumFractionDigits: 2 })}) is less than 1 lot required margin (₹${marginPerLot.toLocaleString('en-IN', { maximumFractionDigits: 2 })}). Set to 1 lot. Consider buying hedge first to reduce margin.`, "warning", 4500);
         } else {
-            showStraddleToast(`⚙️ Auto-fitted lots to ${fittedLots} based on available cash ₹${marginInfo.available.toLocaleString('en-IN', {maximumFractionDigits:2})}.`, "success", 3000);
+            showStraddleToast(`⚙️ Auto-fitted lots to ${fittedLots} based on available cash ₹${marginInfo.available.toLocaleString('en-IN', { maximumFractionDigits: 2 })}.`, "success", 3000);
         }
     } else {
         lotInput.value = 1;
@@ -5145,85 +5149,85 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         let html = "";
         displayPositions.forEach((pos) => {
             const idx = pos._origIdx;
-                const rawStatus = String(pos.status || "OPEN").toUpperCase();
-                const isError = (rawStatus === "ERROR" || !!pos.error_message);
-                const isCompleteOrClosed = (rawStatus === "COMPLETE" || rawStatus === "CLOSED" || rawStatus === "EXITED" || (pos.avg_exit_price && Number(pos.avg_exit_price) > 0 && pos.exit_reason && pos.exit_reason !== "-"));
-                const isOpen = !isError && !isCompleteOrClosed && (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
-                const isClosed = !isError && (isCompleteOrClosed || (!isOpen && !isError));
-                const isReEntry = !!(pos.is_re_entry || pos.re_entry || (pos.re_execute_count && pos.re_execute_count > 0));
-                const stratId = pos.strategy_id || window._straddleState?.activeStrategy?.strategy_id || '';
-                const isFilledOrPartial = isOpen && (Number(pos.entry_qty || 0) > 0 || (pos.avg_ent_price && Number(pos.avg_ent_price) > 0));
-                const isInteractiveRow = isFilledOrPartial;
-                const canAdjustStrikeAndLots = (isOpen || isError) && !isCompleteOrClosed;
+            const rawStatus = String(pos.status || "OPEN").toUpperCase();
+            const isError = (rawStatus === "ERROR" || !!pos.error_message);
+            const isCompleteOrClosed = (rawStatus === "COMPLETE" || rawStatus === "CLOSED" || rawStatus === "EXITED" || (pos.avg_exit_price && Number(pos.avg_exit_price) > 0 && pos.exit_reason && pos.exit_reason !== "-"));
+            const isOpen = !isError && !isCompleteOrClosed && (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
+            const isClosed = !isError && (isCompleteOrClosed || (!isOpen && !isError));
+            const isReEntry = !!(pos.is_re_entry || pos.re_entry || (pos.re_execute_count && pos.re_execute_count > 0));
+            const stratId = pos.strategy_id || window._straddleState?.activeStrategy?.strategy_id || '';
+            const isFilledOrPartial = isOpen && (Number(pos.entry_qty || 0) > 0 || (pos.avg_ent_price && Number(pos.avg_ent_price) > 0));
+            const isInteractiveRow = isFilledOrPartial;
+            const canAdjustStrikeAndLots = (isOpen || isError) && !isCompleteOrClosed;
 
-                // Retrieve any pending user edits for this leg so they are never lost
-                const pending = (window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]) || null;
-                const hasPending = !!pending;
+            // Retrieve any pending user edits for this leg so they are never lost
+            const pending = (window._straddlePendingLegEdits && window._straddlePendingLegEdits[idx]) || null;
+            const hasPending = !!pending;
 
-                // Status Badge
-                let statusHtml = "";
-                if (isError) {
-                    statusHtml = `
+            // Status Badge
+            let statusHtml = "";
+            if (isError) {
+                statusHtml = `
                         <div class="straddle-status-container">
                             <span class="straddle-status-pill status-badge-error">ERROR</span>
                             ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
                         </div>
                     `;
-                } else if (isOpen) {
-                    statusHtml = `
+            } else if (isOpen) {
+                statusHtml = `
                         <div class="straddle-status-container">
                             <span class="straddle-status-pill status-badge-open">OPEN</span>
                             ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
                         </div>
                     `;
-                } else {
-                    statusHtml = `
+            } else {
+                statusHtml = `
                         <div class="straddle-status-container">
                             <span class="straddle-status-pill status-badge-closed">CLOSED</span>
                             ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
                         </div>
                     `;
-                }
+            }
 
-                // Side Badge
-                const side = String(pos.side || "SELL").toUpperCase();
-                const sideClass = (side === "BUY") ? "side-badge-buy" : "side-badge-sell";
+            // Side Badge
+            const side = String(pos.side || "SELL").toUpperCase();
+            const sideClass = (side === "BUY") ? "side-badge-buy" : "side-badge-sell";
 
-                // Symbol Styling & Accent Border
-                const sym = pos.symbol || pos.trading_symbol || 'NIFTY OPT';
-                let symAccentClass = "sym-ce";
-                if (side === "BUY") {
-                    symAccentClass = "sym-buy";
-                } else if (sym.toUpperCase().includes("PE") || (pos.option_type && String(pos.option_type).toUpperCase() === "PE")) {
-                    symAccentClass = "sym-pe";
-                } else {
-                    symAccentClass = "sym-ce";
-                }
+            // Symbol Styling & Accent Border
+            const sym = pos.symbol || pos.trading_symbol || 'NIFTY OPT';
+            let symAccentClass = "sym-ce";
+            if (side === "BUY") {
+                symAccentClass = "sym-buy";
+            } else if (sym.toUpperCase().includes("PE") || (pos.option_type && String(pos.option_type).toUpperCase() === "PE")) {
+                symAccentClass = "sym-pe";
+            } else {
+                symAccentClass = "sym-ce";
+            }
 
-                // Expiry subtext & exchange segment prefix
-                const exSeg = (pos.exchange_segment || (pos.contract && (pos.contract.segment || pos.contract.exchange_segment)) || '').toLowerCase();
-                const posUnd = (pos.underlying || (pos.contract && pos.contract.underlying) || sym).toUpperCase();
-                const isCommPos = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].some(c => posUnd.includes(c)) || exSeg.includes("mcx");
-                const isBsePos = ["SENSEX", "BANKEX"].some(b => posUnd.includes(b)) || exSeg.includes("bse");
-                const segPrefix = isCommPos ? "MCX" : (isBsePos ? "BFO" : "NFO");
+            // Expiry subtext & exchange segment prefix
+            const exSeg = (pos.exchange_segment || (pos.contract && (pos.contract.segment || pos.contract.exchange_segment)) || '').toLowerCase();
+            const posUnd = (pos.underlying || (pos.contract && pos.contract.underlying) || sym).toUpperCase();
+            const isCommPos = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].some(c => posUnd.includes(c)) || exSeg.includes("mcx");
+            const isBsePos = ["SENSEX", "BANKEX"].some(b => posUnd.includes(b)) || exSeg.includes("bse");
+            const segPrefix = isCommPos ? "MCX" : (isBsePos ? "BFO" : "NFO");
 
-                let rawExp = pos.contract ? (pos.contract.expiry_date || pos.contract.expiry_str || '') : (pos.expiry_str || pos.expiry || '');
-                rawExp = String(rawExp).replace(/^(NFO|MCX|BFO|BSE|NSE)\s*/i, '').trim();
-                let expiryText = rawExp ? `${segPrefix} ${rawExp}` : segPrefix;
+            let rawExp = pos.contract ? (pos.contract.expiry_date || pos.contract.expiry_str || '') : (pos.expiry_str || pos.expiry || '');
+            rawExp = String(rawExp).replace(/^(NFO|MCX|BFO|BSE|NSE)\s*/i, '').trim();
+            let expiryText = rawExp ? `${segPrefix} ${rawExp}` : segPrefix;
 
-                // Quantity column - derive lots from actual filled quantity so failed orders never display ghost lots
-                const lotSizeVal = Number(pos.lot_size || 65);
-                const actualFilledLots = Math.max(1, Math.round((Number(pos.quantity || pos.entry_qty || 65)) / lotSizeVal));
-                const savedErr = (window._straddleErrorLegEdits && window._straddleErrorLegEdits[idx]) || null;
-                const lots = pending ? pending.lots : (savedErr && savedErr.lots !== undefined ? savedErr.lots : (pos.quantity ? actualFilledLots : (pos.lots || 1)));
-                const totalQty = pos.quantity || (lots * lotSizeVal);
-                const entryQty = pos.entry_qty || (isError ? "-" : totalQty);
-                const exitQty = (isClosed || (pos.exit_qty && pos.exit_qty > 0)) ? (pos.exit_qty || totalQty) : "-";
+            // Quantity column - derive lots from actual filled quantity so failed orders never display ghost lots
+            const lotSizeVal = Number(pos.lot_size || 65);
+            const actualFilledLots = Math.max(1, Math.round((Number(pos.quantity || pos.entry_qty || 65)) / lotSizeVal));
+            const savedErr = (window._straddleErrorLegEdits && window._straddleErrorLegEdits[idx]) || null;
+            const lots = pending ? pending.lots : (savedErr && savedErr.lots !== undefined ? savedErr.lots : (pos.quantity ? actualFilledLots : (pos.lots || 1)));
+            const totalQty = pos.quantity || (lots * lotSizeVal);
+            const entryQty = pos.entry_qty || (isError ? "-" : totalQty);
+            const exitQty = (isClosed || (pos.exit_qty && pos.exit_qty > 0)) ? (pos.exit_qty || totalQty) : "-";
 
-                // Quantity HTML (Interactive with stepper arrows for OPEN and editable error legs)
-                let qtyHtml = "";
-                if (canAdjustStrikeAndLots) {
-                    qtyHtml = `
+            // Quantity HTML (Interactive with stepper arrows for OPEN and editable error legs)
+            let qtyHtml = "";
+            if (canAdjustStrikeAndLots) {
+                qtyHtml = `
                         <div style="display:flex; align-items:center; gap:4px;">
                             <div class="straddle-stepper-box" style="height:28px;">
                                 <input type="number" id="live_lots_${idx}" class="straddle-stepper-input" style="width:36px; font-size:12px; font-weight:700;" value="${lots}" min="1" max="100" oninput="markRunningLegChanged(${idx})" title="Change lots: increase to buy/sell more, decrease to reduce">
@@ -5237,27 +5241,27 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         <div class="straddle-subtext">Total: ${totalQty} qty</div>
                         <div class="straddle-subtext">Entry: ${entryQty}</div>
                     `;
-                } else {
-                    qtyHtml = `
+            } else {
+                qtyHtml = `
                         <div style="font-weight:700; color:#f8fafc; font-family:var(--font-mono);">${lots} (${totalQty})</div>
                         <div class="straddle-subtext">Entry Qty: ${entryQty}</div>
                         <div class="straddle-subtext">Exit Qty: ${exitQty}</div>
                     `;
-                }
+            }
 
-                // Symbol HTML (With shift strike option and step arrows for OPEN and editable legs)
-                let symHtml = "";
-                const curStrikeMatch = pending ? pending.strike : (savedErr && savedErr.strike !== undefined ? savedErr.strike : (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]));
-                let hedgeTagHtml = "";
-                if (pos.is_associated_hedge) {
-                    const pType = pos.hedge_parent_type || "MAIN";
-                    hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:4px; padding:1px 5px;">🛡️ HEDGE (${formatSymbolColorCoded(pType)})</span></div>`;
-                } else if (pos.has_associated_hedge || pos.associated_hedge_id || side === "SELL") {
-                    hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:900; color:#ef4444; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.45); border-radius:4px; padding:1px 5px;" title="Main Trading Leg">🎯 MAIN</span></div>`;
-                }
+            // Symbol HTML (With shift strike option and step arrows for OPEN and editable legs)
+            let symHtml = "";
+            const curStrikeMatch = pending ? pending.strike : (savedErr && savedErr.strike !== undefined ? savedErr.strike : (pos.strike_price || (sym.match(/\d{5}/) || [''])[0]));
+            let hedgeTagHtml = "";
+            if (pos.is_associated_hedge) {
+                const pType = pos.hedge_parent_type || "MAIN";
+                hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:4px; padding:1px 5px;">🛡️ HEDGE (${formatSymbolColorCoded(pType)})</span></div>`;
+            } else if (pos.has_associated_hedge || pos.associated_hedge_id || side === "SELL") {
+                hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:900; color:#ef4444; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.45); border-radius:4px; padding:1px 5px;" title="Main Trading Leg">🎯 MAIN</span></div>`;
+            }
 
-                if (canAdjustStrikeAndLots) {
-                    symHtml = `
+            if (canAdjustStrikeAndLots) {
+                symHtml = `
                         <div class="straddle-sym-card ${symAccentClass}">
                             <div class="straddle-sym-title">${formatSymbolColorCoded(sym)}</div>
                             <div class="straddle-sym-sub">${expiryText}</div>
@@ -5274,50 +5278,50 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             </div>
                         </div>
                     `;
-                } else {
-                    symHtml = `
+            } else {
+                symHtml = `
                         <div class="straddle-sym-card ${symAccentClass}">
                             <div class="straddle-sym-title">${formatSymbolColorCoded(sym)}</div>
                             <div class="straddle-sym-sub">${expiryText}</div>
                             ${hedgeTagHtml}
                         </div>
                     `;
-                }
+            }
 
-                // Avg Entry Price & Entry Time
-                const avgEntPrice = pos.avg_ent_price ? Number(pos.avg_ent_price).toFixed(2) : '-';
-                const entryTime = pos.entry_time || '-';
+            // Avg Entry Price & Entry Time
+            const avgEntPrice = pos.avg_ent_price ? Number(pos.avg_ent_price).toFixed(2) : '-';
+            const entryTime = pos.entry_time || '-';
 
-                // Reference Price badges and basis selector (AlgoTest Parity)
-                let refPriceBadgeHtml = "";
-                const curRefPrice = Number(pos.reference_price || pos.entry_candle_close || pos.avg_ent_price || 0);
-                const curAvgPrice = Number(pos.avg_ent_price || 0);
+            // Reference Price badges and basis selector (AlgoTest Parity)
+            let refPriceBadgeHtml = "";
+            const curRefPrice = Number(pos.reference_price || pos.entry_candle_close || pos.avg_ent_price || 0);
+            const curAvgPrice = Number(pos.avg_ent_price || 0);
 
-                if (pos.benchmark_pending) {
-                    const pendTime = (pos.benchmark_time || pos.reference_candle_time || '09:16').substring(0, 5);
-                    refPriceBadgeHtml = `
+            if (pos.benchmark_pending) {
+                const pendTime = (pos.benchmark_time || pos.reference_candle_time || '09:16').substring(0, 5);
+                refPriceBadgeHtml = `
                         <div id="live_ref_badge_${idx}" style="margin-top:2px;">
                             <span style="font-size:9px; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); border-radius:3px; padding:1px 4px; font-weight:800; display:inline-block;" title="Interim protection active. Will lock to exact ${pendTime} 1-min candle close price when complete.">⏳ Ref @ ${pendTime} Close</span>
                         </div>
                     `;
-                } else if (curRefPrice > 0) {
-                    let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : (pos.reference_price_mode === "CURRENT_LTP" ? "LTP Ref" : (pos.reference_price_mode === "CUSTOM" ? "Custom Ref" : "Avg Fill"))));
-                    refPriceBadgeHtml = `
+            } else if (curRefPrice > 0) {
+                let modeTag = pos.reference_candle_time ? `${pos.reference_candle_time} Close` : (pos.reference_price_mode === "ENTRY_CANDLE_CLOSE" ? "Entry Close" : (pos.reference_price_mode === "SPECIFIC_TIME" ? `${(pos.benchmark_time || '09:16').substring(0, 5)} Close` : (pos.reference_price_mode === "CURRENT_LTP" ? "LTP Ref" : (pos.reference_price_mode === "CUSTOM" ? "Custom Ref" : "Avg Fill"))));
+                refPriceBadgeHtml = `
                         <div id="live_ref_badge_${idx}" style="margin-top:2px;">
                             <span style="font-size:9.5px; color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target and Stoploss calculated from ${modeTag} Price ₹${curRefPrice.toFixed(2)} (Entry fill was ₹${curAvgPrice.toFixed(2)})">🎯 ${modeTag}: ₹${curRefPrice.toFixed(2)}</span>
                         </div>
                     `;
-                } else {
-                    refPriceBadgeHtml = `<div id="live_ref_badge_${idx}" style="margin-top:2px;"></div>`;
-                }
+            } else {
+                refPriceBadgeHtml = `<div id="live_ref_badge_${idx}" style="margin-top:2px;"></div>`;
+            }
 
-                let refBasisSelectHtml = "";
-                if (isOpen) {
-                    const curRefLabel = curRefPrice > 0 ? `₹${curRefPrice.toFixed(1)}` : 'Avg';
-                    const entryMinStr = (pos.entry_time || '09:37:00').substring(0, 5);
-                    const cCloseVal = pos.entry_candle_close || (pos.reference_price_mode === 'ENTRY_CANDLE_CLOSE' && pos.reference_price ? pos.reference_price : null) || pos.avg_ent_price || pos.reference_price;
-                    const cCloseStr = (cCloseVal && Number(cCloseVal) > 0) ? ` - ₹${Number(cCloseVal).toFixed(2)}` : '';
-                    refBasisSelectHtml = `
+            let refBasisSelectHtml = "";
+            if (isOpen) {
+                const curRefLabel = curRefPrice > 0 ? `₹${curRefPrice.toFixed(1)}` : 'Avg';
+                const entryMinStr = (pos.entry_time || '09:37:00').substring(0, 5);
+                const cCloseVal = pos.entry_candle_close || (pos.reference_price_mode === 'ENTRY_CANDLE_CLOSE' && pos.reference_price ? pos.reference_price : null) || pos.avg_ent_price || pos.reference_price;
+                const cCloseStr = (cCloseVal && Number(cCloseVal) > 0) ? ` - ₹${Number(cCloseVal).toFixed(2)}` : '';
+                refBasisSelectHtml = `
                         <div style="margin-top:3px;">
                             <select id="live_ref_select_${idx}" class="straddle-select" style="padding:1px 2px; font-size:8.5px; height:18px; font-weight:700; color:#38bdf8; background:#0b1120; border-color:#0284c7; border-radius:3px; cursor:pointer;" onchange="changeLegReferenceBasis('${stratId}', '${pos.id || ''}', ${idx}, this.value)" title="Choose basis for Target & Stoploss: Entry Fill Price, Entry Candle Close, Specific Minute Candle (e.g. 10:20), Current LTP, or Custom Price">
                                 <option value="" disabled selected>Ref: ${curRefLabel} ▾</option>
@@ -5329,46 +5333,46 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             </select>
                         </div>
                     `;
-                }
+            }
 
-                // Per Leg Target (Interactive ONLY for live filled/partially filled trades)
-                const isTgtBroker = (pos.target_order_placement === "Place in advance" || pos.target_order_placement === "With Broker" || pos.target_order_placement === "BROKER" || !!pos.target_broker_order_id || !!pos.last_target_broker_order_id);
-                let tgtStatusHtml = "";
-                if (pos.target_cancelled_unexpectedly) {
-                    tgtStatusHtml = `
+            // Per Leg Target (Interactive ONLY for live filled/partially filled trades)
+            const isTgtBroker = (pos.target_order_placement === "Place in advance" || pos.target_order_placement === "With Broker" || pos.target_order_placement === "BROKER" || !!pos.target_broker_order_id || !!pos.last_target_broker_order_id);
+            let tgtStatusHtml = "";
+            if (pos.target_cancelled_unexpectedly) {
+                tgtStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
                             <span style="font-size:9px; color:#f87171; font-weight:800; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="Target order was cancelled on broker! Algo has taken over and is monitoring on platform.">⚠️ CANCELLED ON BROKER</span>
                             <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET', '${sym}')">🏦 Re-send to Broker</button>
                         </div>
                     `;
-                } else if (pos.target_broker_order_id) {
-                    const tOidStr = String(pos.target_broker_order_id);
-                    const isMultiT = tOidStr.includes(",");
-                    const dispT = isMultiT ? `${tOidStr.split(",")[0]} (+${tOidStr.split(",").length - 1} slices)` : tOidStr;
-                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Orders #${tOidStr}">🏦 #${dispT}</span>`;
-                } else if (pos.last_target_broker_order_id) {
-                    const lastTOidStr = String(pos.last_target_broker_order_id);
-                    const isMultiLT = lastTOidStr.includes(",");
-                    const dispLT = isMultiLT ? `${lastTOidStr.split(",")[0]} (+${lastTOidStr.split(",").length - 1} slices)` : lastTOidStr;
-                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Target Orders #${lastTOidStr}">🏦 #${dispLT}</span>`;
-                } else if (pos.target_placement_error && isTgtBroker) {
-                    tgtStatusHtml = `
+            } else if (pos.target_broker_order_id) {
+                const tOidStr = String(pos.target_broker_order_id);
+                const isMultiT = tOidStr.includes(",");
+                const dispT = isMultiT ? `${tOidStr.split(",")[0]} (+${tOidStr.split(",").length - 1} slices)` : tOidStr;
+                tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Target on Kotak Neo: Orders #${tOidStr}">🏦 #${dispT}</span>`;
+            } else if (pos.last_target_broker_order_id) {
+                const lastTOidStr = String(pos.last_target_broker_order_id);
+                const isMultiLT = lastTOidStr.includes(",");
+                const dispLT = isMultiLT ? `${lastTOidStr.split(",")[0]} (+${lastTOidStr.split(",").length - 1} slices)` : lastTOidStr;
+                tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Target Orders #${lastTOidStr}">🏦 #${dispLT}</span>`;
+            } else if (pos.target_placement_error && isTgtBroker) {
+                tgtStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
                             <span style="font-size:9px; color:#f59e0b; font-weight:800; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="${pos.target_placement_error}">⚠️ BROKER PLACEMENT FAILED</span>
                             <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'TARGET', '${sym}')">🏦 Retry Broker Placement</button>
                         </div>
                     `;
-                } else if (isTgtBroker) {
-                    tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Placed with Broker (Limit)">🏦 Broker</span>`;
-                } else {
-                    tgtStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
-                }
+            } else if (isTgtBroker) {
+                tgtStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Placed with Broker (Limit)">🏦 Broker</span>`;
+            } else {
+                tgtStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
+            }
 
-                let targetHtml = "-";
-                if (isInteractiveRow) {
-                    const isPts = pending ? (pending.target_mode === "₹" || pending.target_mode.includes("Pts")) : (pos.target_type && (pos.target_type.includes("Pts") || pos.target_type.includes("₹")));
-                    const tVal = pending ? pending.target_val : (pos.target_value !== undefined ? pos.target_value : 25);
-                    targetHtml = `
+            let targetHtml = "-";
+            if (isInteractiveRow) {
+                const isPts = pending ? (pending.target_mode === "₹" || pending.target_mode.includes("Pts")) : (pos.target_type && (pos.target_type.includes("Pts") || pos.target_type.includes("₹")));
+                const tVal = pending ? pending.target_val : (pos.target_value !== undefined ? pos.target_value : 25);
+                targetHtml = `
                         <div style="display:flex; align-items:center; gap:3px;">
                             <select id="live_tgt_mode_${idx}" class="straddle-select" style="padding:2px 3px; font-size:10.5px; width:45px;" onchange="markRunningLegChanged(${idx})">
                                 <option value="%" ${!isPts ? 'selected' : ''}>%</option>
@@ -5385,61 +5389,61 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </div>
                         ${tgtStatusHtml}
                     `;
-                } else if (isError) {
-                    const tgtValLabel = pos.target_value ? `${pos.target_value}${pos.target_type && pos.target_type.includes("Pts") ? " Pts" : "%"}` : "-";
-                    targetHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="tgt-label-badge" style="opacity:0.8;">TGT: ${tgtValLabel}</span></div>`;
-                } else if (pos.target_price && pos.target_price > 0) {
-                    const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
-                    targetHtml = `
+            } else if (isError) {
+                const tgtValLabel = pos.target_value ? `${pos.target_value}${pos.target_type && pos.target_type.includes("Pts") ? " Pts" : "%"}` : "-";
+                targetHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="tgt-label-badge" style="opacity:0.8;">TGT: ${tgtValLabel}</span></div>`;
+            } else if (pos.target_price && pos.target_price > 0) {
+                const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
+                targetHtml = `
                         <div style="white-space:nowrap;"><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span></div>
                         ${tgtStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${tgtStatusHtml}</div>` : ''}
                     `;
-                } else if (pos.target_value && pos.target_value > 0) {
-                    const tgtLabel = `TGT: ${pos.target_value}%`;
-                    targetHtml = `
+            } else if (pos.target_value && pos.target_value > 0) {
+                const tgtLabel = `TGT: ${pos.target_value}%`;
+                targetHtml = `
                         <div style="white-space:nowrap;"><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>
                         ${tgtStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${tgtStatusHtml}</div>` : ''}
                     `;
-                }
+            }
 
-                // Per Leg Stoploss (Interactive ONLY for live filled/partially filled trades)
-                const isSlBroker = (pos.sl_order_placement === "Place in advance" || pos.sl_order_placement === "With Broker" || pos.sl_order_placement === "BROKER" || !!pos.sl_broker_order_id || !!pos.last_sl_broker_order_id);
-                let slStatusHtml = "";
-                if (pos.sl_cancelled_unexpectedly) {
-                    slStatusHtml = `
+            // Per Leg Stoploss (Interactive ONLY for live filled/partially filled trades)
+            const isSlBroker = (pos.sl_order_placement === "Place in advance" || pos.sl_order_placement === "With Broker" || pos.sl_order_placement === "BROKER" || !!pos.sl_broker_order_id || !!pos.last_sl_broker_order_id);
+            let slStatusHtml = "";
+            if (pos.sl_cancelled_unexpectedly) {
+                slStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
                             <span style="font-size:9px; color:#f87171; font-weight:800; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="Stoploss order was cancelled on broker! Algo has taken over and is monitoring on platform.">⚠️ CANCELLED ON BROKER</span>
                             <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL', '${sym}')">🏦 Re-send to Broker</button>
                         </div>
                     `;
-                } else if (pos.sl_broker_order_id) {
-                    const sOidStr = String(pos.sl_broker_order_id);
-                    const isMultiS = sOidStr.includes(",");
-                    const dispS = isMultiS ? `${sOidStr.split(",")[0]} (+${sOidStr.split(",").length - 1} slices)` : sOidStr;
-                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Orders #${sOidStr}">🏦 #${dispS}</span>`;
-                } else if (pos.last_sl_broker_order_id) {
-                    const lastSOidStr = String(pos.last_sl_broker_order_id);
-                    const isMultiLS = lastSOidStr.includes(",");
-                    const dispLS = isMultiLS ? `${lastSOidStr.split(",")[0]} (+${lastSOidStr.split(",").length - 1} slices)` : lastSOidStr;
-                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Stoploss Orders #${lastSOidStr}">🏦 #${dispLS}</span>`;
-                } else if (pos.sl_placement_error && isSlBroker) {
-                    slStatusHtml = `
+            } else if (pos.sl_broker_order_id) {
+                const sOidStr = String(pos.sl_broker_order_id);
+                const isMultiS = sOidStr.includes(",");
+                const dispS = isMultiS ? `${sOidStr.split(",")[0]} (+${sOidStr.split(",").length - 1} slices)` : sOidStr;
+                slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Live Stoploss on Kotak Neo: Orders #${sOidStr}">🏦 #${dispS}</span>`;
+            } else if (pos.last_sl_broker_order_id) {
+                const lastSOidStr = String(pos.last_sl_broker_order_id);
+                const isMultiLS = lastSOidStr.includes(",");
+                const dispLS = isMultiLS ? `${lastSOidStr.split(",")[0]} (+${lastSOidStr.split(",").length - 1} slices)` : lastSOidStr;
+                slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Kotak Neo Stoploss Orders #${lastSOidStr}">🏦 #${dispLS}</span>`;
+            } else if (pos.sl_placement_error && isSlBroker) {
+                slStatusHtml = `
                         <div style="margin-top:2px; display:flex; flex-direction:column; gap:2px;">
                             <span style="font-size:9px; color:#f59e0b; font-weight:800; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); border-radius:3px; padding:1px 4px; display:inline-block;" title="${pos.sl_placement_error}">⚠️ BROKER PLACEMENT FAILED</span>
                             <button type="button" class="straddle-btn" style="padding:1px 6px; font-size:9px; font-weight:700; background:#0284c7; color:#fff; border:none; border-radius:3px; cursor:pointer;" onclick="resendLegOrderToBroker('${stratId}', '${pos.id || ''}', ${idx}, 'SL', '${sym}')">🏦 Retry Broker Placement</button>
                         </div>
                     `;
-                } else if (isSlBroker) {
-                    slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Placed with Broker (SL-L)">🏦 Broker</span>`;
-                } else {
-                    slStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
-                }
+            } else if (isSlBroker) {
+                slStatusHtml = `<span style="font-size:9px; color:#10b981; font-weight:700;" title="Placed with Broker (SL-L)">🏦 Broker</span>`;
+            } else {
+                slStatusHtml = `<span style="font-size:9px; color:#94a3b8; font-weight:600;" title="Monitored by Straddle Engine platform">💻 Platform</span>`;
+            }
 
-                let slHtml = "-";
-                if (isInteractiveRow) {
-                    const isPts = pending ? (pending.sl_mode === "₹" || pending.sl_mode.includes("Pts")) : (pos.sl_type && (pos.sl_type.includes("Pts") || pos.sl_type.includes("₹")));
-                    const sVal = pending ? pending.sl_val : (pos.sl_value !== undefined ? pos.sl_value : 15);
-                    slHtml = `
+            let slHtml = "-";
+            if (isInteractiveRow) {
+                const isPts = pending ? (pending.sl_mode === "₹" || pending.sl_mode.includes("Pts")) : (pos.sl_type && (pos.sl_type.includes("Pts") || pos.sl_type.includes("₹")));
+                const sVal = pending ? pending.sl_val : (pos.sl_value !== undefined ? pos.sl_value : 15);
+                slHtml = `
                         <div style="display:flex; align-items:center; gap:3px;">
                             <select id="live_sl_mode_${idx}" class="straddle-select" style="padding:2px 3px; font-size:10.5px; width:45px;" onchange="markRunningLegChanged(${idx})">
                                 <option value="%" ${!isPts ? 'selected' : ''}>%</option>
@@ -5456,113 +5460,113 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         </div>
                         ${slStatusHtml}
                     `;
-                } else if (isError) {
-                    const slValLabel = pos.sl_value ? `-${pos.sl_value}${pos.sl_type && pos.sl_type.includes("Pts") ? " Pts" : "%"}` : "-";
-                    slHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="sl-label-badge" style="opacity:0.8;">SL: ${slValLabel}</span></div>`;
-                } else if (pos.sl_price && pos.sl_price > 0) {
-                    const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
-                    const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
-                    slHtml = `
+            } else if (isError) {
+                const slValLabel = pos.sl_value ? `-${pos.sl_value}${pos.sl_type && pos.sl_type.includes("Pts") ? " Pts" : "%"}` : "-";
+                slHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="sl-label-badge" style="opacity:0.8;">SL: ${slValLabel}</span></div>`;
+            } else if (pos.sl_price && pos.sl_price > 0) {
+                const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
+                const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
+                slHtml = `
                         <div style="white-space:nowrap;"><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span></div>
                         ${slStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${slStatusHtml}</div>` : ''}
                         ${origSlLabel ? `<div class="orig-sl-sub" style="font-size:9px; margin-top:1px;">${origSlLabel}</div>` : ''}
                     `;
-                } else if (pos.sl_value && pos.sl_value > 0) {
-                    const slLabel = `SL: -${pos.sl_value}%`;
-                    const origSlLabel = `ORIGINAL SL: -${pos.sl_value}%`;
-                    slHtml = `
+            } else if (pos.sl_value && pos.sl_value > 0) {
+                const slLabel = `SL: -${pos.sl_value}%`;
+                const origSlLabel = `ORIGINAL SL: -${pos.sl_value}%`;
+                slHtml = `
                         <div style="white-space:nowrap;"><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">-</span></div>
                         ${slStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${slStatusHtml}</div>` : ''}
                         ${origSlLabel ? `<div class="orig-sl-sub" style="font-size:9px; margin-top:1px;">${origSlLabel}</div>` : ''}
                     `;
+            }
+
+            // Avg Exit Price & Exit Time
+            const avgExitPrice = (pos.avg_exit_price && pos.avg_exit_price > 0) ? Number(pos.avg_exit_price).toFixed(2) : '-';
+            const exitTime = (isClosed && pos.exit_time) ? pos.exit_time : (pos.avg_exit_price && pos.avg_exit_price > 0 ? (pos.exit_time || '-') : '-');
+
+            // Exit Reason
+            let exitReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
+            if (pos.exit_reason && pos.exit_reason !== "-") {
+                const rStr = String(pos.exit_reason);
+                const rLower = rStr.toLowerCase();
+                if (rLower.includes("target")) {
+                    exitReasonHtml = `<span class="exit-reason-tgt" title="${rStr}">🎯 ${rStr}</span>`;
+                } else if (rLower.includes("stoploss") || rLower.includes("sl")) {
+                    exitReasonHtml = `<span class="exit-reason-sl" title="${rStr}">🛑 ${rStr}</span>`;
+                } else if (rLower.includes("hedge shift") || rLower.includes("shift hedge")) {
+                    exitReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${rStr}">🔄 ${rStr}</span>`;
+                } else if (rLower.includes("hedge")) {
+                    exitReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${rStr}">🛡️ ${rStr}</span>`;
+                } else {
+                    exitReasonHtml = `<span class="straddle-reason-pill entry-initial" title="${rStr}">${rStr}</span>`;
                 }
+            }
 
-                // Avg Exit Price & Exit Time
-                const avgExitPrice = (pos.avg_exit_price && pos.avg_exit_price > 0) ? Number(pos.avg_exit_price).toFixed(2) : '-';
-                const exitTime = (isClosed && pos.exit_time) ? pos.exit_time : (pos.avg_exit_price && pos.avg_exit_price > 0 ? (pos.exit_time || '-') : '-');
+            // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift, adopted from Kotak Neo)
+            let entryReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
+            const isAdopted = !!(
+                pos.is_adopted ||
+                (pos.id && String(pos.id).startsWith("leg_adopted_")) ||
+                (pos.leg_id && String(pos.leg_id).startsWith("leg_adopted_")) ||
+                (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("adopt"))
+            );
 
-                // Exit Reason
-                let exitReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
-                if (pos.exit_reason && pos.exit_reason !== "-") {
-                    const rStr = String(pos.exit_reason);
-                    const rLower = rStr.toLowerCase();
-                    if (rLower.includes("target")) {
-                        exitReasonHtml = `<span class="exit-reason-tgt" title="${rStr}">🎯 ${rStr}</span>`;
-                    } else if (rLower.includes("stoploss") || rLower.includes("sl")) {
-                        exitReasonHtml = `<span class="exit-reason-sl" title="${rStr}">🛑 ${rStr}</span>`;
-                    } else if (rLower.includes("hedge shift") || rLower.includes("shift hedge")) {
-                        exitReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${rStr}">🔄 ${rStr}</span>`;
-                    } else if (rLower.includes("hedge")) {
-                        exitReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${rStr}">🛡️ ${rStr}</span>`;
-                    } else {
-                        exitReasonHtml = `<span class="straddle-reason-pill entry-initial" title="${rStr}">${rStr}</span>`;
+            if (isAdopted) {
+                const sSide = String(pos.side || "SELL").toUpperCase();
+                const sType = String(pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE")).toUpperCase();
+                let adoptLabel = pos.entry_reason && String(pos.entry_reason).trim() !== "-" && !String(pos.entry_reason).startsWith("Initial")
+                    ? String(pos.entry_reason).trim()
+                    : (pos.is_associated_hedge ? `Adopted Hedge from Kotak Neo (${sType})` : `Adopted from Kotak Neo [${sSide} ${sType}]`);
+                if (!adoptLabel.startsWith("📥")) adoptLabel = `📥 ${adoptLabel}`;
+                entryReasonHtml = `<span class="straddle-reason-pill entry-adopted" title="${adoptLabel}">${adoptLabel}</span>`;
+            } else if (pos.entry_reason && pos.entry_reason !== "-") {
+                const eStr = String(pos.entry_reason).trim();
+                const eLower = eStr.toLowerCase();
+                const eUpper = eStr.toUpperCase();
+                if (eLower.includes("hedge") && (eLower.includes("shift") || eLower.includes("re-aligned") || eLower.includes("replaced"))) {
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${eStr}">🔄 ${eStr}</span>`;
+                } else if (eLower.includes("hedge")) {
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${eStr}">🛡️ ${eStr}</span>`;
+                } else if (eLower.includes("re-execute") || eLower.includes("re-entry") || eLower.includes("re-cost") || pos.is_re_entry || (pos.re_execute_count || 0) > 0) {
+                    // Determine option type (CE or PE)
+                    let optType = pos.re_execute_leg_type || "";
+                    if (!optType) {
+                        if (eUpper.includes(" CE ") || eUpper.includes(" CE-") || eUpper.includes(" CALL ") || (pos.symbol && pos.symbol.includes(" CE "))) optType = "CE";
+                        else if (eUpper.includes(" PE ") || eUpper.includes(" PE-") || eUpper.includes(" PUT ") || (pos.symbol && pos.symbol.includes(" PE "))) optType = "PE";
+                        else optType = pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE");
                     }
-                }
-
-                // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift, adopted from Kotak Neo)
-                let entryReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
-                const isAdopted = !!(
-                    pos.is_adopted ||
-                    (pos.id && String(pos.id).startsWith("leg_adopted_")) ||
-                    (pos.leg_id && String(pos.leg_id).startsWith("leg_adopted_")) ||
-                    (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("adopt"))
-                );
-
-                if (isAdopted) {
-                    const sSide = String(pos.side || "SELL").toUpperCase();
-                    const sType = String(pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE")).toUpperCase();
-                    let adoptLabel = pos.entry_reason && String(pos.entry_reason).trim() !== "-" && !String(pos.entry_reason).startsWith("Initial") 
-                        ? String(pos.entry_reason).trim() 
-                        : (pos.is_associated_hedge ? `Adopted Hedge from Kotak Neo (${sType})` : `Adopted from Kotak Neo [${sSide} ${sType}]`);
-                    if (!adoptLabel.startsWith("📥")) adoptLabel = `📥 ${adoptLabel}`;
-                    entryReasonHtml = `<span class="straddle-reason-pill entry-adopted" title="${adoptLabel}">${adoptLabel}</span>`;
-                } else if (pos.entry_reason && pos.entry_reason !== "-") {
-                    const eStr = String(pos.entry_reason).trim();
-                    const eLower = eStr.toLowerCase();
-                    const eUpper = eStr.toUpperCase();
-                    if (eLower.includes("hedge") && (eLower.includes("shift") || eLower.includes("re-aligned") || eLower.includes("replaced"))) {
-                        entryReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${eStr}">🔄 ${eStr}</span>`;
-                    } else if (eLower.includes("hedge")) {
-                        entryReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${eStr}">🛡️ ${eStr}</span>`;
-                    } else if (eLower.includes("re-execute") || eLower.includes("re-entry") || eLower.includes("re-cost") || pos.is_re_entry || (pos.re_execute_count || 0) > 0) {
-                        // Determine option type (CE or PE)
-                        let optType = pos.re_execute_leg_type || "";
-                        if (!optType) {
-                            if (eUpper.includes(" CE ") || eUpper.includes(" CE-") || eUpper.includes(" CALL ") || (pos.symbol && pos.symbol.includes(" CE "))) optType = "CE";
-                            else if (eUpper.includes(" PE ") || eUpper.includes(" PE-") || eUpper.includes(" PUT ") || (pos.symbol && pos.symbol.includes(" PE "))) optType = "PE";
-                            else optType = pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE");
-                        }
-                        // Determine trigger type (STOPLOSS or TARGET)
-                        let trigger = pos.re_execute_trigger || "";
-                        if (!trigger) {
-                            if (eUpper.includes("STOPLOSS") || eUpper.includes(" SL ") || eUpper.includes("SL HIT") || eUpper.includes("STOP LOSS")) trigger = "STOPLOSS";
-                            else if (eUpper.includes("TARGET") || eUpper.includes(" TGT ") || eUpper.includes("TARGET HIT") || eUpper.includes("TGT HIT")) trigger = "TARGET";
-                        }
-                        // Determine count
-                        let count = pos.re_execute_count || 0;
-                        if (!count) {
-                            const m = eStr.match(/#(\d+)/);
-                            if (m) count = parseInt(m[1], 10);
-                            else count = 1;
-                        }
-                        const isCe = (optType === "CE");
-                        const optColor = isCe ? "#38bdf8" : "#e879f9";
-                        const optBorder = isCe ? "rgba(56,189,248,0.4)" : "rgba(232,121,249,0.4)";
-                        const optBg = isCe ? "rgba(56,189,248,0.12)" : "rgba(232,121,249,0.12)";
-                        let triggerBadge = "";
-                        if (trigger === "STOPLOSS") {
-                            triggerBadge = `<span style="display:inline-block; padding:1px 5px; font-size:9.5px; font-weight:800; border-radius:3px; background:rgba(239,68,68,0.22); color:#f87171; border:1px solid rgba(239,68,68,0.45); letter-spacing:0.3px;">🔴 STOPLOSS</span>`;
-                        } else if (trigger === "TARGET") {
-                            triggerBadge = `<span style="display:inline-block; padding:1px 5px; font-size:9.5px; font-weight:800; border-radius:3px; background:rgba(16,185,129,0.22); color:#34d399; border:1px solid rgba(16,185,129,0.45); letter-spacing:0.3px;">🟢 TARGET</span>`;
-                        }
-                        let detailText = "";
-                        const bracketMatch = eStr.match(/\[(.*?)\]/);
-                        if (bracketMatch) {
-                            detailText = bracketMatch[1].replace(/Triggered by\s*/i, "").trim();
-                        } else if (!eStr.startsWith("⚡ Re-Execute") && !eStr.startsWith("⚡ RE-EXECUTE")) {
-                            detailText = eStr;
-                        }
-                        entryReasonHtml = `
+                    // Determine trigger type (STOPLOSS or TARGET)
+                    let trigger = pos.re_execute_trigger || "";
+                    if (!trigger) {
+                        if (eUpper.includes("STOPLOSS") || eUpper.includes(" SL ") || eUpper.includes("SL HIT") || eUpper.includes("STOP LOSS")) trigger = "STOPLOSS";
+                        else if (eUpper.includes("TARGET") || eUpper.includes(" TGT ") || eUpper.includes("TARGET HIT") || eUpper.includes("TGT HIT")) trigger = "TARGET";
+                    }
+                    // Determine count
+                    let count = pos.re_execute_count || 0;
+                    if (!count) {
+                        const m = eStr.match(/#(\d+)/);
+                        if (m) count = parseInt(m[1], 10);
+                        else count = 1;
+                    }
+                    const isCe = (optType === "CE");
+                    const optColor = isCe ? "#38bdf8" : "#e879f9";
+                    const optBorder = isCe ? "rgba(56,189,248,0.4)" : "rgba(232,121,249,0.4)";
+                    const optBg = isCe ? "rgba(56,189,248,0.12)" : "rgba(232,121,249,0.12)";
+                    let triggerBadge = "";
+                    if (trigger === "STOPLOSS") {
+                        triggerBadge = `<span style="display:inline-block; padding:1px 5px; font-size:9.5px; font-weight:800; border-radius:3px; background:rgba(239,68,68,0.22); color:#f87171; border:1px solid rgba(239,68,68,0.45); letter-spacing:0.3px;">🔴 STOPLOSS</span>`;
+                    } else if (trigger === "TARGET") {
+                        triggerBadge = `<span style="display:inline-block; padding:1px 5px; font-size:9.5px; font-weight:800; border-radius:3px; background:rgba(16,185,129,0.22); color:#34d399; border:1px solid rgba(16,185,129,0.45); letter-spacing:0.3px;">🟢 TARGET</span>`;
+                    }
+                    let detailText = "";
+                    const bracketMatch = eStr.match(/\[(.*?)\]/);
+                    if (bracketMatch) {
+                        detailText = bracketMatch[1].replace(/Triggered by\s*/i, "").trim();
+                    } else if (!eStr.startsWith("⚡ Re-Execute") && !eStr.startsWith("⚡ RE-EXECUTE")) {
+                        detailText = eStr;
+                    }
+                    entryReasonHtml = `
                             <div style="display:flex; flex-direction:column; gap:3px; align-items:flex-start;">
                                 <div style="display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap;">
                                     <span style="font-size:11px; font-weight:900; font-family:var(--font-mono); padding:2px 6px; border-radius:4px; background:${optBg}; color:${optColor}; border:1px solid ${optBorder}; display:inline-flex; align-items:center; gap:3px;">
@@ -5573,26 +5577,26 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                 ${detailText ? `<div style="font-size:9.5px; color:#94a3b8; line-height:1.2; word-break:break-word; font-family:var(--font-mono);" title="${eStr}">${detailText}</div>` : ''}
                             </div>
                         `;
-                    } else {
-                        entryReasonHtml = `<span class="straddle-reason-pill entry-initial" title="${eStr}">📌 ${eStr}</span>`;
-                    }
-                } else if (pos.is_associated_hedge) {
-                    const pType = pos.hedge_parent_type || "MAIN";
-                    entryReasonHtml = `<span class="straddle-reason-pill entry-hedge">🛡️ HEDGE (${pType}) [Protecting Main]</span>`;
-                } else if (pos.is_re_entry || (pos.re_execute_count || 0) > 0) {
-                    const reCount = pos.re_execute_count || 1;
-                    const optType = pos.re_execute_leg_type || pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE");
-                    entryReasonHtml = `<span class="straddle-reason-pill entry-reentry">⚡ ${optType} RE-EXECUTE #${reCount}</span>`;
                 } else {
-                    const sSide = String(pos.side || "SELL").toUpperCase();
-                    const sType = String(pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE")).toUpperCase();
-                    entryReasonHtml = `<span class="straddle-reason-pill entry-initial">📌 Initial Entry [${sSide} ${sType}]</span>`;
+                    entryReasonHtml = `<span class="straddle-reason-pill entry-initial" title="${eStr}">📌 ${eStr}</span>`;
                 }
+            } else if (pos.is_associated_hedge) {
+                const pType = pos.hedge_parent_type || "MAIN";
+                entryReasonHtml = `<span class="straddle-reason-pill entry-hedge">🛡️ HEDGE (${pType}) [Protecting Main]</span>`;
+            } else if (pos.is_re_entry || (pos.re_execute_count || 0) > 0) {
+                const reCount = pos.re_execute_count || 1;
+                const optType = pos.re_execute_leg_type || pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE");
+                entryReasonHtml = `<span class="straddle-reason-pill entry-reentry">⚡ ${optType} RE-EXECUTE #${reCount}</span>`;
+            } else {
+                const sSide = String(pos.side || "SELL").toUpperCase();
+                const sType = String(pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE")).toUpperCase();
+                entryReasonHtml = `<span class="straddle-reason-pill entry-initial">📌 Initial Entry [${sSide} ${sType}]</span>`;
+            }
 
-                // Action buttons (Save on live change + Exit + Detach + Combined Placement)
-                let actionHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
-                if (isInteractiveRow) {
-                    actionHtml = `
+            // Action buttons (Save on live change + Exit + Detach + Combined Placement)
+            let actionHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
+            if (isInteractiveRow) {
+                actionHtml = `
                         <div style="display:flex; flex-direction:column; gap:4px; align-items:center;">
                             <button type="button" id="btn_save_running_${idx}" class="straddle-btn btn-primary" style="${hasPending ? 'display:inline-flex;' : 'display:none;'} padding:3px 8px; font-size:11px; font-weight:800; background:#0ea5e9; border:none; box-shadow:0 0 8px rgba(14,165,233,0.6);" onclick="saveRunningPositionChanges('${stratId}', '${pos.id || ''}', ${idx})" title="Save and apply live modifications immediately">
                                 💾 Save
@@ -5616,83 +5620,83 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             </div>
                         </div>
                     `;
+            }
+
+            // LTP & Dynamic Color Tick
+            const ltp = Number(pos.ltp || pos.avg_ent_price || 0.0);
+            const prevLtp = prevMap[sym] || ltp;
+            let ltpClass = "";
+            if (ltp > prevLtp) ltpClass = "straddle-ltp-up";
+            else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
+            prevMap[sym] = ltp;
+
+            let ltpColor = '#cbd5e1';
+            if (isOpen) {
+                ltpColor = (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
+            } else if (isClosed) {
+                const exitP = Number(pos.avg_exit_price || 0);
+                if (exitP > 0) {
+                    ltpColor = (side === 'SELL') ? (ltp <= exitP ? '#10b981' : '#f87171') : (ltp >= exitP ? '#10b981' : '#f87171');
+                } else {
+                    ltpColor = '#cbd5e1';
                 }
+            }
 
-                // LTP & Dynamic Color Tick
-                const ltp = Number(pos.ltp || pos.avg_ent_price || 0.0);
-                const prevLtp = prevMap[sym] || ltp;
-                let ltpClass = "";
-                if (ltp > prevLtp) ltpClass = "straddle-ltp-up";
-                else if (ltp < prevLtp) ltpClass = "straddle-ltp-down";
-                prevMap[sym] = ltp;
+            // MTM (₹) & PnL %
+            const mtm = Number(pos.mtm || 0.0);
+            const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
+            const mtmFormatted = mtm.toFixed(2);
 
-                let ltpColor = '#cbd5e1';
-                if (isOpen) {
-                    ltpColor = (side === 'SELL' ? (ltp <= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171') : (ltp >= (pos.avg_ent_price || 1) ? '#10b981' : '#f87171'));
-                } else if (isClosed) {
-                    const exitP = Number(pos.avg_exit_price || 0);
-                    if (exitP > 0) {
-                        ltpColor = (side === 'SELL') ? (ltp <= exitP ? '#10b981' : '#f87171') : (ltp >= exitP ? '#10b981' : '#f87171');
-                    } else {
-                        ltpColor = '#cbd5e1';
-                    }
+            let pnlPctVal = (pos.pnl_pct !== undefined && pos.pnl_pct !== null) ? Number(pos.pnl_pct) : null;
+            if (pnlPctVal === null && pos.avg_ent_price && Number(pos.avg_ent_price) > 0) {
+                const entP = Number(pos.avg_ent_price);
+                pnlPctVal = (side === "SELL") ? ((entP - ltp) / entP) * 100 : ((ltp - entP) / entP) * 100;
+            }
+
+            let pnlPctBadgeHtml = "";
+            if (pnlPctVal !== null && !isNaN(pnlPctVal)) {
+                const isPos = pnlPctVal >= 0;
+                const pnlSign = isPos ? "+" : "";
+                const pnlPctStr = `${pnlSign}${pnlPctVal.toFixed(2)}%`;
+                const pnlBg = isPos ? "rgba(16,185,129,0.18)" : "rgba(244,63,94,0.18)";
+                const pnlColor = isPos ? "#10b981" : "#f43f5e";
+                const pnlBorder = isPos ? "rgba(16,185,129,0.4)" : "rgba(244,63,94,0.4)";
+                const pnlTitle = isOpen ? `Live PnL: ${pnlPctStr} (Track against Target / Stoploss %)` : `Realized PnL: ${pnlPctStr}`;
+                pnlPctBadgeHtml = `<span class="straddle-pnl-pct" style="display:inline-block; font-size:10.5px; font-weight:800; font-family:var(--font-mono); padding:1.5px 5px; border-radius:4px; background:${pnlBg}; color:${pnlColor}; border:1px solid ${pnlBorder};" title="${pnlTitle}">${pnlPctStr}</span>`;
+            }
+
+            const rowClass = isError ? "straddle-row-error" : "";
+
+            // Check if rejected toast needs to be shown
+            if (isError) {
+                if (!window._straddleToastedErrors) window._straddleToastedErrors = new Set();
+                const errKey = `${sym}_${pos.error_message || ''}_${pos.entry_time || ''}`;
+                if (!window._straddleToastedErrors.has(errKey)) {
+                    window._straddleToastedErrors.add(errKey);
+                    showStraddleRejectedToast({
+                        symbol: sym,
+                        message: pos.error_message || "You need to add required funds in your account to place this trade.",
+                        clientId: pos.client_id || (window._straddleState.activeAccount ? window._straddleState.activeAccount.id : 'Kotak Neo'),
+                        orderId: pos.order_id || ('261' + Math.floor(Math.random() * 1000000000000)),
+                        time: pos.entry_time || (new Date().toLocaleTimeString('en-US', { hour12: false }))
+                    });
                 }
+            }
 
-                // MTM (₹) & PnL %
-                const mtm = Number(pos.mtm || 0.0);
-                const mtmClass = (mtm >= 0) ? "straddle-mtm-pos" : "straddle-mtm-neg";
-                const mtmFormatted = mtm.toFixed(2);
-
-                let pnlPctVal = (pos.pnl_pct !== undefined && pos.pnl_pct !== null) ? Number(pos.pnl_pct) : null;
-                if (pnlPctVal === null && pos.avg_ent_price && Number(pos.avg_ent_price) > 0) {
-                    const entP = Number(pos.avg_ent_price);
-                    pnlPctVal = (side === "SELL") ? ((entP - ltp) / entP) * 100 : ((ltp - entP) / entP) * 100;
+            // Check if cancellation toast needs to be shown
+            if (pos.target_cancelled_unexpectedly || pos.sl_cancelled_unexpectedly) {
+                if (!window._straddleToastedCancellations) window._straddleToastedCancellations = new Set();
+                const cKey = `${sym}_${pos.target_cancelled_unexpectedly ? 'TGT' : ''}_${pos.sl_cancelled_unexpectedly ? 'SL' : ''}_${pos.entry_time || ''}`;
+                if (!window._straddleToastedCancellations.has(cKey)) {
+                    window._straddleToastedCancellations.add(cKey);
+                    const orderName = (pos.target_cancelled_unexpectedly && pos.sl_cancelled_unexpectedly) ? "Target & Stoploss" : (pos.target_cancelled_unexpectedly ? "Target" : "Stoploss");
+                    showStraddleToast(`⚠️ ${sym}: ${orderName} order cancelled on broker! Algo actively monitoring on platform.`, "warning", 6000);
                 }
+            }
 
-                let pnlPctBadgeHtml = "";
-                if (pnlPctVal !== null && !isNaN(pnlPctVal)) {
-                    const isPos = pnlPctVal >= 0;
-                    const pnlSign = isPos ? "+" : "";
-                    const pnlPctStr = `${pnlSign}${pnlPctVal.toFixed(2)}%`;
-                    const pnlBg = isPos ? "rgba(16,185,129,0.18)" : "rgba(244,63,94,0.18)";
-                    const pnlColor = isPos ? "#10b981" : "#f43f5e";
-                    const pnlBorder = isPos ? "rgba(16,185,129,0.4)" : "rgba(244,63,94,0.4)";
-                    const pnlTitle = isOpen ? `Live PnL: ${pnlPctStr} (Track against Target / Stoploss %)` : `Realized PnL: ${pnlPctStr}`;
-                    pnlPctBadgeHtml = `<span class="straddle-pnl-pct" style="display:inline-block; font-size:10.5px; font-weight:800; font-family:var(--font-mono); padding:1.5px 5px; border-radius:4px; background:${pnlBg}; color:${pnlColor}; border:1px solid ${pnlBorder};" title="${pnlTitle}">${pnlPctStr}</span>`;
-                }
+            const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
 
-                const rowClass = isError ? "straddle-row-error" : "";
-
-                // Check if rejected toast needs to be shown
-                if (isError) {
-                    if (!window._straddleToastedErrors) window._straddleToastedErrors = new Set();
-                    const errKey = `${sym}_${pos.error_message || ''}_${pos.entry_time || ''}`;
-                    if (!window._straddleToastedErrors.has(errKey)) {
-                        window._straddleToastedErrors.add(errKey);
-                        showStraddleRejectedToast({
-                            symbol: sym,
-                            message: pos.error_message || "You need to add required funds in your account to place this trade.",
-                            clientId: pos.client_id || (window._straddleState.activeAccount ? window._straddleState.activeAccount.id : 'Kotak Neo'),
-                            orderId: pos.order_id || ('261' + Math.floor(Math.random() * 1000000000000)),
-                            time: pos.entry_time || (new Date().toLocaleTimeString('en-US', { hour12: false }))
-                        });
-                    }
-                }
-
-                // Check if cancellation toast needs to be shown
-                if (pos.target_cancelled_unexpectedly || pos.sl_cancelled_unexpectedly) {
-                    if (!window._straddleToastedCancellations) window._straddleToastedCancellations = new Set();
-                    const cKey = `${sym}_${pos.target_cancelled_unexpectedly ? 'TGT' : ''}_${pos.sl_cancelled_unexpectedly ? 'SL' : ''}_${pos.entry_time || ''}`;
-                    if (!window._straddleToastedCancellations.has(cKey)) {
-                        window._straddleToastedCancellations.add(cKey);
-                        const orderName = (pos.target_cancelled_unexpectedly && pos.sl_cancelled_unexpectedly) ? "Target & Stoploss" : (pos.target_cancelled_unexpectedly ? "Target" : "Stoploss");
-                        showStraddleToast(`⚠️ ${sym}: ${orderName} order cancelled on broker! Algo actively monitoring on platform.`, "warning", 6000);
-                    }
-                }
-
-                const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
-
-                html += `
+            html += `
                     <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-entry-reason="${pos.entry_reason || ''}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}" data-ref-price="${pos.reference_price || ''}" data-sl-price="${pos.sl_price || ''}" data-tgt-price="${pos.target_price || ''}">
                         <td class="pos-col-select" style="text-align:center;">
                             <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
@@ -5728,22 +5732,22 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     </tr>
                 `;
 
-                // Quantiply Unexpected Order Cancellation Warning Banner (for OPEN legs)
-                if ((pos.sl_cancelled_unexpectedly || pos.target_cancelled_unexpectedly) && !isError) {
-                    const legId = pos.id || '';
-                    const isBothCancelled = pos.sl_cancelled_unexpectedly && pos.target_cancelled_unexpectedly;
-                    const isSlCancelled = pos.sl_cancelled_unexpectedly;
-                    const isTgtCancelled = pos.target_cancelled_unexpectedly;
-                    const titleText = isBothCancelled ?
-                        "Target & Stoploss orders cancelled on Broker" :
-                        (isTgtCancelled ? "Target order cancelled on Broker" : "Stoploss order cancelled on Broker");
-                    const subText = isBothCancelled ?
-                        `Both Target and Stoploss orders were cancelled on Broker. The algo is actively monitoring live prices on the platform (SL ₹${pos.sl_price || 0}, TG ₹${pos.target_price || 0}) and will auto-exit when breached. You can re-send orders to the broker matching engine anytime.` :
-                        (isTgtCancelled ?
-                            `Target order was cancelled on Broker. The algo is actively monitoring live price on the platform (TG ₹${pos.target_price || 0}) and will auto-exit on hit. You can re-send the Target order to the broker matching engine anytime.` :
-                            `Stoploss order was cancelled on Broker. The algo is actively monitoring live price on the platform (SL ₹${pos.sl_price || 0}) and will auto-exit on hit. You can re-send the Stoploss order to the broker matching engine anytime.`);
+            // Quantiply Unexpected Order Cancellation Warning Banner (for OPEN legs)
+            if ((pos.sl_cancelled_unexpectedly || pos.target_cancelled_unexpectedly) && !isError) {
+                const legId = pos.id || '';
+                const isBothCancelled = pos.sl_cancelled_unexpectedly && pos.target_cancelled_unexpectedly;
+                const isSlCancelled = pos.sl_cancelled_unexpectedly;
+                const isTgtCancelled = pos.target_cancelled_unexpectedly;
+                const titleText = isBothCancelled ?
+                    "Target & Stoploss orders cancelled on Broker" :
+                    (isTgtCancelled ? "Target order cancelled on Broker" : "Stoploss order cancelled on Broker");
+                const subText = isBothCancelled ?
+                    `Both Target and Stoploss orders were cancelled on Broker. The algo is actively monitoring live prices on the platform (SL ₹${pos.sl_price || 0}, TG ₹${pos.target_price || 0}) and will auto-exit when breached. You can re-send orders to the broker matching engine anytime.` :
+                    (isTgtCancelled ?
+                        `Target order was cancelled on Broker. The algo is actively monitoring live price on the platform (TG ₹${pos.target_price || 0}) and will auto-exit on hit. You can re-send the Target order to the broker matching engine anytime.` :
+                        `Stoploss order was cancelled on Broker. The algo is actively monitoring live price on the platform (SL ₹${pos.sl_price || 0}) and will auto-exit on hit. You can re-send the Stoploss order to the broker matching engine anytime.`);
 
-                    html += `
+                html += `
                         <tr class="straddle-error-banner-row">
                             <td colspan="14">
                                 <div class="straddle-error-banner-cell" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; background:rgba(245, 158, 11, 0.12); border:1px solid rgba(245, 158, 11, 0.45); padding:10px 16px; border-radius:6px; margin: 4px 0;">
@@ -5777,37 +5781,37 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             </td>
                         </tr>
                     `;
-                }
+            }
 
-                // If error, append error banner directly underneath row with streamlined, unambiguous actions
-                if (isError) {
-                    const legId = pos.id || '';
-                    const errDetail = pos.error_message || pos.error || "Order placement rejected by broker / exchange RMS.";
-                    const marginInfo = parseMarginError(errDetail);
-                    let marginBadgeHtml = "";
-                    let marketClosedBadgeHtml = "";
-                    if (/adapter.*logged\s*off/i.test(errDetail)) {
-                        marketClosedBadgeHtml = `
+            // If error, append error banner directly underneath row with streamlined, unambiguous actions
+            if (isError) {
+                const legId = pos.id || '';
+                const errDetail = pos.error_message || pos.error || "Order placement rejected by broker / exchange RMS.";
+                const marginInfo = parseMarginError(errDetail);
+                let marginBadgeHtml = "";
+                let marketClosedBadgeHtml = "";
+                if (/adapter.*logged\s*off/i.test(errDetail)) {
+                    marketClosedBadgeHtml = `
                             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
                                 <span style="background:rgba(245,158,11,0.22); color:#fcd34d; font-weight:700; font-size:11px; padding:3px 10px; border-radius:4px; font-family:var(--font-mono); border:1px solid rgba(245,158,11,0.35);">
                                     ⏸️ Exchange Closed: Market is closed (Exchange Gateway is offline on weekends/holidays). Order routing is 100% verified, orders will execute when market opens (Mon 9:00 AM MCX / 9:15 AM NSE).
                                 </span>
                             </div>
                         `;
-                    }
-                    if (marginInfo && marginInfo.hasMarginDetails) {
-                        marginBadgeHtml = `
+                }
+                if (marginInfo && marginInfo.hasMarginDetails) {
+                    marginBadgeHtml = `
                             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
-                                <span style="background:rgba(56,189,248,0.15); color:#38bdf8; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">💳 Available: ₹${marginInfo.available.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
-                                <span style="background:rgba(245,158,11,0.15); color:#fbbf24; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">⚡ Required: ₹${marginInfo.required.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
-                                <span style="background:rgba(239,68,68,0.22); color:#f87171; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">🔴 Shortfall: ₹${marginInfo.shortfall.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+                                <span style="background:rgba(56,189,248,0.15); color:#38bdf8; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">💳 Available: ₹${marginInfo.available.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                <span style="background:rgba(245,158,11,0.15); color:#fbbf24; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">⚡ Required: ₹${marginInfo.required.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                <span style="background:rgba(239,68,68,0.22); color:#f87171; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; font-family:var(--font-mono);">🔴 Shortfall: ₹${marginInfo.shortfall.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
                         `;
-                    }
+                }
 
-                    const safeMarginInfoJson = marginInfo ? JSON.stringify(marginInfo).replace(/'/g, "\\'") : "null";
+                const safeMarginInfoJson = marginInfo ? JSON.stringify(marginInfo).replace(/'/g, "\\'") : "null";
 
-                    html += `
+                html += `
                         <tr class="straddle-error-banner-row" data-error-leg-index="${idx}">
                             <td colspan="14">
                                 <div class="straddle-error-banner-cell" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); padding:10px 14px; border-radius:6px; margin: 4px 0;">
@@ -5841,19 +5845,19 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                             </td>
                         </tr>
                     `;
-                }
-            });
-            tbody.innerHTML = html;
-            if (activeId) {
-                const el = document.getElementById(activeId);
-                if (el) {
-                    el.focus();
-                    if (selStart !== null && selEnd !== null && typeof el.setSelectionRange === "function") {
-                        try { el.setSelectionRange(selStart, selEnd); } catch(e) {}
-                    }
+            }
+        });
+        tbody.innerHTML = html;
+        if (activeId) {
+            const el = document.getElementById(activeId);
+            if (el) {
+                el.focus();
+                if (selStart !== null && selEnd !== null && typeof el.setSelectionRange === "function") {
+                    try { el.setSelectionRange(selStart, selEnd); } catch (e) { }
                 }
             }
         }
+    }
 
     // Sync master select all checkbox state
     const masterCb = document.getElementById("straddleSelectAllLegs");
@@ -6249,8 +6253,8 @@ async function openRectifyLegModal(strategyId, legId, legIndex) {
     const prevReqEl = document.getElementById("rectifyPrevRequiredDisplay");
     const prevShortEl = document.getElementById("rectifyPrevShortfallDisplay");
     if (parsedErr && parsedErr.hasMarginDetails) {
-        if (prevReqEl) prevReqEl.textContent = `₹ ${parsedErr.required.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
-        if (prevShortEl) prevShortEl.textContent = `₹ ${parsedErr.shortfall.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+        if (prevReqEl) prevReqEl.textContent = `₹ ${parsedErr.required.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (prevShortEl) prevShortEl.textContent = `₹ ${parsedErr.shortfall.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     } else {
         if (prevReqEl) prevReqEl.textContent = "-";
         if (prevShortEl) prevShortEl.textContent = "-";
@@ -6282,7 +6286,7 @@ async function openRectifyLegModal(strategyId, legId, legIndex) {
     const strikeSel = document.getElementById("rectifyStrikeSelect");
     if (strikeSel) {
         strikeSel.innerHTML = "";
-        
+
         // OTM 20 to 1
         for (let i = 20; i >= 1; i--) {
             const opt = document.createElement("option");
@@ -6352,7 +6356,7 @@ async function refreshLiveWalletMarginInModal(fallbackAvail = null) {
     window._rectifyLegState.availableMargin = avail;
     const availEl = document.getElementById("rectifyAvailFundsDisplay");
     if (availEl) {
-        availEl.textContent = `₹ ${avail.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+        availEl.textContent = `₹ ${avail.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 
     onRectifyParamChange();
@@ -6405,7 +6409,7 @@ function onRectifyParamChange() {
 
     const reqEl = document.getElementById("rectifyNewRequiredDisplay");
     if (reqEl) {
-        reqEl.textContent = `₹ ${requiredMargin.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+        reqEl.textContent = `₹ ${requiredMargin.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 
     const statEl = document.getElementById("rectifyStatusSurplusDisplay");
@@ -6414,7 +6418,7 @@ function onRectifyParamChange() {
 
     if (statEl) {
         if (isSufficient) {
-            statEl.innerHTML = `<span style="color:#10b981;">🟢 SUFFICIENT (+₹${diff.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})})</span>`;
+            statEl.innerHTML = `<span style="color:#10b981;">🟢 SUFFICIENT (+₹${diff.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>`;
             if (calcBadge) {
                 calcBadge.style.background = "rgba(16,185,129,0.2)";
                 calcBadge.style.color = "#10b981";
@@ -6426,7 +6430,7 @@ function onRectifyParamChange() {
                 btnRetry.innerHTML = `<span>⚡ Rectify &amp; Place Order Now</span>`;
             }
         } else {
-            statEl.innerHTML = `<span style="color:#ef4444;">🔴 SHORTFALL: ₹${Math.abs(diff).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>`;
+            statEl.innerHTML = `<span style="color:#ef4444;">🔴 SHORTFALL: ₹${Math.abs(diff).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`;
             if (calcBadge) {
                 calcBadge.style.background = "rgba(239,68,68,0.2)";
                 calcBadge.style.color = "#f87171";
@@ -6774,7 +6778,7 @@ function openLegSettingsModal(rowId) {
     if (strikeSel) {
         strikeSel.innerHTML = "";
         const normStrike = curStrike.toUpperCase().replace("_", " ").trim();
-        
+
         // OTM 20 down to 1
         for (let i = 20; i >= 1; i--) {
             const opt = document.createElement("option");
@@ -8147,8 +8151,8 @@ function toggleAlgoBuilderSection(secId, forceState = null) {
 
     // Check if section is currently hidden
     const isHidden = sec.classList.contains("collapsed") ||
-                     sec.style.display === "none" ||
-                     (!sec.classList.contains("expanded") && window.getComputedStyle(sec).display === "none");
+        sec.style.display === "none" ||
+        (!sec.classList.contains("expanded") && window.getComputedStyle(sec).display === "none");
 
     const shouldExpand = (forceState !== null) ? !!forceState : isHidden;
 
@@ -8728,7 +8732,7 @@ async function onStraddleStrategySelect(stratId) {
     try {
         // 1. Immediately find target strategy in allStrategies
         let strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === stratId || s.name === stratId);
-        
+
         // 2. Synchronously update activeStrategy and activeStrategyId
         window._straddleState.activeStrategyId = strat ? strat.strategy_id : stratId;
         if (strat) {
@@ -8782,7 +8786,7 @@ async function onStraddleStrategySelect(stratId) {
             if (window._straddleState.currentSubView === "terminal") {
                 const settingsPanel = document.getElementById("straddleSettingsPanel");
                 const hasFocusInForm = settingsPanel && settingsPanel.contains(document.activeElement);
-                if (!hasFocusInForm && (!strat || strat.strategy_id !== res.strategy.strategy_id)) {
+                if (!hasFocusInForm) {
                     populateStraddleSettingsForm(res.strategy);
                 }
                 renderStraddlePositions(res.strategy.positions || [], res.strategy.group_mtm || 0.0, res.strategy.mtm || 0.0);
@@ -8979,7 +8983,7 @@ function straddleShowBrokerInfo() {
 
 function updateExecutionModeUI(mode) {
     const isPaper = (mode === "PAPER_TRADING");
-    
+
     // Topbar Pill Button
     const pillBtn = document.getElementById("topbarModePillBtn");
     const pillIcon = document.getElementById("topbarModePillIcon");
@@ -9036,7 +9040,7 @@ async function straddleToggleExecutionMode() {
     const confirmMsg = (nextMode === "PAPER_TRADING")
         ? "Switch to 🧪 PAPER TRADING mode?\n\n• Live market ticks and quotes will be used for execution.\n• Orders, Stoplosses, and Targets will simulate in high fidelity.\n• Zero real money or broker orders will be placed."
         : "Switch to 🟢 LIVE BROKER mode?\n\n• Real orders will be routed directly to Kotak Neo Trade API.\n• Actual margin, real capital, and live positions will be affected.";
-    
+
     if (!confirm(confirmMsg)) return;
 
     try {
@@ -9066,7 +9070,7 @@ let _isBrokerConnected = true;
 
 function updateBrokerConnectionUI(connected) {
     _isBrokerConnected = !!connected;
-    
+
     // Topbar badge & button in dropdown
     const connBadge = document.getElementById("kotakBrokerConnBadge");
     const connBtn = document.getElementById("btnToggleBrokerConnection");
@@ -9133,12 +9137,12 @@ window.updateBrokerConnectionUI = updateBrokerConnectionUI;
 
 async function toggleBrokerConnection(event) {
     if (event && event.stopPropagation) event.stopPropagation();
-    
+
     const targetState = !_isBrokerConnected;
     const confirmMsg = targetState
         ? "Connect platform to Kotak Neo?\n\nLive orders will now be permitted to route to Kotak Neo."
         : "⚠️ ARE YOU SURE YOU WANT TO DISCONNECT FROM KOTAK NEO?\n\nWhile disconnected, UNDER NO CIRCUMSTANCES will any order (entries, SL, targets, re-entries, square-offs) be sent to Kotak Neo.\n\nYou can safely make code updates or monitor the market with zero risk of rogue orders.";
-    
+
     if (!confirm(confirmMsg)) return;
 
     try {
@@ -9217,7 +9221,7 @@ function stopOptionChainTicker() {
         _optChainTickerInterval = null;
     }
     if (window._optChainAbortController) {
-        try { window._optChainAbortController.abort(); } catch(_) {}
+        try { window._optChainAbortController.abort(); } catch (_) { }
         window._optChainAbortController = null;
     }
 }
@@ -9306,7 +9310,7 @@ function toggleOptionChainInsights(forceState = null) {
 
     try {
         localStorage.setItem("straddle_opt_chain_insights_collapsed", isCollapsed ? "true" : "false");
-    } catch(e) {}
+    } catch (e) { }
 }
 window.toggleOptionChainInsights = toggleOptionChainInsights;
 
@@ -9446,7 +9450,7 @@ function openOptionChainForActiveBasket() {
     // Priority 2: Check current active basket in storage
     const list = getSavedBasketsList();
     const current = list.find(b => b.id === window._activeBasketId);
-    
+
     // Authoritative underlying for this basket
     const basketUnderlying = selectedUnd || current?.underlying || window._activeGlobalUnderlying || "NIFTY";
 
@@ -9492,7 +9496,7 @@ function closeTopbarSettingsDropdown() {
 }
 window.closeTopbarSettingsDropdown = closeTopbarSettingsDropdown;
 
-document.addEventListener("click", function(e) {
+document.addEventListener("click", function (e) {
     const wrap = document.getElementById("topbarSettingsMenuWrap");
     const dd = document.getElementById("topbarSettingsDropdown");
     if (dd && wrap && !wrap.contains(e.target)) {
@@ -9547,7 +9551,7 @@ function onToggleChainBasketLeg(strike, optType, side, symbol, token, ltp, lotSi
             });
             try {
                 localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-            } catch(e) {}
+            } catch (e) { }
         }
     } else {
         delete window._chainSelectedLegs[key];
@@ -9556,7 +9560,7 @@ function onToggleChainBasketLeg(strike, optType, side, symbol, token, ltp, lotSi
             window._basketOrders = window._basketOrders.filter(o => !(Number(o.strike) === resolvedStrike && o.opt_type === optType && o.side === side));
             try {
                 localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-            } catch(e) {}
+            } catch (e) { }
         }
     }
     updateOptionChainBasketSummaryBar();
@@ -9662,7 +9666,7 @@ function addSelectedLegsToBasketModal() {
 
     try {
         localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-    } catch(e) {}
+    } catch (e) { }
 
     window._chainSelectedLegs = {};
     window._basketOpeningForOptionChain = null;
@@ -9682,7 +9686,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
 
     const undSel = document.getElementById("optChainUnderlyingSelect");
     const und = undSel?.value || window._straddleState?.optionChainUnderlying || "NIFTY";
-    
+
     const expSel = document.getElementById("optChainExpirySelect");
     const exp = expiryMs || expSel?.value || "";
 
@@ -9707,7 +9711,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
         // Only abort previous in-flight request if user triggered an explicit new foreground action
         if (!isBackgroundUpdate) {
             if (window._optChainAbortController) {
-                try { window._optChainAbortController.abort(); } catch(_) {}
+                try { window._optChainAbortController.abort(); } catch (_) { }
             }
             window._optChainAbortController = new AbortController();
         } else if (!window._optChainAbortController) {
@@ -9747,7 +9751,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
 
             // Update Header Spot Ticker
             if (spotLabel) {
-                spotLabel.textContent = `${chain.underlying}: ₹${chain.spot_price.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                spotLabel.textContent = `${chain.underlying}: ₹${chain.spot_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
             }
 
             // Sync Tradeable Only Checkbox state
@@ -9761,7 +9765,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
 
             // Update Market Insights Ribbon
             const spotEl = document.getElementById("optInsightSpot");
-            if (spotEl) spotEl.textContent = `₹${chain.spot_price.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})} (ATM: ${chain.atm_strike})`;
+            if (spotEl) spotEl.textContent = `₹${chain.spot_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (ATM: ${chain.atm_strike})`;
 
             const pcrEl = document.getElementById("optInsightPcr");
             const pcrTag = document.getElementById("optInsightPcrTag");
@@ -9831,7 +9835,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 const dividerRow = document.getElementById("optSpotDividerRow");
                 const dividerBadge = document.getElementById("optSpotDividerBadge");
                 if (dividerBadge && spotP > 0) {
-                    dividerBadge.textContent = spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    dividerBadge.textContent = spotP.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 }
 
                 let firstRowAfterSpot = null;
@@ -9860,7 +9864,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         const ceHasPrice = r.ce && Number(r.ce.ltp) > 0;
                         const ceLtpNum = ceHasPrice ? Number(r.ce.ltp) : 0;
                         const prevLtp = parseFloat(ceLtpCell.getAttribute("data-ltp") || "0");
-                        const ceLtpText = ceHasPrice ? `₹${ceLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
+                        const ceLtpText = ceHasPrice ? `₹${ceLtpNum.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--";
 
                         const ltpSpan = ceLtpCell.querySelector(".opt-ltp-val");
                         if (ltpSpan) ltpSpan.textContent = ceLtpText;
@@ -9894,7 +9898,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         const peHasPrice = r.pe && Number(r.pe.ltp) > 0;
                         const peLtpNum = peHasPrice ? Number(r.pe.ltp) : 0;
                         const prevLtp = parseFloat(peLtpCell.getAttribute("data-ltp") || "0");
-                        const peLtpText = peHasPrice ? `₹${peLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
+                        const peLtpText = peHasPrice ? `₹${peLtpNum.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--";
 
                         const ltpSpan = peLtpCell.querySelector(".opt-ltp-val");
                         if (ltpSpan) ltpSpan.textContent = peLtpText;
@@ -9959,7 +9963,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         <tr class="opt-spot-divider-row" id="optSpotDividerRow">
                             <td colspan="7">
                                 <div class="opt-spot-divider-line">
-                                    <span class="opt-spot-divider-badge" id="optSpotDividerBadge">${spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    <span class="opt-spot-divider-badge" id="optSpotDividerBadge">${spotP.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
                             </td>
                         </tr>
@@ -9974,7 +9978,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 // CE Data & Formatting
                 const ceHasPrice = r.ce && Number(r.ce.ltp) > 0;
                 const ceLtpNum = ceHasPrice ? Number(r.ce.ltp) : 0;
-                const ceLtpText = ceHasPrice ? `₹${ceLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
+                const ceLtpText = ceHasPrice ? `₹${ceLtpNum.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--";
                 const ceChgPct = r.ce ? (Number(r.ce.net_change_pct) || 0) : 0;
                 const ceChgSign = ceChgPct > 0 ? "+" : "";
                 const ceChgColor = ceChgPct > 0 ? "#10b981" : (ceChgPct < 0 ? "#ef4444" : "#94a3b8");
@@ -9989,7 +9993,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                 // PE Data & Formatting
                 const peHasPrice = r.pe && Number(r.pe.ltp) > 0;
                 const peLtpNum = peHasPrice ? Number(r.pe.ltp) : 0;
-                const peLtpText = peHasPrice ? `₹${peLtpNum.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "--";
+                const peLtpText = peHasPrice ? `₹${peLtpNum.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--";
                 const peChgPct = r.pe ? (Number(r.pe.net_change_pct) || 0) : 0;
                 const peChgSign = peChgPct > 0 ? "+" : "";
                 const peChgColor = peChgPct > 0 ? "#10b981" : (peChgPct < 0 ? "#ef4444" : "#94a3b8");
@@ -10075,7 +10079,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         <!-- CE LTP with Angel One Style Purple OI Bar -->
                         <td id="ceLtp_${strike}" data-ltp="${ceLtpNum}" class="${ceCellClass}" style="position:relative; text-align:right; font-family:var(--font-mono); color:#2dd4bf; font-weight:800; font-size:11.5px; padding:2px 6px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'BUY', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})" title="Click to trade ${ceSym}">
                             <span class="opt-ltp-val">${ceLtpText}</span>
-                            <div class="opt-oi-purple-bar-ce" style="width:${ceOiPct}%;" title="CE Open Interest: ${((ceOi || 0)/100000).toFixed(2)}L"></div>
+                            <div class="opt-oi-purple-bar-ce" style="width:${ceOiPct}%;" title="CE Open Interest: ${((ceOi || 0) / 100000).toFixed(2)}L"></div>
                         </td>
 
                         <!-- STRIKE PRICE (Center) -->
@@ -10086,7 +10090,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                         <!-- PE LTP with Angel One Style Purple OI Bar -->
                         <td id="peLtp_${strike}" data-ltp="${peLtpNum}" class="${peCellClass}" style="position:relative; text-align:left; font-family:var(--font-mono); color:#fb7185; font-weight:800; font-size:11.5px; padding:2px 6px; cursor:pointer;" onclick="openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'BUY', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})" title="Click to trade ${peSym}">
                             <span class="opt-ltp-val">${peLtpText}</span>
-                            <div class="opt-oi-purple-bar-pe" style="width:${peOiPct}%;" title="PE Open Interest: ${((peOi || 0)/100000).toFixed(2)}L"></div>
+                            <div class="opt-oi-purple-bar-pe" style="width:${peOiPct}%;" title="PE Open Interest: ${((peOi || 0) / 100000).toFixed(2)}L"></div>
                         </td>
 
                         <!-- PE CHG % -->
@@ -10104,7 +10108,7 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                     <tr class="opt-spot-divider-row" id="optSpotDividerRow">
                         <td colspan="7">
                             <div class="opt-spot-divider-line">
-                                <span class="opt-spot-divider-badge" id="optSpotDividerBadge">${spotP.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                <span class="opt-spot-divider-badge" id="optSpotDividerBadge">${spotP.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
                         </td>
                     </tr>
@@ -10134,7 +10138,7 @@ function toggleOptTradeableOnly(isChecked) {
     window._optChainTradeableOnly = !!isChecked;
     try {
         localStorage.setItem("straddle_opt_tradeable_only", isChecked ? "true" : "false");
-    } catch(e) {}
+    } catch (e) { }
     loadStraddleOptionChain(null, true);
 }
 window.toggleOptTradeableOnly = toggleOptTradeableOnly;
@@ -10380,7 +10384,7 @@ function openStraddleDirectOrderModal(symbol, instrumentKey, strike, optType, si
 
     const undFromState = window._straddleState.optionChainUnderlying || "NIFTY";
     const allCommodityCandidates = [
-        "NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL", 
+        "NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL",
         "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER",
         "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "BANKEX", "SENSEX", "NIFTY"
     ];
@@ -10513,11 +10517,11 @@ function setOrderModalSide(side) {
     if (submitBtn) {
         const actionText = isBuy ? "BUY" : "SELL";
         submitBtn.textContent = `${actionText} ${window._directOrderState.symbol}`;
-        submitBtn.style.background = isBuy 
-            ? "linear-gradient(135deg, #10b981, #059669)" 
+        submitBtn.style.background = isBuy
+            ? "linear-gradient(135deg, #10b981, #059669)"
             : "linear-gradient(135deg, #ea580c, #dc2626)";
-        submitBtn.style.boxShadow = isBuy 
-            ? "0 4px 15px rgba(16,185,129,0.35)" 
+        submitBtn.style.boxShadow = isBuy
+            ? "0 4px 15px rgba(16,185,129,0.35)"
             : "0 4px 15px rgba(234,88,12,0.35)";
     }
 
@@ -10671,7 +10675,7 @@ function syncDirectOrderFunds() {
             const el = document.getElementById("directOrderAvailMargin");
             if (el) el.textContent = `₹${avail.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         })
-        .catch(() => {});
+        .catch(() => { });
 }
 
 function updateOrderMarginSummary() {
@@ -10708,15 +10712,15 @@ function updateOrderMarginSummary() {
 
     if (isBuy) {
         const req = qty * Math.max(0.05, priceVal);
-        reqEl.textContent = req >= 100000 
-            ? `₹ ${(req/100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})})`
-            : `₹ ${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        reqEl.textContent = req >= 100000
+            ? `₹ ${(req / 100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+            : `₹ ${req.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     } else {
         const baseMarginPerLot = LOT_MARGIN_MAP[und] || 124746.08;
         const req = baseMarginPerLot * lots * prodMult;
         reqEl.textContent = req >= 100000
-            ? `₹ ${(req/100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})})`
-            : `₹ ${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            ? `₹ ${(req / 100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+            : `₹ ${req.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 
     // Call server endpoint for exact live calculated broker margin
@@ -10733,16 +10737,16 @@ function updateOrderMarginSummary() {
             underlying: und
         })
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data && data.success && data.required_margin) {
-            const req = data.required_margin;
-            reqEl.textContent = req >= 100000 
-                ? `₹ ${(req/100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})})`
-                : `₹ ${req.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-        }
-    })
-    .catch(() => {});
+        .then(r => r.json())
+        .then(data => {
+            if (data && data.success && data.required_margin) {
+                const req = data.required_margin;
+                reqEl.textContent = req >= 100000
+                    ? `₹ ${(req / 100000).toFixed(2)} L (₹${req.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+                    : `₹ ${req.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            }
+        })
+        .catch(() => { });
 }
 
 async function submitStraddleDirectOrder() {
@@ -11147,8 +11151,8 @@ function renderStraddleAuditLogs() {
     if (!container) return;
 
     // Instant optimistic render from in-memory cache
-    const cachedLogs = window._cachedAuditLogsList 
-        || (window._straddleState && window._straddleState.logs) 
+    const cachedLogs = window._cachedAuditLogsList
+        || (window._straddleState && window._straddleState.logs)
         || (window._straddleState && window._straddleState.state && window._straddleState.state.logs)
         || [];
     if (cachedLogs && cachedLogs.length > 0) {
@@ -11314,10 +11318,10 @@ let _selectedAdoptablePositionIndex = -1;
 async function openAdoptBrokerPositionModal() {
     const allStrats = window._straddleState?.allStrategies || [];
     let stratId = document.getElementById("adopt_target_strat_select")?.value ||
-                  window._straddleState?.activeStrategy?.strategy_id || 
-                  window._straddleState?.activeStrategyId || 
-                  document.getElementById("straddleTerminalStrategySelect")?.value;
-    
+        window._straddleState?.activeStrategy?.strategy_id ||
+        window._straddleState?.activeStrategyId ||
+        document.getElementById("straddleTerminalStrategySelect")?.value;
+
     if (!stratId && allStrats.length > 0) {
         stratId = allStrats[0].strategy_id;
     }
@@ -11388,7 +11392,7 @@ async function fetchAdoptablePositionsForStrategy(stratId) {
                 const sideClass = (p.side === 'BUY') ? 'badge-buy' : 'badge-sell';
                 const pnl = Number(p.pnl || 0);
                 const pnlClass = pnl >= 0 ? 'color:#10b981;' : 'color:#f87171;';
-                const statusBadge = (p.currently_in && !p.currently_in.includes("Unassigned")) 
+                const statusBadge = (p.currently_in && !p.currently_in.includes("Unassigned"))
                     ? `<span style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); padding:2px 8px; border-radius:12px; font-size:10.5px; font-weight:700;">Running in ${p.currently_in}</span>`
                     : `<span style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:2px 8px; border-radius:12px; font-size:10.5px; font-weight:700;">🟢 Live on Kotak Neo</span>`;
 
@@ -11453,8 +11457,8 @@ window.onAdoptIsHedgeToggle = onAdoptIsHedgeToggle;
 
 function populateAdoptHedgeParentOptions() {
     const stratId = document.getElementById("adopt_target_strat_select")?.value ||
-                    window._straddleState?.activeStrategy?.strategy_id || 
-                    window._straddleState?.activeStrategyId;
+        window._straddleState?.activeStrategy?.strategy_id ||
+        window._straddleState?.activeStrategyId;
     const parentSelect = document.getElementById("adopt_hedge_parent_select");
     if (!parentSelect) return;
 
@@ -11526,10 +11530,10 @@ async function submitAdoptBrokerPosition() {
     }
 
     const stratId = document.getElementById("adopt_target_strat_select")?.value ||
-                    window._straddleState?.activeStrategy?.strategy_id || 
-                    window._straddleState?.activeStrategyId || 
-                    document.getElementById("straddleTerminalStrategySelect")?.value;
-    
+        window._straddleState?.activeStrategy?.strategy_id ||
+        window._straddleState?.activeStrategyId ||
+        document.getElementById("straddleTerminalStrategySelect")?.value;
+
     if (!stratId) {
         showStraddleToast("Please select a target algorithm first.", "error", 2500);
         return;
@@ -11666,7 +11670,7 @@ function getSavedBasketsList() {
             if (rawLegacy) legacyOrders = JSON.parse(rawLegacy) || [];
             const rawName = localStorage.getItem(STORAGE_LEGACY_NAME);
             if (rawName) legacyName = rawName.toUpperCase();
-        } catch (e) {}
+        } catch (e) { }
 
         list = [
             {
@@ -11678,7 +11682,7 @@ function getSavedBasketsList() {
         ];
         try {
             localStorage.setItem(STORAGE_SAVED_BASKETS, JSON.stringify(list));
-        } catch (e) {}
+        } catch (e) { }
     }
     return list;
 }
@@ -11718,7 +11722,7 @@ function loadActiveBasketFromStorage() {
     }
     window._activeBasketId = targetId;
     window._basketOrders = Array.isArray(basket.orders) ? JSON.parse(JSON.stringify(basket.orders)) : [];
-    
+
     // Set UI elements
     const nameEl = document.getElementById("basketModalName");
     if (nameEl) nameEl.innerText = basket.name || "DEFAULT BASKET";
@@ -11749,7 +11753,7 @@ function onBasketUnderlyingChange(newUnd) {
     window._chainSelectedLegs = {};
     try {
         localStorage.setItem("straddle_basket_orders", JSON.stringify([]));
-    } catch(e) {}
+    } catch (e) { }
 
     const searchInput = document.getElementById("basketSearchInput");
     if (searchInput) {
@@ -11868,7 +11872,7 @@ function saveCurrentBasket(notify = false) {
         localStorage.setItem(STORAGE_LAST_BASKET_ID, window._activeBasketId);
         localStorage.setItem(STORAGE_LEGACY_ORDERS, JSON.stringify(window._basketOrders));
         localStorage.setItem(STORAGE_LEGACY_NAME, resolvedName);
-    } catch (e) {}
+    } catch (e) { }
 
     syncBasketDropdown();
     if (notify) {
@@ -11929,7 +11933,7 @@ function persistActiveBasketState() {
 // Load default / last active basket on script execution
 try {
     loadActiveBasketFromStorage();
-} catch (e) {}
+} catch (e) { }
 
 try {
     const savedMult = localStorage.getItem("straddle_basket_multiplier");
@@ -12008,7 +12012,7 @@ async function refreshAllBasketQuotes() {
             if (pricesChanged) {
                 try {
                     localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-                } catch(e) {}
+                } catch (e) { }
                 updateBasketMarginCalculation();
             }
         }
@@ -12096,7 +12100,7 @@ function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSi
 
     // Check if real-time updated quote exists in active search results
     if (window._basketSearchResults && Array.isArray(window._basketSearchResults)) {
-        const found = window._basketSearchResults.find(r => 
+        const found = window._basketSearchResults.find(r =>
             (tok && (r.token === tok || r.instrument_key === tok)) ||
             (Number(r.strike) === resolvedStrike && String(r.opt_type).toUpperCase() === String(optType).toUpperCase() && (!exp || r.expiry_date === exp))
         );
@@ -12130,7 +12134,7 @@ function addLegToBasket(sym, tok, strike, optType, side = "SELL", ltp = 0, lotSi
     window._basketOrders.push(newOrder);
     try {
         localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-    } catch(e) {}
+    } catch (e) { }
 
     updateBasketBadges();
     showStraddleToast(`Added ${newOrder.side} ${newOrder.symbol} to Basket 🧺`, "success", 2000);
@@ -12177,8 +12181,8 @@ function renderBasketOrdersTable() {
         const rowBorderLeft = isBuy ? "border-left:3px solid #10b981;" : "border-left:3px solid #ef4444;";
         const rowBg = isBuy ? "background:rgba(16,185,129,0.035);" : "background:rgba(239,68,68,0.035);";
 
-        const actionStyle = isBuy 
-            ? "background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; box-shadow:0 0 10px rgba(16,185,129,0.5) !important;" 
+        const actionStyle = isBuy
+            ? "background:linear-gradient(135deg, #059669, #10b981) !important; color:#ffffff !important; border:1px solid #34d399 !important; box-shadow:0 0 10px rgba(16,185,129,0.5) !important;"
             : "background:linear-gradient(135deg, #dc2626, #ef4444) !important; color:#ffffff !important; border:1px solid #f87171 !important; box-shadow:0 0 10px rgba(239,68,68,0.5) !important;";
 
         const typeStyle = isCe
@@ -12280,7 +12284,7 @@ function toggleSelectAllBasketOrders(checked) {
     window._basketOrders.forEach(o => o.selected = checked);
     try {
         localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-    } catch(e) {}
+    } catch (e) { }
     renderBasketOrdersTable();
     updateBasketMarginCalculation();
 }
@@ -12290,7 +12294,7 @@ function toggleBasketOrderSelected(idx, checked) {
         window._basketOrders[idx].selected = checked;
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
         updateBasketBadges();
         updateBasketMarginCalculation();
     }
@@ -12301,7 +12305,7 @@ function toggleBasketOrderSide(idx) {
         window._basketOrders[idx].side = (window._basketOrders[idx].side === "BUY") ? "SELL" : "BUY";
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
     }
@@ -12341,7 +12345,7 @@ async function fetchQuoteForBasketOrder(idx) {
 
                 try {
                     localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-                } catch(e) {}
+                } catch (e) { }
 
                 // Update row in DOM immediately
                 const row = document.querySelector(`tr[data-idx="${idx}"]`);
@@ -12376,7 +12380,7 @@ function toggleBasketOrderOptType(idx) {
         item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
         renderBasketOrdersTable();
         fetchQuoteForBasketOrder(idx);
     }
@@ -12390,7 +12394,7 @@ function stepBasketOrderStrike(idx, step) {
         item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
         renderBasketOrdersTable();
         fetchQuoteForBasketOrder(idx);
     }
@@ -12403,7 +12407,7 @@ function onBasketOrderStrikeChange(idx, val) {
         item.symbol = `${item.underlying} ${item.strike} ${item.opt_type}`;
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
         renderBasketOrdersTable();
         fetchQuoteForBasketOrder(idx);
     }
@@ -12416,7 +12420,7 @@ function stepBasketOrderLots(idx, step) {
         item.quantity = item.lots * item.lot_size;
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
 
         const row = document.querySelector(`tr[data-idx="${idx}"]`);
         if (row) {
@@ -12439,7 +12443,7 @@ function onBasketOrderLotsChange(idx, val) {
         item.quantity = item.lots * item.lot_size;
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
 
         const row = document.querySelector(`tr[data-idx="${idx}"]`);
         if (row) {
@@ -12458,7 +12462,7 @@ function onBasketOrderProductChange(idx, val) {
         window._basketOrders[idx].product = val;
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
     }
 }
 
@@ -12469,7 +12473,7 @@ function toggleBasketOrderType(idx) {
     item.order_type = newType;
     try {
         localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-    } catch(e) {}
+    } catch (e) { }
 
     // In-place DOM update without destroying inputs!
     const row = document.querySelector(`tr[data-idx="${idx}"]`);
@@ -12519,7 +12523,7 @@ function onBasketOrderPriceChange(idx, val) {
         window._basketOrders[idx].price = price;
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
         const row = document.querySelector(`tr[data-idx="${idx}"]`);
         if (row) {
             const priceInput = row.querySelector(".basket-price-input");
@@ -12540,7 +12544,7 @@ function duplicateBasketOrder(idx) {
         window._basketOrders.splice(idx + 1, 0, clone);
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
     }
@@ -12551,7 +12555,7 @@ function removeBasketOrder(idx) {
         window._basketOrders.splice(idx, 1);
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-        } catch(e) {}
+        } catch (e) { }
         renderBasketOrdersTable();
         updateBasketMarginCalculation();
     }
@@ -12563,7 +12567,7 @@ function stepBasketMultiplier(step) {
     window._basketMultiplier = mult;
     try {
         localStorage.setItem("straddle_basket_multiplier", mult.toString());
-    } catch(e) {}
+    } catch (e) { }
     const input = document.getElementById("basketMultiplierInput");
     if (input) input.value = mult;
 
@@ -12584,7 +12588,7 @@ function onBasketMultiplierChange(val) {
     window._basketMultiplier = mult;
     try {
         localStorage.setItem("straddle_basket_multiplier", mult.toString());
-    } catch(e) {}
+    } catch (e) { }
     const input = document.getElementById("basketMultiplierInput");
     if (input) input.value = mult;
 
@@ -12636,10 +12640,10 @@ async function updateBasketMarginCalculation() {
                 const finalVal = Number(data.final_margin || reqVal);
                 const availVal = Number(data.available_margin || 0);
 
-                if (reqEl) reqEl.textContent = reqVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                if (finalEl) finalEl.textContent = finalVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                if (availEl) availEl.textContent = availVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                if (chargesEl) chargesEl.textContent = Number(data.total_charges || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                if (reqEl) reqEl.textContent = reqVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                if (finalEl) finalEl.textContent = finalVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                if (availEl) availEl.textContent = availVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                if (chargesEl) chargesEl.textContent = Number(data.total_charges || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
                 // Auto Lots calculation
                 const maxSafeLots = Math.max(1, parseInt(data.max_tradeable_lots || 1, 10));
@@ -12680,7 +12684,7 @@ function populateBasketChargesBreakdown(b) {
     if (!b) return;
     const setT = (id, val) => {
         const el = document.getElementById(id);
-        if (el) el.textContent = Number(val || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        if (el) el.textContent = Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
     setT("chgBreakdownBrokerage", b.brokerage);
     setT("chgBreakdownExternal", b.external_charges);
@@ -12725,7 +12729,7 @@ function toggleBasketChargesPopover(e) {
 window.toggleBasketChargesPopover = toggleBasketChargesPopover;
 
 // Close popover when clicking anywhere outside
-document.addEventListener("click", function(e) {
+document.addEventListener("click", function (e) {
     const pop = document.getElementById("basketChargesPopover");
     const icon = document.getElementById("basketChargesInfoIcon");
     const text = document.getElementById("basketTotalChargesText");
@@ -13077,12 +13081,12 @@ function updateFormAutoMultiplierPreview(overrideMargin) {
         badge.innerHTML = `⚡ Auto: <b>${lots} Lots</b> (₹${(totalPerLot / 100000).toFixed(2)}L/lot)`;
         badge.style.color = "#38bdf8";
         badge.style.background = "rgba(56, 189, 248, 0.1)";
-        badge.title = `Broker Required: ₹${brokerMargin.toLocaleString('en-IN', {maximumFractionDigits: 0})} + Cushion: ₹${cushionVal.toLocaleString('en-IN', {maximumFractionDigits: 0})} = ₹${totalPerLot.toLocaleString('en-IN', {maximumFractionDigits: 0})} / lot\nLive Available Capital: ₹${avail.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ➔ ${lots} Lots`;
+        badge.title = `Broker Required: ₹${brokerMargin.toLocaleString('en-IN', { maximumFractionDigits: 0 })} + Cushion: ₹${cushionVal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} = ₹${totalPerLot.toLocaleString('en-IN', { maximumFractionDigits: 0 })} / lot\nLive Available Capital: ₹${avail.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ➔ ${lots} Lots`;
     } else {
         badge.innerHTML = `⚡ Auto: <b>0 Lots</b> (₹${(totalPerLot / 100000).toFixed(2)}L/lot)`;
         badge.style.color = "#f87171";
         badge.style.background = "rgba(248, 113, 113, 0.1)";
-        badge.title = `Live Available Capital (₹${avail.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}) is less than Required Margin per lot (₹${totalPerLot.toLocaleString('en-IN', {maximumFractionDigits: 0})}). Minimum ₹${totalPerLot.toLocaleString('en-IN', {maximumFractionDigits: 0})} needed for 1 lot.`;
+        badge.title = `Live Available Capital (₹${avail.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) is less than Required Margin per lot (₹${totalPerLot.toLocaleString('en-IN', { maximumFractionDigits: 0 })}). Minimum ₹${totalPerLot.toLocaleString('en-IN', { maximumFractionDigits: 0 })} needed for 1 lot.`;
     }
 }
 window.updateFormAutoMultiplierPreview = updateFormAutoMultiplierPreview;
@@ -13116,7 +13120,7 @@ async function executeCurrentBasket() {
 
     const mult = window._basketMultiplier || 1;
     const confirmMsg = `Are you sure you want to execute ${selected.length} orders with ${mult}x Multiplier?\n\n` +
-                       selected.map(o => `• ${o.side} ${o.lots * mult} lots of ${o.symbol} @ ${o.order_type === 'MARKET' ? 'MARKET' : '₹' + o.price}`).join("\n");
+        selected.map(o => `• ${o.side} ${o.lots * mult} lots of ${o.symbol} @ ${o.order_type === 'MARKET' ? 'MARKET' : '₹' + o.price}`).join("\n");
 
     if (!confirm(confirmMsg)) return;
 
@@ -13140,13 +13144,13 @@ async function executeCurrentBasket() {
         if (res.success) {
             const count = res.results ? res.results.length : selected.length;
             showStraddleToast(`🎉 Successfully executed ${count} basket orders!`, "success", 4000);
-            
+
             // Remove executed orders from basket
             const executedIds = new Set(selected.map(o => o.id));
             window._basketOrders = window._basketOrders.filter(o => !executedIds.has(o.id));
             try {
                 localStorage.setItem("straddle_basket_orders", JSON.stringify(window._basketOrders));
-            } catch(e) {}
+            } catch (e) { }
 
             renderBasketOrdersTable();
             updateBasketMarginCalculation();
@@ -13184,10 +13188,10 @@ function analyseBasketPayoff() {
 
     const isCredit = netPremium >= 0;
     const msg = `📊 Strategy Basket Summary:\n` +
-                `• Total Legs: ${selected.length}\n` +
-                `• Multiplier: ${mult}x\n` +
-                `• Net Premium Flow: ₹${Math.abs(netPremium).toLocaleString('en-IN', {minimumFractionDigits: 2})} (${isCredit ? 'Net Credit Received' : 'Net Debit Paid'})\n` +
-                `• Hedge Benefit Applied: Yes (BUY-first margin protection)`;
+        `• Total Legs: ${selected.length}\n` +
+        `• Multiplier: ${mult}x\n` +
+        `• Net Premium Flow: ₹${Math.abs(netPremium).toLocaleString('en-IN', { minimumFractionDigits: 2 })} (${isCredit ? 'Net Credit Received' : 'Net Debit Paid'})\n` +
+        `• Hedge Benefit Applied: Yes (BUY-first margin protection)`;
     alert(msg);
 }
 
@@ -13399,7 +13403,7 @@ function clearBasketSearch() {
 }
 
 // Close search dropdown on click outside
-document.addEventListener("click", function(e) {
+document.addEventListener("click", function (e) {
     const searchBox = document.getElementById("basketSearchInput")?.closest("div");
     const drop = document.getElementById("basketSearchResultsDropdown");
     if (drop && drop.style.display !== "none") {
@@ -13420,7 +13424,7 @@ function getCustomBasketPresets() {
     try {
         const raw = localStorage.getItem(STORAGE_CUSTOM_PRESETS);
         if (raw) return JSON.parse(raw) || [];
-    } catch(e) {}
+    } catch (e) { }
     return [];
 }
 window.getCustomBasketPresets = getCustomBasketPresets;
@@ -13428,7 +13432,7 @@ window.getCustomBasketPresets = getCustomBasketPresets;
 function saveCustomBasketPresets(presets) {
     try {
         localStorage.setItem(STORAGE_CUSTOM_PRESETS, JSON.stringify(presets));
-    } catch(e) {}
+    } catch (e) { }
 }
 
 const BUILTIN_PRESETS = [
@@ -13520,7 +13524,7 @@ function toggleBasketPresetsDropdown(event) {
 window.toggleBasketPresetsDropdown = toggleBasketPresetsDropdown;
 
 // Close presets dropdown on outside click
-document.addEventListener("click", function(e) {
+document.addEventListener("click", function (e) {
     const drop = document.getElementById("basketPresetsDropdown");
     const btn = document.getElementById("btnBasketPresetsToggle");
     if (drop && drop.style.display === "block") {
@@ -13617,7 +13621,7 @@ async function applyBasketPreset(presetId) {
             if (expData.success && expData.expiries && expData.expiries.length > 0) {
                 nearExpiry = expData.expiries[0].formatted_label || expData.expiries[0].tag || "Weekly";
             }
-        } catch(e) {}
+        } catch (e) { }
 
         // For commodities in iron condor, adjust offset
         let legsConfig = JSON.parse(JSON.stringify(preset.legs));
@@ -13667,7 +13671,7 @@ async function applyBasketPreset(presetId) {
         }
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(newOrders));
-        } catch(e) {}
+        } catch (e) { }
 
         renderBasketOrdersTable();
         updateBasketBadges();
@@ -13759,7 +13763,7 @@ async function applyCustomBasketPreset(presetId) {
             if (expData.success && expData.expiries && expData.expiries.length > 0) {
                 nearExpiry = expData.expiries[0].formatted_label || expData.expiries[0].tag || "Weekly";
             }
-        } catch(e) {}
+        } catch (e) { }
 
         const newOrders = [];
         preset.legs.forEach(legDef => {
@@ -13797,14 +13801,14 @@ async function applyCustomBasketPreset(presetId) {
         }
         try {
             localStorage.setItem("straddle_basket_orders", JSON.stringify(newOrders));
-        } catch(e) {}
+        } catch (e) { }
 
         renderBasketOrdersTable();
         updateBasketBadges();
         updateBasketMarginCalculation();
         refreshAllBasketQuotes();
         showStraddleToast(`Loaded preset "${preset.name}" at ATM ${atm}!`, "success", 2500);
-    } catch(e) {
+    } catch (e) {
         showStraddleToast(`Error loading preset: ${e.message}`, "error", 3000);
     }
 }
@@ -13932,7 +13936,7 @@ function selectGlobalUnderlying(undKey) {
     window._activeGlobalUnderlying = cleanKey;
     try {
         localStorage.setItem("straddle_active_underlying", cleanKey);
-    } catch (_) {}
+    } catch (_) { }
 
     const dispName = COMMODITY_DISPLAY_NAMES[cleanKey] || cleanKey;
     const color = COMMODITY_COLOR_MAP[cleanKey] || "#38bdf8";
@@ -14058,7 +14062,7 @@ function selectGlobalUnderlying(undKey) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ underlying: cleanKey })
-    }).catch(() => {});
+    }).catch(() => { });
 
     // 12. Fetch live tick immediately
     fetchLiveSpotTick();
@@ -14166,7 +14170,7 @@ async function loadAndRenderCandleChart(und, tf) {
             window._chartPriceRange = null;
 
             if (countEl) countEl.textContent = `${data.candles.length} candles (${tf})`;
-            
+
             const badgeEl = document.getElementById("chartActiveContractBadge");
             if (badgeEl) {
                 badgeEl.textContent = data.contract_symbol ? data.contract_symbol : `${und} NEAR MONTH`;
@@ -14483,8 +14487,8 @@ window._chartIsDragging = false;
 window._chartData = null;
 
 function chartZoomIn() {
-    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                      ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
+        ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
     if (totalBars <= 0) return;
     const currentZoom = window._chartZoomCount || 80;
     const newZoom = Math.max(15, Math.round(currentZoom * 0.75));
@@ -14505,8 +14509,8 @@ function chartZoomIn() {
 window.chartZoomIn = chartZoomIn;
 
 function chartZoomOut() {
-    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                      ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
+        ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
     if (totalBars <= 0) return;
     const currentZoom = window._chartZoomCount || 80;
     const maxZoomAllowed = Math.min(Math.max(30, totalBars + 6), 450);
@@ -14528,8 +14532,8 @@ function chartZoomOut() {
 window.chartZoomOut = chartZoomOut;
 
 function chartResetZoom() {
-    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                      ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
+        ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
     window._chartZoomCount = Math.min(80, Math.max(20, totalBars || 80));
     window._chartViewStart = null;
     window._chartPriceRange = null; // Clears manual price scale zoom & pan
@@ -14549,7 +14553,7 @@ function renderCandlestickCanvas() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const container = canvas.parentElement;
-    
+
     // Fixed container bounds & device pixel ratio handling
     const dpr = window.devicePixelRatio || 1;
     const w = Math.floor(container.clientWidth || 1050);
@@ -14571,7 +14575,7 @@ function renderCandlestickCanvas() {
 
     const baseCandles = window._activeCandles || [];
     const forecastCandles = (window._kronosForecastActive && window._kronosForecastData && Array.isArray(window._kronosForecastData.candles)) ? window._kronosForecastData.candles : [];
-    
+
     // Combine base and forecast candles with explicit indexing
     const allCandles = [];
     baseCandles.forEach((c, idx) => {
@@ -14766,7 +14770,7 @@ function renderCandlestickCanvas() {
     // 1. Draw Monte Carlo Volatility Corridors (95% outer and 80% primary inner) if Kronos forecast is active
     if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.volatility_corridor) {
         const vc = window._kronosForecastData.volatility_corridor;
-        
+
         // 1a. Outer 95% Volatility Corridor (subtle tail boundary)
         const u95 = vc.upper_95 || [];
         const l95 = vc.lower_95 || [];
@@ -14994,7 +14998,7 @@ function renderCandlestickCanvas() {
             ctx.setLineDash([2, 2]);
             ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
             ctx.lineWidth = 1;
-            
+
             // Vertical line
             ctx.beginPath();
             ctx.moveTo(Math.floor(mx) + 0.5, margin.top);
@@ -15029,8 +15033,8 @@ function renderCandlestickCanvas() {
                 ctx.fill();
                 ctx.stroke();
 
-                const fmtCursorPrice = (cursorPrice >= 1000) ? 
-                    cursorPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 
+                const fmtCursorPrice = (cursorPrice >= 1000) ?
+                    cursorPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) :
                     cursorPrice.toFixed(2);
 
                 ctx.fillStyle = "#ffffff";
@@ -15120,8 +15124,8 @@ function setupChartCanvasEvents() {
     // 1. Mouse Wheel Zoom (Price Scale vs Chart Body)
     canvas.addEventListener("wheel", (e) => {
         e.preventDefault();
-        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                          ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
+            ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
         if (totalBars <= 0) return;
 
         const cData = window._chartData;
@@ -15195,8 +15199,8 @@ function setupChartCanvasEvents() {
     // - On chart body: start 2D pan (horizontal history + vertical price range) (mode = "pan")
     canvas.addEventListener("pointerdown", (e) => {
         if (e.button !== 0) return; // Only main button
-        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                          ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
+            ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
         if (totalBars <= 0) return;
 
         const cData = window._chartData;
@@ -15219,7 +15223,7 @@ function setupChartCanvasEvents() {
                 anchorPrice: cData.priceMax - relativeY * priceSpan
             };
             window._chartIsDragging = true;
-            try { canvas.setPointerCapture(e.pointerId); } catch(err){}
+            try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
             canvas.classList.add("is-price-scaling");
             canvas.style.cursor = "ns-resize";
             e.preventDefault();
@@ -15242,7 +15246,7 @@ function setupChartCanvasEvents() {
             chartWidth: cData.chartWidth
         };
         window._chartIsDragging = true;
-        try { canvas.setPointerCapture(e.pointerId); } catch(err){}
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
         canvas.classList.add("is-dragging");
         canvas.style.cursor = "grabbing";
         e.preventDefault();
@@ -15268,8 +15272,8 @@ function setupChartCanvasEvents() {
             }
 
             if (window._chartDragState.mode === "pan") {
-                const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                                  ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+                const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
+                    ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
                 const minViewStart = -Math.max(140, Math.round(window._chartDragState.visibleCount * 2.2));
                 const maxViewStart = totalBars + Math.round(window._chartDragState.visibleCount * 1.5);
                 const deltaX = e.clientX - window._chartDragState.startX;
@@ -15316,7 +15320,7 @@ function setupChartCanvasEvents() {
             window._chartIsDragging = false;
             canvas.classList.remove("is-dragging");
             canvas.classList.remove("is-price-scaling");
-            try { if (e && e.pointerId !== undefined) canvas.releasePointerCapture(e.pointerId); } catch(err){}
+            try { if (e && e.pointerId !== undefined) canvas.releasePointerCapture(e.pointerId); } catch (err) { }
             canvas.style.cursor = wasPrice ? "ns-resize" : "crosshair";
             renderCandlestickCanvas();
         }
@@ -15384,8 +15388,8 @@ function setupChartCanvasEvents() {
             _touchStartPos = { x: t.clientX, y: t.clientY, time: Date.now() };
             _touchMoved = false;
 
-            const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                              ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+            const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
+                ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
             const currentZoom = window._chartZoomCount || 80;
             const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
 
@@ -15405,8 +15409,8 @@ function setupChartCanvasEvents() {
     }, { passive: false });
 
     canvas.addEventListener("touchmove", (e) => {
-        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + 
-                          ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+        const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
+            ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
 
         if (e.touches.length === 2 && _initialPinchDist > 5) {
             e.preventDefault();
@@ -15495,7 +15499,7 @@ function toggleChartHeaderCollapse() {
     window._chartHeaderCollapsed = !window._chartHeaderCollapsed;
     try {
         localStorage.setItem("straddle_chart_header_collapsed", window._chartHeaderCollapsed ? "true" : "false");
-    } catch (e) {}
+    } catch (e) { }
     applyChartHeaderCollapseState();
 }
 window.toggleChartHeaderCollapse = toggleChartHeaderCollapse;
@@ -15506,7 +15510,7 @@ function applyChartHeaderCollapseState() {
         if (saved !== null) {
             window._chartHeaderCollapsed = (saved === "true");
         }
-    } catch (e) {}
+    } catch (e) { }
 
     const isCollapsed = !!window._chartHeaderCollapsed;
     const controlsRow = document.getElementById("chartControlsRow");
@@ -15574,7 +15578,7 @@ window.closeTopbarAssetMenu = closeTopbarAssetMenu;
 
 window.openBasketOrdersModal = openBasketOrderModal;
 
-document.addEventListener("click", function(e) {
+document.addEventListener("click", function (e) {
     const wrap = document.getElementById("topbarAssetSelectorWrap");
     if (wrap && !wrap.contains(e.target)) {
         closeTopbarAssetMenu();
@@ -15664,7 +15668,7 @@ function renderExecutionBenchmarkData(bmk) {
 
     if (elAvg) elAvg.textContent = `${(bmk.avg_latency_ms || 0).toFixed(1)} ms`;
     if (elFastSlow) elFastSlow.textContent = `${(bmk.fastest_latency_ms || 0).toFixed(0)} ms / ${(bmk.slowest_latency_ms || 0).toFixed(0)} ms`;
-    
+
     const slipPts = Number(bmk.total_slippage_pts || 0);
     const slipInr = Number(bmk.total_slippage_inr || 0);
     if (elSlipPts) {

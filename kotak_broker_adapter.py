@@ -434,22 +434,48 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         if segment == "nse_fo" and clean_ot == "MKT":
             clean_ot = "L"
             p_flt = float(price or 0.0)
+            if p_flt <= 0 and (instrument_key or symbol):
+                try:
+                    q_res = self.get_live_quotes([instrument_key or symbol])
+                    if q_res and isinstance(q_res, dict):
+                        q_data = q_res.get(instrument_key) or q_res.get(symbol) or {}
+                        if isinstance(q_data, dict):
+                            p_flt = float(q_data.get("ltp") or q_data.get("last_price") or 0.0)
+                        elif isinstance(q_data, (int, float)):
+                            p_flt = float(q_data)
+                except Exception as e_q:
+                    logger.debug(f"Note fetching live quote for MKT order conversion: {e_q}")
+
             if clean_tt == "B":
-                # Buy: tight marketable spread buffer (0.15 - 0.40 pts) to match lowest ask on book immediately (<5ms)
-                # without drifting away from candle close reference price or breaching LPP
-                buf = max(0.15, min(0.40, p_flt * 0.005)) if p_flt > 0 else 0.20
-                mkt_price = p_flt + buf if p_flt > 0 else 5.0
+                # Marketable Buy limit order: Generous buffer so order executes immediately without rejection
+                if p_flt > 0:
+                    buf = max(2.0, min(15.0, p_flt * 0.03))
+                    mkt_price = p_flt + buf
+                else:
+                    mkt_price = 100.0  # Safe non-zero fallback instead of 5.0
                 clean_price = str(round_to_tick(max(0.05, mkt_price), tick_size=tick_size))
             else:
-                # Sell: tight marketable spread buffer (0.15 - 0.40 pts) to match highest bid on book immediately (<5ms)
-                # without drifting away from candle close reference price or breaching LPP
-                buf = max(0.15, min(0.40, p_flt * 0.005)) if p_flt > 0 else 0.20
-                mkt_price = max(0.05, p_flt - buf) if p_flt > 0 else 0.05
+                # Marketable Sell limit order: Generous buffer so order executes immediately without rejection
+                if p_flt > 0:
+                    buf = max(2.0, min(15.0, p_flt * 0.03))
+                    mkt_price = max(0.05, p_flt - buf)
+                else:
+                    mkt_price = 0.05
                 clean_price = str(round_to_tick(max(0.05, mkt_price), tick_size=tick_size))
         elif clean_ot in ("L", "SL"):
             p_flt = float(price or 0.0)
             if p_flt <= 0:
-                p_flt = 5.0 if clean_tt == "B" else 0.05
+                if instrument_key or symbol:
+                    try:
+                        q_res = self.get_live_quotes([instrument_key or symbol])
+                        if q_res and isinstance(q_res, dict):
+                            q_data = q_res.get(instrument_key) or q_res.get(symbol) or {}
+                            if isinstance(q_data, dict):
+                                p_flt = float(q_data.get("ltp") or q_data.get("last_price") or 0.0)
+                    except Exception:
+                        pass
+                if p_flt <= 0:
+                    p_flt = 100.0 if clean_tt == "B" else 0.05
             clean_price = str(round_to_tick(max(0.05, p_flt), tick_size=tick_size))
         else:
             clean_price = "0"
