@@ -1826,13 +1826,48 @@ def _execute_safe_git_pull_operation():
         out = "Standalone mode: Local files are up-to-date. Data snapshot reconciled. Reloading server..."
         success = True
 
-    # 3. Restore snapshots
+    # 3. Restore snapshots with intelligent strategy reconciliation
     for rel, b_data in data_snapshots.items():
         dest_p = config.PROJECT_ROOT / rel
         try:
-            dest_p.parent.mkdir(parents=True, exist_ok=True)
-            with open(dest_p, "wb") as f_out:
-                f_out.write(b_data)
+            if rel.endswith("straddle_strategies.json"):
+                # Intelligently reconcile strategies instead of blindly clobbering repo strategies
+                git_strats = []
+                if dest_p.exists():
+                    try:
+                        with open(dest_p, "r", encoding="utf-8") as f_g:
+                            git_strats = json.load(f_g)
+                        if not isinstance(git_strats, list): git_strats = []
+                    except Exception:
+                        git_strats = []
+
+                snap_strats = []
+                try:
+                    snap_strats = json.loads(b_data.decode("utf-8"))
+                    if not isinstance(snap_strats, list): snap_strats = []
+                except Exception:
+                    snap_strats = []
+
+                merged = {}
+                for s in git_strats:
+                    if isinstance(s, dict) and s.get("strategy_id"):
+                        merged[str(s["strategy_id"]).strip()] = s
+                for s in snap_strats:
+                    if isinstance(s, dict) and s.get("strategy_id"):
+                        sid = str(s["strategy_id"]).strip()
+                        if sid in merged:
+                            merged[sid].update(s)
+                        else:
+                            merged[sid] = s
+
+                final_list = list(merged.values()) if merged else (git_strats or snap_strats)
+                dest_p.parent.mkdir(parents=True, exist_ok=True)
+                with open(dest_p, "w", encoding="utf-8") as f_out:
+                    json.dump(final_list, f_out, indent=2)
+            else:
+                dest_p.parent.mkdir(parents=True, exist_ok=True)
+                with open(dest_p, "wb") as f_out:
+                    f_out.write(b_data)
         except Exception as e_rest:
             out += f"\nNote restoring {rel}: {e_rest}"
 
