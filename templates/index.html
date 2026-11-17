@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261117_v1">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261117_fix_final">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -828,7 +828,7 @@
             <!-- 1. Top Header Bar (Screenshot 1) -->
             <div class="straddle-card straddle-header-card">
                 <div class="straddle-title-group">
-                    <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" title="Return to Algos List" style="padding:4px 10px; font-weight:800; font-size:13px; color:#93c5fd; border-color:#3b82f6; display:inline-flex; align-items:center; gap:6px;">
+                    <button type="button" class="straddle-btn btn-outline" onclick="saveStraddleStrategyAndGoBack()" title="Save changes and return to Algos List" style="padding:4px 10px; font-weight:800; font-size:13px; color:#93c5fd; border-color:#3b82f6; display:inline-flex; align-items:center; gap:6px;">
                         <span>←</span>
                     </button>
                     <span class="straddle-title-text" id="straddleTerminalStrategyTitle">straddle</span>
@@ -3496,7 +3496,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261117_v1"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261117_fix_final"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

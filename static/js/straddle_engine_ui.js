@@ -635,6 +635,15 @@ function switchStraddleSubView(view) {
     const isOrderbook = (view === "orderbook");
     const targetPanel = isOrderbook ? "open_positions" : view;
 
+    // If navigating away from terminal and settings panel was open, auto-save settings
+    if (window._straddleState?.currentSubView === "terminal" && view !== "terminal") {
+        const settingsPanel = document.getElementById("straddleSettingsPanel");
+        const isSettingsOpen = settingsPanel && (settingsPanel.style.display === "block" || !settingsPanel.classList.contains("hidden"));
+        if (isSettingsOpen && typeof saveStraddleStrategySettings === "function") {
+            saveStraddleStrategySettings().catch(e => console.warn("Auto-save on view switch:", e));
+        }
+    }
+
     window._straddleState.currentSubView = view;
 
     // Control visibility of all subview containers
@@ -1226,44 +1235,107 @@ async function confirmSquareOffAllOpenPositions() {
 
 window._selectedAlgoIds = window._selectedAlgoIds || new Set();
 
+function getCurrentlyDisplayedStrategies() {
+    const strategies = window._straddleState?.allStrategies || [];
+    if (!strategies.length) return [];
+    const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
+    const activeUnd = typeof canonicalUnderlying === "function" ? canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY") : (window._activeGlobalUnderlying || "NIFTY").toUpperCase();
+    const hasUnderlyingMatch = strategies.some(s => {
+        const u = typeof canonicalUnderlying === "function" ? canonicalUnderlying(s.underlying || "NIFTY") : (s.underlying || "NIFTY").toUpperCase();
+        return u === activeUnd;
+    });
+    let showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
+
+    let filtered = strategies.filter(s => {
+        const und = typeof canonicalUnderlying === "function" ? canonicalUnderlying(s.underlying || "NIFTY") : (s.underlying || "NIFTY").toUpperCase();
+        if (!showAll && und !== activeUnd) return false;
+        if (searchVal) {
+            const name = (s.name || s.strategy_id || "").toLowerCase();
+            const status = (s.status || "Ready").toLowerCase();
+            if (!name.includes(searchVal) && !und.toLowerCase().includes(searchVal) && !status.includes(searchVal)) return false;
+        }
+        return true;
+    });
+
+    if (filtered.length === 0 && strategies.length > 0 && !searchVal) {
+        filtered = strategies;
+    }
+    return filtered;
+}
+
 function onToggleAlgoSelect(strategyId, isChecked) {
     if (isChecked) {
         window._selectedAlgoIds.add(strategyId);
     } else {
         window._selectedAlgoIds.delete(strategyId);
     }
+    const tr = document.querySelector(`tr[data-strategy-id="${strategyId}"]`);
+    if (tr) {
+        tr.style.background = isChecked ? "rgba(59,130,246,0.08)" : "";
+        const cb = tr.querySelector(".straddle-algo-checkbox");
+        if (cb && cb.checked !== isChecked) cb.checked = isChecked;
+    }
     updateBulkActionsBar();
     updateMasterCheckboxState();
 }
 
 function toggleSelectAllStraddleAlgos(masterCb) {
-    const strategies = window._straddleState?.allStrategies || [];
-    if (masterCb && masterCb.checked) {
-        strategies.forEach(s => {
+    const isChecked = masterCb ? !!masterCb.checked : false;
+    const displayed = getCurrentlyDisplayedStrategies();
+    
+    if (isChecked) {
+        displayed.forEach(s => {
             if (s && s.strategy_id) window._selectedAlgoIds.add(s.strategy_id);
         });
     } else {
-        window._selectedAlgoIds.clear();
+        displayed.forEach(s => {
+            if (s && s.strategy_id) window._selectedAlgoIds.delete(s.strategy_id);
+        });
     }
-    renderStraddleAlgosTable();
+    
+    // Sync all row checkboxes and backgrounds in the DOM immediately
+    const tbody = document.getElementById("straddleAlgosTableBody");
+    if (tbody) {
+        const rows = tbody.querySelectorAll("tr[data-strategy-id]");
+        rows.forEach(tr => {
+            const sid = tr.getAttribute("data-strategy-id");
+            const sel = window._selectedAlgoIds.has(sid);
+            tr.style.background = sel ? "rgba(59,130,246,0.08)" : "";
+            const cb = tr.querySelector(".straddle-algo-checkbox");
+            if (cb) cb.checked = sel;
+        });
+    }
+    
+    updateBulkActionsBar();
+    updateMasterCheckboxState();
 }
 
 function clearAllSelectedAlgos() {
     window._selectedAlgoIds.clear();
-    renderStraddleAlgosTable();
+    const tbody = document.getElementById("straddleAlgosTableBody");
+    if (tbody) {
+        const rows = tbody.querySelectorAll("tr[data-strategy-id]");
+        rows.forEach(tr => {
+            tr.style.background = "";
+            const cb = tr.querySelector(".straddle-algo-checkbox");
+            if (cb) cb.checked = false;
+        });
+    }
+    updateBulkActionsBar();
+    updateMasterCheckboxState();
 }
 
 function updateMasterCheckboxState() {
     const masterCb = document.getElementById("straddleSelectAllAlgos");
     if (!masterCb) return;
-    const strategies = window._straddleState?.allStrategies || [];
-    if (strategies.length === 0) {
+    const displayed = getCurrentlyDisplayedStrategies();
+    if (displayed.length === 0) {
         masterCb.checked = false;
         masterCb.indeterminate = false;
         return;
     }
-    const allChecked = strategies.every(s => window._selectedAlgoIds.has(s.strategy_id));
-    const someChecked = strategies.some(s => window._selectedAlgoIds.has(s.strategy_id));
+    const allChecked = displayed.every(s => window._selectedAlgoIds.has(s.strategy_id));
+    const someChecked = displayed.some(s => window._selectedAlgoIds.has(s.strategy_id));
     masterCb.checked = allChecked;
     masterCb.indeterminate = (!allChecked && someChecked);
 }
@@ -1334,6 +1406,8 @@ async function bulkDeleteSelectedAlgos() {
             window._straddleState.allStrategies = window._straddleState.allStrategies.filter(s => !idSet.has(s.strategy_id));
         }
         window._selectedAlgoIds.clear();
+        updateBulkActionsBar();
+        updateMasterCheckboxState();
         renderStraddleAlgosTable(true);
 
         const resp = await fetch("/api/straddle/strategy/batch_delete", {
@@ -1522,8 +1596,18 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         }
         if (allMatch) {
             // Update live numbers in place without touching DOM hierarchy
-            filtered.forEach(s => {
+            filtered.forEach((s, idx) => {
                 const sid = s.strategy_id;
+                const isSelected = window._selectedAlgoIds.has(sid);
+                const tr = existingRows[idx];
+                if (tr) {
+                    tr.style.background = isSelected ? "rgba(59,130,246,0.08)" : "";
+                    const cb = tr.querySelector(".straddle-algo-checkbox");
+                    if (cb && cb !== document.activeElement) {
+                        cb.checked = isSelected;
+                    }
+                }
+
                 const rawStatus = (s.status || "").toUpperCase();
                 const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
                 const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
@@ -1612,6 +1696,8 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                     }
                 }
             });
+            updateMasterCheckboxState();
+            updateBulkActionsBar();
             return;
         }
     }
@@ -2372,6 +2458,8 @@ async function deleteStraddleAlgo(strategyId) {
             window._straddleState.allStrategies = window._straddleState.allStrategies.filter(s => s.strategy_id !== strategyId);
         }
         window._selectedAlgoIds.delete(strategyId);
+        updateBulkActionsBar();
+        updateMasterCheckboxState();
         renderStraddleAlgosTable(true);
 
         const resp = await fetch("/api/straddle/strategy/delete", {
@@ -7413,7 +7501,7 @@ function addStraddleLegRow(leg = null) {
                 <select class="straddle-select leg-tgt-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
                     ${tgtReOptionsHtml}
                 </select>
-                <input type="number" class="straddle-input leg-tgt-re-cnt" style="width:40px;" value="${l.target_re_execute_count || 6}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
+                <input type="number" class="straddle-input leg-tgt-re-cnt" style="width:40px;" value="${(l.target_re_execute_count !== undefined && l.target_re_execute_count !== null) ? l.target_re_execute_count : 6}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
             </div>
         </td>
         <td class="leg-col-sl">
@@ -7442,7 +7530,7 @@ function addStraddleLegRow(leg = null) {
                 <select class="straddle-select leg-sl-re-type" style="width:120px;" onchange="syncLegRowDisabledFields(this.closest('tr')); syncStrategyLegChange('${rowId}');">
                     ${slReOptionsHtml}
                 </select>
-                <input type="number" class="straddle-input leg-sl-re-cnt" style="width:40px;" value="${l.sl_re_execute_count || 1}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
+                <input type="number" class="straddle-input leg-sl-re-cnt" style="width:40px;" value="${(l.sl_re_execute_count !== undefined && l.sl_re_execute_count !== null) ? l.sl_re_execute_count : 1}" oninput="syncStrategyLegChange('${rowId}')" onchange="syncStrategyLegChange('${rowId}')">
             </div>
         </td>
         <td class="leg-col-action">
@@ -8295,6 +8383,13 @@ function stepStraddleTime(inputId, deltaSeconds) {
 }
 
 function serializeCurrentStrategySettings() {
+    // 1. Immediately synchronize any active stepper time inputs to main inputs
+    if (typeof syncTimeSegmentsToMain === "function") {
+        syncTimeSegmentsToMain("cfgStartTime");
+        syncTimeSegmentsToMain("cfgEndTime");
+        syncTimeSegmentsToMain("cfgNoReEntryAfterTime");
+    }
+
     const active = window._straddleState.activeStrategy || {};
     const inputSid = document.getElementById("cfgStrategyId")?.value;
     const inputName = document.getElementById("cfgStrategyName")?.value;
@@ -8309,6 +8404,12 @@ function serializeCurrentStrategySettings() {
     const stratUnd = (document.getElementById("cfgStrategyUnderlying")?.value || active.underlying || "NIFTY").toUpperCase();
     const stratExecMode = document.getElementById("cfgStrategyExecutionMode")?.value || active.execution_mode || "LIVE_BROKER";
     const stratShadowPaper = document.getElementById("cfgStrategyShadowPaper") ? document.getElementById("cfgStrategyShadowPaper").checked : (active.shadow_paper_trading !== false);
+
+    const multParsed = parseInt(document.getElementById("cfgMultiplier")?.value, 10);
+    const cushionParsed = parseFloat(document.getElementById("cfgCushionMargin")?.value);
+    const mtmTgtVal = parseFloat(document.getElementById("cfgMtmTargetValue")?.value);
+    const mtmSlVal = parseFloat(document.getElementById("cfgMtmSlValue")?.value);
+
     const strategy = {
         execution_mode: stratExecMode,
         shadow_paper_trading: stratShadowPaper,
@@ -8317,8 +8418,8 @@ function serializeCurrentStrategySettings() {
         underlying: stratUnd,
         enabled: active.enabled !== false,
         multiplier_type: (document.getElementById("grpAutoMultiplier")?.style.display !== "none") ? "AUTO" : "MANUAL",
-        multiplier: parseInt(document.getElementById("cfgMultiplier")?.value) || 1,
-        cushion_margin: parseFloat(document.getElementById("cfgCushionMargin")?.value) || 15000,
+        multiplier: (!isNaN(multParsed) && multParsed > 0) ? multParsed : 1,
+        cushion_margin: !isNaN(cushionParsed) ? Math.max(0, cushionParsed) : 15000.0,
         segment: document.getElementById("cfgSegment")?.value || "Options",
         start_time: document.getElementById("cfgStartTime")?.value || "09:15:56",
         end_time: document.getElementById("cfgEndTime")?.value || "15:29:50",
@@ -8336,30 +8437,30 @@ function serializeCurrentStrategySettings() {
         },
         underlying_price_source: undSource,
         trade_type: document.getElementById("btnTradePositional")?.classList.contains("active-toggle") ? "Positional" : "Intraday",
-        schedule_days: active.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+        schedule_days: (active && Array.isArray(active.schedule_days)) ? active.schedule_days : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
         mtm_enabled: !!document.getElementById("cfgToggleMtmSection")?.checked,
         mtm_calc_mode: document.getElementById("btnMtmModePerLot")?.classList.contains("active-toggle") ? "Per Lot" : "Overall",
         mtm_target: {
             enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmTarget")?.checked),
             type: document.getElementById("cfgMtmTargetType")?.value || "Lock and Trail",
-            profit_reaches: parseFloat(document.getElementById("cfgMtmTargetReach")?.value) || 0.0,
-            lock_profit: parseFloat(document.getElementById("cfgMtmTargetLock")?.value) || 0.0,
-            trail_step: parseFloat(document.getElementById("cfgMtmTargetTrailStep")?.value) || 0.0,
-            trail_val: parseFloat(document.getElementById("cfgMtmTargetTrailVal")?.value) || 0.0,
-            value: parseFloat(document.getElementById("cfgMtmTargetValue")?.value) || 10000,
+            profit_reaches: !isNaN(parseFloat(document.getElementById("cfgMtmTargetReach")?.value)) ? parseFloat(document.getElementById("cfgMtmTargetReach")?.value) : 0.0,
+            lock_profit: !isNaN(parseFloat(document.getElementById("cfgMtmTargetLock")?.value)) ? parseFloat(document.getElementById("cfgMtmTargetLock")?.value) : 0.0,
+            trail_step: !isNaN(parseFloat(document.getElementById("cfgMtmTargetTrailStep")?.value)) ? parseFloat(document.getElementById("cfgMtmTargetTrailStep")?.value) : 0.0,
+            trail_val: !isNaN(parseFloat(document.getElementById("cfgMtmTargetTrailVal")?.value)) ? parseFloat(document.getElementById("cfgMtmTargetTrailVal")?.value) : 0.0,
+            value: !isNaN(mtmTgtVal) ? mtmTgtVal : 10000.0,
             re_entry: document.getElementById("cfgMtmTargetReEntry")?.value || "None",
             action: document.getElementById("cfgMtmTargetAction")?.value || "Square off all positions"
         },
         mtm_stoploss: {
             enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmSl")?.checked),
             type: document.getElementById("cfgMtmSlType")?.value || "None",
-            value: parseFloat(document.getElementById("cfgMtmSlValue")?.value) || -5000,
+            value: !isNaN(mtmSlVal) ? mtmSlVal : -5000.0,
             action: document.getElementById("cfgMtmSlAction")?.value || "Square off all positions"
         },
         mtm_sl: {
             enabled: !!(document.getElementById("cfgToggleMtmSection")?.checked && document.getElementById("cfgToggleMtmSl")?.checked),
             type: document.getElementById("cfgMtmSlType")?.value || "None",
-            value: parseFloat(document.getElementById("cfgMtmSlValue")?.value) || -5000,
+            value: !isNaN(mtmSlVal) ? mtmSlVal : -5000.0,
             action: document.getElementById("cfgMtmSlAction")?.value || "Square off all positions"
         },
         no_reentry_after: {
@@ -8369,12 +8470,12 @@ function serializeCurrentStrategySettings() {
         premium_matching: {
             enabled: !!document.getElementById("cfgTogglePremSection")?.checked,
             mode: document.querySelector("input[name='prem_match_mode']:checked")?.value || "No matching of premiums",
-            max_difference: parseFloat(document.getElementById("cfgPremMaxDiffVal")?.value) || 0.0,
-            close_to: parseFloat(document.getElementById("cfgPremCloseToVal")?.value) || 0.0,
-            range_min: parseFloat(document.getElementById("cfgPremRangeMin")?.value) || 0.0,
-            range_max: parseFloat(document.getElementById("cfgPremRangeMax")?.value) || 0.0,
+            max_difference: !isNaN(parseFloat(document.getElementById("cfgPremMaxDiffVal")?.value)) ? parseFloat(document.getElementById("cfgPremMaxDiffVal")?.value) : 0.0,
+            close_to: !isNaN(parseFloat(document.getElementById("cfgPremCloseToVal")?.value)) ? parseFloat(document.getElementById("cfgPremCloseToVal")?.value) : 0.0,
+            range_min: !isNaN(parseFloat(document.getElementById("cfgPremRangeMin")?.value)) ? parseFloat(document.getElementById("cfgPremRangeMin")?.value) : 0.0,
+            range_max: !isNaN(parseFloat(document.getElementById("cfgPremRangeMax")?.value)) ? parseFloat(document.getElementById("cfgPremRangeMax")?.value) : 0.0,
             combined_premium_type: document.getElementById("cfgToggleCombinedPrem")?.checked ? (document.getElementById("cfgCombinedPremType")?.value || "Lower than") : "None",
-            combined_premium_value: parseFloat(document.getElementById("cfgCombinedPremVal")?.value) || 0.0,
+            combined_premium_value: !isNaN(parseFloat(document.getElementById("cfgCombinedPremVal")?.value)) ? parseFloat(document.getElementById("cfgCombinedPremVal")?.value) : 0.0,
             condition_frequency: document.getElementById("cfgPremFrequency")?.value || "LTP (Continuous Monitoring)"
         },
         advanced_settings: {
@@ -8430,13 +8531,14 @@ function serializeCurrentStrategySettings() {
         const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
         const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
 
-        const effectiveTgtPlacement = (strategy.advanced_settings.target_order_placement === "Place in advance") 
-            ? "Place in advance" 
-            : (tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Place in advance");
+        const effectiveTgtPlacement = tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Place in advance";
+        const effectiveSlPlacement = tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Place in advance";
 
-        const effectiveSlPlacement = (strategy.advanced_settings.sl_order_placement === "Place in advance") 
-            ? "Place in advance" 
-            : (tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Place in advance");
+        const tgtValParsed = parseFloat(tr.querySelector(".leg-tgt-val")?.value);
+        const tgtReCntParsed = parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value, 10);
+        const slValParsed = parseFloat(tr.querySelector(".leg-sl-val")?.value);
+        const slReCntParsed = parseInt(tr.querySelector(".leg-sl-re-cnt")?.value, 10);
+        const lotsParsed = parseInt(tr.querySelector(".leg-lots")?.value, 10);
 
         strategy.legs.push({
             id: tr.id,
@@ -8445,7 +8547,7 @@ function serializeCurrentStrategySettings() {
             strike_selection: tr.querySelector(".leg-strike")?.value,
             multiple_strike_selection: tr.querySelector(".leg-multiple-strike")?.value || "None",
             option_type: tr.querySelector(".leg-type")?.value,
-            lots: parseInt(tr.querySelector(".leg-lots")?.value) || 1,
+            lots: (!isNaN(lotsParsed) && lotsParsed > 0) ? lotsParsed : 1,
             associated_hedge: {
                 enabled: isHedgeOn,
                 initial_otm: hInitVal,
@@ -8454,16 +8556,16 @@ function serializeCurrentStrategySettings() {
                 exit_with_parent: true
             },
             target_type: tr.querySelector(".leg-tgt-type")?.value,
-            target_value: parseFloat(tr.querySelector(".leg-tgt-val")?.value) || 45.0,
+            target_value: !isNaN(tgtValParsed) ? tgtValParsed : 45.0,
             target_order_placement: effectiveTgtPlacement,
             target_re_execute_type: tr.querySelector(".leg-tgt-re-type")?.value,
-            target_re_execute_count: parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value) || 6,
+            target_re_execute_count: !isNaN(tgtReCntParsed) ? tgtReCntParsed : 6,
             sl_type: tr.querySelector(".leg-sl-type")?.value,
-            sl_value: parseFloat(tr.querySelector(".leg-sl-val")?.value) || 66.0,
+            sl_value: !isNaN(slValParsed) ? slValParsed : 66.0,
             sl_order_placement: effectiveSlPlacement,
             tsl_type: tr.querySelector(".leg-tsl-type")?.value,
             sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
-            sl_re_execute_count: parseInt(tr.querySelector(".leg-sl-re-cnt")?.value) || 1,
+            sl_re_execute_count: !isNaN(slReCntParsed) ? slReCntParsed : 1,
             action: tr.querySelector(".leg-action")?.value,
             underlying: stratUnd,
             expiry: tr.querySelector(".leg-expiry")?.value
@@ -8678,7 +8780,11 @@ async function onStraddleStrategySelect(stratId) {
                 if (idx >= 0) window._straddleState.allStrategies[idx] = res.strategy;
             }
             if (window._straddleState.currentSubView === "terminal") {
-                populateStraddleSettingsForm(res.strategy);
+                const settingsPanel = document.getElementById("straddleSettingsPanel");
+                const hasFocusInForm = settingsPanel && settingsPanel.contains(document.activeElement);
+                if (!hasFocusInForm && (!strat || strat.strategy_id !== res.strategy.strategy_id)) {
+                    populateStraddleSettingsForm(res.strategy);
+                }
                 renderStraddlePositions(res.strategy.positions || [], res.strategy.group_mtm || 0.0, res.strategy.mtm || 0.0);
             }
         }

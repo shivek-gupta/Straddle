@@ -1831,36 +1831,48 @@ def _execute_safe_git_pull_operation():
         dest_p = config.PROJECT_ROOT / rel
         try:
             if rel.endswith("straddle_strategies.json"):
-                # Intelligently reconcile strategies instead of blindly clobbering repo strategies
-                git_strats = []
-                if dest_p.exists():
+                # Preserve user live strategies and respect deleted tombstones
+                del_ids = set()
+                del_p = config.PROJECT_ROOT / "data" / "straddle_deleted_strategies.json"
+                if del_p.exists():
                     try:
-                        with open(dest_p, "r", encoding="utf-8") as f_g:
-                            git_strats = json.load(f_g)
-                        if not isinstance(git_strats, list): git_strats = []
+                        with open(del_p, "r", encoding="utf-8") as f_del:
+                            del_ids = {str(x).strip().lower() for x in json.load(f_del) if x}
                     except Exception:
-                        git_strats = []
+                        pass
 
-                snap_strats = []
+                snap_strats = None
                 try:
-                    snap_strats = json.loads(b_data.decode("utf-8"))
-                    if not isinstance(snap_strats, list): snap_strats = []
+                    loaded = json.loads(b_data.decode("utf-8"))
+                    if isinstance(loaded, list):
+                        snap_strats = loaded
                 except Exception:
-                    snap_strats = []
+                    snap_strats = None
 
-                merged = {}
-                for s in git_strats:
-                    if isinstance(s, dict) and s.get("strategy_id"):
-                        merged[str(s["strategy_id"]).strip()] = s
-                for s in snap_strats:
-                    if isinstance(s, dict) and s.get("strategy_id"):
-                        sid = str(s["strategy_id"]).strip()
-                        if sid in merged:
-                            merged[sid].update(s)
-                        else:
-                            merged[sid] = s
+                if snap_strats is not None:
+                    # Live snapshot exists - strictly prioritize live user configuration
+                    final_list = [
+                        s for s in snap_strats
+                        if isinstance(s, dict)
+                        and str(s.get("strategy_id", "")).strip().lower() not in del_ids
+                        and str(s.get("name", "")).strip().lower() not in del_ids
+                    ]
+                else:
+                    git_strats = []
+                    if dest_p.exists():
+                        try:
+                            with open(dest_p, "r", encoding="utf-8") as f_g:
+                                git_strats = json.load(f_g)
+                            if not isinstance(git_strats, list): git_strats = []
+                        except Exception:
+                            git_strats = []
+                    final_list = [
+                        s for s in git_strats
+                        if isinstance(s, dict)
+                        and str(s.get("strategy_id", "")).strip().lower() not in del_ids
+                        and str(s.get("name", "")).strip().lower() not in del_ids
+                    ]
 
-                final_list = list(merged.values()) if merged else (git_strats or snap_strats)
                 dest_p.parent.mkdir(parents=True, exist_ok=True)
                 with open(dest_p, "w", encoding="utf-8") as f_out:
                     json.dump(final_list, f_out, indent=2)

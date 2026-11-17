@@ -38,16 +38,18 @@ jobs:
             python3 -c "import json, os; \
             del_f = 'data/straddle_deleted_strategies.json'; \
             strat_f = 'data/straddle_strategies.json'; \
-            d_ids = {'straddle_nifty_920', 'nifty 9:20 short straddle (45% tgt / 66% sl)'}; \
-            if os.path.exists(del_f): \
-              try: d_ids.update(x.strip().lower() for x in json.load(open(del_f))); \
-              except Exception: pass; \
-            for pf in (strat_f, '/home/ubuntu/straddle_data_persist/straddle_strategies.json'): \
+            persist_f = '/home/ubuntu/straddle_data_persist/straddle_strategies.json'; \
+            d_ids = set(); \
+            for df in (del_f, '/home/ubuntu/straddle_data_persist/straddle_deleted_strategies.json'): \
+              if os.path.exists(df): \
+                try: d_ids.update(str(x).strip().lower() for x in json.load(open(df)) if x); \
+                except Exception: pass; \
+            for pf in (strat_f, persist_f): \
               if os.path.exists(pf): \
                 try: \
                   items = json.load(open(pf)); \
                   if isinstance(items, list): \
-                    clean = [s for s in items if str(s.get('strategy_id','')).strip().lower() not in d_ids and str(s.get('name','')).strip().lower() not in d_ids]; \
+                    clean = [s for s in items if isinstance(s, dict) and str(s.get('strategy_id','')).strip().lower() not in d_ids and str(s.get('name','')).strip().lower() not in d_ids]; \
                     json.dump(clean, open(pf, 'w'), indent=2); \
                 except Exception: pass" 2>/dev/null || true
 

@@ -1547,6 +1547,20 @@ class StraddleManager:
     def _load_deleted_strategies(self):
         with _ENGINE_LOCK:
             self._deleted_strategy_ids = set()
+            # First check Oracle Cloud persistent directory if present
+            persist_dir = Path("/home/ubuntu/straddle_data_persist")
+            if persist_dir.exists():
+                p_del = persist_dir / "straddle_deleted_strategies.json"
+                if p_del.exists():
+                    try:
+                        with open(p_del, "r", encoding="utf-8") as f_p:
+                            p_data = json.load(f_p)
+                            if isinstance(p_data, list):
+                                for item in p_data:
+                                    if item:
+                                        self._deleted_strategy_ids.add(str(item).strip().lower())
+                    except Exception as e_p:
+                        logger.warning(f"Error loading persist deleted strategies: {e_p}")
             if STRADDLE_DELETED_FILE.exists():
                 try:
                     with open(STRADDLE_DELETED_FILE, "r", encoding="utf-8") as f:
@@ -1561,7 +1575,15 @@ class StraddleManager:
 
     def _save_deleted_strategies(self):
         try:
-            _safe_write_json(STRADDLE_DELETED_FILE, sorted(list(self._deleted_strategy_ids)))
+            del_list = sorted(list(self._deleted_strategy_ids))
+            _safe_write_json(STRADDLE_DELETED_FILE, del_list)
+            persist_dir = Path("/home/ubuntu/straddle_data_persist")
+            if persist_dir.exists():
+                try:
+                    p_del = persist_dir / "straddle_deleted_strategies.json"
+                    _safe_write_json(p_del, del_list)
+                except Exception as e_p:
+                    logger.warning(f"Note updating persist directory deleted strategies: {e_p}")
         except Exception as e:
             logger.warning(f"Error saving deleted strategies: {e}")
 
@@ -1775,11 +1797,25 @@ class StraddleManager:
 
     def _load_strategies(self):
         with _ENGINE_LOCK:
+            self._strategies_loaded = True
+            persist_dir = Path("/home/ubuntu/straddle_data_persist")
+
+            # 1. Restore from persist directory if local file is missing on Oracle Cloud
+            if persist_dir.exists():
+                p_strat_file = persist_dir / "straddle_strategies.json"
+                if not STRADDLE_STRATEGIES_FILE.exists() and p_strat_file.exists():
+                    try:
+                        import shutil
+                        shutil.copyfile(p_strat_file, STRADDLE_STRATEGIES_FILE)
+                    except Exception as e_cp:
+                        logger.warning(f"Error copying strategies from persist dir: {e_cp}")
+
+            # 2. Load strategies from disk
             if STRADDLE_STRATEGIES_FILE.exists():
                 try:
                     with open(STRADDLE_STRATEGIES_FILE, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        if isinstance(data, list) and len(data) > 0:
+                        if isinstance(data, list):
                             self._strategies = [s for s in data if isinstance(s, dict)]
                         else:
                             self._strategies = []
@@ -1787,67 +1823,25 @@ class StraddleManager:
                     logger.error(f"Failed to load straddle strategies: {e}")
                     self._strategies = []
             else:
-                self._strategies = []
+                # First run initialization ONLY when no strategies file AND no deleted strategies file exist
+                if not self._deleted_strategy_ids:
+                    import copy
+                    self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
+                    self._save_strategies()
+                else:
+                    self._strategies = []
 
-            # Remove any blacklist entries targeting DEFAULT_STRATEGIES
-            default_ids = {str(d.get("strategy_id", "")).strip().lower() for d in DEFAULT_STRATEGIES}
-            default_ids.update(str(d.get("name", "")).strip().lower() for d in DEFAULT_STRATEGIES)
-            if self._deleted_strategy_ids:
-                filtered_del = {x for x in self._deleted_strategy_ids if x not in default_ids}
-                if len(filtered_del) != len(self._deleted_strategy_ids):
-                    self._deleted_strategy_ids = filtered_del
-                    self._save_deleted_strategies()
-
-            # Purge any user-deleted custom strategies permanently
+            # 3. Purge any user-deleted strategies permanently (regardless of whether they were originally default or custom)
             if self._deleted_strategy_ids and self._strategies:
-                purged = [
+                self._strategies = [
                     s for s in self._strategies
                     if isinstance(s, dict)
                     and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
                     and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
                 ]
-                if purged:
-                    self._strategies = purged
-                else:
-                    self._deleted_strategy_ids.clear()
-                    self._save_deleted_strategies()
 
-            # Guaranteed self-healing: Ensure every essential default strategy is present
-            existing_ids = {str(s.get("strategy_id", "")).strip().lower() for s in self._strategies if isinstance(s, dict)}
-            existing_ids.update(str(s.get("name", "")).strip().lower() for s in self._strategies if isinstance(s, dict))
-            import copy
-            added_any_default = False
-            for def_s in DEFAULT_STRATEGIES:
-                did = str(def_s.get("strategy_id", "")).strip().lower()
-                dname = str(def_s.get("name", "")).strip().lower()
-                if did not in existing_ids and dname not in existing_ids:
-                    self._strategies.append(copy.deepcopy(def_s))
-                    existing_ids.add(did)
-                    existing_ids.add(dname)
-                    added_any_default = True
-                    logger.info(f"Auto-restored essential strategy: {def_s.get('name')}")
-
-            if added_any_default or not STRADDLE_STRATEGIES_FILE.exists() or len(self._strategies) == 0:
-                if not self._strategies:
-                    self._strategies = copy.deepcopy(DEFAULT_STRATEGIES)
-                self._save_strategies()
-
-            # Synchronize with Oracle Cloud persistent storage if directory exists
-            persist_dir = Path("/home/ubuntu/straddle_data_persist")
-            if persist_dir.exists():
-                try:
-                    p_strat_file = persist_dir / "straddle_strategies.json"
-                    with open(p_strat_file, "w", encoding="utf-8") as f_p:
-                        json.dump(self._strategies, f_p, indent=2)
-                    p_del_file = persist_dir / "straddle_deleted_strategies.json"
-                    with open(p_del_file, "w", encoding="utf-8") as f_d:
-                        json.dump(list(self._deleted_strategy_ids), f_d, indent=2)
-                except Exception as e_p:
-                    logger.warning(f"Note updating persist directory: {e_p}")
-
-            # Ensure unique names and valid default timings across all strategies
+            # 4. Ensure unique names and valid default timings across all strategies
             seen_names = set()
-            names_modified = False
             for s in self._strategies:
                 name = (s.get("name") or "Strategy").strip()
                 if name.lower() in seen_names:
@@ -1857,7 +1851,6 @@ class StraddleManager:
                         counter += 1
                         candidate = f"{name} ({counter})"
                     s["name"] = candidate
-                    names_modified = True
                     seen_names.add(candidate.lower())
                 else:
                     s["name"] = name
@@ -1871,13 +1864,14 @@ class StraddleManager:
                     s["end_time"] = "15:29:50"
                 else:
                     s["end_time"] = normalize_time_str(s["end_time"], "15:29:50")
-                if not s.get("schedule_days"):
+                if "schedule_days" not in s or s.get("schedule_days") is None:
                     s["schedule_days"] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
                 if "enabled" not in s:
                     s["enabled"] = False
 
             if self._strategies:
-                self._active_strategy_id = self._strategies[0].get("strategy_id")
+                if not self._active_strategy_id or not any(s.get("strategy_id") == self._active_strategy_id for s in self._strategies):
+                    self._active_strategy_id = self._strategies[0].get("strategy_id")
             else:
                 self._active_strategy_id = None
 
@@ -1886,6 +1880,13 @@ class StraddleManager:
     def _save_strategies(self):
         with _ENGINE_LOCK:
             _safe_write_json(STRADDLE_STRATEGIES_FILE, self._strategies)
+            persist_dir = Path("/home/ubuntu/straddle_data_persist")
+            if persist_dir.exists():
+                try:
+                    p_strat_file = persist_dir / "straddle_strategies.json"
+                    _safe_write_json(p_strat_file, self._strategies)
+                except Exception as e_p:
+                    logger.warning(f"Note updating persist directory strategies: {e_p}")
 
     def _load_state(self):
         with _ENGINE_LOCK:
@@ -4401,6 +4402,11 @@ class StraddleManager:
                 sid = f"strat_{int(time.time())}"
                 strat_dict["strategy_id"] = sid
 
+            self._deleted_strategy_ids.discard(str(sid).strip().lower())
+            if sname:
+                self._deleted_strategy_ids.discard(str(sname).strip().lower())
+            self._save_deleted_strategies()
+
             # Normalize underlying asset
             und = str(strat_dict.get("underlying") or "NIFTY").upper()
             strat_dict["underlying"] = und
@@ -5129,8 +5135,11 @@ class StraddleManager:
                     new_strat["status"] = "STOPPED"
                     new_strat["entry_error"] = "Strategy is disabled"
                     new_strat["mtm"] = 0.0
+                    self._deleted_strategy_ids.discard(new_id.strip().lower())
+                    self._deleted_strategy_ids.discard(new_strat["name"].strip().lower())
                     self._strategies.append(new_strat)
                     duplicated.append(new_strat)
+            self._save_deleted_strategies()
             self._save_strategies()
             self._log_event(f"Batch duplicated {len(duplicated)} strategies.")
             return {"success": True, "duplicated_count": len(duplicated), "strategies": duplicated}
@@ -5941,6 +5950,9 @@ class StraddleManager:
                 final_name = candidate
 
             sid = f"strat_preset_{p_type.lower().replace(' ', '_')}_{int(time.time()*1000)}"
+            self._deleted_strategy_ids.discard(sid.strip().lower())
+            self._deleted_strategy_ids.discard(final_name.strip().lower())
+            self._save_deleted_strategies()
             base_strat = DEFAULT_STRATEGIES[0]
             strat = json.loads(json.dumps(base_strat))
             strat["strategy_id"] = sid
@@ -15600,25 +15612,25 @@ class StraddleManager:
 
     def get_full_state(self) -> Dict[str, Any]:
         with _ENGINE_LOCK:
-            if not self._strategies:
+            if not getattr(self, "_strategies_loaded", False):
                 self._load_strategies()
 
             active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else {})
             active_positions = active_strat.get("positions", []) if active_strat else []
 
-            # Ensure all strategies have default schedule days and multiplier settings if not set
+            # Ensure all strategies have valid properties if not set
             for s in self._strategies:
                 if not isinstance(s, dict):
                     continue
-                if not s.get("schedule_days"):
+                if "schedule_days" not in s or s.get("schedule_days") is None:
                     s["schedule_days"] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
                 if "mtm" not in s:
                     s["mtm"] = 0.0
-                if "multiplier_type" not in s:
+                if "multiplier_type" not in s or not s.get("multiplier_type"):
                     s["multiplier_type"] = "MANUAL"
-                if "multiplier" not in s:
+                if "multiplier" not in s or s.get("multiplier") is None:
                     s["multiplier"] = 1
-                if "cushion_margin" not in s:
+                if "cushion_margin" not in s or s.get("cushion_margin") is None:
                     s["cushion_margin"] = 15000.0
                 try:
                     s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(s)
