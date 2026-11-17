@@ -7094,17 +7094,44 @@ function populateStraddleSettingsForm(s) {
         syncNoReEntryAfterState();
     }
 
-    document.getElementById("cfgToggleMoveSlToCost").checked = !!s.move_sl_to_cost;
-    document.getElementById("cfgToggleWaitAndTrade").checked = !!s.wait_and_trade;
-    document.getElementById("cfgToggleReEntry").checked = s.re_entry_enabled !== false;
-    document.getElementById("cfgToggleRangeBreakout").checked = !!s.range_breakout;
+    const moveSlEl = document.getElementById("cfgToggleMoveSlToCost");
+    if (moveSlEl) {
+        moveSlEl.checked = !!(s.move_sl_to_cost || (s.toggles && s.toggles.move_sl_to_cost));
+        moveSlEl.closest(".straddle-toggle-chip")?.classList.toggle("chip-checked", moveSlEl.checked);
+    }
+    const waitTradeEl = document.getElementById("cfgToggleWaitAndTrade");
+    if (waitTradeEl) {
+        waitTradeEl.checked = !!(s.wait_and_trade || (s.toggles && s.toggles.wait_and_trade));
+        waitTradeEl.closest(".straddle-toggle-chip")?.classList.toggle("chip-checked", waitTradeEl.checked);
+    }
+    const reEntryEl = document.getElementById("cfgToggleReEntry");
+    if (reEntryEl) {
+        reEntryEl.checked = (s.toggles && s.toggles.re_entry_active !== undefined) ? s.toggles.re_entry_active : (s.re_entry_enabled !== false);
+        reEntryEl.closest(".straddle-toggle-chip")?.classList.toggle("chip-checked", reEntryEl.checked);
+    }
+    const rangeBreakEl = document.getElementById("cfgToggleRangeBreakout");
+    if (rangeBreakEl) {
+        rangeBreakEl.checked = !!(s.range_breakout || (s.toggles && s.toggles.range_breakout));
+        rangeBreakEl.closest(".straddle-toggle-chip")?.classList.toggle("chip-checked", rangeBreakEl.checked);
+    }
     const dynHedgeEl = document.getElementById("cfgToggleDynamicHedges");
     if (dynHedgeEl) {
         dynHedgeEl.checked = s.toggles ? (s.toggles.dynamic_hedging !== false) : (s.dynamic_hedging !== false);
+        dynHedgeEl.closest(".straddle-toggle-chip")?.classList.toggle("chip-checked", dynHedgeEl.checked);
     }
+
+    // Schedule days
+    const stratDays = Array.isArray(s.schedule_days) ? s.schedule_days : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    document.querySelectorAll(".day-pill-btn").forEach(btn => {
+        const d = btn.getAttribute("data-day");
+        btn.classList.toggle("active", stratDays.includes(d));
+    });
 
     setUnderlyingPriceSource(s.underlying_price_source || "Spot");
     setStraddleTradeType(s.trade_type || "Intraday");
+    if (typeof updateTimingsHeaderBadge === "function") {
+        updateTimingsHeaderBadge();
+    }
 
     // MTM Calculation Mode (Overall vs Per Lot)
     const mtmMode = s.mtm_calc_mode || "Overall";
@@ -8319,12 +8346,165 @@ function setUnderlyingPriceSource(source) {
         const btn = document.getElementById(id);
         if (btn) btn.classList.toggle("active-toggle", s === source);
     });
+    if (window._straddleState?.activeStrategy) {
+        window._straddleState.activeStrategy.underlying_price_source = source;
+    }
+    if (typeof updateTimingsHeaderBadge === "function") {
+        updateTimingsHeaderBadge();
+    }
 }
+window.setUnderlyingPriceSource = setUnderlyingPriceSource;
 
 function setStraddleTradeType(type) {
     document.getElementById("btnTradeIntraday")?.classList.toggle("active-toggle", type === "Intraday");
     document.getElementById("btnTradePositional")?.classList.toggle("active-toggle", type === "Positional");
+    if (window._straddleState?.activeStrategy) {
+        window._straddleState.activeStrategy.trade_type = type;
+    }
+    if (typeof updateTimingsHeaderBadge === "function") {
+        updateTimingsHeaderBadge();
+    }
 }
+window.setStraddleTradeType = setStraddleTradeType;
+
+// Section 2: Strategy Toggles Handler
+function onStrategyToggleChanged(key, isChecked) {
+    if (!window._straddleState?.activeStrategy) return;
+    const strat = window._straddleState.activeStrategy;
+    if (!strat.toggles) strat.toggles = {};
+    strat.toggles[key] = isChecked;
+
+    if (key === "move_sl_to_cost") strat.move_sl_to_cost = isChecked;
+    if (key === "wait_and_trade") strat.wait_and_trade = isChecked;
+    if (key === "re_entry_active") {
+        strat.re_entry_enabled = isChecked;
+        strat.toggles.re_entry_active = isChecked;
+    }
+    if (key === "range_breakout") strat.range_breakout = isChecked;
+    if (key === "dynamic_hedging") {
+        strat.dynamic_hedging = isChecked;
+        strat.toggles.dynamic_hedging = isChecked;
+        document.querySelectorAll("#straddleLegsBuilderBody tr.straddle-leg-builder-row").forEach(tr => {
+            const side = (tr.querySelector(".leg-side")?.value || "Sell").toUpperCase();
+            if (side === "SELL") {
+                const chk = tr.querySelector(".leg-hedge-enabled");
+                if (chk) {
+                    chk.checked = isChecked;
+                    if (typeof toggleLegHedgeRow === "function") toggleLegHedgeRow(tr.id, isChecked);
+                }
+            }
+        });
+    }
+
+    const toggleIdMap = {
+        'move_sl_to_cost': 'cfgToggleMoveSlToCost',
+        'wait_and_trade': 'cfgToggleWaitAndTrade',
+        're_entry_active': 'cfgToggleReEntry',
+        'range_breakout': 'cfgToggleRangeBreakout',
+        'dynamic_hedging': 'cfgToggleDynamicHedges'
+    };
+    const inputEl = document.getElementById(toggleIdMap[key]);
+    if (inputEl) {
+        inputEl.closest(".straddle-toggle-chip")?.classList.toggle("chip-checked", isChecked);
+    }
+
+    if (typeof updateTimingsHeaderBadge === "function") {
+        updateTimingsHeaderBadge();
+    }
+}
+window.onStrategyToggleChanged = onStrategyToggleChanged;
+
+// Section 2: Header Live Badges
+function updateTimingsHeaderBadge() {
+    const summaryBadge = document.getElementById("badge_timings_summary");
+    const countBadge = document.getElementById("badge_active_toggles_count");
+
+    if (summaryBadge) {
+        let und = "Spot";
+        if (document.getElementById("btnUndFutures")?.classList.contains("active-toggle")) und = "Futures";
+        else if (document.getElementById("btnUndSynthetic")?.classList.contains("active-toggle")) und = "Synthetic";
+
+        const tradeType = document.getElementById("btnTradePositional")?.classList.contains("active-toggle") ? "Positional" : "Intraday";
+
+        const startTime = document.getElementById("cfgStartTime")?.value || "09:15:56";
+        const endTime = document.getElementById("cfgEndTime")?.value || "15:29:50";
+
+        summaryBadge.textContent = `${und} • ${tradeType} • ${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
+    }
+
+    if (countBadge) {
+        const toggles = [
+            document.getElementById("cfgToggleMoveSlToCost")?.checked,
+            document.getElementById("cfgToggleWaitAndTrade")?.checked,
+            document.getElementById("cfgToggleReEntry")?.checked,
+            document.getElementById("cfgToggleRangeBreakout")?.checked,
+            document.getElementById("cfgToggleDynamicHedges")?.checked
+        ];
+        const activeCount = toggles.filter(Boolean).length;
+        countBadge.textContent = `${activeCount} Active Toggle${activeCount !== 1 ? "s" : ""}`;
+        if (activeCount > 0) {
+            countBadge.style.color = "#10b981";
+            countBadge.style.background = "rgba(16,185,129,0.12)";
+            countBadge.style.borderColor = "rgba(16,185,129,0.25)";
+        } else {
+            countBadge.style.color = "#94a3b8";
+            countBadge.style.background = "rgba(148,163,184,0.1)";
+            countBadge.style.borderColor = "rgba(148,163,184,0.2)";
+        }
+    }
+}
+window.updateTimingsHeaderBadge = updateTimingsHeaderBadge;
+
+// Quick Time Presets
+function setTimePreset(baseId, timeStr) {
+    if (typeof setStraddleTimeInputValue === "function") {
+        setStraddleTimeInputValue(baseId, timeStr);
+    }
+    if (typeof syncTimeSegmentsToMain === "function") {
+        syncTimeSegmentsToMain(baseId);
+    }
+    if (window._straddleState?.activeStrategy) {
+        if (baseId === "cfgStartTime") window._straddleState.activeStrategy.start_time = timeStr;
+        if (baseId === "cfgEndTime") window._straddleState.activeStrategy.end_time = timeStr;
+        if (baseId === "cfgNoReEntryAfterTime") {
+            if (!window._straddleState.activeStrategy.no_reentry_after) window._straddleState.activeStrategy.no_reentry_after = {};
+            window._straddleState.activeStrategy.no_reentry_after.time = timeStr;
+        }
+    }
+    if (typeof updateTimingsHeaderBadge === "function") {
+        updateTimingsHeaderBadge();
+    }
+}
+window.setTimePreset = setTimePreset;
+
+// Execution Days of Week Pills
+function toggleScheduleDay(day) {
+    const btn = document.querySelector(`.day-pill-btn[data-day="${day}"]`);
+    if (btn) {
+        btn.classList.toggle("active");
+    }
+    syncScheduleDaysToActiveStrategy();
+}
+window.toggleScheduleDay = toggleScheduleDay;
+
+function setAllScheduleDays(enableAll) {
+    document.querySelectorAll(".day-pill-btn").forEach(btn => {
+        btn.classList.toggle("active", !!enableAll);
+    });
+    syncScheduleDaysToActiveStrategy();
+}
+window.setAllScheduleDays = setAllScheduleDays;
+
+function syncScheduleDaysToActiveStrategy() {
+    if (!window._straddleState?.activeStrategy) return;
+    const days = [];
+    document.querySelectorAll(".day-pill-btn.active").forEach(btn => {
+        const d = btn.getAttribute("data-day");
+        if (d) days.push(d);
+    });
+    window._straddleState.activeStrategy.schedule_days = days.length > 0 ? days : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+}
+window.syncScheduleDaysToActiveStrategy = syncScheduleDaysToActiveStrategy;
 
 function applyStraddleBulkEdit(action) {
     if (!action) return;
@@ -8523,6 +8703,17 @@ function stepStraddleTimePart(baseId, unit, delta) {
     const finalStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     const main = document.getElementById(baseId);
     if (main) main.value = finalStr;
+    if (window._straddleState?.activeStrategy) {
+        if (baseId === "cfgStartTime") window._straddleState.activeStrategy.start_time = finalStr;
+        if (baseId === "cfgEndTime") window._straddleState.activeStrategy.end_time = finalStr;
+        if (baseId === "cfgNoReEntryAfterTime") {
+            if (!window._straddleState.activeStrategy.no_reentry_after) window._straddleState.activeStrategy.no_reentry_after = {};
+            window._straddleState.activeStrategy.no_reentry_after.time = finalStr;
+        }
+    }
+    if (typeof updateTimingsHeaderBadge === "function") {
+        updateTimingsHeaderBadge();
+    }
 }
 window.stepStraddleTimePart = stepStraddleTimePart;
 
@@ -8612,8 +8803,20 @@ function syncTimeSegmentsToMain(baseId) {
     if (hhInput) hhInput.value = String(h).padStart(2, '0');
     if (mmInput) mmInput.value = String(m).padStart(2, '0');
     if (ssInput) ssInput.value = String(s).padStart(2, '0');
+    const finalStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     const main = document.getElementById(baseId);
-    if (main) main.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    if (main) main.value = finalStr;
+    if (window._straddleState?.activeStrategy) {
+        if (baseId === "cfgStartTime") window._straddleState.activeStrategy.start_time = finalStr;
+        if (baseId === "cfgEndTime") window._straddleState.activeStrategy.end_time = finalStr;
+        if (baseId === "cfgNoReEntryAfterTime") {
+            if (!window._straddleState.activeStrategy.no_reentry_after) window._straddleState.activeStrategy.no_reentry_after = {};
+            window._straddleState.activeStrategy.no_reentry_after.time = finalStr;
+        }
+    }
+    if (typeof updateTimingsHeaderBadge === "function") {
+        updateTimingsHeaderBadge();
+    }
 }
 window.syncTimeSegmentsToMain = syncTimeSegmentsToMain;
 
@@ -8717,7 +8920,15 @@ function serializeCurrentStrategySettings() {
         },
         underlying_price_source: undSource,
         trade_type: document.getElementById("btnTradePositional")?.classList.contains("active-toggle") ? "Positional" : "Intraday",
-        schedule_days: (active && Array.isArray(active.schedule_days)) ? active.schedule_days : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+        schedule_days: (() => {
+            const activeDays = [];
+            document.querySelectorAll(".day-pill-btn.active").forEach(btn => {
+                const d = btn.getAttribute("data-day");
+                if (d) activeDays.push(d);
+            });
+            if (activeDays.length > 0) return activeDays;
+            return (active && Array.isArray(active.schedule_days) && active.schedule_days.length > 0) ? active.schedule_days : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+        })(),
         mtm_enabled: !!document.getElementById("cfgToggleMtmSection")?.checked,
         mtm_calc_mode: document.getElementById("btnMtmModePerLot")?.classList.contains("active-toggle") ? "Per Lot" : "Overall",
         mtm_target: {

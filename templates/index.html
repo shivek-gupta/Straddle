@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/straddle.css?v=20261117_positions_legs_v2">
+    <link rel="stylesheet" href="/static/css/straddle.css?v=20261117_timings_and_toggles_v3">
     <style>
         .live-tick-pulse {
             display: inline-block;
@@ -1140,33 +1140,48 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_timings')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_timings" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">TIMINGS, UNDERLYING & STRATEGY TOGGLES</span>
+                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">TIMINGS, UNDERLYING &amp; STRATEGY TOGGLES</span>
+                        <span id="badge_timings_summary" style="font-size:11px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); border-radius:12px; padding:1px 8px; margin-left:4px;">Spot • Intraday • 09:15 - 15:29</span>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;" onclick="event.stopPropagation()">
+                        <span id="badge_active_toggles_count" style="font-size:11px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.25); border-radius:12px; padding:1px 8px;">2 Active Toggles</span>
                     </div>
                 </div>
 
                 <div id="sec_builder_timings" class="straddle-collapsible-body collapsed" style="display:none;">
-                    <!-- Toggles Row (Screenshot 2) -->
-                    <div class="straddle-toggles-row" style="margin-bottom:12px;">
-                        <label class="straddle-checkbox-label">
-                            <input type="checkbox" id="cfgToggleMoveSlToCost"> Move SL to Cost 🔗
+                    <!-- Strategy Toggles Row -->
+                    <div class="straddle-toggles-row" style="margin-bottom:12px; display:flex; gap:10px; flex-wrap:wrap;">
+                        <label class="straddle-toggle-chip" title="When one leg hits Target or SL and completes, the opposing open leg's SL is automatically moved to its entry cost price, locking in risk-free execution.">
+                            <input type="checkbox" id="cfgToggleMoveSlToCost" onchange="onStrategyToggleChanged('move_sl_to_cost', this.checked)">
+                            <span class="chip-title">Move SL to Cost</span>
+                            <span class="chip-badge">🔗 Pair SL</span>
                         </label>
-                        <label class="straddle-checkbox-label">
-                            <input type="checkbox" id="cfgToggleWaitAndTrade"> Wait & Trade 🔗
+                        <label class="straddle-toggle-chip" title="Waits for directional momentum confirmation before punching initial orders.">
+                            <input type="checkbox" id="cfgToggleWaitAndTrade" onchange="onStrategyToggleChanged('wait_and_trade', this.checked)">
+                            <span class="chip-title">Wait &amp; Trade</span>
+                            <span class="chip-badge">⚡ Momentum</span>
                         </label>
-                        <label class="straddle-checkbox-label">
-                            <input type="checkbox" id="cfgToggleReEntry" checked> Re-Entry / Re-Cost / Re-Execute 🔗
+                        <label class="straddle-toggle-chip" title="Master toggle allowing legs to re-enter, re-cost, or re-execute after exit based on individual leg settings.">
+                            <input type="checkbox" id="cfgToggleReEntry" checked onchange="onStrategyToggleChanged('re_entry_active', this.checked)">
+                            <span class="chip-title">Re-Entry / Re-Execute</span>
+                            <span class="chip-badge">🔄 Cycles</span>
                         </label>
-                        <label class="straddle-checkbox-label">
-                            <input type="checkbox" id="cfgToggleRangeBreakout"> Range Breakout 🔗
+                        <label class="straddle-toggle-chip" title="Opening Range Breakout: monitors opening candle high/low range before initiating positions.">
+                            <input type="checkbox" id="cfgToggleRangeBreakout" onchange="onStrategyToggleChanged('range_breakout', this.checked)">
+                            <span class="chip-title">Range Breakout</span>
+                            <span class="chip-badge">📊 ORB</span>
                         </label>
-                        <label class="straddle-checkbox-label" title="Enable dynamic associated hedges with auto-roll on Target and auto square-off on exhaustion">
-                            <input type="checkbox" id="cfgToggleDynamicHedges" checked> Dynamic Associated Hedges 🛡️
+                        <label class="straddle-toggle-chip" title="Automatically purchases and rolls deep OTM protective options, reducing exchange margin by up to 70% and shielding against black-swan spikes.">
+                            <input type="checkbox" id="cfgToggleDynamicHedges" checked onchange="onStrategyToggleChanged('dynamic_hedging', this.checked)">
+                            <span class="chip-title">Dynamic Associated Hedges</span>
+                            <span class="chip-badge">🛡️ Margin Saver</span>
                         </label>
                     </div>
 
-                    <!-- Underlying & Trade Type & Timings with Steppers (Screenshots 2 & 3) -->
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; background:#080c14; border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 16px;">
-                        <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
+                    <!-- Underlying, Trade Type, Days, & Execution Timings Container -->
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; background:#080c14; border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 16px;">
+                        <!-- Left Group: Underlying & Trade Type & Active Schedule Days -->
+                        <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Underlying:</label>
                                 <div style="display:flex; gap:4px;">
@@ -1182,10 +1197,22 @@
                                     <button type="button" class="straddle-btn btn-outline" id="btnTradePositional" onclick="setStraddleTradeType('Positional')" title="Positional (NRML): Carry forward positions overnight across days until target, stoploss, or expiry.">Positional</button>
                                 </div>
                             </div>
+                            <div class="straddle-form-group" style="margin-bottom:0;">
+                                <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Active Days:</label>
+                                <div class="straddle-days-pill-group">
+                                    <button type="button" class="day-pill-btn active" data-day="Monday" onclick="toggleScheduleDay('Monday')" title="Monday">M</button>
+                                    <button type="button" class="day-pill-btn active" data-day="Tuesday" onclick="toggleScheduleDay('Tuesday')" title="Tuesday">T</button>
+                                    <button type="button" class="day-pill-btn active" data-day="Wednesday" onclick="toggleScheduleDay('Wednesday')" title="Wednesday">W</button>
+                                    <button type="button" class="day-pill-btn active" data-day="Thursday" onclick="toggleScheduleDay('Thursday')" title="Thursday">T</button>
+                                    <button type="button" class="day-pill-btn active" data-day="Friday" onclick="toggleScheduleDay('Friday')" title="Friday">F</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="padding:2px 6px; font-size:10px; margin-left:2px; height:26px;" onclick="setAllScheduleDays(true)" title="Select All Days">All</button>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Time Controls with Independent Hour, Minute, Second Up & Down Stepper Arrows -->
-                        <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+                        <!-- Right Group: Start Time, End Time & No Re-Entry After with Steppers & Quick Presets -->
+                        <div style="display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap;">
+                            <!-- Start Time -->
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">Start Time (HH:MM:SS):</label>
                                 <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#050608; border:1px solid #1a1d27; border-radius:8px; padding:3px 6px; gap:4px;">
@@ -1229,7 +1256,14 @@
                                     </div>
                                     <input type="hidden" id="cfgStartTime" value="09:15:56">
                                 </div>
+                                <div class="straddle-time-presets">
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgStartTime', '09:16:00')">09:16</span>
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgStartTime', '09:20:00')">09:20</span>
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgStartTime', '09:30:00')">09:30</span>
+                                </div>
                             </div>
+
+                            <!-- End Time -->
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:4px; display:block;">End Time (HH:MM:SS):</label>
                                 <div class="straddle-time-stepper-group" style="display:inline-flex; align-items:center; background:#050608; border:1px solid #1a1d27; border-radius:8px; padding:3px 6px; gap:4px;">
@@ -1273,8 +1307,14 @@
                                     </div>
                                     <input type="hidden" id="cfgEndTime" value="15:29:50">
                                 </div>
+                                <div class="straddle-time-presets">
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgEndTime', '15:20:00')">15:20</span>
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgEndTime', '15:25:00')">15:25</span>
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgEndTime', '15:29:50')">15:29:50</span>
+                                </div>
                             </div>
-                            <!-- No Re-Entry After (Cutoff to avoid new entries / re-executions in last minutes of algo) -->
+
+                            <!-- No Re-Entry After -->
                             <div class="straddle-form-group" style="margin-bottom:0;">
                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
                                     <label style="font-weight:700; color:#94a3b8; font-size:11.5px; margin-bottom:0;" title="No new entries or re-executions will be triggered after this cutoff time">No re-entry after:</label>
@@ -1323,7 +1363,11 @@
                                         </div>
                                     </div>
                                     <input type="hidden" id="cfgNoReEntryAfterTime" value="15:00:00">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" style="margin-left:4px;" title="Clock Cutoff"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                </div>
+                                <div class="straddle-time-presets">
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgNoReEntryAfterTime', '14:45:00')">14:45</span>
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgNoReEntryAfterTime', '15:00:00')">15:00</span>
+                                    <span class="time-preset-pill" onclick="setTimePreset('cfgNoReEntryAfterTime', '15:15:00')">15:15</span>
                                 </div>
                             </div>
                         </div>
@@ -3513,7 +3557,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261117_positions_legs_v2"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261117_timings_and_toggles_v3"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>

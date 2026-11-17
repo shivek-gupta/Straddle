@@ -1024,7 +1024,7 @@ body {
 .straddle-toggles-row {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 10px;
     flex-wrap: wrap;
     font-size: 12px;
     color: #cbd5e1;
@@ -1037,6 +1037,125 @@ body {
     gap: 6px;
     cursor: pointer;
     user-select: none;
+}
+
+/* Strategy Toggles Professional Chips */
+.straddle-toggle-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #080c14;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 12px;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+.straddle-toggle-chip:hover {
+    border-color: rgba(56, 189, 248, 0.3);
+    background: #0d1320;
+    color: #f1f5f9;
+}
+
+.straddle-toggle-chip input[type="checkbox"] {
+    accent-color: #38bdf8;
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+}
+
+.straddle-toggle-chip.chip-checked,
+.straddle-toggle-chip:has(input[type="checkbox"]:checked) {
+    background: rgba(56, 189, 248, 0.08);
+    border-color: rgba(56, 189, 248, 0.35);
+    color: #f8fafc;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.08);
+}
+
+.straddle-toggle-chip .chip-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #64748b;
+    letter-spacing: 0.3px;
+    transition: all 0.2s ease;
+}
+
+.straddle-toggle-chip.chip-checked .chip-badge,
+.straddle-toggle-chip:has(input[type="checkbox"]:checked) .chip-badge {
+    background: rgba(56, 189, 248, 0.18);
+    color: #38bdf8;
+}
+
+/* Schedule Days Pills */
+.straddle-days-pill-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.day-pill-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #090d16;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+}
+
+.day-pill-btn:hover {
+    border-color: rgba(56, 189, 248, 0.3);
+    color: #f1f5f9;
+}
+
+.day-pill-btn.active {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: #38bdf8;
+    color: #38bdf8;
+    box-shadow: 0 0 6px rgba(56, 189, 248, 0.2);
+}
+
+/* Quick Time Preset Pills */
+.straddle-time-presets {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.time-preset-pill {
+    font-size: 9.5px;
+    font-weight: 700;
+    color: #64748b;
+    background: #090d16;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 1px 5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+.time-preset-pill:hover {
+    color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.3);
+    background: rgba(56, 189, 248, 0.1);
 }
 
 .straddle-grid-2col {
