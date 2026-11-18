@@ -1803,9 +1803,9 @@ select:disabled.straddle-select {
    Expressive & Colorful Option Chain Matrix Styles
    ========================================================================== */
 .opt-chain-modal-dialog {
-    width: 95vw !important;
-    max-width: 880px !important;
-    max-height: 88vh !important;
+    width: 96vw !important;
+    max-width: 960px !important;
+    max-height: 90vh !important;
     background: #080c14 !important;
     border: 1px solid rgba(59, 130, 246, 0.35) !important;
     border-radius: 12px !important;
@@ -9329,6 +9329,30 @@ table .flag-cell {
     table-layout: fixed !important;
     width: 100% !important;
     overflow-x: hidden !important;
+    border-collapse: collapse !important;
+}
+
+/* Sticky Headers for Option Chain Matrix */
+.opt-chain-table thead {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 40 !important;
+}
+
+.opt-chain-table thead tr#optChainSuperHeaderRow th {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 42 !important;
+    background: #090e1a !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6) !important;
+}
+
+.opt-chain-table thead tr#optChainSubHeaderRow th {
+    position: sticky !important;
+    top: 25px !important;
+    z-index: 41 !important;
+    background: #080a10 !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.7) !important;
 }
 
 .opt-chain-table th, 
@@ -9378,19 +9402,71 @@ table .flag-cell {
     height: 27px !important;
     font-size: 11px !important;
 }
+.opt-chain-table .chain-quick-trade-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
 .opt-chain-table .chain-quick-trade-btn {
-    width: 19px !important;
+    width: 17px !important;
     height: 18px !important;
-    font-size: 9.5px !important;
+    font-size: 9px !important;
     padding: 0 !important;
     line-height: 18px !important;
     border-radius: 3px !important;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.12s ease, filter 0.12s ease;
+}
+.opt-chain-table .chain-quick-trade-btn:hover {
+    transform: scale(1.15);
+    filter: brightness(1.2);
+}
+.opt-chain-table .chain-btn-buy {
+    background: linear-gradient(135deg, #059669, #10b981) !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+    border: 1px solid #34d399 !important;
+    box-shadow: 0 0 4px rgba(16, 185, 129, 0.5) !important;
+}
+.opt-chain-table .chain-btn-sell {
+    background: linear-gradient(135deg, #dc2626, #ef4444) !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+    border: 1px solid #f87171 !important;
+    box-shadow: 0 0 4px rgba(239, 68, 68, 0.5) !important;
+}
+.opt-chain-table .chain-btn-algo {
+    background: linear-gradient(135deg, #4f46e5, #6366f1) !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+    border: 1px solid #818cf8 !important;
+    box-shadow: 0 0 4px rgba(99, 102, 241, 0.5) !important;
+    font-size: 8.5px !important;
 }
 .opt-chain-table .chain-tick-btn {
     padding: 1px 3px !important;
     font-size: 9.5px !important;
     height: 18px !important;
     border-radius: 3px !important;
+}
+.opt-view-btn {
+    color: #94a3b8;
+    background: transparent;
+    transition: all 0.15s ease;
+}
+.opt-view-btn.active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 8px rgba(37, 99, 235, 0.6) !important;
+}
+.opt-oi-val {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 11px;
 }
 
 /* ==========================================================
@@ -9950,15 +10026,27 @@ button, input[type="button"], input[type="submit"] {
     gap: 8px;
     cursor: pointer;
     user-select: none;
-    font-size: 12px;
+    font-size: 11.5px;
     color: #cbd5e1;
     font-weight: 700;
+    position: relative;
+}
+
+.tradeable-toggle-wrapper input[type="checkbox"] {
+    position: absolute !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none !important;
+    display: none !important;
 }
 
 .tradeable-toggle-switch {
-    width: 38px;
-    height: 20px;
-    background: #161822;
+    width: 36px;
+    height: 18px;
+    background: #1e293b;
     border: 1px solid #475569;
     border-radius: 9999px;
     position: relative;
@@ -9968,26 +10056,28 @@ button, input[type="button"], input[type="submit"] {
 }
 
 .tradeable-toggle-switch .toggle-circle {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     background: #94a3b8;
     border-radius: 50%;
     position: absolute;
     top: 2px;
-    left: 3px;
+    left: 2px;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.tradeable-toggle-wrapper input[type="checkbox"]:checked + .tradeable-toggle-switch,
 input[type="checkbox"]:checked + .tradeable-toggle-switch {
-    background: #2563eb;
-    border-color: #60a5fa;
-    box-shadow: 0 0 10px rgba(37, 99, 235, 0.5);
+    background: #2563eb !important;
+    border-color: #60a5fa !important;
+    box-shadow: 0 0 10px rgba(37, 99, 235, 0.5) !important;
 }
 
+.tradeable-toggle-wrapper input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle,
 input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
-    left: 19px;
-    background: #ffffff;
-    box-shadow: 0 0 6px rgba(255, 255, 255, 0.85);
+    left: 20px !important;
+    background: #ffffff !important;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.85) !important;
 }
 
 /* ==========================================================

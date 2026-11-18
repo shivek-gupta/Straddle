@@ -1042,6 +1042,7 @@
                     <div style="display:flex; gap:8px; align-items:center;" onclick="event.stopPropagation()">
                         <button type="button" class="straddle-btn btn-secondary" style="padding:3px 10px; font-size:11px; font-weight:700;" onclick="addStraddleStraddlePair()" title="Add 1 CE + 1 PE ATM Straddle Pair">+ Straddle (CE+PE)</button>
                         <button type="button" class="straddle-btn btn-outline" style="padding:3px 10px; font-size:11px; font-weight:700;" onclick="addStraddleLegRow()">+ Add Leg</button>
+                        <button type="button" class="straddle-btn btn-outline" style="padding:3px 10px; font-size:11px; font-weight:700; color:#38bdf8; border-color:#38bdf8; background:rgba(56,189,248,0.08);" onclick="openOptionChainForActiveStrategy()" title="Open Option Chain to pick and add strikes to this strategy">⛓️ Option Chain</button>
                     </div>
                 </div>
 
@@ -2703,59 +2704,89 @@
         <!-- Interactive Option Chain Modal (Expressive, Colourful Matrix with Greeks, PCR & Market Depth) -->
         <div id="straddleOptionChainModal" class="straddle-modal-backdrop" style="display:none;">
             <div class="straddle-modal-dialog opt-chain-modal-dialog">
-                <div class="straddle-modal-header" style="background:linear-gradient(90deg, #090e1a 0%, #172554 100%);">
-                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                        <span style="font-size:18px;">📊</span>
-                        <h3 style="margin:0; font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">Option Chain</h3>
-                        <span id="optChainSpotTicker" style="color:#38bdf8; font-family:var(--font-mono); font-size:13px; font-weight:700; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:9999px; padding:2px 10px;">NIFTY: ₹--</span>
+                <!-- Modal Header: Tier 1 (Brand, Asset Selector, Spot Ticker, Action Buttons) -->
+                <div class="straddle-modal-header" style="background:linear-gradient(90deg, #090e1a 0%, #172554 100%); padding:10px 16px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                    <div style="display:flex; align-items:center; justify-content:space-between; width:100%; gap:12px; flex-wrap:wrap;">
+                        <!-- Left Group: Icon, Title, Interactive Asset Picker, Live Spot -->
+                        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                            <span style="font-size:18px;">📊</span>
+                            <h3 style="margin:0; font-size:16px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">Option Chain</h3>
+
+                            <!-- Interactive Focused Asset Selector Dropdown -->
+                            <div class="opt-chain-asset-picker" style="display:inline-flex; align-items:center; gap:6px; background:#0c0d12; border:1px solid #2563eb; padding:2px 10px; border-radius:9999px;" title="Select focused underlying asset for option chain and algo">
+                                <span style="color:#94a3b8; font-size:11px; font-weight:700;">Asset:</span>
+                                <select id="optChainUnderlyingSelect" class="straddle-select" style="background:transparent; border:none; color:#60a5fa; font-weight:800; font-size:12px; padding:2px 4px; cursor:pointer; outline:none;" onchange="onChangeOptChainUnderlying(this.value)">
+                                    <option value="NIFTY" selected>NIFTY 50</option>
+                                    <option value="BANKNIFTY">BANKNIFTY</option>
+                                    <option value="FINNIFTY">FINNIFTY</option>
+                                    <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+                                    <option value="SENSEX">SENSEX</option>
+                                    <option value="BANKEX">BANKEX</option>
+                                    <option value="CRUDEOIL">Crude Oil (MCX)</option>
+                                    <option value="NATURALGAS">Natural Gas (MCX)</option>
+                                    <option value="GOLD">Gold (MCX)</option>
+                                    <option value="SILVER">Silver (MCX)</option>
+                                    <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
+                                    <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
+                                    <option value="GOLDM">Gold Mini (MCX)</option>
+                                    <option value="SILVERM">Silver Mini (MCX)</option>
+                                    <option value="COPPER">Copper (MCX)</option>
+                                </select>
+                            </div>
+                            <span id="optChainUnderlyingBadge" style="display:none;">NIFTY</span>
+
+                            <!-- Spot Ticker Pill -->
+                            <span id="optChainSpotTicker" style="color:#38bdf8; font-family:var(--font-mono); font-size:12.5px; font-weight:800; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:9999px; padding:3px 12px; white-space:nowrap;">NIFTY: ₹--</span>
+                        </div>
+
+                        <!-- Right Group: Actions (Refresh, Basket Mode, Basket Orders, Close) -->
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <button type="button" class="straddle-btn btn-outline" style="padding:4px 10px; font-size:11.5px; border-radius:9999px;" onclick="loadStraddleOptionChain()" title="Refresh Option Chain quotes and Greeks">🔄 Refresh</button>
+                            <button type="button" class="straddle-btn" id="btnToggleBasketMode" onclick="toggleOptionChainBasketMode()" style="background:#0c0d12; color:#38bdf8; border:1px solid #38bdf8; font-weight:800; padding:4px 12px; font-size:11.5px; border-radius:9999px; display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="Toggle multi-leg basket selection checkboxes">🧺 Basket Mode: <span id="basketModeStateLabel" style="color:#f87171; font-weight:900;">OFF</span></button>
+                            <button type="button" class="straddle-btn btn-primary" style="padding:4px 14px; font-size:11.5px; font-weight:800; border-radius:9999px;" onclick="openBasketOrderModal()" title="View Basket Orders">📋 Basket <span id="basketHeaderBadge" style="background:rgba(255,255,255,0.25); color:#fff; border-radius:9999px; padding:0 6px; font-size:10px;">0</span></button>
+                            <button type="button" class="straddle-modal-close" onclick="closeStraddleOptionChainModal()" style="font-size:20px; color:#94a3b8; background:none; border:none; cursor:pointer; padding:2px 8px; line-height:1;" title="Close Option Chain (Esc)">✕</button>
+                        </div>
                     </div>
-                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                        <!-- Tradeable Only Switch (Exact Match to Screenshots 3 & 4) -->
+                </div>
+
+                <!-- Modal Header: Tier 2 (Controls & Filter Strip: Expiry, Strike Range, Tradeable Only, Greeks View) -->
+                <div class="opt-chain-header-controls" style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:6px 16px; background:#07090e; border-bottom:1px solid rgba(255,255,255,0.08); flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <!-- Expiry Selector -->
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="color:#94a3b8; font-size:11px; font-weight:700;">Expiry:</span>
+                            <select id="optChainExpirySelect" class="straddle-select" style="min-width:180px; border-radius:9999px; font-size:11.5px; font-weight:700; padding:3px 10px;" onchange="loadStraddleOptionChain(this.value)">
+                                <!-- Expiries populated dynamically -->
+                            </select>
+                        </div>
+
+                        <!-- Strike Range Selector -->
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="color:#94a3b8; font-size:11px; font-weight:700;">Strikes:</span>
+                            <select id="optChainStrikeRangeSelect" class="straddle-select" style="min-width:115px; border-radius:9999px; font-size:11.5px; font-weight:700; padding:3px 8px;" onchange="loadStraddleOptionChain()">
+                                <option value="10">± 10 Strikes</option>
+                                <option value="15" selected>± 15 Strikes</option>
+                                <option value="20">± 20 Strikes</option>
+                                <option value="25">± 25 Strikes</option>
+                                <option value="30">± 30 Strikes</option>
+                                <option value="0">All Strikes</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                        <!-- Tradeable Only Switch (Clean Toggle with zero raw checkbox glitch) -->
                         <label class="tradeable-toggle-wrapper" title="Toggle between Tradeable Only (liquid) strikes and All consecutive strikes">
-                            <span>Tradeable only</span>
+                            <span style="font-size:11px; font-weight:700; color:#cbd5e1;">Tradeable only</span>
                             <input type="checkbox" id="chkOptTradeableOnly" onchange="toggleOptTradeableOnly(this.checked)">
                             <span class="tradeable-toggle-switch"><span class="toggle-circle"></span></span>
                         </label>
 
-                        <!-- Focused Underlying Read-only Badge (Switch via top bar) -->
-                        <div class="straddle-badge" style="display:inline-flex; align-items:center; gap:6px; background:#0c0d12; border:1px solid #2563eb; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:800;" title="Focused Underlying (Change via Top Bar dropdown)">
-                            <span style="color:#94a3b8; font-size:11px;">Asset:</span>
-                            <span id="optChainUnderlyingBadge" style="color:#60a5fa; font-weight:800;">NIFTY</span>
+                        <!-- View Mode Toggle: Standard vs Greeks -->
+                        <div style="display:inline-flex; background:#070a11; border:1px solid #334155; border-radius:9999px; padding:1px; overflow:hidden;" title="Toggle between Standard View (OI, Chg%, LTP) and Greeks View (IV, Delta, LTP)">
+                            <button type="button" id="btnOptViewStandard" class="opt-view-btn active" onclick="setOptChainViewMode('standard')" style="padding:2px 8px; font-size:10.5px; font-weight:800; border:none; border-radius:9999px; cursor:pointer;">Standard</button>
+                            <button type="button" id="btnOptViewGreeks" class="opt-view-btn" onclick="setOptChainViewMode('greeks')" style="padding:2px 8px; font-size:10.5px; font-weight:800; border:none; border-radius:9999px; cursor:pointer;">Greeks</button>
                         </div>
-                        <select id="optChainUnderlyingSelect" class="straddle-select" style="display:none;" onchange="onChangeOptChainUnderlying(this.value)">
-                            <option value="NIFTY" selected>NIFTY 50</option>
-                            <option value="BANKNIFTY">BANKNIFTY</option>
-                            <option value="FINNIFTY">FINNIFTY</option>
-                            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
-                            <option value="SENSEX">SENSEX</option>
-                            <option value="CRUDEOIL">Crude Oil (MCX)</option>
-                            <option value="NATURALGAS">Natural Gas (MCX)</option>
-                            <option value="GOLD">Gold (MCX)</option>
-                            <option value="SILVER">Silver (MCX)</option>
-                            <option value="CRUDEOILM">Crude Oil Mini (MCX)</option>
-                            <option value="NATGASMINI">Natural Gas Mini (MCX)</option>
-                            <option value="GOLDM">Gold Mini (MCX)</option>
-                            <option value="SILVERM">Silver Mini (MCX)</option>
-                            <option value="COPPER">Copper (MCX)</option>
-                        </select>
-
-                        <!-- Expiry Selector -->
-                        <select id="optChainExpirySelect" class="straddle-select" style="min-width:170px; border-radius:9999px;" onchange="loadStraddleOptionChain(this.value)">
-                            <!-- Expiries populated dynamically -->
-                        </select>
-
-                        <!-- Strike Range Selector -->
-                        <select id="optChainStrikeRangeSelect" class="straddle-select" style="min-width:110px; border-radius:9999px;" onchange="loadStraddleOptionChain()">
-                            <option value="10">± 10 Strikes</option>
-                            <option value="15" selected>± 15 Strikes</option>
-                            <option value="20">± 20 Strikes</option>
-                            <option value="0">All Strikes</option>
-                        </select>
-
-                        <button type="button" class="straddle-btn btn-outline" style="padding:4px 10px; font-size:12px;" onclick="loadStraddleOptionChain()">🔄 Refresh</button>
-                        <button type="button" class="straddle-btn" id="btnToggleBasketMode" onclick="toggleOptionChainBasketMode()" style="background:#0c0d12; color:#38bdf8; border:1px solid #38bdf8; font-weight:800; padding:4px 12px; font-size:12px; display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="Toggle multi-leg basket selection checkboxes">🧺 Basket Mode: <span id="basketModeStateLabel" style="color:#f87171; font-weight:900;">OFF</span></button>
-                        <button type="button" class="straddle-btn btn-primary" style="padding:4px 14px; font-size:12px; font-weight:800;" onclick="openBasketOrderModal()">📋 Basket <span id="basketHeaderBadge" style="background:rgba(255,255,255,0.25); color:#fff; border-radius:9999px; padding:0 6px; font-size:10px;">0</span></button>
-                        <button class="straddle-modal-close" onclick="closeStraddleOptionChainModal()">×</button>
                     </div>
                 </div>
 
@@ -2800,46 +2831,50 @@
                     </div>
                 </div>
 
-                <!-- Matrix Table (Compact, Wrapped, Zero Horizontal Scrollbar, Perfectly Aligned) -->
-                <div class="straddle-modal-body opt-chain-scroll-body" style="padding:0; overflow-x:auto !important; -webkit-overflow-scrolling:touch !important; max-height:calc(88vh - 160px); overflow-y:auto;">
+                <!-- Matrix Table (Sticky Header, 9 Precision Columns, Compact Wrapped, Zero Horizontal Scrollbar) -->
+                <div class="straddle-modal-body opt-chain-scroll-body" style="padding:0; overflow-x:auto !important; -webkit-overflow-scrolling:touch !important; max-height:calc(88vh - 180px); overflow-y:auto;">
                     <table class="straddle-table opt-chain-table" id="straddleOptionChainTable" style="margin:0; width:100%; font-size:12px; table-layout:fixed; border-collapse:collapse;">
-                        <colgroup>
-                            <col style="width: 88px;">
-                            <col style="width: 62px;">
-                            <col style="width: 78px;">
+                        <colgroup id="optChainColgroup">
+                            <col style="width: 104px;">
+                            <col style="width: 66px;">
+                            <col style="width: 60px;">
+                            <col style="width: 76px;">
                             <col style="width: 72px;">
-                            <col style="width: 78px;">
-                            <col style="width: 62px;">
-                            <col style="width: 88px;">
+                            <col style="width: 76px;">
+                            <col style="width: 60px;">
+                            <col style="width: 66px;">
+                            <col style="width: 104px;">
                         </colgroup>
                         <thead>
                             <tr id="optChainSuperHeaderRow">
-                                <!-- CALLS HEADER -->
-                                <th id="thCeSuperHeader" colspan="3" class="opt-table-header-ce" style="text-align:center; font-size:11px; letter-spacing:0.5px; padding:3px 6px;">
-                                    CALL
+                                <!-- CALLS (CE) HEADER -->
+                                <th id="thCeSuperHeader" colspan="4" class="opt-table-header-ce" style="text-align:center; font-size:11px; letter-spacing:0.5px; padding:4px 6px;">
+                                    CALLS (CE)
                                 </th>
                                 <!-- STRIKE HEADER -->
-                                <th class="opt-table-header-strike" style="text-align:center; width:72px; font-size:11px; padding:3px 2px;">
+                                <th class="opt-table-header-strike" style="text-align:center; width:72px; font-size:11px; padding:4px 2px;">
                                     STRIKE
                                 </th>
-                                <!-- PUTS HEADER -->
-                                <th id="thPeSuperHeader" colspan="3" class="opt-table-header-pe" style="text-align:center; font-size:11px; letter-spacing:0.5px; padding:3px 6px;">
-                                    PUT
+                                <!-- PUTS (PE) HEADER -->
+                                <th id="thPeSuperHeader" colspan="4" class="opt-table-header-pe" style="text-align:center; font-size:11px; letter-spacing:0.5px; padding:4px 6px;">
+                                    PUTS (PE)
                                 </th>
                             </tr>
                             <tr id="optChainSubHeaderRow" style="background:#090a0e; border-bottom:1px solid rgba(255,255,255,0.1);">
-                                <!-- Calls Columns: Action/Select, CHG%, LTP -->
-                                <th id="thCeActionHeader" class="opt-action-col" style="text-align:center; width:88px; color:#38bdf8; padding:3px 2px; font-weight:800; font-size:10px;">ACTION</th>
-                                <th id="thCeChg" style="text-align:right; width:62px; color:#94a3b8; font-weight:800; padding:3px 4px; font-size:10px;">CHG %</th>
-                                <th id="thCeLtp" style="text-align:right; width:78px; color:#34d399; font-weight:800; padding:3px 6px; font-size:10px;">LTP</th>
+                                <!-- Calls Columns: Action/Select, OI/IV, CHG%/Delta, LTP -->
+                                <th id="thCeActionHeader" class="opt-action-col" style="text-align:center; width:104px; color:#38bdf8; padding:3px 2px; font-weight:800; font-size:10px;">ACTION</th>
+                                <th id="thCeCol1" style="text-align:right; width:66px; color:#c084fc; font-weight:800; padding:3px 6px; font-size:10px;">OI (L)</th>
+                                <th id="thCeCol2" style="text-align:right; width:60px; color:#94a3b8; font-weight:800; padding:3px 4px; font-size:10px;">CHG %</th>
+                                <th id="thCeCol3" style="text-align:right; width:76px; color:#34d399; font-weight:800; padding:3px 6px; font-size:10px;">LTP</th>
 
                                 <!-- Center Strike -->
                                 <th style="text-align:center; width:72px; background:#111c3a; color:#60a5fa; font-weight:900; padding:3px 2px; font-size:10.5px;">STRIKE</th>
 
-                                <!-- Puts Columns: LTP, CHG%, Action/Select -->
-                                <th id="thPeLtp" style="text-align:left; width:78px; color:#fb7185; font-weight:800; padding:3px 6px; font-size:10px;">LTP</th>
-                                <th id="thPeChg" style="text-align:left; width:62px; color:#94a3b8; font-weight:800; padding:3px 4px; font-size:10px;">CHG %</th>
-                                <th id="thPeActionHeader" class="opt-action-col" style="text-align:center; width:88px; color:#38bdf8; padding:3px 2px; font-weight:800; font-size:10px;">ACTION</th>
+                                <!-- Puts Columns: LTP, CHG%/Delta, OI/IV, Action/Select -->
+                                <th id="thPeCol3" style="text-align:left; width:76px; color:#fb7185; font-weight:800; padding:3px 6px; font-size:10px;">LTP</th>
+                                <th id="thPeCol2" style="text-align:left; width:60px; color:#94a3b8; font-weight:800; padding:3px 4px; font-size:10px;">CHG %</th>
+                                <th id="thPeCol1" style="text-align:left; width:66px; color:#c084fc; font-weight:800; padding:3px 6px; font-size:10px;">OI (L)</th>
+                                <th id="thPeActionHeader" class="opt-action-col" style="text-align:center; width:104px; color:#38bdf8; padding:3px 2px; font-weight:800; font-size:10px;">ACTION</th>
                             </tr>
                         </thead>
                         <tbody id="straddleOptionChainBody">
