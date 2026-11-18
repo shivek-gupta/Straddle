@@ -16120,16 +16120,48 @@ function selectGlobalUnderlying(undKey) {
 }
 window.selectGlobalUnderlying = selectGlobalUnderlying;
 
+// Helper: Exchange Segment routing for Underlyings & Options
+function getExchangeSegmentForUnderlying(und) {
+    const u = String(und || "NIFTY").toUpperCase();
+    if (u === "SENSEX" || u === "BANKEX") return "BFO";
+    if (["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"].includes(u)) return "NSE_FO";
+    return "MCX_FO";
+}
+window.getExchangeSegmentForUnderlying = getExchangeSegmentForUnderlying;
+
+// Helper: Extract root underlying key from any underlying or option contract symbol
+function extractRootUnderlying(symbol) {
+    if (!symbol) return window._activeGlobalUnderlying || "NIFTY";
+    const s = String(symbol).toUpperCase().replace(/\s+/g, "");
+    const sorted = [
+        "NATGASMINI", "CRUDEOILM", "MIDCPNIFTY", "NATURALGAS",
+        "BANKNIFTY", "FINNIFTY", "CRUDEOIL", "SILVERM", "SENSEX",
+        "BANKEX", "COPPER", "SILVER", "GOLDM", "NIFTY", "GOLD"
+    ];
+    for (const u of sorted) {
+        if (s.startsWith(u)) return u;
+    }
+    return window._activeGlobalUnderlying || "NIFTY";
+}
+window.extractRootUnderlying = extractRootUnderlying;
+
 function openActiveAssetChartModal(undParam) {
-    const und = undParam || window._activeGlobalUnderlying || "NIFTY";
-    window._activeChartUnderlying = und;
+    const rawSymbol = undParam || window._activeGlobalUnderlying || "NIFTY";
+    window._activeChartUnderlying = rawSymbol;
     const modal = document.getElementById("modalLiveChart");
     if (!modal) return;
     modal.classList.remove("hidden");
     modal.style.setProperty("display", "flex", "important");
 
-    const dispName = COMMODITY_DISPLAY_NAMES[und] || und;
-    const color = COMMODITY_COLOR_MAP[und] || "#38bdf8";
+    const rootUnd = extractRootUnderlying(rawSymbol);
+    const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[rootUnd]) || rootUnd;
+    const color = (typeof COMMODITY_COLOR_MAP !== "undefined" && COMMODITY_COLOR_MAP[rootUnd]) || "#38bdf8";
+
+    // Synchronize interactive Asset Selector dropdown
+    const selectEl = document.getElementById("chartAssetSelect");
+    if (selectEl) {
+        selectEl.value = rootUnd;
+    }
 
     const titleEl = document.getElementById("chartAssetTitle");
     if (titleEl) {
@@ -16137,7 +16169,7 @@ function openActiveAssetChartModal(undParam) {
     }
     const badgeEl = document.getElementById("chartActiveContractBadge");
     if (badgeEl) {
-        badgeEl.textContent = `${dispName.toUpperCase()} NEAR MONTH`;
+        badgeEl.textContent = rawSymbol.includes(" ") ? rawSymbol : `${dispName.toUpperCase()} NEAR MONTH`;
     }
     const dotEl = document.getElementById("chartAssetDot");
     if (dotEl) {
@@ -16147,17 +16179,248 @@ function openActiveAssetChartModal(undParam) {
 
     const segEl = document.getElementById("chartExchangeSegInfo");
     if (segEl) {
-        segEl.textContent = (und === "NIFTY") ? "NSE_FO" : "MCX_FO";
+        segEl.textContent = getExchangeSegmentForUnderlying(rootUnd);
     }
 
+    updateChartIndicatorButtons();
     setupChartCanvasEvents();
     if (typeof applyChartHeaderCollapseState === "function") {
         applyChartHeaderCollapseState();
     }
-    loadAndRenderCandleChart(und, window._activeChartTimeframe || "5m");
+    loadAndRenderCandleChart(rawSymbol, window._activeChartTimeframe || "5m");
     startChartTickStream();
 }
 window.openActiveAssetChartModal = openActiveAssetChartModal;
+
+// In-Chart Asset Switcher handler
+function onChartAssetChange(newUnd) {
+    if (!newUnd) return;
+    window._activeChartUnderlying = newUnd;
+
+    if (typeof selectGlobalUnderlying === "function") {
+        selectGlobalUnderlying(newUnd);
+    }
+
+    const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[newUnd]) || newUnd;
+    const color = (typeof COMMODITY_COLOR_MAP !== "undefined" && COMMODITY_COLOR_MAP[newUnd]) || "#38bdf8";
+
+    const badgeEl = document.getElementById("chartActiveContractBadge");
+    if (badgeEl) {
+        badgeEl.textContent = `${dispName.toUpperCase()} NEAR MONTH`;
+    }
+    const dotEl = document.getElementById("chartAssetDot");
+    if (dotEl) {
+        dotEl.style.background = color;
+        dotEl.style.boxShadow = `0 0 10px ${color}`;
+    }
+    const segEl = document.getElementById("chartExchangeSegInfo");
+    if (segEl) {
+        segEl.textContent = getExchangeSegmentForUnderlying(newUnd);
+    }
+
+    window._chartViewStart = null;
+    window._chartPriceRange = null;
+
+    loadAndRenderCandleChart(newUnd, window._activeChartTimeframe || "5m");
+}
+window.onChartAssetChange = onChartAssetChange;
+
+// Direct Quick Order Execution from Chart Modal
+function executeChartDirectOrder(side) {
+    const symbol = window._activeContractSymbol || window._activeChartUnderlying || "NIFTY";
+    const lastCandle = (window._activeCandles && window._activeCandles.length > 0) ? window._activeCandles[window._activeCandles.length - 1] : null;
+    const ltp = lastCandle ? lastCandle.close : 0;
+
+    let strike = 0;
+    let optType = "CE";
+    const m = symbol.match(/(\d+(?:\.\d+)?)\s*(CE|PE)/i);
+    if (m) {
+        strike = parseFloat(m[1]);
+        optType = m[2].toUpperCase();
+    } else if (lastCandle) {
+        strike = Math.round(lastCandle.close);
+    }
+
+    if (typeof openStraddleDirectOrderModal === "function") {
+        openStraddleDirectOrderModal(symbol, "", strike, optType, side, ltp);
+    } else {
+        showStraddleToast(`Direct order modal not available`, "warning", 2000);
+    }
+}
+window.executeChartDirectOrder = executeChartDirectOrder;
+
+// Add Active Chart Contract to Algo Strategy Builder
+function addChartAssetToAlgoStrategy() {
+    const symbol = window._activeContractSymbol || window._activeChartUnderlying || "NIFTY";
+    const lastCandle = (window._activeCandles && window._activeCandles.length > 0) ? window._activeCandles[window._activeCandles.length - 1] : null;
+    const ltp = lastCandle ? lastCandle.close : 0;
+    let strike = 0;
+    let optType = "CE";
+    const m = symbol.match(/(\d+(?:\.\d+)?)\s*(CE|PE)/i);
+    if (m) {
+        strike = parseFloat(m[1]);
+        optType = m[2].toUpperCase();
+    } else if (lastCandle) {
+        strike = Math.round(lastCandle.close);
+    }
+
+    if (typeof addOptionChainLegToStrategy === "function") {
+        addOptionChainLegToStrategy(strike, optType, "Buy", symbol, ltp);
+    } else {
+        showStraddleToast(`Algo strategy leg builder not available`, "warning", 2000);
+    }
+}
+window.addChartAssetToAlgoStrategy = addChartAssetToAlgoStrategy;
+
+// Fullscreen Modal Toggle
+window._chartIsFullscreen = false;
+function toggleChartFullscreen() {
+    window._chartIsFullscreen = !window._chartIsFullscreen;
+    const modal = document.getElementById("modalLiveChart");
+    if (!modal) return;
+    const card = modal.querySelector(".straddle-modal-card");
+    const icon = document.getElementById("iconChartFullscreen");
+    const lbl = document.getElementById("lblChartFullscreen");
+    const btn = document.getElementById("btnToggleChartFullscreen");
+
+    if (window._chartIsFullscreen) {
+        if (card) {
+            card.style.setProperty("max-width", "99vw", "important");
+            card.style.setProperty("width", "99vw", "important");
+            card.style.setProperty("height", "98vh", "important");
+            card.style.setProperty("max-height", "98vh", "important");
+        }
+        if (icon) icon.textContent = "🗗";
+        if (lbl) lbl.textContent = "Restore";
+        if (btn) {
+            btn.style.borderColor = "#38bdf8";
+            btn.style.color = "#38bdf8";
+        }
+    } else {
+        if (card) {
+            card.style.removeProperty("max-width");
+            card.style.removeProperty("width");
+            card.style.removeProperty("height");
+            card.style.removeProperty("max-height");
+        }
+        if (icon) icon.textContent = "⛶";
+        if (lbl) lbl.textContent = "Maximize";
+        if (btn) {
+            btn.style.removeProperty("border-color");
+            btn.style.removeProperty("color");
+        }
+    }
+
+    setTimeout(() => {
+        applyChartHeaderCollapseState();
+    }, 50);
+}
+window.toggleChartFullscreen = toggleChartFullscreen;
+
+// Technical Indicators State & Math
+window._chartActiveIndicators = {
+    ema9: false,
+    ema21: false,
+    vwap: false,
+    bb: false
+};
+try {
+    const savedInds = localStorage.getItem("straddle_chart_indicators");
+    if (savedInds) {
+        window._chartActiveIndicators = Object.assign(window._chartActiveIndicators, JSON.parse(savedInds));
+    }
+} catch (e) { }
+
+function toggleChartIndicator(ind) {
+    if (!window._chartActiveIndicators) {
+        window._chartActiveIndicators = { ema9: false, ema21: false, vwap: false, bb: false };
+    }
+    window._chartActiveIndicators[ind] = !window._chartActiveIndicators[ind];
+    try {
+        localStorage.setItem("straddle_chart_indicators", JSON.stringify(window._chartActiveIndicators));
+    } catch (e) { }
+    updateChartIndicatorButtons();
+    renderCandlestickCanvas();
+}
+window.toggleChartIndicator = toggleChartIndicator;
+
+function updateChartIndicatorButtons() {
+    const inds = window._chartActiveIndicators || {};
+    document.querySelectorAll(".chart-indicator-btn").forEach(btn => {
+        const indName = btn.getAttribute("data-ind");
+        if (indName) {
+            btn.classList.toggle("active", !!inds[indName]);
+        }
+    });
+}
+window.updateChartIndicatorButtons = updateChartIndicatorButtons;
+
+function calcChartEMA(candles, period) {
+    const n = candles.length;
+    const emaValues = new Array(n).fill(null);
+    if (n < period) return emaValues;
+
+    let sum = 0;
+    for (let i = 0; i < period; i++) sum += candles[i].close;
+    let prev = sum / period;
+    emaValues[period - 1] = prev;
+
+    const mult = 2 / (period + 1);
+    for (let i = period; i < n; i++) {
+        const val = (candles[i].close - prev) * mult + prev;
+        emaValues[i] = val;
+        prev = val;
+    }
+    return emaValues;
+}
+
+function calcChartVWAP(candles) {
+    const n = candles.length;
+    const vwapValues = new Array(n).fill(null);
+    if (n === 0) return vwapValues;
+
+    let cumVol = 0;
+    let cumTypicalVol = 0;
+    let lastDay = -1;
+
+    for (let i = 0; i < n; i++) {
+        const c = candles[i];
+        const d = new Date(c.time * 1000);
+        const day = d.getUTCDate();
+        if (day !== lastDay) {
+            cumVol = 0;
+            cumTypicalVol = 0;
+            lastDay = day;
+        }
+        const typical = (c.high + c.low + c.close) / 3;
+        const vol = (c.volume && c.volume > 0) ? c.volume : 1;
+        cumVol += vol;
+        cumTypicalVol += typical * vol;
+        vwapValues[i] = (cumVol > 0) ? (cumTypicalVol / cumVol) : typical;
+    }
+    return vwapValues;
+}
+
+function calcChartBollingerBands(candles, period = 20, mult = 2) {
+    const n = candles.length;
+    const upper = new Array(n).fill(null);
+    const middle = new Array(n).fill(null);
+    const lower = new Array(n).fill(null);
+    if (n < period) return { upper, middle, lower };
+
+    for (let i = period - 1; i < n; i++) {
+        let sum = 0;
+        for (let j = 0; j < period; j++) sum += candles[i - j].close;
+        const mean = sum / period;
+        let sumSqDiff = 0;
+        for (let j = 0; j < period; j++) sumSqDiff += Math.pow(candles[i - j].close - mean, 2);
+        const stdDev = Math.sqrt(sumSqDiff / period);
+        middle[i] = mean;
+        upper[i] = mean + mult * stdDev;
+        lower[i] = mean - mult * stdDev;
+    }
+    return { upper, middle, lower };
+}
 
 function closeLiveChartModal() {
     const modal = document.getElementById("modalLiveChart");
@@ -16212,7 +16475,7 @@ async function loadAndRenderCandleChart(und, tf) {
             window._activeCandles = data.candles;
             window._activeContractSymbol = data.contract_symbol || und;
             window._activeExpiryDate = data.expiry_date || "";
-            window._activeSegment = data.segment || (und === "NIFTY" ? "NSE_FO" : "MCX_FO");
+            window._activeSegment = data.segment || getExchangeSegmentForUnderlying(und);
 
             // Reset viewport view start and manual price scale to auto-align to the latest candles
             window._chartViewStart = null;
@@ -16348,109 +16611,112 @@ window.triggerKronosForecast = triggerKronosForecast;
 function updateKronosForecastUI(data) {
     if (!data) return;
     const summary = data.summary || {};
-    const corridor = data.volatility_corridor || {};
-    const edge = data.straddle_edge || {};
-    const mtf = data.mtf_confluence || {};
-
-    const statusText = document.getElementById("kronosStatusText");
-    if (statusText) {
-        statusText.textContent = `${data.engine || "Kronos"} (${data.device || "cpu"})`;
-    }
 
     const dirBadge = document.getElementById("kronosDirectionBadge");
+    const targetBadge = document.getElementById("kronosTargetPrice");
+    const confBadge = document.getElementById("kronosConfidenceScore");
+    const statusText = document.getElementById("kronosStatusText");
+
     if (dirBadge) {
-        dirBadge.style.color = summary.direction_color || "#38bdf8";
-        dirBadge.innerHTML = `<span>${summary.direction_icon || "📈"}</span> <span>${summary.direction || "NEUTRAL"}</span>`;
-    }
-
-    const changePtsEl = document.getElementById("kronosChangePoints");
-    if (changePtsEl) {
-        const chg = summary.change_points || 0;
-        const pct = summary.change_percent || 0;
-        const prefix = chg >= 0 ? "+" : "";
-        changePtsEl.textContent = `(${prefix}${chg.toFixed(2)} pts / ${prefix}${pct.toFixed(2)}%)`;
-        changePtsEl.style.color = summary.direction_color || "#38bdf8";
-    }
-
-    const highEl = document.getElementById("kronosProjectedHigh");
-    const lowEl = document.getElementById("kronosProjectedLow");
-    const spreadEl = document.getElementById("kronosProjectedSpread");
-
-    if (highEl) highEl.textContent = "₹" + (summary.projected_high || 0).toFixed(2);
-    if (lowEl) lowEl.textContent = "₹" + (summary.projected_low || 0).toFixed(2);
-    if (spreadEl) spreadEl.textContent = (summary.projected_range_pts || 0).toFixed(2) + " pts";
-
-    const edgePill = document.getElementById("kronosStraddleEdgePill");
-    if (edgePill) {
-        edgePill.textContent = edge.assessment || "STANDARD THETA ZONE";
-        edgePill.title = edge.recommendation || "";
-        if (edge.safe_rating === "HIGH") {
-            edgePill.style.background = "rgba(16, 185, 129, 0.2)";
-            edgePill.style.borderColor = "rgba(16, 185, 129, 0.6)";
-            edgePill.style.color = "#34d399";
-        } else if (edge.safe_rating === "CAUTION") {
-            edgePill.style.background = "rgba(239, 68, 68, 0.2)";
-            edgePill.style.borderColor = "rgba(239, 68, 68, 0.6)";
-            edgePill.style.color = "#f87171";
-        } else {
-            edgePill.style.background = "rgba(56, 189, 248, 0.2)";
-            edgePill.style.borderColor = "rgba(56, 189, 248, 0.6)";
-            edgePill.style.color = "#38bdf8";
+        const dir = (summary.direction || "NEUTRAL").toUpperCase();
+        let icon = "⚡";
+        let bg = "rgba(56, 189, 248, 0.25)";
+        let border = "#38bdf8";
+        let color = "#38bdf8";
+        if (dir === "BULLISH") {
+            icon = "▲";
+            bg = "rgba(16, 185, 129, 0.25)";
+            border = "#10b981";
+            color = "#34d399";
+        } else if (dir === "BEARISH") {
+            icon = "▼";
+            bg = "rgba(244, 63, 94, 0.25)";
+            border = "#f43f5e";
+            color = "#fb7185";
         }
+        dirBadge.innerHTML = `<span>${icon}</span> <span>${dir}</span>`;
+        dirBadge.style.background = bg;
+        dirBadge.style.border = `1px solid ${border}`;
+        dirBadge.style.color = color;
     }
 
-    // Update MTF Confluence badge if available
-    const mtfBadge = document.getElementById("lblMtfTrendBadge");
-    if (mtfBadge && mtf.bias) {
-        const scoreStr = (mtf.score >= 0 ? "+" : "") + (mtf.score || 0).toFixed(2);
-        mtfBadge.textContent = `${mtf.bias} (${scoreStr})`;
-        mtfBadge.style.color = mtf.color || "#38bdf8";
-        mtfBadge.style.borderColor = mtf.color || "rgba(56,189,248,0.4)";
+    if (targetBadge && summary.final_projected_price) {
+        targetBadge.textContent = "₹" + summary.final_projected_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    if (confBadge && summary.confidence_pct) {
+        confBadge.textContent = `${summary.confidence_pct}% Confidence`;
+    }
+
+    if (statusText) {
+        statusText.textContent = `Horizon: ${window._kronosForecastHorizon || 24} candles • Drift: ${summary.expected_return_pct > 0 ? '+' : ''}${summary.expected_return_pct || 0}%`;
     }
 }
-window.updateKronosForecastUI = updateKronosForecastUI;
 
-function updateDerivativesUI(intel) {
-    if (!intel) return;
-    const painEl = document.getElementById("lblMaxPainStrike");
-    const callEl = document.getElementById("lblCallWallStrike");
-    const putEl = document.getElementById("lblPutWallStrike");
-    const pcrEl = document.getElementById("lblPcrRatio");
-    const premEl = document.getElementById("lblAtmStraddlePremium");
-    const mispriceBadge = document.getElementById("lblStraddleMispricingBadge");
+function updateDerivativesUI(der) {
+    if (!der) return;
+    const mpEl = document.getElementById("lblMaxPainStrike");
+    const cwEl = document.getElementById("lblCallWallStrike");
+    const pwEl = document.getElementById("lblPutWallStrike");
+    const pcrEl = document.getElementById("lblDerivativesPcr");
+    const atmEl = document.getElementById("lblAtmStraddlePremium");
+    const misEl = document.getElementById("lblStraddleMispricingBadge");
+    const mtfEl = document.getElementById("lblMtfTrendBadge");
 
-    if (painEl && intel.max_pain) {
-        painEl.textContent = "₹" + Math.round(intel.max_pain).toLocaleString('en-IN');
+    if (mpEl && der.max_pain_strike) mpEl.textContent = "₹" + Number(der.max_pain_strike).toLocaleString('en-IN');
+    if (cwEl && der.call_wall_strike) {
+        const dist = der.call_wall_distance ? ` (+${der.call_wall_distance.toFixed(2)})` : "";
+        cwEl.textContent = "₹" + Number(der.call_wall_strike).toLocaleString('en-IN') + dist;
     }
-    if (callEl && intel.call_oi_wall) {
-        const dist = intel.call_wall_dist !== undefined ? ` (+${intel.call_wall_dist})` : "";
-        callEl.textContent = "₹" + Math.round(intel.call_oi_wall).toLocaleString('en-IN') + dist;
+    if (pwEl && der.put_wall_strike) {
+        const dist = der.put_wall_distance ? ` (-${Math.abs(der.put_wall_distance).toFixed(2)})` : "";
+        pwEl.textContent = "₹" + Number(der.put_wall_strike).toLocaleString('en-IN') + dist;
     }
-    if (putEl && intel.put_oi_wall) {
-        const dist = intel.put_wall_dist !== undefined ? ` (-${intel.put_wall_dist})` : "";
-        putEl.textContent = "₹" + Math.round(intel.put_oi_wall).toLocaleString('en-IN') + dist;
+    if (pcrEl && der.pcr) {
+        pcrEl.textContent = `${der.pcr.toFixed(2)} (${der.pcr_sentiment || "Neutral"})`;
     }
-    if (pcrEl && intel.pcr !== undefined) {
-        pcrEl.textContent = `${intel.pcr.toFixed(2)} (${intel.sentiment || 'Balanced'})`;
-        if (intel.sentiment_color) pcrEl.style.color = intel.sentiment_color;
+    if (atmEl && der.atm_straddle_premium) {
+        const pct = der.atm_straddle_pct ? ` (±${der.atm_straddle_pct.toFixed(2)}%)` : "";
+        atmEl.textContent = "₹" + der.atm_straddle_premium.toFixed(2) + pct;
     }
-    if (premEl && intel.atm_straddle_premium) {
-        premEl.textContent = `₹${intel.atm_straddle_premium.toFixed(2)} (±${intel.atm_implied_move_pct.toFixed(2)}%)`;
-    }
-    if (mispriceBadge && intel.mispricing_badge) {
-        mispriceBadge.textContent = `${intel.mispricing_badge} [${(intel.mispricing_ratio || 1).toFixed(2)}x]`;
-        mispriceBadge.title = intel.action_text || "";
-        mispriceBadge.className = "";
-        if (intel.mispricing_status === "OVERPRICED") {
-            mispriceBadge.classList.add("mispricing-badge-overpriced");
-        } else if (intel.mispricing_status === "UNDERPRICED") {
-            mispriceBadge.classList.add("mispricing-badge-underpriced");
+    if (misEl && der.straddle_edge) {
+        const isOver = (der.straddle_edge.verdict || "").includes("OVERPRICED");
+        const isUnder = (der.straddle_edge.verdict || "").includes("UNDERPRICED");
+        misEl.textContent = `${der.straddle_edge.verdict} [${der.straddle_edge.mispricing_ratio}x]`;
+        if (isOver) {
+            misEl.className = "mispricing-badge-overpriced";
+            misEl.style.background = "rgba(16, 185, 129, 0.2)";
+            misEl.style.borderColor = "#10b981";
+            misEl.style.color = "#34d399";
+        } else if (isUnder) {
+            misEl.className = "mispricing-badge-underpriced";
+            misEl.style.background = "rgba(244, 63, 94, 0.2)";
+            misEl.style.borderColor = "#f43f5e";
+            misEl.style.color = "#fb7185";
         } else {
-            mispriceBadge.classList.add("mispricing-badge-neutral");
+            misEl.className = "mispricing-badge-neutral";
+            misEl.style.background = "rgba(56, 189, 248, 0.15)";
+            misEl.style.borderColor = "#38bdf8";
+            misEl.style.color = "#38bdf8";
+        }
+    }
+    if (mtfEl && der.mtf_bias) {
+        mtfEl.textContent = der.mtf_bias;
+        if (der.mtf_bias.includes("BULLISH")) {
+            mtfEl.style.background = "rgba(16, 185, 129, 0.2)";
+            mtfEl.style.borderColor = "#10b981";
+            mtfEl.style.color = "#34d399";
+        } else if (der.mtf_bias.includes("BEARISH")) {
+            mtfEl.style.background = "rgba(244, 63, 94, 0.2)";
+            mtfEl.style.borderColor = "#f43f5e";
+            mtfEl.style.color = "#fb7185";
+        } else {
+            mtfEl.style.background = "rgba(56, 189, 248, 0.15)";
+            mtfEl.style.borderColor = "#38bdf8";
+            mtfEl.style.color = "#38bdf8";
         }
     }
 }
-window.updateDerivativesUI = updateDerivativesUI;
 
 function toggleAIStrategist() {
     window._aiStrategistActive = !window._aiStrategistActive;
@@ -16461,12 +16727,12 @@ function toggleAIStrategist() {
     if (window._aiStrategistActive) {
         if (btn) btn.classList.add("btn-ai-strategist-active");
         if (badge) {
-            badge.textContent = "ACTIVE";
+            badge.textContent = "OPEN";
             badge.style.background = "#10b981";
             badge.style.boxShadow = "0 0 8px rgba(16, 185, 129, 0.8)";
         }
         if (panel) panel.style.display = "flex";
-        fetchAIStrategist(true);
+        fetchAIStrategist();
     } else {
         if (btn) btn.classList.remove("btn-ai-strategist-active");
         if (badge) {
@@ -16479,25 +16745,27 @@ function toggleAIStrategist() {
 }
 window.toggleAIStrategist = toggleAIStrategist;
 
-async function fetchAIStrategist(force = false) {
+async function fetchAIStrategist() {
     const und = window._activeChartUnderlying || "NIFTY";
+    const tf = window._activeChartTimeframe || "5m";
+
     const regimeEl = document.getElementById("aiStrategistRegime");
     const biasEl = document.getElementById("aiStrategistBias");
     const recEl = document.getElementById("aiStrategistRecommendation");
     const b1 = document.getElementById("aiStrategistBullet1");
     const b2 = document.getElementById("aiStrategistBullet2");
     const b3 = document.getElementById("aiStrategistBullet3");
-    const srcBadge = document.getElementById("aiStrategistSourceBadge");
 
-    if (recEl) recEl.textContent = "Synthesizing real-time quant analysis...";
+    if (regimeEl) regimeEl.textContent = "Synthesizing Institutional Quant Playbook...";
+    if (biasEl) biasEl.textContent = "Analyzing Greeks...";
 
     try {
-        const resp = await fetch(`/api/straddle/ai_strategist?underlying=${encodeURIComponent(und)}`);
+        const resp = await fetch(`/api/straddle/ai_strategist?underlying=${encodeURIComponent(und)}&timeframe=${encodeURIComponent(tf)}`);
         const data = await resp.json();
         if (data && data.success && data.report) {
-            window._aiStrategistData = data;
             const r = data.report;
-            if (srcBadge) srcBadge.textContent = r.source || "Institutional Quant Synthesis Engine";
+            window._aiStrategistData = r;
+
             if (regimeEl) regimeEl.textContent = r.market_regime || "Normal Market Conditions";
             if (biasEl) biasEl.textContent = r.bias || "DELTA-NEUTRAL";
             if (recEl) recEl.textContent = r.strategy_recommendation || "Delta-Neutral Straddle / Strangle";
@@ -16527,7 +16795,7 @@ function clamp(val, min, max) {
     return Math.max(min, Math.min(max, val));
 }
 
-// Global Viewport, Pan/Zoom & Price Scale State (Copied & adapted from SwingScanner)
+// Global Viewport, Pan/Zoom & Price Scale State
 window._chartZoomCount = 80; // default visible candles in viewport
 window._chartViewStart = null; // null = right-aligned to newest candles
 window._chartPriceRange = null; // null = automatic fit; object { min, max } when user drags/scales price
@@ -16547,7 +16815,6 @@ function chartZoomIn() {
         window._chartZoomCount = newZoom;
         window._chartViewStart = Math.max(0, Math.min(totalBars - 5, anchor - (newZoom * 0.85)));
     }
-    // Proportionally zoom manual price scale if active
     if (window._chartPriceRange && Number.isFinite(window._chartPriceRange.min) && Number.isFinite(window._chartPriceRange.max)) {
         const mid = (window._chartPriceRange.min + window._chartPriceRange.max) / 2;
         const halfSpan = (window._chartPriceRange.max - window._chartPriceRange.min) * 0.425;
@@ -16570,10 +16837,9 @@ function chartZoomOut() {
         window._chartZoomCount = newZoom;
         window._chartViewStart = Math.max(0, Math.min(totalBars - 5, anchor - (newZoom * 0.85)));
     }
-    // Proportionally zoom manual price scale if active
     if (window._chartPriceRange && Number.isFinite(window._chartPriceRange.min) && Number.isFinite(window._chartPriceRange.max)) {
         const mid = (window._chartPriceRange.min + window._chartPriceRange.max) / 2;
-        const halfSpan = (window._chartPriceRange.max - window._chartPriceRange.min) * 0.575;
+        const halfSpan = (window._chartPriceRange.max - window._chartPriceRange.min) * 0.6;
         window._chartPriceRange = { min: mid - halfSpan, max: mid + halfSpan };
     }
     renderCandlestickCanvas();
@@ -16581,15 +16847,13 @@ function chartZoomOut() {
 window.chartZoomOut = chartZoomOut;
 
 function chartResetZoom() {
-    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
-        ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
-    window._chartZoomCount = Math.min(80, Math.max(20, totalBars || 80));
+    window._chartZoomCount = 80;
     window._chartViewStart = null;
-    window._chartPriceRange = null; // Clears manual price scale zoom & pan
+    window._chartPriceRange = null;
     renderCandlestickCanvas();
 }
 window.chartResetZoom = chartResetZoom;
-window.resetChartView = chartResetZoom; // SwingScanner alias
+window.resetChartView = chartResetZoom;
 
 function resetPriceScaleOnly() {
     window._chartPriceRange = null;
@@ -16603,10 +16867,14 @@ function renderCandlestickCanvas() {
     const ctx = canvas.getContext("2d");
     const container = canvas.parentElement;
 
-    // Fixed container bounds & device pixel ratio handling
     const dpr = window.devicePixelRatio || 1;
     const w = Math.floor(container.clientWidth || 1050);
-    const h = window._chartCanvasHeight || (window._chartHeaderCollapsed ? 640 : 500);
+    let h = window._chartCanvasHeight || (window._chartHeaderCollapsed ? 680 : 500);
+
+    if (window._chartIsFullscreen) {
+        const headerOffset = window._chartHeaderCollapsed ? 100 : 210;
+        h = Math.max(450, window.innerHeight - headerOffset);
+    }
 
     if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
         canvas.width = Math.floor(w * dpr);
@@ -16654,7 +16922,6 @@ function renderCandlestickCanvas() {
     const zoomCount = Math.max(15, Math.min(Math.min(totalBars + 5, 450), window._chartZoomCount || 80));
     window._chartZoomCount = zoomCount;
 
-    // Default right gap of 4 bars so latest candle has comfortable breathing room
     const rightGap = 4;
     if (window._chartViewStart === null || window._chartViewStart === undefined) {
         window._chartViewStart = Math.max(0, totalBars - zoomCount + rightGap);
@@ -16682,7 +16949,6 @@ function renderCandlestickCanvas() {
         if (c.volume > maxVolume) maxVolume = c.volume;
     });
 
-    // Also include Kronos volatility corridors (80% and 95%) in price scaling if visible
     if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.volatility_corridor) {
         const vc = window._kronosForecastData.volatility_corridor;
         const u95 = vc.upper_95 || vc.upper || [];
@@ -16695,8 +16961,6 @@ function renderCandlestickCanvas() {
             }
         });
     }
-
-    // Note: CE Wall, PE Wall, and Max Pain are excluded from price scaling to keep candles well-proportioned and prevent vertical candle compression
 
     if (minPrice === Infinity || maxPrice === -Infinity || minPrice <= 0) {
         minPrice = 100;
@@ -16712,7 +16976,6 @@ function renderCandlestickCanvas() {
     minPrice -= pricePadding;
     maxPrice += pricePadding;
 
-    // Apply manual price range if user dragged or zoomed price scale (SwingScanner pattern)
     if (window._chartPriceRange && Number.isFinite(window._chartPriceRange.min) && Number.isFinite(window._chartPriceRange.max)) {
         minPrice = window._chartPriceRange.min;
         maxPrice = window._chartPriceRange.max;
@@ -16743,7 +17006,6 @@ function renderCandlestickCanvas() {
         height: h
     };
 
-    // Update Auto button badge if present
     const autoBtn = document.getElementById("chartAutoScaleBtn");
     if (autoBtn) {
         if (window._chartPriceRange) {
@@ -16774,53 +17036,63 @@ function renderCandlestickCanvas() {
         ctx.fillText("₹" + p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w - margin.right + 6, y + 4);
     }
 
-    // Vertical Time Grid Lines and X-axis Labels
+    // Vertical Time Grid Lines and X-axis Labels (with bold day boundary separators)
     ctx.save();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.035)";
-    ctx.lineWidth = 1;
-    ctx.fillStyle = "#64748b";
-    ctx.font = "10.5px JetBrains Mono, monospace";
-    ctx.textAlign = "center";
-
     const labelStep = Math.max(5, Math.floor(zoomCount / 7));
+    let lastRenderedDate = null;
+
     for (let i = visStartIdx; i < visEndIdx; i++) {
-        if (i % labelStep === 0 || i === baseCandles.length - 1) {
-            const c = allCandles[i];
-            if (!c) continue;
+        const c = allCandles[i];
+        if (!c) continue;
+        const d = new Date(c.time * 1000);
+        const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const isNewDay = (lastRenderedDate !== null && lastRenderedDate !== dateStr);
+        lastRenderedDate = dateStr;
+
+        if (i % labelStep === 0 || i === baseCandles.length - 1 || isNewDay) {
             const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
             if (x >= margin.left && x <= w - margin.right) {
-                // Vertical grid line
                 ctx.beginPath();
-                ctx.setLineDash([2, 4]);
+                if (isNewDay) {
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+                    ctx.setLineDash([]);
+                } else {
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.035)";
+                    ctx.setLineDash([2, 4]);
+                }
                 ctx.moveTo(Math.floor(x) + 0.5, margin.top);
                 ctx.lineTo(Math.floor(x) + 0.5, h - margin.bottom);
                 ctx.stroke();
 
-                // Timestamp label at bottom
-                const d = new Date(c.time * 1000);
                 const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                ctx.fillStyle = c.is_forecast ? "#c084fc" : "#64748b";
-                ctx.fillText(timeStr, x, h - 8);
+                if (isNewDay) {
+                    ctx.fillStyle = "#38bdf8";
+                    ctx.font = "bold 10px JetBrains Mono, monospace";
+                    ctx.textAlign = "center";
+                    ctx.fillText(dateStr, x, h - 8);
+                } else {
+                    ctx.fillStyle = c.is_forecast ? "#c084fc" : "#64748b";
+                    ctx.font = "10px JetBrains Mono, monospace";
+                    ctx.textAlign = "center";
+                    ctx.fillText(timeStr, x, h - 8);
+                }
             }
         }
     }
     ctx.restore();
 
-    // COLOR DEFINITIONS
     const COLOR_BULLISH = "#089981";
     const COLOR_BEARISH = "#f23645";
 
-    // Clip rendering strictly to chart canvas region (prevents overflow during drag/pan)
+    // Clip rendering strictly to chart canvas region
     ctx.save();
     ctx.beginPath();
     ctx.rect(margin.left, margin.top - 12, chartW, chartH + 12);
     ctx.clip();
 
-    // 1. Draw Monte Carlo Volatility Corridors (95% outer and 80% primary inner) if Kronos forecast is active
+    // 1. Draw Monte Carlo Volatility Corridors if Kronos forecast is active
     if (forecastCandles.length > 0 && window._kronosForecastData && window._kronosForecastData.volatility_corridor) {
         const vc = window._kronosForecastData.volatility_corridor;
-
-        // 1a. Outer 95% Volatility Corridor (subtle tail boundary)
         const u95 = vc.upper_95 || [];
         const l95 = vc.lower_95 || [];
         if (u95.length === forecastCandles.length && l95.length === forecastCandles.length) {
@@ -16829,7 +17101,6 @@ function renderCandlestickCanvas() {
             ctx.strokeStyle = "rgba(168, 85, 247, 0.22)";
             ctx.lineWidth = 1.0;
             ctx.setLineDash([2, 4]);
-
             ctx.beginPath();
             for (let f = 0; f < forecastCandles.length; f++) {
                 const idx = baseCandles.length + f;
@@ -16850,7 +17121,6 @@ function renderCandlestickCanvas() {
             ctx.restore();
         }
 
-        // 1b. Inner 80% Volatility Corridor (primary confidence envelope)
         const u80 = vc.upper_80 || vc.upper || [];
         const l80 = vc.lower_80 || vc.lower || [];
         if (u80.length === forecastCandles.length && l80.length === forecastCandles.length) {
@@ -16859,7 +17129,6 @@ function renderCandlestickCanvas() {
             ctx.strokeStyle = "rgba(168, 85, 247, 0.45)";
             ctx.lineWidth = 1.3;
             ctx.setLineDash([3, 3]);
-
             ctx.beginPath();
             for (let f = 0; f < forecastCandles.length; f++) {
                 const idx = baseCandles.length + f;
@@ -16894,7 +17163,6 @@ function renderCandlestickCanvas() {
             ctx.lineTo(divX, h - margin.bottom);
             ctx.stroke();
 
-            // Glowing Forecast Horizon Badge
             ctx.fillStyle = "#a855f7";
             ctx.beginPath();
             ctx.roundRect(divX - 42, margin.top - 20, 84, 18, 4);
@@ -16907,10 +17175,145 @@ function renderCandlestickCanvas() {
         }
     }
 
+    // 2b. Draw Technical Studies / Indicators on historical baseCandles
+    if (baseCandles.length > 0 && window._chartActiveIndicators) {
+        const inds = window._chartActiveIndicators;
+
+        // A. Bollinger Bands (20, 2)
+        if (inds.bb && baseCandles.length >= 5) {
+            const bb = calcChartBollingerBands(baseCandles, 20, 2);
+            ctx.save();
+            ctx.fillStyle = "rgba(168, 85, 247, 0.08)";
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < baseCandles.length; i++) {
+                if (bb.upper[i] !== null && bb.lower[i] !== null) {
+                    const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+                    const yUp = margin.top + priceH - ((bb.upper[i] - minPrice) / priceRange * priceH);
+                    if (!started) { ctx.moveTo(x, yUp); started = true; }
+                    else { ctx.lineTo(x, yUp); }
+                }
+            }
+            for (let i = baseCandles.length - 1; i >= 0; i--) {
+                if (bb.upper[i] !== null && bb.lower[i] !== null) {
+                    const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+                    const yLow = margin.top + priceH - ((bb.lower[i] - minPrice) / priceRange * priceH);
+                    ctx.lineTo(x, yLow);
+                }
+            }
+            ctx.closePath();
+            ctx.fill();
+
+            // Upper band
+            ctx.strokeStyle = "rgba(168, 85, 247, 0.55)";
+            ctx.lineWidth = 1.1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            started = false;
+            for (let i = 0; i < baseCandles.length; i++) {
+                if (bb.upper[i] !== null) {
+                    const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+                    const yUp = margin.top + priceH - ((bb.upper[i] - minPrice) / priceRange * priceH);
+                    if (!started) { ctx.moveTo(x, yUp); started = true; }
+                    else { ctx.lineTo(x, yUp); }
+                }
+            }
+            ctx.stroke();
+
+            // Lower band
+            ctx.beginPath();
+            started = false;
+            for (let i = 0; i < baseCandles.length; i++) {
+                if (bb.lower[i] !== null) {
+                    const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+                    const yLow = margin.top + priceH - ((bb.lower[i] - minPrice) / priceRange * priceH);
+                    if (!started) { ctx.moveTo(x, yLow); started = true; }
+                    else { ctx.lineTo(x, yLow); }
+                }
+            }
+            ctx.stroke();
+
+            // Middle band
+            ctx.strokeStyle = "rgba(168, 85, 247, 0.35)";
+            ctx.setLineDash([2, 4]);
+            ctx.beginPath();
+            started = false;
+            for (let i = 0; i < baseCandles.length; i++) {
+                if (bb.middle[i] !== null) {
+                    const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+                    const yMid = margin.top + priceH - ((bb.middle[i] - minPrice) / priceRange * priceH);
+                    if (!started) { ctx.moveTo(x, yMid); started = true; }
+                    else { ctx.lineTo(x, yMid); }
+                }
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // B. VWAP
+        if (inds.vwap && baseCandles.length > 0) {
+            const vwapVals = calcChartVWAP(baseCandles);
+            ctx.save();
+            ctx.strokeStyle = "#ec4899";
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < baseCandles.length; i++) {
+                if (vwapVals[i] !== null) {
+                    const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+                    const y = margin.top + priceH - ((vwapVals[i] - minPrice) / priceRange * priceH);
+                    if (!started) { ctx.moveTo(x, y); started = true; }
+                    else { ctx.lineTo(x, y); }
+                }
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // C. EMA 21
+        if (inds.ema21 && baseCandles.length >= 21) {
+            const ema21Vals = calcChartEMA(baseCandles, 21);
+            ctx.save();
+            ctx.strokeStyle = "#f59e0b";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < baseCandles.length; i++) {
+                if (ema21Vals[i] !== null) {
+                    const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+                    const y = margin.top + priceH - ((ema21Vals[i] - minPrice) / priceRange * priceH);
+                    if (!started) { ctx.moveTo(x, y); started = true; }
+                    else { ctx.lineTo(x, y); }
+                }
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // D. EMA 9
+        if (inds.ema9 && baseCandles.length >= 9) {
+            const ema9Vals = calcChartEMA(baseCandles, 9);
+            ctx.save();
+            ctx.strokeStyle = "#38bdf8";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < baseCandles.length; i++) {
+                if (ema9Vals[i] !== null) {
+                    const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
+                    const y = margin.top + priceH - ((ema9Vals[i] - minPrice) / priceRange * priceH);
+                    if (!started) { ctx.moveTo(x, y); started = true; }
+                    else { ctx.lineTo(x, y); }
+                }
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
     // 3. Draw Candles & Volumes
     allCandles.forEach((c, i) => {
         const x = margin.left + ((i - viewStart) * slotW) + (slotW / 2);
-        // Only draw if within or slightly outside the visible slot
         if (x < margin.left - slotW * 2 || x > w - margin.right + slotW * 2) return;
 
         const isUp = c.close >= c.open;
@@ -16921,7 +17324,6 @@ function renderCandlestickCanvas() {
             color = isUp ? "#34d399" : "#fb7185";
         }
 
-        // Y positions
         const yOpen = margin.top + priceH - ((c.open - minPrice) / priceRange * priceH);
         const yClose = margin.top + priceH - ((c.close - minPrice) / priceRange * priceH);
         const yHigh = margin.top + priceH - ((c.high - minPrice) / priceRange * priceH);
@@ -16994,7 +17396,6 @@ function renderCandlestickCanvas() {
             ctx.stroke();
             ctx.restore();
 
-            // Price tag badge on right axis
             ctx.fillStyle = lastColor;
             ctx.beginPath();
             ctx.roundRect(w - margin.right + 2, Math.floor(curY) - 10, margin.right - 4, 20, 4);
@@ -17022,7 +17423,6 @@ function renderCandlestickCanvas() {
             ctx.lineTo(w - margin.right, Math.floor(targetY) + 0.5);
             ctx.stroke();
 
-            // Right axis target badge
             ctx.fillStyle = "#a855f7";
             ctx.beginPath();
             ctx.roundRect(w - margin.right + 2, Math.floor(targetY) - 10, margin.right - 4, 20, 4);
@@ -17035,14 +17435,18 @@ function renderCandlestickCanvas() {
         }
     }
 
-    // 5b. Note: CE Wall, PE Wall, and Max Pain lines are removed from the candlestick chart per user request to prevent vertical candle compression
+    // 6. Crosshair, Hover HUD & Stationary Status
+    let targetCandle = null;
+    let targetIdx = -1;
+    let isHovering = false;
+    let crosshairPrice = null;
 
-    // 6. Crosshair and Hover Information
     if (window._chartCrosshairPos && !window._chartIsDragging) {
         const mx = window._chartCrosshairPos.x;
         const my = window._chartCrosshairPos.y;
 
         if (mx >= margin.left && mx <= w - margin.right && my >= margin.top && my <= h - margin.bottom) {
+            isHovering = true;
             ctx.save();
             ctx.setLineDash([2, 2]);
             ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
@@ -17062,12 +17466,11 @@ function renderCandlestickCanvas() {
             ctx.restore();
 
             // Compute price under crosshair cursor and render on right price scale
-            let cursorPrice = null;
             if (my >= margin.top && my <= margin.top + priceH + 6) {
-                cursorPrice = Math.max(minPrice, minPrice + ((margin.top + priceH - my) / priceH) * priceRange);
+                crosshairPrice = Math.max(minPrice, minPrice + ((margin.top + priceH - my) / priceH) * priceRange);
             }
 
-            if (cursorPrice !== null && cursorPrice > 0) {
+            if (crosshairPrice !== null && crosshairPrice > 0) {
                 const badgeY = Math.min(margin.top + priceH + 2, Math.max(margin.top - 2, my));
                 const badgeX = w - margin.right + 2;
                 const badgeW = margin.right - 4;
@@ -17082,49 +17485,30 @@ function renderCandlestickCanvas() {
                 ctx.fill();
                 ctx.stroke();
 
-                const fmtCursorPrice = (cursorPrice >= 1000) ?
-                    cursorPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) :
-                    cursorPrice.toFixed(2);
+                const fmtCrosshair = (crosshairPrice >= 1000) ?
+                    crosshairPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) :
+                    crosshairPrice.toFixed(2);
 
                 ctx.fillStyle = "#ffffff";
                 ctx.font = "bold 11px JetBrains Mono, monospace";
                 ctx.textAlign = "left";
-                ctx.fillText("₹" + fmtCursorPrice, badgeX + 5, badgeY + 4);
+                ctx.fillText("₹" + fmtCrosshair, badgeX + 5, badgeY + 4);
                 ctx.restore();
-
-                const cursorPriceLegendEl = document.getElementById("lblCursorPrice");
-                if (cursorPriceLegendEl) {
-                    cursorPriceLegendEl.textContent = "₹" + fmtCursorPrice;
-                }
             }
 
             // Hovered candle index in allCandles
             const hoveredRelSlot = (mx - margin.left) / slotW;
-            const hoveredIdx = Math.floor(viewStart + hoveredRelSlot);
-            if (hoveredIdx >= 0 && hoveredIdx < allCandles.length) {
-                const c = allCandles[hoveredIdx];
-                const d = new Date(c.time * 1000);
-                const openEl = document.getElementById("lblCandleOpen");
-                const highEl = document.getElementById("lblCandleHigh");
-                const lowEl = document.getElementById("lblCandleLow");
-                const closeEl = document.getElementById("lblCandleClose");
-                const timeEl = document.getElementById("lblCandleTime");
-                if (openEl) openEl.textContent = "₹" + c.open.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                if (highEl) highEl.textContent = "₹" + c.high.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                if (lowEl) lowEl.textContent = "₹" + c.low.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                if (closeEl) closeEl.textContent = "₹" + c.close.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                if (timeEl) {
-                    const tStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                    const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                    timeEl.textContent = c.is_forecast ? `🔮 FORECAST (${tStr})` : `${dateStr} ${tStr}`;
-                    timeEl.style.color = c.is_forecast ? "#c084fc" : "#94a3b8";
-                }
+            const hIdx = Math.floor(viewStart + hoveredRelSlot);
+            if (hIdx >= 0 && hIdx < allCandles.length) {
+                targetCandle = allCandles[hIdx];
+                targetIdx = hIdx;
 
-                // Sleek time pill on bottom X-axis at cursor X
+                // Time badge on bottom X-axis
+                const d = new Date(targetCandle.time * 1000);
                 const tStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
                 ctx.save();
-                ctx.fillStyle = c.is_forecast ? "#7e22ce" : "#1e293b";
-                ctx.strokeStyle = c.is_forecast ? "#c084fc" : "#64748b";
+                ctx.fillStyle = targetCandle.is_forecast ? "#7e22ce" : "#1e293b";
+                ctx.strokeStyle = targetCandle.is_forecast ? "#c084fc" : "#64748b";
                 ctx.lineWidth = 1;
                 ctx.beginPath();
                 ctx.roundRect(mx - 28, h - margin.bottom + 3, 56, 18, 4);
@@ -17136,6 +17520,93 @@ function renderCandlestickCanvas() {
                 ctx.fillText(tStr, mx, h - margin.bottom + 15);
                 ctx.restore();
             }
+        }
+    }
+
+    // If not hovering over a valid candle, default to the latest candle
+    if (!targetCandle && allCandles.length > 0) {
+        targetCandle = allCandles[allCandles.length - 1];
+        targetIdx = allCandles.length - 1;
+    }
+
+    if (targetCandle) {
+        const openEl = document.getElementById("lblCandleOpen");
+        const highEl = document.getElementById("lblCandleHigh");
+        const lowEl = document.getElementById("lblCandleLow");
+        const closeEl = document.getElementById("lblCandleClose");
+        const chgEl = document.getElementById("lblCandleChg");
+        const priceEl = document.getElementById("lblCursorPrice");
+        const timeEl = document.getElementById("lblCandleTime");
+        const indStripEl = document.getElementById("lblIndValuesStrip");
+
+        if (openEl) openEl.textContent = "₹" + targetCandle.open.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (highEl) highEl.textContent = "₹" + targetCandle.high.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (lowEl) lowEl.textContent = "₹" + targetCandle.low.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (closeEl) closeEl.textContent = "₹" + targetCandle.close.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        const diff = targetCandle.close - targetCandle.open;
+        const diffPct = targetCandle.open > 0 ? (diff / targetCandle.open * 100) : 0;
+        const sign = diff >= 0 ? "+" : "";
+        if (chgEl) {
+            chgEl.textContent = `${sign}₹${Math.abs(diff).toFixed(2)} (${sign}${diffPct.toFixed(2)}%)`;
+            chgEl.style.color = diff >= 0 ? "#10b981" : "#f43f5e";
+        }
+
+        if (priceEl) {
+            if (isHovering && crosshairPrice !== null) {
+                priceEl.textContent = "₹" + (crosshairPrice >= 1000 ? crosshairPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : crosshairPrice.toFixed(2));
+            } else {
+                priceEl.textContent = "₹" + targetCandle.close.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+        }
+
+        if (timeEl) {
+            const d = new Date(targetCandle.time * 1000);
+            const tStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            if (targetCandle.is_forecast) {
+                timeEl.textContent = `🔮 FORECAST (${tStr})`;
+                timeEl.style.color = "#c084fc";
+            } else if (isHovering) {
+                timeEl.textContent = `${dateStr} ${tStr}`;
+                timeEl.style.color = "#94a3b8";
+            } else {
+                timeEl.textContent = `${dateStr} ${tStr} (LIVE)`;
+                timeEl.style.color = "#34d399";
+            }
+        }
+
+        // Indicator badges in legend
+        if (indStripEl) {
+            const badges = [];
+            const inds = window._chartActiveIndicators || {};
+            if (targetIdx >= 0 && targetIdx < baseCandles.length) {
+                if (inds.ema9 && baseCandles.length >= 9) {
+                    const ema9 = calcChartEMA(baseCandles, 9);
+                    if (ema9[targetIdx] !== null) {
+                        badges.push(`<span style="color:#38bdf8; font-weight:700;">EMA9: ₹${ema9[targetIdx].toFixed(2)}</span>`);
+                    }
+                }
+                if (inds.ema21 && baseCandles.length >= 21) {
+                    const ema21 = calcChartEMA(baseCandles, 21);
+                    if (ema21[targetIdx] !== null) {
+                        badges.push(`<span style="color:#f59e0b; font-weight:700;">EMA21: ₹${ema21[targetIdx].toFixed(2)}</span>`);
+                    }
+                }
+                if (inds.vwap && baseCandles.length > 0) {
+                    const vwap = calcChartVWAP(baseCandles);
+                    if (vwap[targetIdx] !== null) {
+                        badges.push(`<span style="color:#ec4899; font-weight:700;">VWAP: ₹${vwap[targetIdx].toFixed(2)}</span>`);
+                    }
+                }
+                if (inds.bb && baseCandles.length >= 20) {
+                    const bb = calcChartBollingerBands(baseCandles, 20, 2);
+                    if (bb.upper[targetIdx] !== null && bb.lower[targetIdx] !== null) {
+                        badges.push(`<span style="color:#a855f7; font-weight:700;">BB: [${bb.lower[targetIdx].toFixed(1)} - ${bb.upper[targetIdx].toFixed(1)}]</span>`);
+                    }
+                }
+            }
+            indStripEl.innerHTML = badges.join("<span style='color:rgba(255,255,255,0.2); margin:0 2px;'>|</span>");
         }
     }
 }
@@ -17187,7 +17658,6 @@ function setupChartCanvasEvents() {
         const zoomIn = e.deltaY < 0;
 
         if (isPriceScale) {
-            // Zoom vertical price scale ONLY
             const currentMin = cData.priceMin;
             const currentMax = cData.priceMax;
             const priceSpan = Math.max(currentMax - currentMin, 0.001);
@@ -17203,7 +17673,6 @@ function setupChartCanvasEvents() {
             return;
         }
 
-        // Horizontal zoom on chart body
         const chartW = cData.chartWidth;
         if (chartW <= 0) return;
         const clampedMouseX = Math.max(cData.padLeft, Math.min(rect.width - cData.padRight, mouseX));
@@ -17225,7 +17694,6 @@ function setupChartCanvasEvents() {
             window._chartViewStart = clamp(newStart, minView, maxView);
         }
 
-        // If manual price scale is active, also scale price range proportionally
         if (window._chartPriceRange) {
             const currentMin = window._chartPriceRange.min;
             const currentMax = window._chartPriceRange.max;
@@ -17244,10 +17712,8 @@ function setupChartCanvasEvents() {
     }, { passive: false });
 
     // 2. Pointer Down:
-    // - On price scale: start price scale vertical zoom drag (mode = "price")
-    // - On chart body: start 2D pan (horizontal history + vertical price range) (mode = "pan")
     canvas.addEventListener("pointerdown", (e) => {
-        if (e.button !== 0) return; // Only main button
+        if (e.button !== 0) return;
         const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
             ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
         if (totalBars <= 0) return;
@@ -17279,7 +17745,6 @@ function setupChartCanvasEvents() {
             return;
         }
 
-        // Main chart pan (horizontal & vertical drag)
         const currentZoom = window._chartZoomCount || 80;
         const currentStart = (window._chartViewStart !== null) ? window._chartViewStart : Math.max(0, totalBars - currentZoom + 4);
 
@@ -17330,7 +17795,6 @@ function setupChartCanvasEvents() {
 
                 window._chartViewStart = clamp(window._chartDragState.initialStart - candleShift, minViewStart, maxViewStart);
 
-                // Vertical drag (pan price scale vertically)
                 const deltaY = e.clientY - window._chartDragState.startY;
                 const verticalShift = (deltaY / window._chartDragState.priceHeight) * (window._chartDragState.initialPriceMax - window._chartDragState.initialPriceMin);
 
@@ -17347,7 +17811,6 @@ function setupChartCanvasEvents() {
             }
         }
 
-        // Dynamic Cursor feedback on hover
         if (cData) {
             const isPriceScale = mouseX >= rect.width - cData.padRight && mouseY >= cData.priceTop && mouseY <= cData.priceBottom;
             if (isPriceScale) {
@@ -17357,7 +17820,6 @@ function setupChartCanvasEvents() {
             }
         }
 
-        // Crosshair position
         window._chartCrosshairPos = { x: mouseX, y: mouseY };
         renderCandlestickCanvas();
     });
@@ -17378,8 +17840,6 @@ function setupChartCanvasEvents() {
     canvas.addEventListener("pointercancel", endDrag);
 
     // 4. Double-Click to Reset:
-    // - On price scale: reset price scale auto-fit
-    // - On chart canvas: reset entire chart view
     canvas.addEventListener("dblclick", (e) => {
         e.preventDefault();
         const cData = window._chartData;
@@ -17402,12 +17862,10 @@ function setupChartCanvasEvents() {
     // 6. Mouse Leave
     canvas.addEventListener("mouseleave", () => {
         window._chartCrosshairPos = null;
-        const cursorPriceLegendEl = document.getElementById("lblCursorPrice");
-        if (cursorPriceLegendEl) cursorPriceLegendEl.textContent = "--";
         renderCandlestickCanvas();
     });
 
-    // 7. Touch Events for Full Mobile / Tablet Support (from swingscanner)
+    // 7. Touch Events for Full Mobile / Tablet Support
     let _touchStartPos = null;
     let _touchPanState = null;
     let _touchMoved = false;
@@ -17505,7 +17963,7 @@ function setupChartCanvasEvents() {
                         const verticalShift = (deltaY / _touchPanState.priceHeight) * (_touchPanState.initialPriceMax - _touchPanState.initialPriceMin);
                         window._chartPriceRange = {
                             min: _touchPanState.initialMin + verticalShift,
-                            max: _touchPanState.initialMax + verticalShift
+                            max: _touchPanState.initialPriceMax + verticalShift
                         };
                     }
                 }
@@ -17534,13 +17992,7 @@ function setupChartCanvasEvents() {
     });
 }
 
-
-
-
-// =========================================================================
 // LIVE CHART MODAL HEADER COLLAPSE / EXPAND TOGGLE & CANVAS SCALING
-// =========================================================================
-
 window._chartHeaderCollapsed = false;
 window._chartCanvasHeight = 500;
 
@@ -17593,8 +18045,14 @@ function applyChartHeaderCollapseState() {
         btn.title = isCollapsed ? "Expand topbar to show controls, derivatives intelligence & AI models" : "Collapse topbar to 1st row only and maximize chart space";
     }
 
-    // Dynamic responsive height for candlestick canvas (maximize when compact)
-    window._chartCanvasHeight = isCollapsed ? 680 : 500;
+    // Dynamic responsive height for candlestick canvas
+    if (window._chartIsFullscreen) {
+        const headerOffset = isCollapsed ? 100 : 210;
+        window._chartCanvasHeight = Math.max(450, window.innerHeight - headerOffset);
+    } else {
+        window._chartCanvasHeight = isCollapsed ? 680 : 500;
+    }
+
     const canvas = document.getElementById("liveCandlestickCanvas");
     if (canvas) {
         canvas.style.height = window._chartCanvasHeight + "px";
