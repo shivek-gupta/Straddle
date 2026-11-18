@@ -7207,6 +7207,9 @@ function populateStraddleSettingsForm(s) {
     if (document.getElementById("cfgPremMaxDiffVal")) {
         document.getElementById("cfgPremMaxDiffVal").value = pm.max_difference || "";
     }
+    if (document.getElementById("cfgPremMaxDiffType")) {
+        document.getElementById("cfgPremMaxDiffType").value = pm.max_difference_type || "Points";
+    }
     if (document.getElementById("cfgPremCloseToVal")) {
         document.getElementById("cfgPremCloseToVal").value = pm.close_to || "";
     }
@@ -8199,11 +8202,84 @@ function onTogglePremSection(enabled) {
 }
 window.onTogglePremSection = onTogglePremSection;
 
+function selectPremMatchCard(radId) {
+    const secToggle = document.getElementById("cfgTogglePremSection");
+    if (secToggle && !secToggle.checked) {
+        secToggle.checked = true;
+        onTogglePremSection(true);
+    }
+    const rad = document.getElementById(radId);
+    if (rad) {
+        rad.checked = true;
+        syncPremiumMatchingFieldStates();
+    }
+}
+window.selectPremMatchCard = selectPremMatchCard;
+
+function setPremDiffPreset(val, type) {
+    selectPremMatchCard('radPremMaxDiff');
+    const input = document.getElementById("cfgPremMaxDiffVal");
+    if (input) {
+        input.value = val;
+        input.focus();
+    }
+    if (type && document.getElementById("cfgPremMaxDiffType")) {
+        document.getElementById("cfgPremMaxDiffType").value = type;
+    }
+    syncPremiumMatchingFieldStates();
+}
+window.setPremDiffPreset = setPremDiffPreset;
+
+function setPremCloseToPreset(val) {
+    selectPremMatchCard('radPremCloseTo');
+    const input = document.getElementById("cfgPremCloseToVal");
+    if (input) {
+        input.value = val;
+        input.focus();
+    }
+    syncPremiumMatchingFieldStates();
+}
+window.setPremCloseToPreset = setPremCloseToPreset;
+
+function setPremRangePreset(min, max) {
+    selectPremMatchCard('radPremRange');
+    const minInput = document.getElementById("cfgPremRangeMin");
+    const maxInput = document.getElementById("cfgPremRangeMax");
+    if (minInput) minInput.value = min;
+    if (maxInput) {
+        maxInput.value = max;
+        maxInput.focus();
+    }
+    syncPremiumMatchingFieldStates();
+}
+window.setPremRangePreset = setPremRangePreset;
+
+function setCombinedPremPreset(val) {
+    const secToggle = document.getElementById("cfgTogglePremSection");
+    if (secToggle && !secToggle.checked) {
+        secToggle.checked = true;
+        onTogglePremSection(true);
+    }
+    const combToggle = document.getElementById("cfgToggleCombinedPrem");
+    if (combToggle) combToggle.checked = true;
+    const input = document.getElementById("cfgCombinedPremVal");
+    if (input) {
+        input.value = val;
+        input.focus();
+    }
+    syncPremiumMatchingFieldStates();
+}
+window.setCombinedPremPreset = setCombinedPremPreset;
+
 function syncPremiumMatchingFieldStates() {
     const secToggle = document.getElementById("cfgTogglePremSection");
     const isSecEnabled = secToggle ? secToggle.checked : false;
     const secBody = document.getElementById("sec_builder_premium");
     const secBadge = document.getElementById("badge_prem_section");
+    const ruleBadge = document.getElementById("badgePremActiveRule");
+    const prevBadge = document.getElementById("prevPremModeBadge");
+    const prevFormula = document.getElementById("prevPremFormulaText");
+    const prevCadence = document.getElementById("prevPremCadenceText");
 
     if (secBadge) {
         secBadge.textContent = isSecEnabled ? "ENABLED" : "DISABLED";
@@ -8219,7 +8295,13 @@ function syncPremiumMatchingFieldStates() {
     const radCloseTo = document.getElementById("radPremCloseTo");
     const radRange = document.getElementById("radPremRange");
 
+    const cardNone = document.getElementById("cardPremNone");
+    const cardMaxDiff = document.getElementById("cardPremMaxDiff");
+    const cardCloseTo = document.getElementById("cardPremCloseTo");
+    const cardRange = document.getElementById("cardPremRange");
+
     const diffVal = document.getElementById("cfgPremMaxDiffVal");
+    const diffType = document.getElementById("cfgPremMaxDiffType");
     const closeToVal = document.getElementById("cfgPremCloseToVal");
     const rangeMin = document.getElementById("cfgPremRangeMin");
     const rangeMax = document.getElementById("cfgPremRangeMax");
@@ -8227,6 +8309,7 @@ function syncPremiumMatchingFieldStates() {
     const combToggle = document.getElementById("cfgToggleCombinedPrem");
     const combType = document.getElementById("cfgCombinedPremType");
     const combVal = document.getElementById("cfgCombinedPremVal");
+    const combBadge = document.getElementById("badgeCombinedPrem");
     const combFreq = document.getElementById("cfgPremFrequency");
 
     // All controls disabled if section is disabled
@@ -8234,37 +8317,71 @@ function syncPremiumMatchingFieldStates() {
         if (ctrl) ctrl.disabled = !isSecEnabled;
     });
 
+    // Update Card Selected classes
+    const isNone = radNone && radNone.checked;
+    const isDiff = radMaxDiff && radMaxDiff.checked;
+    const isClose = radCloseTo && radCloseTo.checked;
+    const isRng = radRange && radRange.checked;
+
+    if (cardNone) cardNone.classList.toggle("card-selected", isNone && isSecEnabled);
+    if (cardMaxDiff) cardMaxDiff.classList.toggle("card-selected", isDiff && isSecEnabled);
+    if (cardCloseTo) cardCloseTo.classList.toggle("card-selected", isClose && isSecEnabled);
+    if (cardRange) cardRange.classList.toggle("card-selected", isRng && isSecEnabled);
+
     if (!isSecEnabled) {
-        [diffVal, closeToVal, rangeMin, rangeMax, combType, combVal, combFreq].forEach(el => {
+        [diffVal, diffType, closeToVal, rangeMin, rangeMax, combType, combVal, combFreq].forEach(el => {
             if (el) {
                 el.disabled = true;
                 el.classList.add("input-disabled-muted");
             }
         });
+        if (ruleBadge) {
+            ruleBadge.textContent = "Disabled (Standard Immediate Entry)";
+            ruleBadge.style.color = "#64748b";
+            ruleBadge.style.background = "rgba(100,116,139,0.12)";
+            ruleBadge.style.borderColor = "rgba(100,116,139,0.3)";
+        }
+        if (prevBadge) {
+            prevBadge.textContent = "Section Disabled";
+            prevBadge.style.color = "#64748b";
+            prevBadge.style.background = "rgba(100,116,139,0.15)";
+        }
+        if (prevFormula) {
+            prevFormula.textContent = "Strike Selection: Configured Leg Strikes (ATM/OTM) | Entry: Immediate at Start Time (No condition waiting)";
+        }
+        if (prevCadence) {
+            prevCadence.textContent = "⏱️ Status: Strategy will enter immediately at start_time without premium matching.";
+        }
+        if (combBadge) {
+            combBadge.textContent = "Off";
+            combBadge.style.color = "#64748b";
+            combBadge.style.background = "rgba(255,255,255,0.05)";
+        }
         return;
     }
 
     // Section is enabled: enable fields according to selected radio and checkbox
-    const isDiffActive = radMaxDiff && radMaxDiff.checked;
     if (diffVal) {
-        diffVal.disabled = !isDiffActive;
-        diffVal.classList.toggle("input-disabled-muted", !isDiffActive);
+        diffVal.disabled = !isDiff;
+        diffVal.classList.toggle("input-disabled-muted", !isDiff);
+    }
+    if (diffType) {
+        diffType.disabled = !isDiff;
+        diffType.classList.toggle("input-disabled-muted", !isDiff);
     }
 
-    const isCloseToActive = radCloseTo && radCloseTo.checked;
     if (closeToVal) {
-        closeToVal.disabled = !isCloseToActive;
-        closeToVal.classList.toggle("input-disabled-muted", !isCloseToActive);
+        closeToVal.disabled = !isClose;
+        closeToVal.classList.toggle("input-disabled-muted", !isClose);
     }
 
-    const isRangeActive = radRange && radRange.checked;
     if (rangeMin) {
-        rangeMin.disabled = !isRangeActive;
-        rangeMin.classList.toggle("input-disabled-muted", !isRangeActive);
+        rangeMin.disabled = !isRng;
+        rangeMin.classList.toggle("input-disabled-muted", !isRng);
     }
     if (rangeMax) {
-        rangeMax.disabled = !isRangeActive;
-        rangeMax.classList.toggle("input-disabled-muted", !isRangeActive);
+        rangeMax.disabled = !isRng;
+        rangeMax.classList.toggle("input-disabled-muted", !isRng);
     }
 
     const isCombActive = combToggle && combToggle.checked;
@@ -8277,8 +8394,77 @@ function syncPremiumMatchingFieldStates() {
         combVal.classList.toggle("input-disabled-muted", !isCombActive);
     }
     if (combFreq) {
-        combFreq.disabled = !isSecEnabled;
-        combFreq.classList.toggle("input-disabled-muted", !isSecEnabled);
+        combFreq.disabled = false;
+        combFreq.classList.remove("input-disabled-muted");
+    }
+
+    const cValNum = parseFloat(combVal?.value) || 0;
+    const cTypeStr = combType?.value || "Lower than";
+    const cTypeOp = cTypeStr.includes("Lower") ? "≤" : "≥";
+    if (combBadge) {
+        if (isCombActive && cValNum > 0) {
+            combBadge.textContent = `Active (${cTypeOp} ₹${cValNum})`;
+            combBadge.style.color = "#38bdf8";
+            combBadge.style.background = "rgba(56,189,248,0.15)";
+        } else if (isCombActive) {
+            combBadge.textContent = "Active (Set Threshold)";
+            combBadge.style.color = "#f59e0b";
+            combBadge.style.background = "rgba(245,158,11,0.15)";
+        } else {
+            combBadge.textContent = "Off";
+            combBadge.style.color = "#64748b";
+            combBadge.style.background = "rgba(255,255,255,0.05)";
+        }
+    }
+
+    // Dynamic Live Blueprint & Status text
+    let modeText = "No Matching (Immediate Entry)";
+    let formulaText = "Strike Selection: Configured ATM/OTM Leg Strikes | Entry: Immediate at Start Time";
+    let badgeColor = "#10b981";
+
+    if (isDiff) {
+        const dVal = parseFloat(diffVal?.value) || 0;
+        const dUnit = (diffType?.value === "Percentage") ? "%" : "₹";
+        modeText = `Max Difference (≤ ${dUnit}${dVal})`;
+        formulaText = `🎯 Rule: |CE_LTP - PE_LTP| ≤ ${dUnit}${dVal} | Checks primary CE vs PE sell legs`;
+        badgeColor = "#38bdf8";
+    } else if (isClose) {
+        const cVal = parseFloat(closeToVal?.value) || 0;
+        modeText = `Close to Target (₹${cVal} ±10%)`;
+        formulaText = `🎯 Rule: |CE_LTP - ${cVal}| ≤ 10% AND |PE_LTP - ${cVal}| ≤ 10% (Target: ₹${cVal})`;
+        badgeColor = "#f59e0b";
+    } else if (isRng) {
+        const rMin = parseFloat(rangeMin?.value) || 0;
+        const rMax = parseFloat(rangeMax?.value) || 0;
+        modeText = `Premium Range [₹${rMin} - ₹${rMax}]`;
+        formulaText = `🎯 Rule: ₹${rMin} ≤ CE_LTP, PE_LTP ≤ ₹${rMax} | Both legs must be within bracket`;
+        badgeColor = "#a855f7";
+    }
+
+    if (isCombActive && cValNum > 0) {
+        formulaText += ` | 🔗 Combined Filter: (CE + PE) ${cTypeOp} ₹${cValNum}`;
+    }
+
+    if (ruleBadge) {
+        ruleBadge.textContent = modeText;
+        ruleBadge.style.color = badgeColor;
+        ruleBadge.style.background = badgeColor === "#10b981" ? "rgba(16,185,129,0.1)" : (badgeColor === "#38bdf8" ? "rgba(56,189,248,0.15)" : (badgeColor === "#f59e0b" ? "rgba(245,158,11,0.15)" : "rgba(168,85,247,0.15)"));
+        ruleBadge.style.borderColor = badgeColor;
+    }
+
+    if (prevBadge) {
+        prevBadge.textContent = modeText;
+        prevBadge.style.color = badgeColor;
+        prevBadge.style.background = badgeColor === "#10b981" ? "rgba(16,185,129,0.15)" : (badgeColor === "#38bdf8" ? "rgba(56,189,248,0.15)" : (badgeColor === "#f59e0b" ? "rgba(245,158,11,0.15)" : "rgba(168,85,247,0.15)"));
+    }
+
+    if (prevFormula) {
+        prevFormula.textContent = formulaText;
+    }
+
+    if (prevCadence) {
+        const freqVal = combFreq?.value || "LTP (Continuous Monitoring)";
+        prevCadence.textContent = `⏱️ Frequency: ${freqVal} | Monitored Legs: Primary Sell CE & PE | Auto-Entry Trigger on condition match`;
     }
 }
 window.syncPremiumMatchingFieldStates = syncPremiumMatchingFieldStates;
@@ -9246,6 +9432,7 @@ function serializeCurrentStrategySettings() {
             enabled: !!document.getElementById("cfgTogglePremSection")?.checked,
             mode: document.querySelector("input[name='prem_match_mode']:checked")?.value || "No matching of premiums",
             max_difference: !isNaN(parseFloat(document.getElementById("cfgPremMaxDiffVal")?.value)) ? parseFloat(document.getElementById("cfgPremMaxDiffVal")?.value) : 0.0,
+            max_difference_type: document.getElementById("cfgPremMaxDiffType")?.value || "Points",
             close_to: !isNaN(parseFloat(document.getElementById("cfgPremCloseToVal")?.value)) ? parseFloat(document.getElementById("cfgPremCloseToVal")?.value) : 0.0,
             range_min: !isNaN(parseFloat(document.getElementById("cfgPremRangeMin")?.value)) ? parseFloat(document.getElementById("cfgPremRangeMin")?.value) : 0.0,
             range_max: !isNaN(parseFloat(document.getElementById("cfgPremRangeMax")?.value)) ? parseFloat(document.getElementById("cfgPremRangeMax")?.value) : 0.0,

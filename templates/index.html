@@ -1515,7 +1515,7 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_premium')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_premium" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">PREMIUM MATCHING & RANGE 🔗</span>
+                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">⚖️ PREMIUM MATCHING & RANGE (QUANTIPLY PARITY) 🔗</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:10px;" onclick="event.stopPropagation()">
                         <span id="badge_prem_section" class="section-status-badge badge-disabled">DISABLED</span>
@@ -1527,43 +1527,186 @@
                 </div>
 
                 <div id="sec_builder_premium" class="straddle-collapsible-body collapsed" style="display:none;">
-                    <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-                        <div class="prem-matching-radios-row" style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
-                            <label class="straddle-checkbox-label">
-                                <input type="radio" name="prem_match_mode" id="radPremNone" value="No matching of premiums" checked onchange="syncPremiumMatchingFieldStates()"> No matching of premiums 🔗
-                            </label>
-                            <label class="straddle-checkbox-label">
-                                <input type="radio" name="prem_match_mode" id="radPremMaxDiff" value="Match premiums with maximum difference" onchange="syncPremiumMatchingFieldStates()"> Match premiums with max difference: 🔗
-                            </label>
-                            <input type="number" id="cfgPremMaxDiffVal" class="straddle-input" style="width:90px;" placeholder="₹ Diff">
-                            <label class="straddle-checkbox-label">
-                                <input type="radio" name="prem_match_mode" id="radPremCloseTo" value="Premium close to" onchange="syncPremiumMatchingFieldStates()"> Premium close to: 🔗
-                            </label>
-                            <input type="number" id="cfgPremCloseToVal" class="straddle-input" style="width:90px;" placeholder="₹ Target">
-                            <label class="straddle-checkbox-label">
-                                <input type="radio" name="prem_match_mode" id="radPremRange" value="Premium range" onchange="syncPremiumMatchingFieldStates()"> Premium range: 🔗
-                            </label>
-                            <input type="number" id="cfgPremRangeMin" class="straddle-input" style="width:70px;" placeholder="Min">
-                            <span>To</span>
-                            <input type="number" id="cfgPremRangeMax" class="straddle-input" style="width:70px;" placeholder="Max">
+                    <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:16px;">
+                        
+                        <!-- Header Banner -->
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                            <div>
+                                <div style="font-size:13px; font-weight:800; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+                                    <span>⚖️ Premium Matching, Range & Combined Limits</span>
+                                    <span style="font-size:10px; font-weight:700; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); border-radius:3px; padding:1px 6px;">Quantiply Parity</span>
+                                </div>
+                                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+                                    Trigger trade entry only when option leg premiums satisfy required difference, proximity, or combined total criteria.
+                                </div>
+                            </div>
+                            <div style="text-align:right;">
+                                <span id="badgePremActiveRule" style="font-size:10.5px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:4px; padding:3px 8px;">
+                                    No Matching (Immediate Entry)
+                                </span>
+                            </div>
                         </div>
 
-                        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">
-                            <label class="straddle-checkbox-label">
-                                <input type="checkbox" id="cfgToggleCombinedPrem" onchange="syncPremiumMatchingFieldStates()"> Combined Premium: 🔗
-                            </label>
-                            <select id="cfgCombinedPremType" class="straddle-select" style="width:120px;" onchange="syncPremiumMatchingFieldStates()">
-                                <option value="Lower than">Lower than</option>
-                                <option value="Higher than">Higher than</option>
-                            </select>
-                            <input type="number" id="cfgCombinedPremVal" class="straddle-input" style="width:90px;" placeholder="Value">
-                            <span style="font-size:11px; color:#94a3b8; font-weight:700;">Condition Matching Frequency:</span>
-                            <select id="cfgPremFrequency" class="straddle-select">
-                                <option value="LTP (Continuous Monitoring)" selected>LTP (Continuous Monitoring)</option>
-                                <option value="1 sec">1 sec</option>
-                                <option value="5 sec">5 sec</option>
-                            </select>
+                        <!-- 4 Interactive Mode Selection Cards -->
+                        <div class="prem-match-card-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; margin-bottom:14px;">
+                            
+                            <!-- Card 1: No Matching -->
+                            <div id="cardPremNone" class="prem-match-card card-selected" onclick="selectPremMatchCard('radPremNone')">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                                    <label class="straddle-checkbox-label" style="font-weight:800; font-size:12px; color:#f8fafc; cursor:pointer;" onclick="event.stopPropagation()">
+                                        <input type="radio" name="prem_match_mode" id="radPremNone" value="No matching of premiums" checked onchange="syncPremiumMatchingFieldStates()"> No matching 🔗
+                                    </label>
+                                    <span style="font-size:9.5px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.12); padding:1px 5px; border-radius:3px;">Immediate</span>
+                                </div>
+                                <div style="font-size:11px; color:#94a3b8; line-height:1.35; margin-top:4px;">
+                                    Standard strike execution. Orders punch immediately at start time with zero premium wait condition.
+                                </div>
+                                <div style="font-size:10px; color:#64748b; font-style:italic; margin-top:auto; padding-top:6px;">
+                                    ATM / OTM strike ladder
+                                </div>
+                            </div>
+
+                            <!-- Card 2: Max Difference -->
+                            <div id="cardPremMaxDiff" class="prem-match-card" onclick="selectPremMatchCard('radPremMaxDiff')">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                                    <label class="straddle-checkbox-label" style="font-weight:800; font-size:12px; color:#f8fafc; cursor:pointer;" onclick="event.stopPropagation()">
+                                        <input type="radio" name="prem_match_mode" id="radPremMaxDiff" value="Match premiums with maximum difference" onchange="syncPremiumMatchingFieldStates()"> Max difference: 🔗
+                                    </label>
+                                    <span style="font-size:9.5px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); padding:1px 5px; border-radius:3px;">Balanced</span>
+                                </div>
+                                <div style="font-size:10.5px; color:#38bdf8; font-family:monospace; margin-top:2px;">
+                                    |CE LTP - PE LTP| ≤ Diff
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px; margin-top:6px;" onclick="event.stopPropagation()">
+                                    <input type="number" id="cfgPremMaxDiffVal" class="straddle-input" style="flex:1; font-weight:700; padding:4px 8px;" placeholder="₹ Diff" min="0" step="0.5" oninput="syncPremiumMatchingFieldStates()">
+                                    <select id="cfgPremMaxDiffType" class="straddle-select" style="width:75px; font-size:11px; padding:4px 6px;" onchange="syncPremiumMatchingFieldStates()">
+                                        <option value="Points" selected>Points (₹)</option>
+                                        <option value="Percentage">Percent (%)</option>
+                                    </select>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:4px; margin-top:6px;" onclick="event.stopPropagation()">
+                                    <span style="font-size:9.5px; color:#64748b; font-weight:600;">Presets:</span>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremDiffPreset(5)">5</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremDiffPreset(10)">10</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremDiffPreset(15)">15</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremDiffPreset(25)">25</button>
+                                </div>
+                            </div>
+
+                            <!-- Card 3: Close to Target -->
+                            <div id="cardPremCloseTo" class="prem-match-card" onclick="selectPremMatchCard('radPremCloseTo')">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                                    <label class="straddle-checkbox-label" style="font-weight:800; font-size:12px; color:#f8fafc; cursor:pointer;" onclick="event.stopPropagation()">
+                                        <input type="radio" name="prem_match_mode" id="radPremCloseTo" value="Premium close to" onchange="syncPremiumMatchingFieldStates()"> Close to target: 🔗
+                                    </label>
+                                    <span style="font-size:9.5px; font-weight:700; color:#f59e0b; background:rgba(245,158,11,0.12); padding:1px 5px; border-radius:3px;">Proximity</span>
+                                </div>
+                                <div style="font-size:10.5px; color:#f59e0b; font-family:monospace; margin-top:2px;">
+                                    CE & PE ≈ Target (±10%)
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px; margin-top:6px;" onclick="event.stopPropagation()">
+                                    <input type="number" id="cfgPremCloseToVal" class="straddle-input" style="flex:1; font-weight:700; padding:4px 8px;" placeholder="₹ Target" min="0" step="1" oninput="syncPremiumMatchingFieldStates()">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">₹</span>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:4px; margin-top:6px;" onclick="event.stopPropagation()">
+                                    <span style="font-size:9.5px; color:#64748b; font-weight:600;">Presets:</span>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremCloseToPreset(50)">50</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremCloseToPreset(100)">100</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremCloseToPreset(150)">150</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremCloseToPreset(200)">200</button>
+                                </div>
+                            </div>
+
+                            <!-- Card 4: Premium Range -->
+                            <div id="cardPremRange" class="prem-match-card" onclick="selectPremMatchCard('radPremRange')">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                                    <label class="straddle-checkbox-label" style="font-weight:800; font-size:12px; color:#f8fafc; cursor:pointer;" onclick="event.stopPropagation()">
+                                        <input type="radio" name="prem_match_mode" id="radPremRange" value="Premium range" onchange="syncPremiumMatchingFieldStates()"> Premium range: 🔗
+                                    </label>
+                                    <span style="font-size:9.5px; font-weight:700; color:#a855f7; background:rgba(168,85,247,0.12); padding:1px 5px; border-radius:3px;">Bracket</span>
+                                </div>
+                                <div style="font-size:10.5px; color:#a855f7; font-family:monospace; margin-top:2px;">
+                                    Min ≤ CE & PE ≤ Max
+                                </div>
+                                <div style="display:flex; align-items:center; gap:4px; margin-top:6px; flex-wrap:nowrap;" onclick="event.stopPropagation()">
+                                    <input type="number" id="cfgPremRangeMin" class="straddle-input" style="width:48%; font-weight:700; padding:4px 6px;" placeholder="Min ₹" min="0" step="1" oninput="syncPremiumMatchingFieldStates()">
+                                    <span style="font-size:10px; font-weight:800; color:#64748b; padding:0 2px; white-space:nowrap;">TO</span>
+                                    <input type="number" id="cfgPremRangeMax" class="straddle-input" style="width:48%; font-weight:700; padding:4px 6px;" placeholder="Max ₹" min="0" step="1" oninput="syncPremiumMatchingFieldStates()">
+                                </div>
+                                <div style="display:flex; align-items:center; gap:4px; margin-top:6px;" onclick="event.stopPropagation()">
+                                    <span style="font-size:9.5px; color:#64748b; font-weight:600;">Presets:</span>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremRangePreset(50, 120)">50-120</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremRangePreset(80, 150)">80-150</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setPremRangePreset(100, 200)">100-200</button>
+                                </div>
+                            </div>
+
                         </div>
+
+                        <!-- Secondary Filters: Combined Premium & Frequency Grid -->
+                        <div class="straddle-grid-2col" style="display:grid; grid-template-columns:1.2fr 1fr; gap:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.06);">
+                            
+                            <!-- Left: Combined Premium Filter -->
+                            <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:10px 12px;">
+                                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                                    <label class="straddle-checkbox-label" style="font-size:12px; font-weight:800; color:#f8fafc;">
+                                        <input type="checkbox" id="cfgToggleCombinedPrem" onchange="syncPremiumMatchingFieldStates()"> Combined Premium (Sum of Legs): 🔗
+                                    </label>
+                                    <span id="badgeCombinedPrem" style="font-size:9.5px; font-weight:700; color:#64748b; background:rgba(255,255,255,0.05); padding:1px 6px; border-radius:3px;">Off</span>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <select id="cfgCombinedPremType" class="straddle-select" style="width:145px; font-weight:700;" onchange="syncPremiumMatchingFieldStates()">
+                                        <option value="Lower than" selected>Lower than (≤)</option>
+                                        <option value="Higher than">Higher than (≥)</option>
+                                    </select>
+                                    <div style="display:flex; align-items:center; gap:4px; flex:1;">
+                                        <span style="font-size:12px; color:#94a3b8; font-weight:700;">₹</span>
+                                        <input type="number" id="cfgCombinedPremVal" class="straddle-input" style="flex:1; font-weight:700;" placeholder="Threshold ₹" min="0" step="5" oninput="syncPremiumMatchingFieldStates()">
+                                    </div>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:5px; margin-top:8px;">
+                                    <span style="font-size:9.5px; color:#64748b; font-weight:600;">Presets:</span>
+                                    <button type="button" class="prem-preset-pill" onclick="setCombinedPremPreset(150)">₹150</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setCombinedPremPreset(200)">₹200</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setCombinedPremPreset(250)">₹250</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setCombinedPremPreset(300)">₹300</button>
+                                    <button type="button" class="prem-preset-pill" onclick="setCombinedPremPreset(400)">₹400</button>
+                                </div>
+                            </div>
+
+                            <!-- Right: Condition Matching Frequency -->
+                            <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:10px 12px; display:flex; flex-direction:column; justify-content:space-between;">
+                                <div>
+                                    <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                        Condition Matching Frequency:
+                                    </label>
+                                    <select id="cfgPremFrequency" class="straddle-select" style="font-weight:700;" onchange="syncPremiumMatchingFieldStates()">
+                                        <option value="LTP (Continuous Monitoring)" selected>LTP (Continuous Monitoring - &lt;10ms)</option>
+                                        <option value="1 sec">1 sec (Quantiply Standard Cadence)</option>
+                                        <option value="5 sec">5 sec (Wick & Noise Filter Cadence)</option>
+                                    </select>
+                                </div>
+                                <div style="font-size:10px; color:#64748b; margin-top:6px; line-height:1.35;">
+                                    Checks live option quotes of primary CE & PE legs. Strategy executes entry the moment criteria are met.
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <!-- Live Interactive Formula & Parity Summary Card -->
+                        <div id="premMatchLivePreviewCard" style="background:#030712; border:1px solid rgba(56,189,248,0.25); border-radius:6px; padding:10px 14px; font-size:11px; display:flex; flex-direction:column; gap:4px; margin-top:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-weight:800; color:#38bdf8;">📐 Live Premium Matching & Range Execution Breakdown:</span>
+                                <span id="prevPremModeBadge" style="font-size:9.5px; font-weight:800; color:#38bdf8; background:rgba(56,189,248,0.15); padding:1px 6px; border-radius:3px;">No Matching</span>
+                            </div>
+                            <div id="prevPremFormulaText" style="color:#e2e8f0; font-family:monospace; font-size:11px;">
+                                Strike Selection: Configured ATM/OTM Leg Strikes | Entry: Immediate at Start Time
+                            </div>
+                            <div id="prevPremCadenceText" style="color:#94a3b8; font-size:10.5px;">
+                                ⏱️ Frequency: LTP Continuous (&lt;10ms) | Scope: Monitored on Primary CE & PE Sell Legs
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 

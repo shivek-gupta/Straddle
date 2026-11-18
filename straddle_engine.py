@@ -6516,19 +6516,32 @@ class StraddleManager:
         # 1. Match premiums with maximum difference
         if mode == "Match premiums with maximum difference":
             max_diff = float(pm.get("max_difference") or 0.0)
-            diff = round(abs(p1 - p2), 2)
-            if diff <= max_diff:
-                matched = True
-                reason = f"Diff ₹{diff:.2f} <= max ₹{max_diff:.2f} ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f})"
+            diff_type = str(pm.get("max_difference_type") or "Points").strip().lower()
+            if diff_type in ("percentage", "pct", "%"):
+                base_p = min(p1, p2)
+                diff_pct = round((abs(p1 - p2) / base_p * 100) if base_p > 0 else 0.0, 2)
+                if diff_pct <= max_diff:
+                    matched = True
+                    reason = f"Diff {diff_pct:.1f}% <= max {max_diff:.1f}% ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f})"
+                else:
+                    matched = False
+                    reason = f"Diff {diff_pct:.1f}% > max {max_diff:.1f}% ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f})"
             else:
-                matched = False
-                reason = f"Diff ₹{diff:.2f} > max ₹{max_diff:.2f} ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f})"
+                diff = round(abs(p1 - p2), 2)
+                if diff <= max_diff:
+                    matched = True
+                    reason = f"Diff ₹{diff:.2f} <= max ₹{max_diff:.2f} ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f})"
+                else:
+                    matched = False
+                    reason = f"Diff ₹{diff:.2f} > max ₹{max_diff:.2f} ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f})"
 
         # 2. Premium close to
         elif mode == "Premium close to":
             target_p = float(pm.get("close_to") or 0.0)
             if target_p > 0:
-                tol = max(5.0, round(target_p * 0.05, 2))
+                tol = float(pm.get("close_to_tolerance") or 0.0)
+                if tol <= 0:
+                    tol = max(5.0, round(target_p * 0.10, 2))
                 is_close_1 = abs(p1 - target_p) <= tol
                 is_close_2 = abs(p2 - target_p) <= tol
                 if is_close_1 and is_close_2:
@@ -6545,9 +6558,12 @@ class StraddleManager:
         elif mode == "Premium range":
             r_min = float(pm.get("range_min") or 0.0)
             r_max = float(pm.get("range_max") or 0.0)
-            if r_max > 0:
-                in_range_1 = (r_min <= p1 <= r_max)
-                in_range_2 = (r_min <= p2 <= r_max)
+            if r_min > 0 or r_max > 0:
+                if r_min > r_max and r_max > 0:
+                    r_min, r_max = r_max, r_min
+                eff_max = r_max if r_max > 0 else 999999.0
+                in_range_1 = (r_min <= p1 <= eff_max)
+                in_range_2 = (r_min <= p2 <= eff_max)
                 if in_range_1 and in_range_2:
                     matched = True
                     reason = f"Premiums ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f}) in range [₹{r_min:.2f}, ₹{r_max:.2f}]"
@@ -6556,25 +6572,26 @@ class StraddleManager:
                     reason = f"Premiums ({lbl1}: ₹{p1:.2f}, {lbl2}: ₹{p2:.2f}) outside range [₹{r_min:.2f}, ₹{r_max:.2f}]"
             else:
                 matched = True
-                reason = "Range max is 0"
+                reason = "Range is 0"
 
         # 4. Combined Premium
-        if matched and comb_type in ("Lower than", "Higher than", "Between range"):
+        c_type_raw = str(pm.get("combined_premium_type") or "").strip().lower()
+        if matched and c_type_raw not in ("none", "", "null", "false"):
             comb_val = float(pm.get("combined_premium_value") or 0.0)
             comb_actual = round(p1 + p2, 2)
-            if comb_type == "Lower than":
+            if "lower" in c_type_raw:
                 if comb_actual <= comb_val:
                     reason += (f" & " if reason else "") + f"Combined ₹{comb_actual:.2f} <= ₹{comb_val:.2f}"
                 else:
                     matched = False
                     reason = f"Combined ₹{comb_actual:.2f} > ₹{comb_val:.2f} ({lbl1}: ₹{p1:.2f} + {lbl2}: ₹{p2:.2f})"
-            elif comb_type == "Higher than":
+            elif "higher" in c_type_raw:
                 if comb_actual >= comb_val:
                     reason += (f" & " if reason else "") + f"Combined ₹{comb_actual:.2f} >= ₹{comb_val:.2f}"
                 else:
                     matched = False
                     reason = f"Combined ₹{comb_actual:.2f} < ₹{comb_val:.2f} ({lbl1}: ₹{p1:.2f} + {lbl2}: ₹{p2:.2f})"
-            elif comb_type == "Between range":
+            elif "between" in c_type_raw:
                 min_c = float(pm.get("range_min") or 0.0)
                 max_c = float(pm.get("range_max") or comb_val)
                 if min_c <= comb_actual <= max_c:
@@ -15200,7 +15217,10 @@ class StraddleManager:
                     
                     # ONLY auto-start strategies in READY state that are enabled, scheduled, NOT manually reset, cooldown elapsed, and have NOT traded yet today
                     if strat_status == "READY" and not has_open_positions and not has_completed_positions:
-                        if not entry_in_prog and not strat.get("_manual_reset") and strat.get("last_trade_date") != today_s and (now_ts - last_attempt > 60):
+                        err_str = str(strat.get("entry_error") or "")
+                        is_waiting_pm = "Waiting for Premium Matching" in err_str
+                        cooldown_req = 0 if is_waiting_pm or last_attempt <= 0 else (60 if err_str and not err_str.startswith("Waiting for") else 0)
+                        if not entry_in_prog and not strat.get("_manual_reset") and strat.get("last_trade_date") != today_s and (now_ts - last_attempt >= cooldown_req):
                             # Evaluate Premium Matching & Range condition if enabled
                             is_pm_matched, pm_reason = self.check_premium_matching_condition(strat)
                             if not is_pm_matched:
