@@ -1616,7 +1616,22 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 const name = (s.name || s.strategy_id || "").toLowerCase();
                 const status = (s.status || "Ready").toLowerCase();
                 const und = canonicalUnderlying(s.underlying || "NIFTY").toLowerCase();
-                return name.includes(searchVal) || und.includes(searchVal) || status.includes(searchVal);
+                const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[und.toUpperCase()]) ? COMMODITY_DISPLAY_NAMES[und.toUpperCase()].toLowerCase() : und;
+                const clientId = String(s.client_id || "").toLowerCase();
+                const execMode = (s.execution_mode || "Paper").toLowerCase();
+                const tradeType = (s.trade_type || "Intraday").toLowerCase();
+                const startTime = String(s.start_time || "").toLowerCase();
+                const days = Array.isArray(s.schedule_days) ? s.schedule_days.join(" ").toLowerCase() : "";
+
+                return name.includes(searchVal) || 
+                       und.includes(searchVal) || 
+                       dispName.includes(searchVal) || 
+                       status.includes(searchVal) || 
+                       clientId.includes(searchVal) || 
+                       execMode.includes(searchVal) || 
+                       tradeType.includes(searchVal) || 
+                       startTime.includes(searchVal) || 
+                       days.includes(searchVal);
             }
             // CRITICAL SAFETY RULE: Never hide strategies with OPEN positions, active trades, or errors!
             const hasActiveTrading = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "EXIT_PENDING" || p.status === "ERROR");
@@ -1635,20 +1650,24 @@ function renderStraddleAlgosTable(forceRebuild = false) {
 
         const badgeEl = document.getElementById("algosFocusedUnderlyingBadge");
         const toggleBtn = document.getElementById("btnToggleShowAllAlgos");
+        const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
+        const undColor = (typeof COMMODITY_COLOR_MAP !== "undefined" && COMMODITY_COLOR_MAP[activeUnd]) ? COMMODITY_COLOR_MAP[activeUnd] : "#38bdf8";
+
         if (badgeEl) {
             if (showAll) {
                 badgeEl.textContent = `Showing All Assets (${strategies.length})`;
-                badgeEl.style.color = "#38bdf8";
-                badgeEl.style.borderColor = "rgba(56,189,248,0.4)";
+                badgeEl.style.color = "#94a3b8";
+                badgeEl.style.background = "rgba(148,163,184,0.12)";
+                badgeEl.style.borderColor = "rgba(148,163,184,0.3)";
             } else {
-                const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
                 badgeEl.textContent = `Focused: ${dispName}`;
-                badgeEl.style.color = "#f43f5e";
-                badgeEl.style.borderColor = "rgba(244,63,94,0.4)";
+                badgeEl.style.color = undColor;
+                badgeEl.style.background = undColor.startsWith("#") ? `${undColor}1a` : "rgba(56,189,248,0.15)";
+                badgeEl.style.borderColor = undColor.startsWith("#") ? `${undColor}55` : "rgba(56,189,248,0.4)";
             }
         }
         if (toggleBtn) {
-            toggleBtn.textContent = showAll ? "Filter by Active Asset" : "Show All Assets";
+            toggleBtn.textContent = showAll ? `Filter by ${dispName}` : "Show All Assets";
             toggleBtn.classList.toggle("btn-primary", showAll);
             toggleBtn.classList.toggle("btn-outline", !showAll);
         }
@@ -1657,9 +1676,21 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         let totalMtm = 0;
         filtered.forEach(s => { totalMtm += (s.mtm || 0.0); });
         const totMtmEl = document.getElementById("straddleAlgosTotalMtm");
+        const totMtmLbl = document.getElementById("lblStraddleAlgosTotalMtm");
+        if (totMtmLbl) {
+            totMtmLbl.textContent = showAll ? "Total Algos MTM:" : `${dispName} Algos MTM:`;
+        }
         if (totMtmEl) {
-            totMtmEl.textContent = (totalMtm >= 0 ? "+₹ " : "-₹ ") + Math.abs(totalMtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            totMtmEl.style.color = totalMtm >= 0 ? "#10b981" : "#f43f5e";
+            if (Math.abs(totalMtm) < 0.005) {
+                totMtmEl.textContent = "₹ 0.00";
+                totMtmEl.style.color = "#94a3b8";
+            } else if (totalMtm > 0) {
+                totMtmEl.textContent = "+₹ " + totalMtm.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                totMtmEl.style.color = "#10b981";
+            } else {
+                totMtmEl.textContent = "-₹ " + Math.abs(totalMtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                totMtmEl.style.color = "#f43f5e";
+            }
         }
 
         updateMasterCheckboxState();
@@ -2161,7 +2192,9 @@ function toggleShowAllUnderlyingsAlgos() {
     window._showAllUnderlyingsAlgos = !window._showAllUnderlyingsAlgos;
     const btn = document.getElementById("btnToggleShowAllAlgos");
     if (btn) {
-        btn.textContent = window._showAllUnderlyingsAlgos ? "Show Focused Asset Only" : "Show All Assets";
+        const activeUnd = canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY");
+        const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
+        btn.textContent = window._showAllUnderlyingsAlgos ? `Filter by ${dispName}` : "Show All Assets";
         btn.classList.toggle("btn-primary", window._showAllUnderlyingsAlgos);
         btn.classList.toggle("btn-outline", !window._showAllUnderlyingsAlgos);
     }
@@ -2662,6 +2695,13 @@ function openAddStraddleAlgoModal() {
     if (nameInput) {
         nameInput.value = "";
         nameInput.placeholder = "e.g. Weekly Short Straddle 9:20";
+    }
+    const undSelect = document.getElementById("newAlgoUnderlying");
+    if (undSelect) {
+        const activeUnd = canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY");
+        if (Array.from(undSelect.options).some(o => o.value === activeUnd)) {
+            undSelect.value = activeUnd;
+        }
     }
     modal.style.display = "flex";
 }
@@ -10514,15 +10554,61 @@ async function straddleTerminateAlgo() {
 }
 
 async function straddleSquareOffAllAndTerminate() {
+    let openPositionsCount = 0;
+    const countedIds = new Set();
+
+    // 1. Check open positions cache
+    if (Array.isArray(window._openPositionsCache)) {
+        window._openPositionsCache.forEach(p => {
+            if (p && (p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "ENTRY_FILLED")) {
+                const pid = p.symbol || p.order_id || p.id || JSON.stringify(p);
+                if (!countedIds.has(pid)) {
+                    countedIds.add(pid);
+                    openPositionsCount++;
+                }
+            }
+        });
+    }
+
+    // 2. Check active strategy positions
     const posList = window._straddleState?.positions || window._straddleState?.activeStrategy?.positions || [];
-    const hasOpen = posList.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+    if (Array.isArray(posList)) {
+        posList.forEach(p => {
+            if (p && (p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "ENTRY_FILLED")) {
+                const pid = p.symbol || p.order_id || p.id || JSON.stringify(p);
+                if (!countedIds.has(pid)) {
+                    countedIds.add(pid);
+                    openPositionsCount++;
+                }
+            }
+        });
+    }
+
+    // 3. Check all other strategies in platform
+    if (Array.isArray(window._straddleState?.allStrategies)) {
+        window._straddleState.allStrategies.forEach(s => {
+            if (Array.isArray(s.positions)) {
+                s.positions.forEach(p => {
+                    if (p && (p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "ENTRY_FILLED")) {
+                        const pid = p.symbol || p.order_id || p.id || JSON.stringify(p);
+                        if (!countedIds.has(pid)) {
+                            countedIds.add(pid);
+                            openPositionsCount++;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    const hasOpen = openPositionsCount > 0;
 
     if (!hasOpen) {
         if (!confirm("No open positions are currently active. Do you want to stop/terminate all running algorithms?")) {
             return;
         }
     } else {
-        if (!confirm("EMERGENCY ACTION: Square off ALL open strategy positions and terminate algorithm immediately?")) {
+        if (!confirm(`🚨 EMERGENCY ACTION:\nSquare off ALL ${openPositionsCount} open position(s) across all strategies and terminate algorithm execution immediately?`)) {
             return;
         }
     }
@@ -10603,6 +10689,7 @@ function updateExecutionModeUI(mode) {
             pillBtn.style.background = "rgba(168,85,247,0.15)";
             pillBtn.style.borderColor = "#a855f7";
             pillBtn.style.color = "#c084fc";
+            pillBtn.title = "🧪 Paper Simulation Mode Active (Click to switch to Live Broker)";
             if (resetBtn) resetBtn.style.display = "inline-flex";
         } else {
             pillIcon.textContent = "🟢";
@@ -10610,6 +10697,7 @@ function updateExecutionModeUI(mode) {
             pillBtn.style.background = "rgba(16,185,129,0.12)";
             pillBtn.style.borderColor = "#10b981";
             pillBtn.style.color = "#10b981";
+            pillBtn.title = "🟢 Kotak Neo Live Broker Connected (Click to switch to Paper Trading)";
             if (resetBtn) resetBtn.style.display = "none";
         }
     }
@@ -18420,6 +18508,9 @@ function toggleTopbarAssetMenu(event) {
     const isShown = dd.style.display === "block";
     dd.style.display = isShown ? "none" : "block";
     if (btn) btn.classList.toggle("open", !isShown);
+    if (!isShown && typeof closeTopbarSettingsDropdown === "function") {
+        closeTopbarSettingsDropdown();
+    }
 }
 window.toggleTopbarAssetMenu = toggleTopbarAssetMenu;
 

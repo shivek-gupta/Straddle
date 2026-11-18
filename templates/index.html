@@ -221,10 +221,10 @@
                 <span>🔄</span> Reset
             </button>
 
-            <!-- Net MTM Pill -->
-            <div id="topbarMtmPill" style="display:inline-flex; align-items:center; gap:4px; background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.12); padding:4px 9px; border-radius:6px; font-family:var(--font-mono); font-size:11.5px; font-weight:800; flex-shrink:0; white-space:nowrap;">
+            <!-- Net MTM Pill (Click to jump to Open Positions & breakdown) -->
+            <div id="topbarMtmPill" onclick="switchStraddleSubView('open_positions')" style="display:inline-flex; align-items:center; gap:4px; background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.12); padding:4px 9px; border-radius:6px; font-family:var(--font-mono); font-size:11.5px; font-weight:800; flex-shrink:0; white-space:nowrap; cursor:pointer; transition:all 0.15s ease;" title="Click to view Open Positions & portfolio MTM breakdown" onmouseenter="this.style.borderColor='rgba(56,189,248,0.5)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.12)'">
                 <span style="color:#94a3b8; font-size:10px;">NET:</span>
-                <span id="topbarMtmVal" style="color:#38bdf8;">₹0.00</span>
+                <span id="topbarMtmVal" style="color:#94a3b8;">₹0.00</span>
             </div>
 
             <!-- Emergency Square-Off Kill Switch -->
@@ -760,16 +760,19 @@
             <div style="display:flex; justify-content:space-between; align-items:center; background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 14px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <div style="display:flex; align-items:center; gap:6px; background:#111726; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:4px 10px;">
-                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Total MTM:</span>
-                        <span id="straddleAlgosTotalMtm" style="color:#f43f5e; font-weight:800; font-family:var(--font-mono); font-size:12.5px;">₹ 0.00</span>
+                        <span id="lblStraddleAlgosTotalMtm" style="font-size:11px; color:#94a3b8; font-weight:700;">Total MTM:</span>
+                        <span id="straddleAlgosTotalMtm" style="color:#94a3b8; font-weight:800; font-family:var(--font-mono); font-size:12.5px;">₹ 0.00</span>
                     </div>
                 </div>
                 <div style="display:flex; align-items:center; gap:12px;">
                     <div style="display:inline-flex; align-items:center; gap:8px;">
-                        <span id="algosFocusedUnderlyingBadge" style="font-size:12px; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 12px; border-radius:6px;">Focused: NIFTY</span>
+                        <span id="algosFocusedUnderlyingBadge" style="font-size:12px; font-weight:800; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 12px; border-radius:6px;">Focused: NIFTY 50</span>
                         <button type="button" id="btnToggleShowAllAlgos" class="straddle-btn btn-outline" style="padding:5px 10px; font-size:11.5px; font-weight:700;" onclick="toggleShowAllUnderlyingsAlgos()">Show All Assets</button>
                     </div>
-                    <input type="text" id="straddleAlgosSearch" class="straddle-input" placeholder="Search by Algo name, Status..." style="width:240px;" oninput="renderStraddleAlgosTable()">
+                    <div style="position:relative; display:inline-flex; align-items:center;">
+                        <input type="text" id="straddleAlgosSearch" class="straddle-input" placeholder="Search by Algo, Status, Client..." style="width:230px; padding-right:24px;" oninput="renderStraddleAlgosTable(); const btnClr = document.getElementById('btnClearAlgosSearch'); if(btnClr) btnClr.style.display = this.value ? 'block' : 'none';">
+                        <button type="button" id="btnClearAlgosSearch" onclick="document.getElementById('straddleAlgosSearch').value=''; this.style.display='none'; renderStraddleAlgosTable();" style="display:none; position:absolute; right:7px; background:none; border:none; color:#94a3b8; font-size:11px; cursor:pointer; padding:0 2px;" title="Clear search filter">✕</button>
+                    </div>
                     <button type="button" class="straddle-btn btn-primary" onclick="openAddStraddleAlgoModal()">+ Add Algo</button>
                 </div>
             </div>
@@ -4221,7 +4224,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261118_audit_logs_pro_sync_v6"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261118_topbar_algos_sync_v7"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
@@ -4477,8 +4480,16 @@
                     const mtm = state.totalPortfolioPnl;
                     const el = document.getElementById("topbarMtmVal");
                     if (el) {
-                        el.textContent = (mtm >= 0 ? "+₹" : "-₹") + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                        el.style.color = mtm > 0 ? "#10b981" : (mtm < 0 ? "#f43f5e" : "#38bdf8");
+                        if (Math.abs(mtm) < 0.005) {
+                            el.textContent = "₹0.00";
+                            el.style.color = "#94a3b8";
+                        } else if (mtm > 0) {
+                            el.textContent = "+₹" + mtm.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            el.style.color = "#10b981";
+                        } else {
+                            el.textContent = "-₹" + Math.abs(mtm).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            el.style.color = "#f43f5e";
+                        }
                     }
                 }
             }, 1000);
