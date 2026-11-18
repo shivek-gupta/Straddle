@@ -5753,12 +5753,6 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
             // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift, adopted from Kotak Neo)
             let entryReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
-            const isAdopted = !!(
-                pos.is_adopted ||
-                (pos.id && String(pos.id).startsWith("leg_adopted_")) ||
-                (pos.leg_id && String(pos.leg_id).startsWith("leg_adopted_")) ||
-                (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("adopt"))
-            );
 
             if (isAdopted) {
                 const sSide = String(pos.side || "SELL").toUpperCase();
