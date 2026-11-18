@@ -103,9 +103,45 @@ function showStraddleToast(message, type = 'info', duration = 2500) {
 }
 window.showStraddleToast = showStraddleToast;
 
+function parseTradingSymbol(raw) {
+    if (!raw || typeof raw !== "string") return raw || "";
+    const s = raw.trim().toUpperCase();
+    if (s.includes(" ")) return s;
+    
+    // Monthly options: e.g. BANKNIFTY26NOV64300CE -> BANKNIFTY 64300 CE 26 NOV 2026
+    const mMonth = s.match(/^([A-Z]+)(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d+(?:\.\d+)?)(CE|PE)$/);
+    if (mMonth) {
+        const [_, und, yr, mon, strike, opt] = mMonth;
+        return `${und} ${strike} ${opt} ${mon} 20${yr}`;
+    }
+    // Weekly options: e.g. BANKNIFTY24N2045000CE -> BANKNIFTY 45000 CE 20 NOV 2024
+    const mWeek = s.match(/^([A-Z]+)(\d{2})([1-9OND])(\d{2})(\d+(?:\.\d+)?)(CE|PE)$/);
+    if (mWeek) {
+        const [_, und, yr, mcode, day, strike, opt] = mWeek;
+        const monthMap = {'1':'JAN','2':'FEB','3':'MAR','4':'APR','5':'MAY','6':'JUN','7':'JUL','8':'AUG','9':'SEP','O':'OCT','N':'NOV','D':'DEC'};
+        const mon = monthMap[mcode] || mcode;
+        return `${und} ${strike} ${opt} ${day} ${mon} 20${yr}`;
+    }
+    // Generic options fallback
+    const mGen = s.match(/^([A-Z]+?)(\d{2}[A-Z0-9]+?)(\d{4,6})(CE|PE)$/);
+    if (mGen) {
+        const [_, und, exp, strike, opt] = mGen;
+        return `${und} ${strike} ${opt} ${exp}`;
+    }
+    // Futures: e.g. NIFTY26NOVFUT -> NIFTY FUT 26 NOV 2026
+    const mFut = s.match(/^([A-Z]+)(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(FUT)$/);
+    if (mFut) {
+        const [_, und, yr, mon, fut] = mFut;
+        return `${und} FUT ${mon} 20${yr}`;
+    }
+    return s;
+}
+window.parseTradingSymbol = parseTradingSymbol;
+
 function formatSymbolColorCoded(symStr) {
     if (!symStr || typeof symStr !== "string") return symStr || "";
-    return symStr
+    const parsed = parseTradingSymbol(symStr);
+    return parsed
         .replace(/\b(CE|CALL)\b/g, '<span style="color:#10b981; font-weight:900; background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.45); border-radius:3px; padding:1px 5px; display:inline-block; font-size:0.92em; letter-spacing:0.5px;">$1</span>')
         .replace(/\b(PE|PUT)\b/g, '<span style="color:#f87171; font-weight:900; background:rgba(239,68,68,0.18); border:1px solid rgba(239,68,68,0.45); border-radius:3px; padding:1px 5px; display:inline-block; font-size:0.92em; letter-spacing:0.5px;">$1</span>');
 }
@@ -4775,6 +4811,18 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
     const elClosed = document.getElementById("algoCountClosed");
     if (elClosed) elClosed.textContent = closedCount;
 
+    const masterHeaderCb = document.getElementById("straddleSelectAllLegs");
+    if (masterHeaderCb) {
+        if (openCount === 0) {
+            masterHeaderCb.checked = false;
+            masterHeaderCb.disabled = true;
+            masterHeaderCb.title = "No open positions to select";
+        } else {
+            masterHeaderCb.disabled = false;
+            masterHeaderCb.title = "Select / deselect all open positions";
+        }
+    }
+
     const btnToggle = document.getElementById("btnToggleAlgoClosedTrades");
     const textToggle = document.getElementById("textToggleAlgoClosed");
     const iconToggle = document.getElementById("iconToggleAlgoClosed");
@@ -5202,7 +5250,14 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const isCompleteOrClosed = (rawStatus === "COMPLETE" || rawStatus === "CLOSED" || rawStatus === "EXITED" || (pos.avg_exit_price && Number(pos.avg_exit_price) > 0 && pos.exit_reason && pos.exit_reason !== "-"));
             const isOpen = !isError && !isCompleteOrClosed && (rawStatus === "OPEN" || rawStatus === "LIVE OPEN");
             const isClosed = !isError && (isCompleteOrClosed || (!isOpen && !isError));
-            const isReEntry = !!(pos.is_re_entry || pos.re_entry || (pos.re_execute_count && pos.re_execute_count > 0));
+            const isAdopted = !!(
+                pos.is_adopted ||
+                (pos.id && String(pos.id).startsWith("leg_adopted_")) ||
+                (pos.leg_id && String(pos.leg_id).startsWith("leg_adopted_")) ||
+                (pos.id && String(pos.id).startsWith("leg_reexec_adopted_")) ||
+                (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("adopt"))
+            );
+            const isReEntry = !isAdopted && !!(pos.is_re_entry || pos.re_entry || (pos.re_execute_count && pos.re_execute_count > 0));
             const stratId = pos.strategy_id || window._straddleState?.activeStrategy?.strategy_id || '';
             const isFilledOrPartial = isOpen && (Number(pos.entry_qty || 0) > 0 || (pos.avg_ent_price && Number(pos.avg_ent_price) > 0));
             const isInteractiveRow = isFilledOrPartial;
@@ -5214,25 +5269,29 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
             // Status Badge
             let statusHtml = "";
+            const adoptedBadgeHtml = '<span class="status-badge-adopted" style="font-size:9.5px; font-weight:800; background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.45); border-radius:3px; padding:1px 5px; letter-spacing:0.3px;">ADOPTED</span>';
+            const reEntryBadgeHtml = '<span class="status-badge-reentry">RE-ENTRY</span>';
+            const secondaryStatusBadge = isAdopted ? adoptedBadgeHtml : (isReEntry ? reEntryBadgeHtml : '');
+
             if (isError) {
                 statusHtml = `
                         <div class="straddle-status-container">
                             <span class="straddle-status-pill status-badge-error">ERROR</span>
-                            ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
+                            ${secondaryStatusBadge}
                         </div>
                     `;
             } else if (isOpen) {
                 statusHtml = `
                         <div class="straddle-status-container">
                             <span class="straddle-status-pill status-badge-open">OPEN</span>
-                            ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
+                            ${secondaryStatusBadge}
                         </div>
                     `;
             } else {
                 statusHtml = `
                         <div class="straddle-status-container">
                             <span class="straddle-status-pill status-badge-closed">CLOSED</span>
-                            ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
+                            ${secondaryStatusBadge}
                             ${pos.re_execution_pending ? `<span style="font-size:9.5px; font-weight:800; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); border-radius:3px; padding:1px 5px; margin-top:2px; display:inline-block;" title="Next Re-entry scheduled at ${pos.re_execution_target_time || ''}">⏳ Re-Entering @ ${pos.re_execution_target_time || 'Next Candle'}</span>` : ''}
                         </div>
                     `;
@@ -5305,8 +5364,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             if (pos.is_associated_hedge) {
                 const pType = pos.hedge_parent_type || "MAIN";
                 hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:4px; padding:1px 5px;">🛡️ HEDGE (${formatSymbolColorCoded(pType)})</span></div>`;
-            } else if (pos.has_associated_hedge || pos.associated_hedge_id || side === "SELL") {
+            } else if (pos.has_associated_hedge || pos.associated_hedge_id || (side === "SELL" && !isAdopted)) {
                 hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:900; color:#ef4444; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.45); border-radius:4px; padding:1px 5px;" title="Main Trading Leg">🎯 MAIN</span></div>`;
+            } else if (isAdopted) {
+                hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9px; font-weight:800; color:#c084fc; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); border-radius:4px; padding:1px 5px;" title="Adopted broker position">💼 ADOPTED</span></div>`;
             }
 
             if (canAdjustStrikeAndLots) {
@@ -5442,16 +5503,19 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         ${tgtStatusHtml}
                     `;
             } else if (isError) {
-                const tgtValLabel = pos.target_value ? `${pos.target_value}${pos.target_type && pos.target_type.includes("Pts") ? " Pts" : "%"}` : "-";
+                const rawTgtV = pos.target_value ? Math.abs(Number(pos.target_value)) : null;
+                const tgtValLabel = rawTgtV ? `${rawTgtV}${pos.target_type && pos.target_type.includes("Pts") ? " Pts" : "%"}` : "-";
                 targetHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="tgt-label-badge" style="opacity:0.8;">TGT: ${tgtValLabel}</span></div>`;
             } else if (pos.target_price && pos.target_price > 0) {
-                const tgtLabel = pos.target_type_label || (pos.target_value ? `TGT: ${pos.target_value}%` : 'TGT: 45%');
+                const rawTgtV = pos.target_value !== undefined ? Math.abs(Number(pos.target_value)) : 45;
+                const tgtLabel = pos.target_type_label || `TGT: ${rawTgtV}%`;
                 targetHtml = `
                         <div style="white-space:nowrap;"><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">${Number(pos.target_price).toFixed(2)}</span></div>
                         ${tgtStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${tgtStatusHtml}</div>` : ''}
                     `;
             } else if (pos.target_value && pos.target_value > 0) {
-                const tgtLabel = `TGT: ${pos.target_value}%`;
+                const rawTgtV = Math.abs(Number(pos.target_value));
+                const tgtLabel = `TGT: ${rawTgtV}%`;
                 targetHtml = `
                         <div style="white-space:nowrap;"><span class="tgt-label-badge">${tgtLabel}</span> <span class="straddle-val-badge">-</span></div>
                         ${tgtStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${tgtStatusHtml}</div>` : ''}
@@ -5513,23 +5577,34 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         ${slStatusHtml}
                     `;
             } else if (isError) {
-                const slValLabel = pos.sl_value ? `-${pos.sl_value}${pos.sl_type && pos.sl_type.includes("Pts") ? " Pts" : "%"}` : "-";
+                const rawSlV = pos.sl_value ? Math.abs(Number(pos.sl_value)) : null;
+                const slValLabel = rawSlV ? `-${rawSlV}${pos.sl_type && pos.sl_type.includes("Pts") ? " Pts" : "%"}` : "-";
                 slHtml = `<div style="color:#94a3b8; font-size:11px; font-weight:600;"><span class="sl-label-badge" style="opacity:0.8;">SL: ${slValLabel}</span></div>`;
             } else if (pos.sl_price && pos.sl_price > 0) {
-                const slLabel = pos.sl_type_label || (pos.sl_value ? `SL: -${pos.sl_value}%` : 'SL: -65%');
-                const origSlLabel = pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${pos.sl_value}%` : 'ORIGINAL SL: -65%');
+                const rawSlV = pos.sl_value !== undefined ? Math.abs(Number(pos.sl_value)) : 65;
+                const slLabel = (pos.sl_type_label || `SL: -${rawSlV}%`).replace(/--+/, '-');
+                let origSlLabel = (pos.original_sl_label || (pos.sl_value ? `ORIGINAL SL: -${rawSlV}%` : 'ORIGINAL SL: -65%')).replace(/--+/, '-');
+                if (origSlLabel && !origSlLabel.toUpperCase().startsWith("ORIGINAL")) {
+                    origSlLabel = `ORIGINAL SL: ${origSlLabel.replace(/^SL:\s*/i, '')}`;
+                }
+                origSlLabel = origSlLabel.replace(/--+/, '-');
+                const cleanSl = slLabel.replace(/^SL:\s*/i, '').trim();
+                const cleanOrig = origSlLabel.replace(/^ORIGINAL SL:\s*/i, '').trim();
+                const isTrailed = !!pos.sl_trailed || (pos.original_sl_price && Math.abs(Number(pos.sl_price) - Number(pos.original_sl_price)) > 0.05);
+                const showOrig = isTrailed || (cleanSl && cleanOrig && cleanSl !== cleanOrig);
+
                 slHtml = `
                         <div style="white-space:nowrap;"><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">${Number(pos.sl_price).toFixed(2)}</span></div>
                         ${slStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${slStatusHtml}</div>` : ''}
-                        ${origSlLabel ? `<div class="orig-sl-sub" style="font-size:9px; margin-top:1px;">${origSlLabel}</div>` : ''}
+                        ${showOrig ? `<div class="orig-sl-sub" style="font-size:9px; margin-top:1px;">${origSlLabel}</div>` : ''}
                     `;
             } else if (pos.sl_value && pos.sl_value > 0) {
-                const slLabel = `SL: -${pos.sl_value}%`;
-                const origSlLabel = `ORIGINAL SL: -${pos.sl_value}%`;
+                const rawSlV = Math.abs(Number(pos.sl_value));
+                const slLabel = `SL: -${rawSlV}%`;
+                const origSlLabel = `ORIGINAL SL: -${rawSlV}%`;
                 slHtml = `
                         <div style="white-space:nowrap;"><span class="sl-label-badge">${slLabel}</span> <span class="straddle-val-badge">-</span></div>
                         ${slStatusHtml ? `<div style="font-size:9.5px; margin-top:2px; font-family:var(--font-mono); white-space:nowrap;">${slStatusHtml}</div>` : ''}
-                        ${origSlLabel ? `<div class="orig-sl-sub" style="font-size:9px; margin-top:1px;">${origSlLabel}</div>` : ''}
                     `;
             }
 
@@ -5540,16 +5615,23 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             // Exit Reason
             let exitReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
             if (pos.exit_reason && pos.exit_reason !== "-") {
-                const rStr = String(pos.exit_reason);
+                const rStr = String(pos.exit_reason).trim();
                 const rLower = rStr.toLowerCase();
                 if (rLower.includes("target")) {
                     exitReasonHtml = `<span class="exit-reason-tgt" title="${rStr}">🎯 ${rStr}</span>`;
                 } else if (rLower.includes("stoploss") || rLower.includes("sl")) {
                     exitReasonHtml = `<span class="exit-reason-sl" title="${rStr}">🛑 ${rStr}</span>`;
-                } else if (rLower.includes("hedge shift") || rLower.includes("shift hedge")) {
+                } else if (rLower.includes("square off") || rLower.includes("manual") || rLower.includes("exit all")) {
+                    const exitLabel = (rLower === "square off" || rLower === "square off all") ? "Square Off (Broker Exit)" : rStr;
+                    exitReasonHtml = `<span class="straddle-reason-pill exit-reason-squareoff" style="display:inline-block; font-size:9.5px; font-weight:800; color:#fbbf24; background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); border-radius:3px; padding:2px 6px; letter-spacing:0.3px;" title="${rStr}">🚨 ${exitLabel}</span>`;
+                } else if (rLower.includes("hedge shift") || rLower.includes("shift hedge") || rLower.includes("realigned to")) {
                     exitReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${rStr}">🔄 ${rStr}</span>`;
                 } else if (rLower.includes("hedge")) {
                     exitReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${rStr}">🛡️ ${rStr}</span>`;
+                } else if (rLower.includes("time") || rLower.includes("eod") || rLower.includes("market close")) {
+                    exitReasonHtml = `<span class="straddle-reason-pill" style="display:inline-block; font-size:9.5px; font-weight:800; color:#c084fc; background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.4); border-radius:3px; padding:2px 6px;" title="${rStr}">⏰ ${rStr}</span>`;
+                } else if (rLower.includes("mtm")) {
+                    exitReasonHtml = `<span class="straddle-reason-pill" style="display:inline-block; font-size:9.5px; font-weight:800; color:#f87171; background:rgba(239,68,68,0.18); border:1px solid rgba(239,68,68,0.4); border-radius:3px; padding:2px 6px;" title="${rStr}">📊 ${rStr}</span>`;
                 } else {
                     exitReasonHtml = `<span class="straddle-reason-pill entry-initial" title="${rStr}">${rStr}</span>`;
                 }
@@ -5646,7 +5728,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             }
 
             // Action buttons (Save on live change + Exit + Detach + Combined Placement)
-            let actionHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
+            let actionHtml = `<span class="badge-closed-tag" style="font-size:9.5px; font-weight:800; color:#64748b; background:rgba(100,116,139,0.12); border:1px solid rgba(100,116,139,0.25); border-radius:3px; padding:1.5px 6px; letter-spacing:0.3px;">EXITED</span>`;
             if (isInteractiveRow) {
                 actionHtml = `
                         <div style="display:flex; flex-direction:column; gap:4px; align-items:center;">
@@ -5671,6 +5753,18 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                                 </select>
                             </div>
                         </div>
+                    `;
+            } else if (isError) {
+                actionHtml = `
+                        <button type="button" class="straddle-btn btn-primary" style="padding:2px 7px; font-size:10px; font-weight:700;" onclick="retrySingleStraddleLeg('${stratId}', '${pos.id || ''}', ${idx})" title="Retry placing this leg">
+                            🔄 Retry
+                        </button>
+                    `;
+            } else if (isOpen) {
+                actionHtml = `
+                        <button type="button" class="straddle-btn btn-danger" style="padding:2px 7px; font-size:10.5px; font-weight:700;" onclick="squareOffSingleLegIndex(${idx})" title="Square off this leg on broker">
+                            Exit
+                        </button>
                     `;
             }
 
@@ -5751,7 +5845,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             html += `
                     <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-entry-reason="${pos.entry_reason || ''}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}" data-ref-price="${pos.reference_price || ''}" data-sl-price="${pos.sl_price || ''}" data-tgt-price="${pos.target_price || ''}">
                         <td class="pos-col-select" style="text-align:center;">
-                            <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
+                            <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} ${isClosed ? 'disabled style="opacity:0.25; cursor:not-allowed;" title="Position is already closed"' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
                         </td>
                         <td class="pos-col-status">${statusHtml}</td>
                         <td class="pos-col-side"><span class="straddle-side-badge ${sideClass}">${side}</span></td>
@@ -6105,9 +6199,17 @@ function onStraddlePositionCheckboxChange(inputEl = null, idx = null, legId = nu
     }
 
     const masterCb = document.getElementById("straddleSelectAllLegs");
-    const allLegCbs = document.querySelectorAll(".straddle-leg-checkbox");
+    const actionableCbs = Array.from(document.querySelectorAll(".straddle-leg-checkbox:not(:disabled)"));
     if (masterCb) {
-        masterCb.checked = (allLegCbs.length > 0 && Array.from(allLegCbs).every(cb => cb.checked));
+        if (actionableCbs.length === 0) {
+            masterCb.checked = false;
+            masterCb.disabled = true;
+            masterCb.title = "No open positions to select";
+        } else {
+            masterCb.disabled = false;
+            masterCb.checked = actionableCbs.every(cb => cb.checked);
+            masterCb.title = "Select / deselect all open positions";
+        }
     }
 
     const allChecked = document.querySelectorAll(".straddle-leg-checkbox:checked");
@@ -6164,6 +6266,10 @@ function toggleSelectAllStraddleLegs(masterCb) {
         const cbs = tbody ? tbody.querySelectorAll("input[type='checkbox'].straddle-leg-checkbox, input[type='checkbox']") : document.querySelectorAll(".straddle-leg-checkbox");
 
         cbs.forEach(cb => {
+            if (cb.disabled) {
+                cb.checked = false;
+                return;
+            }
             cb.checked = isChecked;
             const idx = parseInt(cb.getAttribute("data-index"), 10);
             const legId = cb.getAttribute("data-leg-id");
@@ -6179,8 +6285,12 @@ function toggleSelectAllStraddleLegs(masterCb) {
         const activeStrat = window._straddleState?.activeStrategy;
         if (isChecked && activeStrat && activeStrat.positions) {
             activeStrat.positions.forEach((p, i) => {
-                window._straddleSelectedLegIndices.add(i);
-                if (p.id) window._straddleSelectedLegIds.add(p.id);
+                const s = String(p.status || "OPEN").toUpperCase();
+                const isClosed = (s === "COMPLETE" || s === "CLOSED" || s === "EXITED");
+                if (!isClosed) {
+                    window._straddleSelectedLegIndices.add(i);
+                    if (p.id) window._straddleSelectedLegIds.add(p.id);
+                }
             });
         } else if (!isChecked) {
             window._straddleSelectedLegIndices.clear();

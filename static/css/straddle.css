@@ -11086,6 +11086,43 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     line-height: 1.35;
 }
 
+.exit-reason-squareoff {
+    color: #fbbf24 !important;
+    background: rgba(245, 158, 11, 0.16) !important;
+    border: 1px solid rgba(245, 158, 11, 0.45) !important;
+    border-radius: 4px;
+    padding: 3px 7px;
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.status-badge-adopted {
+    background: rgba(168, 85, 247, 0.22);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.45);
+    font-size: 9px;
+    font-weight: 800;
+    padding: 1.5px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    display: inline-block;
+}
+
+.badge-closed-tag {
+    font-size: 9.5px;
+    font-weight: 800;
+    color: #64748b;
+    background: rgba(100, 116, 139, 0.12);
+    border: 1px solid rgba(100, 116, 139, 0.25);
+    border-radius: 3px;
+    padding: 1.5px 6px;
+    letter-spacing: 0.3px;
+    display: inline-block;
+}
+
 /* ==========================================================
    ENHANCED MOBILE LAYOUT & VIEWPORT CONTAINMENT (MOBILE V4)
    ========================================================== */

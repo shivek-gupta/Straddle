@@ -186,6 +186,43 @@ def _is_same_instrument(sym1: str, key1: str = "", sym2: str = "", key2: str = "
     return False
 
 
+def format_trading_symbol_display(sym: str) -> str:
+    """Formats raw broker trading symbols (e.g. BANKNIFTY26NOV64300CE) into clean spaced display format."""
+    if not sym or not isinstance(sym, str):
+        return str(sym or "")
+    s = sym.strip().upper()
+    if " " in s:
+        return s
+    
+    # Monthly options: e.g. BANKNIFTY26NOV64300CE -> BANKNIFTY 64300 CE 26 NOV 2026
+    m_month = re.match(r'^([A-Z]+)(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d+(?:\.\d+)?)(CE|PE)$', s)
+    if m_month:
+        und, yr, mon, strike, opt = m_month.groups()
+        return f"{und} {strike} {opt} {mon} 20{yr}"
+        
+    # Weekly options: e.g. BANKNIFTY24N2045000CE -> BANKNIFTY 45000 CE 20 NOV 2024
+    m_week = re.match(r'^([A-Z]+)(\d{2})([1-9OND])(\d{2})(\d+(?:\.\d+)?)(CE|PE)$', s)
+    if m_week:
+        und, yr, mcode, day, strike, opt = m_week.groups()
+        month_map = {'1':'JAN','2':'FEB','3':'MAR','4':'APR','5':'MAY','6':'JUN','7':'JUL','8':'AUG','9':'SEP','O':'OCT','N':'NOV','D':'DEC'}
+        mon = month_map.get(mcode, mcode)
+        return f"{und} {strike} {opt} {day} {mon} 20{yr}"
+        
+    # Generic options fallback
+    m_gen = re.match(r'^([A-Z]+?)(\d{2}[A-Z0-9]+?)(\d{4,6})(CE|PE)$', s)
+    if m_gen:
+        und, exp, strike, opt = m_gen.groups()
+        return f"{und} {strike} {opt} {exp}"
+        
+    # Futures: e.g. NIFTY26NOVFUT -> NIFTY FUT 26 NOV 2026
+    m_fut = re.match(r'^([A-Z]+)(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(FUT)$', s)
+    if m_fut:
+        und, yr, mon, fut = m_fut.groups()
+        return f"{und} FUT {mon} 20{yr}"
+
+    return s
+
+
 # ==========================================================
 # Paths & Lock Configuration
 # ==========================================================
@@ -12625,7 +12662,7 @@ class StraddleManager:
                     status_label = f"In '{managing_strat.get('name')}'"
 
                 adoptable.append({
-                    "symbol": sym,
+                    "symbol": format_trading_symbol_display(sym),
                     "trading_symbol": tsym,
                     "token": tok,
                     "instrument_key": tok,
@@ -12719,7 +12756,7 @@ class StraddleManager:
             adopted_leg = {
                 "id": adopted_id,
                 "leg_id": adopted_id,
-                "symbol": sym,
+                "symbol": format_trading_symbol_display(sym),
                 "trading_symbol": pos.get("trading_symbol") or sym,
                 "token": pos.get("token") or pos.get("instrument_key") or "",
                 "instrument_key": pos.get("token") or pos.get("instrument_key") or "",
@@ -14692,11 +14729,12 @@ class StraddleManager:
                         re_num = prior_reexecs + 1
 
                         auto_pos = {
-                            "id": f"leg_reexec_adopted_{int(time.time()*1000)}",
+                            "id": f"leg_adopted_{int(time.time()*1000)}",
                             "status": "OPEN",
                             "side": side,
                             "product": bp.get("product", "NRML"),
-                            "symbol": bp_sym,
+                            "symbol": format_trading_symbol_display(bp_sym),
+                            "trading_symbol": bp_sym,
                             "instrument_key": bp_ikey,
                             "strike_price": stk_price,
                             "option_type": opt_type,
@@ -14723,9 +14761,9 @@ class StraddleManager:
                             "pnl_pct": pnl_pct,
                             "order_id": real_oid,
                             "child_order_ids": [real_oid] if real_oid else [],
-                            "re_execute_count": re_num,
-                            "re_execute_leg_type": opt_type,
-                            "re_execute_trigger": "STOPLOSS",
+                            "re_execute_count": 0,
+                            "re_execute_leg_type": "",
+                            "re_execute_trigger": "",
                             "is_re_entry": False,
                             "is_adopted": True,
                             "entry_reason": f"📥 Adopted from Kotak Neo ({opt_type}) [Broker Position]",
