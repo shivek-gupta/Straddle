@@ -8108,6 +8108,8 @@ class StraddleManager:
             "child_order_ids": order_res.get("child_order_ids") or ([order_id] if order_id else []),
             "exit_order_id": None,
             "re_execute_count": int(leg_cfg.get("re_execute_count") or 0),
+            "target_re_count": int(leg_cfg.get("target_re_count") or 0),
+            "sl_re_count": int(leg_cfg.get("sl_re_count") or 0),
             "target_re_execute_type": leg_cfg.get("target_re_execute_type", "RE EXECUTE"),
             "target_re_execute_count": int(leg_cfg.get("target_re_execute_count") if leg_cfg.get("target_re_execute_count") is not None else 5),
             "sl_re_execute_type": leg_cfg.get("sl_re_execute_type", "RE EXECUTE"),
@@ -10140,7 +10142,6 @@ class StraddleManager:
                 if not leg_id or cand.get("id") == leg_id or cand.get("status") == "OPEN":
                     pos = cand
                     pos_idx = int(leg_index)
-
             if not pos and leg_id:
                 # Prioritize OPEN leg
                 for idx, p in enumerate(positions):
@@ -11332,36 +11333,41 @@ class StraddleManager:
                 "tsl_trail_pts": pos.get("tsl_trail_pts", 0.0),
             }
 
+        opt_type = (pos.get("option_type") or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")).upper()
+        strat_counts = self.get_strategy_reexecution_counts(authoritative_strat)
+
         if trigger.upper() == "STOPLOSS":
             raw_re_type = leg_cfg.get("sl_re_execute_type") or pos.get("sl_re_execute_type") or "RE EXECUTE"
             re_type = str(raw_re_type)
 
             c_val = leg_cfg.get("sl_re_execute_count")
             if c_val is None or c_val == "":
-                c_val = pos.get("sl_re_execute_count", 2)
+                c_val = pos.get("sl_re_execute_count", 1)
             try:
                 re_max = int(c_val)
             except Exception:
-                re_max = 2
+                re_max = 1
+            key_name = f"{opt_type.lower()}_sl"
+            cur_count = max(int(strat_counts.get(key_name, 0)), int(pos.get("sl_re_count", 0)))
         else:
             raw_re_type = leg_cfg.get("target_re_execute_type") or pos.get("target_re_execute_type") or "RE EXECUTE"
             re_type = str(raw_re_type)
 
             c_val = leg_cfg.get("target_re_execute_count")
             if c_val is None or c_val == "":
-                c_val = pos.get("target_re_execute_count", 5)
+                c_val = pos.get("target_re_execute_count", 2)
             try:
                 re_max = int(c_val)
             except Exception:
-                re_max = 5
-
-        cur_count = int(pos.get("re_execute_count", 0))
+                re_max = 2
+            key_name = f"{opt_type.lower()}_target"
+            cur_count = max(int(strat_counts.get(key_name, 0)), int(pos.get("target_re_count", 0)))
 
         re_type_u = str(re_type or "").upper()
         is_re_enabled = any(k in re_type_u for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY"))
 
         self._log_event(
-            f"[{strat.get('name')}] Re-Execution evaluation for {pos.get('symbol')} ({trigger} hit): re_type='{re_type_u}', count={cur_count}/{re_max}, enabled={is_re_enabled}"
+            f"[{strat.get('name')}] Re-Execution evaluation for {pos.get('symbol')} ({trigger} hit): re_type='{re_type_u}', {opt_type} {trigger} count={cur_count}/{re_max}, enabled={is_re_enabled}"
         )
 
         # Check 'No Re-Entry After' cutoff condition (AlgoTest Parity)
@@ -11403,8 +11409,21 @@ class StraddleManager:
             self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"End-time cutoff reached ({chk.get('et_str')})")
             return
 
-        can_proceed = (chk.get("can_enter", False) or (strat_active and not chk.get("is_after_end", False) and chk.get("is_day_scheduled", True))) and self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED")
-        if not can_proceed:
+        # Check if strategy or engine was explicitly hard-terminated by user
+        is_hard_terminated = (
+            self._state.get("status") == "TERMINATED"
+            or strat.get("status") in ("TERMINATED", "SQUARED_OFF")
+            or strat.get("_terminated_by_user", False)
+        )
+        if is_hard_terminated:
+            self._log_event(f"[{strat.get('name')}] Re-entry cancelled: Strategy is TERMINATED / SQUARED OFF.", level="INFO")
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            self._auto_square_off_associated_hedge(strat, pos, broker, reason="Strategy Terminated")
+            return
+
+        # Day schedule & end-time check
+        if not chk.get("is_day_scheduled", True) or chk.get("is_after_end", False):
             self._log_event(f"[{strat.get('name')}] Re-entry not triggered: {chk['reason']}", level="INFO")
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
@@ -11437,13 +11456,17 @@ class StraddleManager:
                         return
 
                 chk_w = self.get_strategy_schedule_status(strat)
-                strat_active_w = (strat.get("status") == "TRADE_ACTIVE") or bool(strat.get("enabled", False))
-                can_enter_w = (chk_w.get("can_enter", False) or (strat_active_w and not chk_w.get("is_after_end", False) and chk_w.get("is_day_scheduled", True)))
-                if not can_enter_w or not self._state.get("algo_running") or self._state.get("status") in ("TERMINATED", "STOPPED"):
-                    self._log_event(f"[{strat.get('name')}] Re-entry worker aborted: {chk_w['reason']}", level="INFO")
+                is_hard_terminated_w = (
+                    self._stop_event.is_set()
+                    or self._state.get("status") == "TERMINATED"
+                    or strat.get("status") in ("TERMINATED", "SQUARED_OFF")
+                    or strat.get("_terminated_by_user", False)
+                )
+                if is_hard_terminated_w or chk_w.get("is_after_end", False):
+                    self._log_event(f"[{strat.get('name')}] Re-entry worker aborted: Strategy terminated or after end time.", level="INFO")
                     mode = self._state.get("execution_mode", "LIVE_BROKER")
                     broker = get_broker_adapter(mode)
-                    self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Re-entry aborted ({chk_w['reason']})")
+                    self._auto_square_off_associated_hedge(strat, pos, broker, reason="Strategy Terminated / End Time reached")
                     return
 
                 mode = self._state.get("execution_mode", "LIVE_BROKER")
@@ -11916,13 +11939,19 @@ class StraddleManager:
                         entry_reason=re_reason_str
                     )
                     if new_pos:
-                        new_pos["re_execute_count"] = new_count
                         new_pos["re_execute_leg_type"] = clean_opt
                         new_pos["re_execute_trigger"] = clean_trig
                         new_pos["is_re_entry"] = True
+                        if clean_trig == "STOPLOSS":
+                            new_pos["sl_re_count"] = new_count
+                            new_pos["target_re_count"] = int(pos.get("target_re_count", 0))
+                        else:
+                            new_pos["target_re_count"] = new_count
+                            new_pos["sl_re_count"] = int(pos.get("sl_re_count", 0))
+                        new_pos["re_execute_count"] = int(new_pos["sl_re_count"]) + int(new_pos["target_re_count"])
                     if new_pos and new_pos.get("status") == "OPEN":
                         if pos.get("exit_reason") and "➔" not in str(pos.get("exit_reason")):
-                            pos["exit_reason"] = f"{pos['exit_reason']} ➔ Triggered {clean_opt} Re-Execute #{new_count}"
+                            pos["exit_reason"] = f"{pos['exit_reason']} ➔ Triggered {clean_opt} {clean_trig.title()} Re-Execute #{new_count}"
                 finally:
                     if unblocked_items:
                         def _restore_unblocked_orders():
@@ -11958,13 +11987,21 @@ class StraddleManager:
                         threading.Thread(target=_restore_unblocked_orders, daemon=True).start()
 
                 if new_pos:
-                    new_pos["re_execute_count"] = new_count
+                    if clean_trig == "STOPLOSS":
+                        new_pos["sl_re_count"] = new_count
+                        new_pos["target_re_count"] = int(pos.get("target_re_count", 0))
+                    else:
+                        new_pos["target_re_count"] = new_count
+                        new_pos["sl_re_count"] = int(pos.get("sl_re_count", 0))
+                    new_pos["re_execute_count"] = int(new_pos["sl_re_count"]) + int(new_pos["target_re_count"])
                     new_pos["is_re_entry"] = True
+                    new_pos["re_execute_leg_type"] = clean_opt
+                    new_pos["re_execute_trigger"] = clean_trig
                     # Preserve re-execute configurations on the new position
-                    new_pos["sl_re_execute_type"] = leg_cfg.get("sl_re_execute_type") or pos.get("sl_re_execute_type", "NONE")
-                    new_pos["sl_re_execute_count"] = int(leg_cfg.get("sl_re_execute_count") if leg_cfg.get("sl_re_execute_count") is not None else pos.get("sl_re_execute_count", 0))
-                    new_pos["target_re_execute_type"] = leg_cfg.get("target_re_execute_type") or pos.get("target_re_execute_type", "NONE")
-                    new_pos["target_re_execute_count"] = int(leg_cfg.get("target_re_execute_count") if leg_cfg.get("target_re_execute_count") is not None else pos.get("target_re_execute_count", 0))
+                    new_pos["sl_re_execute_type"] = leg_cfg.get("sl_re_execute_type") or pos.get("sl_re_execute_type", "RE EXECUTE")
+                    new_pos["sl_re_execute_count"] = int(leg_cfg.get("sl_re_execute_count") if leg_cfg.get("sl_re_execute_count") is not None else pos.get("sl_re_execute_count", 1))
+                    new_pos["target_re_execute_type"] = leg_cfg.get("target_re_execute_type") or pos.get("target_re_execute_type", "RE EXECUTE")
+                    new_pos["target_re_execute_count"] = int(leg_cfg.get("target_re_execute_count") if leg_cfg.get("target_re_execute_count") is not None else pos.get("target_re_execute_count", 2))
                     if active_hedge:
                         new_pos["has_associated_hedge"] = True
                         new_pos["associated_hedge_id"] = active_hedge.get("id")
@@ -11978,7 +12015,7 @@ class StraddleManager:
                             # Prevent duplicate entries for the same order/symbol execution
                             is_dup = any(
                                 (new_pos.get("order_id") and p.get("order_id") == new_pos.get("order_id"))
-                                or (p.get("symbol") == new_pos.get("symbol") and p.get("status") == "OPEN" and p.get("re_execute_count") == new_count)
+                                or (p.get("symbol") == new_pos.get("symbol") and p.get("status") == "OPEN" and p.get("re_execute_trigger") == clean_trig and (p.get("sl_re_count" if clean_trig == "STOPLOSS" else "target_re_count") == new_count))
                                 for p in strat_pos_list
                             )
                             if not is_dup:
@@ -11990,15 +12027,23 @@ class StraddleManager:
                             for p_in_s in strat_pos_list:
                                 if p_in_s.get("id") == pos.get("id"):
                                     if p_in_s.get("exit_reason") and "➔" not in str(p_in_s.get("exit_reason")):
-                                        p_in_s["exit_reason"] = f"{p_in_s['exit_reason']} ➔ Triggered {clean_opt} Re-Execute #{new_count}"
+                                        p_in_s["exit_reason"] = f"{p_in_s['exit_reason']} ➔ Triggered {clean_opt} {clean_trig.title()} Re-Execute #{new_count}"
                             auth_strat["status"] = "TRADE_ACTIVE"
+                            auth_strat["enabled"] = True
                             auth_strat["entry_error"] = "-"
                             if strat is not auth_strat:
                                 strat["status"] = "TRADE_ACTIVE"
+                                strat["enabled"] = True
                                 strat["entry_error"] = "-"
+                            self._state["algo_running"] = True
+                            if self._state.get("status") not in ("TERMINATED",):
+                                self._state["status"] = "RUNNING"
+                            auth_strat["re_execution_counts"] = self.get_strategy_reexecution_counts(auth_strat)
+                            if strat is not auth_strat:
+                                strat["re_execution_counts"] = auth_strat["re_execution_counts"]
                             self._save_strategies()
                             self._save_state(force=True)
-                        self._log_event(f"Re-Execute #{new_count} filled for {new_pos['symbol']} @ ₹{new_pos.get('avg_ent_price', 0):.2f}", level="SUCCESS")
+                        self._log_event(f"Re-Execute #{new_count} ({clean_trig}) filled for {new_pos['symbol']} @ ₹{new_pos.get('avg_ent_price', 0):.2f}", level="SUCCESS")
                     else:
                         with _ENGINE_LOCK:
                             strat_pos_list = auth_strat.setdefault("positions", [])
@@ -12030,11 +12075,11 @@ class StraddleManager:
 
             threading.Thread(target=_runner_wrapper, daemon=True).start()
         else:
-            # Re-entries for this parent leg are EXHAUSTED (or re-entry is disabled)!
-            self._log_event(f"Re-entries exhausted for leg '{pos.get('symbol')}' ({cur_count}/{re_max}). Auto squaring off associated hedge...")
+            # Re-entries for this specific trigger are EXHAUSTED (or re-entry is disabled)!
+            self._log_event(f"{trigger} re-entries exhausted for leg '{pos.get('symbol')}' ({cur_count}/{re_max}). Auto squaring off associated hedge...")
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
-            self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Parent {pos.get('symbol')} re-entries exhausted ({cur_count}/{re_max})")
+            self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Parent {pos.get('symbol')} {trigger} re-entries exhausted ({cur_count}/{re_max})")
 
     def get_strategy_reexecution_counts(self, strat: Dict[str, Any]) -> Dict[str, int]:
         """
@@ -12042,9 +12087,16 @@ class StraddleManager:
         Returns: {'ce_sl': int, 'ce_target': int, 'pe_sl': int, 'pe_target': int}
         """
         counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
-        positions = strat.get("positions", []) if isinstance(strat, dict) else []
-        if not positions or (isinstance(strat, dict) and strat.get("status") == "READY"):
+        if not isinstance(strat, dict):
             return counts
+        positions = list(strat.get("positions", []))
+        for cp in strat.get("closed_positions", []):
+            if cp not in positions:
+                positions.append(cp)
+
+        if not positions or (strat.get("status") == "READY" and not any(p.get("status") == "OPEN" for p in positions)):
+            return counts
+
         for p in positions:
             e_reason = str(p.get("entry_reason", "")).upper()
             sym = str(p.get("symbol", "")).upper()
@@ -12068,18 +12120,25 @@ class StraddleManager:
                     elif trig == "STOPLOSS":
                         counts["pe_sl"] += 1
 
+            # Direct attribute counts
+            if opt == "CE":
+                counts["ce_target"] = max(counts["ce_target"], int(p.get("target_re_count", 0) or 0))
+                counts["ce_sl"] = max(counts["ce_sl"], int(p.get("sl_re_count", 0) or 0))
+            elif opt == "PE":
+                counts["pe_target"] = max(counts["pe_target"], int(p.get("target_re_count", 0) or 0))
+                counts["pe_sl"] = max(counts["pe_sl"], int(p.get("sl_re_count", 0) or 0))
+
         # Secondary cross-verification: also count triggers documented in completed leg exit reasons
         exit_counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
         for p in positions:
             exit_r = str(p.get("exit_reason", "")).upper()
-            sym = str(p.get("symbol", "")).upper()
-            if "TRIGGERED CE RE-EXECUTE" in exit_r or "TRIGGERED CE RE-ENTRY" in exit_r:
-                if "TARGET" in exit_r:
+            if "TRIGGERED CE" in exit_r and ("RE-EXECUTE" in exit_r or "RE-ENTRY" in exit_r):
+                if "TARGET" in exit_r or "TGT" in exit_r:
                     exit_counts["ce_target"] += 1
                 else:
                     exit_counts["ce_sl"] += 1
-            elif "TRIGGERED PE RE-EXECUTE" in exit_r or "TRIGGERED PE RE-ENTRY" in exit_r:
-                if "TARGET" in exit_r:
+            elif "TRIGGERED PE" in exit_r and ("RE-EXECUTE" in exit_r or "RE-ENTRY" in exit_r):
+                if "TARGET" in exit_r or "TGT" in exit_r:
                     exit_counts["pe_target"] += 1
                 else:
                     exit_counts["pe_sl"] += 1
@@ -12264,30 +12323,31 @@ class StraddleManager:
                         for p in strat_positions:
                             p_opt = (p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper()
                             if p_opt == h_opt and str(p.get("side", "SELL")).upper() == "SELL" and not p.get("is_associated_hedge"):
-                                c_cnt = int(p.get("re_execute_count", 0))
+                                c_t_cnt = int(p.get("target_re_count", 0))
+                                c_s_cnt = int(p.get("sl_re_count", 0))
                                 tgt_max = int(p.get("target_re_execute_count", 5))
                                 sl_max = int(p.get("sl_re_execute_count", 2))
                                 tgt_re = str(p.get("target_re_execute_type", "RE EXECUTE")).upper()
                                 sl_re = str(p.get("sl_re_execute_type", "RE EXECUTE")).upper()
-                                has_t = any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_cnt < tgt_max
-                                has_s = any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_cnt < sl_max
+                                has_t = any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_t_cnt < tgt_max
+                                has_s = any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_s_cnt < sl_max
                                 if has_t or has_s:
                                     has_remaining_re_entries = True
                                     break
                         if not has_remaining_re_entries:
+                            strat_counts = self.get_strategy_reexecution_counts(strat)
                             for l_cfg in strat_legs:
                                 l_opt = str(l_cfg.get("option_type", "")).upper()
                                 if l_opt == h_opt and str(l_cfg.get("side", "SELL")).upper() == "SELL":
                                     tgt_re = str(l_cfg.get("target_re_execute_type", "RE EXECUTE")).upper()
                                     sl_re = str(l_cfg.get("sl_re_execute_type", "RE EXECUTE")).upper()
-                                    has_t = any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY"))
-                                    has_s = any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY"))
+                                    tgt_max = int(l_cfg.get("target_re_execute_count", 5))
+                                    sl_max = int(l_cfg.get("sl_re_execute_count", 2))
+                                    has_t = any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and int(strat_counts.get(f"{h_opt.lower()}_target", 0)) < tgt_max
+                                    has_s = any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and int(strat_counts.get(f"{h_opt.lower()}_sl", 0)) < sl_max
                                     if has_t or has_s:
-                                        total_exits = sum(1 for p in strat_positions if (p.get("option_type") or "").upper() == h_opt and str(p.get("side", "")).upper() == "SELL" and p.get("status") in ("COMPLETE", "CLOSED"))
-                                        max_allowed = max(int(l_cfg.get("target_re_execute_count", 5)), int(l_cfg.get("sl_re_execute_count", 2))) + 1
-                                        if total_exits < max_allowed:
-                                            has_remaining_re_entries = True
-                                            break
+                                        has_remaining_re_entries = True
+                                        break
 
                     if not matching_open and not has_pending_re_entry and not has_remaining_re_entries:
                         self._log_event(
@@ -15187,7 +15247,8 @@ class StraddleManager:
 
                                 # Re-entries ONLY apply to trade legs (not associated hedges)!
                                 if not is_pos_hedge:
-                                    self._handle_leg_re_entry(s, p, trigger=trigger)
+                                    exit_oid_to_pass = exit_oid or p.get("exit_order_id") or (p.get("sl_broker_order_id") if trigger == "STOPLOSS" else p.get("target_broker_order_id"))
+                                    self._handle_leg_re_entry(s, p, trigger=trigger, exit_order_id=str(exit_oid_to_pass) if exit_oid_to_pass else None)
 
             if changes_made:
                 self._save_strategies()
