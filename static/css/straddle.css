@@ -9173,6 +9173,36 @@ table .flag-cell {
     font-size: 12px;
     color: #f8fafc;
     outline: none;
+    -moz-appearance: textfield !important;
+}
+
+.basket-input-num::-webkit-outer-spin-button,
+.basket-input-num::-webkit-inner-spin-button {
+    -webkit-appearance: none !important;
+    margin: 0 !important;
+}
+
+/* Payoff Analysis Modal Styles */
+#modalBasketPayoff .payoff-stat-card {
+    background: #090e18;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+#modalBasketPayoff .payoff-stat-card .label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+#modalBasketPayoff .payoff-stat-card .val {
+    font-size: 16px;
+    font-weight: 900;
+    font-family: var(--font-mono);
 }
 
 /* ==========================================================================

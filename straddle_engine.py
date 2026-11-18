@@ -10102,9 +10102,8 @@ class StraddleManager:
 
             self._save_strategies()
             self._save_state(force=True)
-
             self._log_event(
-                f"🎯 [Reference Price Updated] Strategy '{strat.get('name')}', Leg {pos.get('symbol')} "
+                f"[{strat.get('name', 'Algo')}] Ref price modified for {pos.get('symbol')}: "
                 f"updated basis to {msg_detail}. SL: ₹{pos.get('sl_price', 0):.2f}, Target: ₹{pos.get('target_price', 0):.2f}."
             )
 
@@ -13572,6 +13571,14 @@ class StraddleManager:
             f"Basket Execution Finished: {success_count} slice(s) placed, {fail_count} failed.",
             level="SUCCESS" if fail_count == 0 else "WARNING"
         )
+
+        if success_count > 0:
+            try:
+                self._cached_open_positions_response = None
+                self._cached_open_positions_ts = 0.0
+                _PERSISTENT_LEG_POOL.submit(self.sync_broker_data)
+            except Exception as e:
+                logger.warning(f"[Basket] Error triggering background sync_broker_data: {e}")
 
         return {
             "success": fail_count == 0,
