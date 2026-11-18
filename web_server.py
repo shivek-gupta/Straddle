@@ -9,6 +9,7 @@ Features:
 """
 
 import os
+import re
 import sys
 import time
 import json

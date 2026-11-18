@@ -42,15 +42,17 @@ jobs:
             persist_f = '/home/ubuntu/straddle_data_persist/straddle_strategies.json'; \
             disk_strats = json.load(open(disk_f)) if os.path.exists(disk_f) else []; \
             persist_strats = json.load(open(persist_f)) if os.path.exists(persist_f) else []; \
-            merged = {str(s.get('strategy_id')).lower(): s for s in disk_strats if isinstance(s, dict)}; \
+            merged_map = {}; \
             for ps in persist_strats: \
-              if isinstance(ps, dict): \
-                pid = str(ps.get('strategy_id')).lower(); \
-                pname = str(ps.get('name','')).strip().lower(); \
-                existing_key = next((k for k, v in merged.items() if k == pid or str(v.get('name','')).strip().lower() == pname), None); \
-                if existing_key: merged[existing_key].update(ps); \
-                else: merged[pid] = ps; \
-            final_list = list(merged.values()); \
+              if isinstance(ps, dict) and ps.get('strategy_id'): \
+                merged_map[str(ps['strategy_id']).lower()] = ps; \
+            for ds in disk_strats: \
+              if isinstance(ds, dict) and ds.get('strategy_id'): \
+                did = str(ds['strategy_id']).lower(); \
+                dname = str(ds.get('name','')).strip().lower(); \
+                if did not in merged_map and not any(str(v.get('name','')).strip().lower() == dname for v in merged_map.values()): \
+                  merged_map[did] = ds; \
+            final_list = list(merged_map.values()) if merged_map else disk_strats; \
             json.dump(final_list, open(disk_f, 'w'), indent=2); \
             json.dump(final_list, open(persist_f, 'w'), indent=2);" 2>/dev/null || true
 

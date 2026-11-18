@@ -1870,10 +1870,20 @@ class StraddleManager:
                                                 str(cur_s.get("name", "")).strip().lower() == pname):
                                                 if p_strat.get("positions"):
                                                     cur_s["positions"] = p_strat["positions"]
+                                                if p_strat.get("closed_positions"):
+                                                    cur_s["closed_positions"] = p_strat["closed_positions"]
                                                 if p_strat.get("last_trade_date"):
                                                     cur_s["last_trade_date"] = p_strat["last_trade_date"]
                                                 if "enabled" in p_strat:
                                                     cur_s["enabled"] = p_strat["enabled"]
+                                                if "status" in p_strat:
+                                                    cur_s["status"] = p_strat["status"]
+                                                if "mtm" in p_strat:
+                                                    cur_s["mtm"] = p_strat["mtm"]
+                                                if "group_mtm" in p_strat:
+                                                    cur_s["group_mtm"] = p_strat["group_mtm"]
+                                                if "re_execution_counts" in p_strat:
+                                                    cur_s["re_execution_counts"] = p_strat["re_execution_counts"]
                                                 if "schedule_days" in p_strat:
                                                     cur_s["schedule_days"] = p_strat["schedule_days"]
                                                 if "multiplier" in p_strat:
@@ -1937,7 +1947,8 @@ class StraddleManager:
                     s["enabled"] = False
 
             if self._strategies:
-                self._active_strategy_id = self._strategies[0].get("strategy_id")
+                if not self._active_strategy_id or not any(s.get("strategy_id") == self._active_strategy_id for s in self._strategies):
+                    self._active_strategy_id = self._strategies[0].get("strategy_id")
             else:
                 self._active_strategy_id = None
 
@@ -4630,12 +4641,21 @@ class StraddleManager:
             if idx >= 0:
                 # Merge existing runtime properties (e.g. positions, status, mtm)
                 existing = self._strategies[idx]
-                if "positions" not in strat_dict and "positions" in existing:
+                if ("positions" not in strat_dict or not strat_dict["positions"]) and existing.get("positions"):
                     strat_dict["positions"] = existing["positions"]
+                if ("closed_positions" not in strat_dict or not strat_dict["closed_positions"]) and existing.get("closed_positions"):
+                    strat_dict["closed_positions"] = existing["closed_positions"]
                 if "status" not in strat_dict and "status" in existing:
+                    strat_dict["status"] = existing["status"]
+                elif existing.get("status") in ("TRADE_ACTIVE", "ENTRY_PENDING"):
+                    # Preserve active running status if strategy is currently executing
                     strat_dict["status"] = existing["status"]
                 if "mtm" not in strat_dict and "mtm" in existing:
                     strat_dict["mtm"] = existing["mtm"]
+                elif existing.get("mtm", 0.0) != 0.0 and strat_dict.get("mtm", 0.0) == 0.0:
+                    strat_dict["mtm"] = existing["mtm"]
+                if "re_execution_counts" not in strat_dict and "re_execution_counts" in existing:
+                    strat_dict["re_execution_counts"] = existing["re_execution_counts"]
 
                 # -------------------------------------------------------------
                 # LIVE SETTINGS SYNCHRONIZATION FOR RUNNING POSITIONS:
@@ -15348,10 +15368,11 @@ class StraddleManager:
                 et = chk["et_str"]
                 today_name = chk["today_name"]
 
-                # Date-awareness: if strategy has positions from a prior date, archive/reset them so it trades fresh today
-                if strat.get("last_trade_date") and strat.get("last_trade_date") != today_s:
-                    open_l = [p for p in strat_positions if p.get("status") == "OPEN"]
+                # Date-awareness: if strategy has positions from a prior date, archive them into closed_positions so it trades fresh today
+                if strat.get("last_trade_date") and strat.get("last_trade_date") != today_s and now_sec < (15 * 3600 + 30 * 60):
+                    open_l = [p for p in strat_positions if p.get("status") in ("OPEN", "LIVE OPEN")]
                     if not open_l:
+                        strat.setdefault("closed_positions", []).extend([p for p in strat_positions if p not in strat.get("closed_positions", [])])
                         strat["positions"] = []
                         if is_enabled:
                             strat["status"] = "READY"
@@ -15361,7 +15382,7 @@ class StraddleManager:
                             strat["entry_error"] = "Strategy is disabled"
                         strat["mtm"] = 0.0
                         strat_positions = []
-                    strat["last_trade_date"] = today_s
+                        strat["last_trade_date"] = today_s
 
                 has_open_positions = any(p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0 for p in strat_positions)
                 has_completed_positions = any(p.get("status") in ("COMPLETE", "CLOSED", "EXITED") for p in strat_positions)

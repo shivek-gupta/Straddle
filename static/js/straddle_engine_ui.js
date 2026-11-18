@@ -533,7 +533,19 @@ async function fetchStraddleState() {
             }
             window._straddleState.activeStrategy = active;
             window._straddleState.activeStrategyId = active ? active.strategy_id : null;
-            const activePositions = active ? (active.positions || []) : (s.positions || []);
+            let activePositions = [];
+            if (active) {
+                const combined = [...(active.positions || []), ...(active.closed_positions || [])];
+                const seenKeys = new Set();
+                activePositions = combined.filter(p => {
+                    const k = p.id || (p.symbol + "_" + (p.order_id || p.entry_time || ""));
+                    if (seenKeys.has(k)) return false;
+                    seenKeys.add(k);
+                    return true;
+                });
+            } else {
+                activePositions = s.positions || [];
+            }
             window._straddleState.positions = activePositions;
 
             if (s.logs && Array.isArray(s.logs)) {
@@ -703,15 +715,6 @@ function switchStraddleSubView(view) {
 
     const isOrderbook = (view === "orderbook");
     const targetPanel = isOrderbook ? "open_positions" : view;
-
-    // If navigating away from terminal and settings panel was open, auto-save settings
-    if (window._straddleState?.currentSubView === "terminal" && view !== "terminal") {
-        const settingsPanel = document.getElementById("straddleSettingsPanel");
-        const isSettingsOpen = settingsPanel && (settingsPanel.style.display === "block" || !settingsPanel.classList.contains("hidden"));
-        if (isSettingsOpen && typeof saveStraddleStrategySettings === "function") {
-            saveStraddleStrategySettings().catch(e => console.warn("Auto-save on view switch:", e));
-        }
-    }
 
     window._straddleState.currentSubView = view;
 
@@ -10164,12 +10167,22 @@ async function saveStraddleStrategySettings() {
 
     // Optimistically update local state for instant responsiveness
     if (window._straddleState && window._straddleState.allStrategies) {
-        const idx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === strat.strategy_id);
+        const idx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === strat.strategy_id || s.name === strat.name);
         if (idx >= 0) {
-            strat.positions = window._straddleState.allStrategies[idx].positions || [];
-            strat.status = window._straddleState.allStrategies[idx].status || strat.status;
-            strat.mtm = window._straddleState.allStrategies[idx].mtm || 0.0;
+            const existing = window._straddleState.allStrategies[idx];
+            strat.strategy_id = existing.strategy_id;
+            strat.positions = existing.positions || [];
+            strat.closed_positions = existing.closed_positions || [];
+            strat.status = existing.status || strat.status;
+            strat.mtm = existing.mtm || 0.0;
+            strat.group_mtm = existing.group_mtm || 0.0;
+            strat.re_execution_counts = existing.re_execution_counts || strat.re_execution_counts;
             window._straddleState.allStrategies[idx] = strat;
+        } else if (window._straddleState.activeStrategy) {
+            strat.positions = window._straddleState.activeStrategy.positions || [];
+            strat.closed_positions = window._straddleState.activeStrategy.closed_positions || [];
+            strat.status = window._straddleState.activeStrategy.status || strat.status;
+            strat.mtm = window._straddleState.activeStrategy.mtm || 0.0;
         }
         window._straddleState.activeStrategy = strat;
         renderStraddleAlgosTable(true);
