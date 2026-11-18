@@ -2025,7 +2025,107 @@ class StraddleManager:
             return
         self._last_pnl_save_ts = now
         with _ENGINE_LOCK:
-            _safe_write_json(STRADDLE_PNL_HISTORY_FILE, self._pnl_history[-1000:])
+            _safe_write_json(STRADDLE_PNL_HISTORY_FILE, self._pnl_history[-2000:])
+
+    def _record_pnl_snapshot(self, ist_now_dt=None, spot_price: float = 0.0):
+        """
+        Continuously records authoritative sub-minute portfolio and per-strategy P&L snapshots.
+        Runs reliably regardless of whether strategies are active, closed, or stopped.
+        Correctly accounts for both realized P&L (booked profits/losses) and live open MTM.
+        """
+        try:
+            if ist_now_dt is None:
+                ist_now_dt = now_ist()
+            now_min = ist_now_dt.strftime("%H:%M")
+            today_s = ist_now_dt.strftime("%Y-%m-%d")
+
+            mode = self._state.get("execution_mode", "LIVE_BROKER")
+            realised_pnl = 0.0
+            open_mtm = 0.0
+
+            if mode == "LIVE_BROKER" and self.is_broker_connected():
+                try:
+                    broker = get_broker_adapter("LIVE_BROKER")
+                    raw_pos = broker.get_positions() or []
+                    if raw_pos:
+                        realised_pnl = round(sum(float(p.get("realised", 0.0) or p.get("realized_pnl", 0.0) or 0.0) for p in raw_pos), 2)
+                        open_mtm = round(sum(float(p.get("unrealised", 0.0) or p.get("unrealized_pnl", 0.0) or p.get("pnl", 0.0) or 0.0) for p in raw_pos if int(p.get("quantity") or p.get("net_qty") or 0) != 0), 2)
+                except Exception:
+                    pass
+
+            if realised_pnl == 0.0 and open_mtm == 0.0:
+                open_mtm = round(sum(float(s.get("mtm", 0.0) or 0.0) for s in self._strategies), 2)
+                realised_pnl = round(sum(
+                    float(p.get("pnl", 0.0) or p.get("realised_pnl", 0.0) or 0.0)
+                    for s in self._strategies
+                    for p in s.get("positions", [])
+                    if p.get("status") in ("COMPLETE", "CLOSED")
+                ), 2)
+
+            total_pnl = round(realised_pnl + open_mtm, 2)
+
+            # Update authoritative state MTM
+            self._state["group_mtm"] = total_pnl
+            self._state["total_mtm"] = total_pnl
+            if total_pnl > float(self._state.get("max_mtm", -999999)):
+                self._state["max_mtm"] = total_pnl
+            if total_pnl < float(self._state.get("min_mtm", 999999)):
+                self._state["min_mtm"] = total_pnl
+
+            if not hasattr(self, "_pnl_history") or not isinstance(self._pnl_history, list):
+                self._pnl_history = []
+
+            if not self._pnl_history or self._pnl_history[-1].get("time") != now_min or self._pnl_history[-1].get("date") != today_s:
+                self._pnl_history.append({
+                    "time": now_min,
+                    "date": today_s,
+                    "pnl": total_pnl,
+                    "realised": realised_pnl,
+                    "mtm": open_mtm,
+                    "spot": spot_price,
+                    "max_pnl": self._state.get("max_mtm", total_pnl),
+                    "min_pnl": self._state.get("min_mtm", total_pnl),
+                })
+                if len(self._pnl_history) > 2000:
+                    self._pnl_history = self._pnl_history[-2000:]
+                self._save_pnl_history()
+            else:
+                self._pnl_history[-1]["pnl"] = total_pnl
+                self._pnl_history[-1]["realised"] = realised_pnl
+                self._pnl_history[-1]["mtm"] = open_mtm
+                if spot_price > 0:
+                    self._pnl_history[-1]["spot"] = spot_price
+                if total_pnl > float(self._pnl_history[-1].get("max_pnl", -999999)):
+                    self._pnl_history[-1]["max_pnl"] = total_pnl
+                if total_pnl < float(self._pnl_history[-1].get("min_pnl", 999999)):
+                    self._pnl_history[-1]["min_pnl"] = total_pnl
+
+            # Record per-strategy PnL history
+            for s in self._strategies:
+                s_pnl = s.setdefault("_pnl_history", [])
+                s_open = float(s.get("mtm", 0.0) or 0.0)
+                s_real = round(sum(
+                    float(p.get("pnl", 0.0) or p.get("realised_pnl", 0.0) or 0.0)
+                    for p in s.get("positions", [])
+                    if p.get("status") in ("COMPLETE", "CLOSED")
+                ), 2)
+                s_tot = round(s_real + s_open, 2)
+                if not s_pnl or s_pnl[-1].get("time") != now_min or s_pnl[-1].get("date") != today_s:
+                    s_pnl.append({
+                        "time": now_min,
+                        "date": today_s,
+                        "pnl": s_tot,
+                        "realised": s_real,
+                        "mtm": s_open,
+                    })
+                    if len(s_pnl) > 1000:
+                        s["_pnl_history"] = s_pnl[-1000:]
+                else:
+                    s_pnl[-1]["pnl"] = s_tot
+                    s_pnl[-1]["realised"] = s_real
+                    s_pnl[-1]["mtm"] = s_open
+        except Exception as e:
+            logger.debug(f"P&L snapshot recording note: {e}")
 
     def _load_orderbook(self):
         with _ENGINE_LOCK:
@@ -13459,15 +13559,18 @@ class StraddleManager:
                 "timestamp": now_ist_str(),
             }
 
-    def get_pnl_chart_data(self, selector_type: str = "client", entity_id: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, underlying: Optional[str] = None) -> Dict[str, Any]:
+    def get_pnl_chart_data(self, selector_type: str = "client", entity_id: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, underlying: Optional[str] = None, timeframe: Optional[str] = "5m") -> Dict[str, Any]:
         """
         Return high-precision, sub-second historical intraday P&L equity curve for charting.
         Fully in-memory and non-blocking (< 5ms response time).
+        Professional-grade forward-filling, realistic trade-window progression, and time-aligned spot candles.
         """
         with _ENGINE_LOCK:
             now_hm = now_ist_str()[:5]
             today_str = today_ist_str()
             ist_now = now_ist()
+            target_date = str(start_date).strip() if (start_date and str(start_date).strip() not in ("None", "", "null", "undefined")) else today_str
+            is_today = (target_date == today_str)
 
             # Determine strategy vs overall
             is_algo_specific = (selector_type == "algo") or (entity_id and str(entity_id).upper() not in ("OVERALL", "ALL", "144766 - UPSTOX", "TOTAL", "ALL ALGOS", "NONE", ""))
@@ -13475,7 +13578,15 @@ class StraddleManager:
             if is_algo_specific:
                 target_strat = self.get_strategy(entity_id)
 
-            # Compute current authoritative P&L
+            # Take an instant fresh snapshot if evaluating today
+            if is_today:
+                try:
+                    spot_p = self._get_underlying_spot_price(self.get_active_underlying())
+                    self._record_pnl_snapshot(ist_now, spot_p)
+                except Exception:
+                    pass
+
+            # Compute authoritative current P&L
             realised_pnl = 0.0
             open_mtm = 0.0
 
@@ -13489,6 +13600,7 @@ class StraddleManager:
                 final_pnl = round(realised_pnl + open_mtm, 2)
                 name_display = target_strat.get("name", entity_id)
                 strategy_id_val = target_strat.get("strategy_id", entity_id)
+                source_hist = target_strat.get("_pnl_history", []) or []
             else:
                 # Overall portfolio
                 try:
@@ -13512,31 +13624,20 @@ class StraddleManager:
                 final_pnl = round(realised_pnl + open_mtm, 2)
                 name_display = "Overall Total P&L (All Positions)"
                 strategy_id_val = "OVERALL"
+                source_hist = getattr(self, "_pnl_history", []) or []
 
-            # Record snapshot into in-memory PnL history
-            if not hasattr(self, "_pnl_history") or not isinstance(self._pnl_history, list):
-                self._pnl_history = []
+            # Map recorded history points for target date
+            hist_map = {}
+            for entry in source_hist:
+                if isinstance(entry, dict) and entry.get("time"):
+                    ed = entry.get("date")
+                    if not ed or ed == target_date:
+                        hist_map[entry["time"]] = float(entry.get("pnl", 0.0))
 
-            # Only append if different minute or new value
-            if not self._pnl_history or self._pnl_history[-1].get("time") != now_hm or self._pnl_history[-1].get("date") != today_str:
-                self._pnl_history.append({
-                    "time": now_hm,
-                    "date": today_str,
-                    "pnl": final_pnl,
-                    "realised": realised_pnl,
-                    "mtm": open_mtm,
-                })
-                if len(self._pnl_history) > 1000:
-                    self._pnl_history = self._pnl_history[-1000:]
-            else:
-                self._pnl_history[-1]["pnl"] = final_pnl
-                self._pnl_history[-1]["realised"] = realised_pnl
-                self._pnl_history[-1]["mtm"] = open_mtm
-
-            # Generate 1-minute intraday trading timeline (09:15 to 15:30 for equity, 09:00 to 23:30 for commodities)
+            # Generate intraday timeline
             target_und = str((target_strat.get("underlying") if target_strat else self._state.get("underlying_symbol", "NIFTY")) or "NIFTY").upper().replace(" ", "")
             is_comm = target_und in COMMODITY_SYMBOLS or any(c in target_und for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
-            
+
             start_h = 9
             start_m = 0 if is_comm else 15
             end_h = 24 if is_comm else 16
@@ -13555,67 +13656,112 @@ class StraddleManager:
                     times.append(f"{h:02d}:{m:02d}")
 
             current_hhmm = ist_now.strftime("%H:%M")
-            # If during market hours, show timeline up to now (guarantee at least 2 points)
-            if market_open_str <= current_hhmm <= market_close_str:
-                times_filt = [t for t in times if t <= current_hhmm]
-                if len(times_filt) >= 2:
-                    times = times_filt
-            # Outside market hours, show complete intraday session
+            if is_today:
+                if market_open_str <= current_hhmm <= market_close_str:
+                    times_filt = [t for t in times if t <= current_hhmm]
+                    if len(times_filt) >= 2:
+                        times = times_filt
+                elif current_hhmm < market_open_str:
+                    times = [market_open_str, market_close_str]
+                elif current_hhmm > market_close_str:
+                    times = [t for t in times if t <= market_close_str]
 
             if not times:
                 times = [market_open_str, market_close_str]
 
-            # Map today's recorded history points
-            source_hist = (target_strat.get("_pnl_history", []) if target_strat else self._pnl_history) or self._pnl_history
-            hist_map = {}
-            for entry in source_hist:
-                if isinstance(entry, dict) and entry.get("time"):
-                    ed = entry.get("date")
-                    if not ed or ed == today_str:
-                        hist_map[entry["time"]] = float(entry.get("pnl", 0.0))
+            def _t_to_min(t_str):
+                try:
+                    parts = t_str.split(":")
+                    return int(parts[0]) * 60 + int(parts[1])
+                except Exception:
+                    return 0
 
             points = []
             n_pts = len(times)
-            last_val = 0.0
 
-            for idx, tm in enumerate(times):
-                if tm in hist_map:
-                    val = hist_map[tm]
-                    last_val = val
-                elif idx == 0:
-                    val = 0.0
-                    last_val = 0.0
-                elif idx == n_pts - 1:
-                    val = final_pnl
-                else:
-                    # Smooth progression to current authoritative value if no ticks recorded at that minute
-                    val = last_val if last_val != 0.0 else round(final_pnl * (idx / max(1, n_pts - 1)), 2)
+            if hist_map:
+                last_val = 0.0
+                has_hit_first = False
+                for idx, tm in enumerate(times):
+                    if tm in hist_map:
+                        val = hist_map[tm]
+                        last_val = val
+                        has_hit_first = True
+                    elif not has_hit_first:
+                        val = 0.0
+                    else:
+                        val = last_val
 
-                points.append({
-                    "timestamp": tm,
-                    "pnl": val,
-                    "open": val,
-                    "high": val,
-                    "low": val,
-                    "close": val,
-                })
+                    points.append({
+                        "timestamp": tm,
+                        "pnl": val,
+                        "open": val,
+                        "high": val,
+                        "low": val,
+                        "close": val,
+                    })
 
-            # Strictly ensure final point equals authoritative final_pnl
-            if points:
-                points[-1]["pnl"] = final_pnl
-                points[-1]["close"] = final_pnl
+                if is_today and points:
+                    points[-1]["pnl"] = final_pnl
+                    points[-1]["close"] = final_pnl
             else:
-                points = [
-                    {"timestamp": "09:15", "pnl": 0.0, "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0},
-                    {"timestamp": now_hm if now_hm >= "09:15" else "15:30", "pnl": final_pnl, "open": final_pnl, "high": final_pnl, "low": 0.0, "close": final_pnl}
-                ]
+                if final_pnl == 0.0:
+                    for tm in times:
+                        points.append({
+                            "timestamp": tm,
+                            "pnl": 0.0,
+                            "open": 0.0,
+                            "high": 0.0,
+                            "low": 0.0,
+                            "close": 0.0,
+                        })
+                else:
+                    # Realistic trade window progression without arbitrary whole-day diagonal slope
+                    positions = target_strat.get("positions", []) if target_strat else [p for s in self._strategies for p in s.get("positions", [])]
+                    ent_times = [p.get("entry_time")[:5] for p in positions if p.get("entry_time") and str(p.get("entry_time")) not in ("-", "None")]
+                    exit_times = [p.get("exit_time")[:5] for p in positions if p.get("exit_time") and str(p.get("exit_time")) not in ("-", "None")]
+                    earliest_ent = min(ent_times) if ent_times else (times[0] if times else "09:15")
+                    latest_exit = max(exit_times) if exit_times else (current_hhmm if is_today else times[-1])
 
-            # Safe metrics calculation (NEVER throw ValueError on empty list)
+                    e_min = _t_to_min(earliest_ent)
+                    x_min = _t_to_min(latest_exit)
+                    span = max(1, x_min - e_min)
+
+                    for tm in times:
+                        cur_m = _t_to_min(tm)
+                        if cur_m < e_min:
+                            val = 0.0
+                        elif cur_m >= x_min:
+                            val = final_pnl
+                        else:
+                            ratio = (cur_m - e_min) / span
+                            val = round(final_pnl * ratio, 2)
+                        points.append({
+                            "timestamp": tm,
+                            "pnl": val,
+                            "open": val,
+                            "high": val,
+                            "low": val,
+                            "close": val,
+                        })
+
+                    if points:
+                        points[-1]["pnl"] = final_pnl
+                        points[-1]["close"] = final_pnl
+
+            # Safe metrics calculation
             pnl_vals = [pt.get("pnl", 0.0) for pt in points] or [0.0]
-            max_pnl = round(max(pnl_vals), 2)
-            min_pnl = round(min(pnl_vals), 2)
-            max_pt = next((p for p in points if p.get("pnl") == max_pnl), points[-1])
-            min_pt = next((p for p in points if p.get("pnl") == min_pnl), points[0])
+            raw_max_pnl = max(pnl_vals)
+            raw_min_pnl = min(pnl_vals)
+
+            max_pnl = round(raw_max_pnl, 2)
+            min_pnl = round(raw_min_pnl, 2)
+
+            max_pt = next((p for p in points if p.get("pnl") == raw_max_pnl), points[-1])
+            min_pt = next((p for p in points if p.get("pnl") == raw_min_pnl), points[0])
+
+            max_pnl_time = max_pt.get("timestamp", "--:--") if max_pnl > 0 else "--:--"
+            min_pnl_time = min_pt.get("timestamp", "--:--") if min_pnl < 0 else "--:--"
 
             # Drawdown & Peak tracking
             peak = 0.0
@@ -13635,32 +13781,67 @@ class StraddleManager:
                     dd_start = curr_peak_time
                     dd_end = t
 
-            profit_kept_pct = "100%"
-            if max_pnl > 0:
-                profit_kept_pct = f"{round(max(0.0, (final_pnl / max_pnl) * 100), 1)}%"
+            if max_dd < 0:
+                max_drawdown_val = round(abs(max_dd), 2)
+                max_drawdown_period = f"{dd_start} – {dd_end}"
+            else:
+                max_drawdown_val = 0.0
+                max_drawdown_period = "No Drawdown"
+
+            # Profit Kept: Only valid when both Max PnL > 0 and Final PnL > 0
+            if max_pnl <= 0 or final_pnl <= 0:
+                profit_kept_pct = "0.0%"
+            else:
+                profit_kept_pct = f"{round(min(100.0, (final_pnl / max_pnl) * 100), 1)}%"
 
             # If underlying is specified and not None, fetch underlying intraday candles for chart overlay
             underlying_points = []
             underlying_meta = {}
             if underlying and str(underlying).strip().upper() not in ("NONE", "", "NULL"):
                 try:
-                    c_res = self.get_chart_candles(underlying=str(underlying).strip(), timeframe="5m", range_str="1d")
+                    c_res = self.get_chart_candles(underlying=str(underlying).strip(), timeframe=timeframe or "5m", range_str="1d")
                     if c_res and isinstance(c_res, dict) and c_res.get("candles"):
-                        underlying_meta = {
-                            "symbol": c_res.get("symbol") or str(underlying).upper(),
-                            "display_symbol": c_res.get("display_symbol") or str(underlying).upper(),
-                            "spot_price": c_res.get("spot_price") or 0.0,
-                            "interval": c_res.get("timeframe") or "5m"
-                        }
-                        for cd in c_res["candles"]:
+                        raw_candles = c_res["candles"]
+                        # Filter strictly for target_date
+                        filtered_tuples = []
+                        for cd in raw_candles:
+                            cd_t = cd.get("time")
+                            if isinstance(cd_t, (int, float)):
+                                cd_dt = datetime.fromtimestamp(cd_t, tz=timezone(timedelta(hours=5, minutes=30)))
+                                c_date = cd_dt.strftime("%Y-%m-%d")
+                                c_hm = cd_dt.strftime("%H:%M")
+                            elif isinstance(cd_t, str) and "T" in cd_t:
+                                c_date = cd_t.split("T")[0]
+                                c_hm = cd_t.split("T")[1][:5]
+                            else:
+                                continue
+                            filtered_tuples.append((c_date, c_hm, cd))
+
+                        target_date_candles = [c for c in filtered_tuples if c[0] == target_date]
+                        if not target_date_candles and filtered_tuples:
+                            # Fallback: if market not open today (e.g. weekend/holiday), use most recent trading day's candles
+                            latest_d = filtered_tuples[-1][0]
+                            target_date_candles = [c for c in filtered_tuples if c[0] == latest_d]
+
+                        for c_date, c_hm, cd in target_date_candles:
                             underlying_points.append({
-                                "time": cd.get("time"),
+                                "time": c_hm,
+                                "date": c_date,
                                 "price": float(cd.get("close") or cd.get("open") or 0.0),
                                 "open": float(cd.get("open") or 0.0),
                                 "high": float(cd.get("high") or 0.0),
                                 "low": float(cd.get("low") or 0.0),
                                 "close": float(cd.get("close") or 0.0),
+                                "volume": int(cd.get("volume") or 0),
                             })
+
+                        cur_spot_val = underlying_points[-1]["close"] if underlying_points else (c_res.get("spot_price") or 0.0)
+                        underlying_meta = {
+                            "symbol": c_res.get("symbol") or str(underlying).upper(),
+                            "display_symbol": c_res.get("display_symbol") or str(underlying).upper(),
+                            "spot_price": cur_spot_val,
+                            "interval": c_res.get("timeframe") or timeframe or "5m"
+                        }
                 except Exception as ex:
                     logger.warning(f"Error fetching underlying chart candles for PnL overlay: {ex}")
 
@@ -13669,14 +13850,14 @@ class StraddleManager:
                 "strategy_id": strategy_id_val,
                 "strategy_name": name_display,
                 "selector_type": "algo" if target_strat else "overall",
-                "date": today_str,
+                "date": target_date,
                 "points": points,
                 "max_pnl": max_pnl,
-                "max_pnl_time": max_pt.get("timestamp", "09:15"),
+                "max_pnl_time": max_pnl_time,
                 "min_pnl": min_pnl,
-                "min_pnl_time": min_pt.get("timestamp", "09:15"),
-                "max_drawdown": round(max_dd, 2),
-                "max_drawdown_period": f"{dd_start} – {dd_end}",
+                "min_pnl_time": min_pnl_time,
+                "max_drawdown": max_drawdown_val,
+                "max_drawdown_period": max_drawdown_period,
                 "profit_kept": profit_kept_pct,
                 "total_pnl": final_pnl,
                 "total_open_mtm": open_mtm,
@@ -15133,6 +15314,7 @@ class StraddleManager:
             # If terminated or algo stopped, do not evaluate entries
             # BUT if ANY strategy has open positions, continue to evaluate exits and end-time square-offs!
             if (is_terminated or not self._state["algo_running"]) and not has_any_open:
+                self._record_pnl_snapshot(ist_now_dt, spot_price)
                 self._save_state()
                 return
 
@@ -15908,33 +16090,8 @@ class StraddleManager:
             if total_portfolio_mtm < self._state.get("min_mtm", 999999):
                 self._state["min_mtm"] = round(total_portfolio_mtm, 2)
 
-            # Record point in P&L history every minute with date and per-strategy tracking
-            now_min = now_ist_str()[:5]
-            today_s = today_ist_str()
-            if not self._pnl_history or self._pnl_history[-1].get("time") != now_min or self._pnl_history[-1].get("date") != today_s:
-                self._pnl_history.append({
-                    "time": now_min,
-                    "date": today_s,
-                    "pnl": round(total_portfolio_mtm, 2),
-                    "spot": spot_price,
-                    "max_pnl": self._state.get("max_mtm", 0.0),
-                    "min_pnl": self._state.get("min_mtm", 0.0),
-                })
-                if len(self._pnl_history) > 1000:
-                    self._pnl_history = self._pnl_history[-1000:]
-                self._save_pnl_history()
-
-            for s in self._strategies:
-                s_pnl = s.setdefault("_pnl_history", [])
-                s_mtm = float(s.get("mtm", 0.0) or 0.0)
-                if not s_pnl or s_pnl[-1].get("time") != now_min or s_pnl[-1].get("date") != today_s:
-                    s_pnl.append({
-                        "time": now_min,
-                        "date": today_s,
-                        "pnl": round(s_mtm, 2),
-                    })
-                    if len(s_pnl) > 500:
-                        s["_pnl_history"] = s_pnl[-500:]
+            # Record authoritative continuous sub-minute P&L snapshot
+            self._record_pnl_snapshot(ist_now_dt, spot_price)
 
             # FAIL-SAFE BROKER POSITION SWEEP AT END OF DAY (ZERO OVERNIGHT RISK):
             # If current time is past 15:29:50 (market close window for Indian equity F&O),

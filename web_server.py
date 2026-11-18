@@ -1433,13 +1433,15 @@ def api_straddle_pnl_chart():
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
         underlying = request.args.get("underlying")
+        timeframe = request.args.get("timeframe", "5m")
         mgr = get_straddle_manager()
         chart_data = mgr.get_pnl_chart_data(
             selector_type=selector_type,
             entity_id=entity_id,
             start_date=start_date,
             end_date=end_date,
-            underlying=underlying
+            underlying=underlying,
+            timeframe=timeframe
         )
         return jsonify({"success": True, "data": chart_data})
     except Exception as e:

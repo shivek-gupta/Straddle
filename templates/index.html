@@ -2221,28 +2221,44 @@
 
 
         <!-- ====================================================================
-             SUB-VIEW 3: P&L CHART (Screenshot 2)
+             SUB-VIEW 3: P&L CHART (Professional Quant Analytics)
              ==================================================================== -->
         <div id="straddleSubView_pnl" class="straddle-subview-panel" style="display:none;">
             <!-- Header Filter Bar -->
             <div style="display:flex; justify-content:space-between; align-items:center; background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; gap:12px;">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <button type="button" class="straddle-btn btn-outline" onclick="switchStraddleSubView('algos')" style="padding:4px 10px; font-size:12px;">← Algos</button>
-                    <span style="font-size:14px; font-weight:800; color:#f8fafc;">P&L Chart Analysis</span>
+                    <span style="font-size:14px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">P&L Chart Analysis</span>
                 </div>
 
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <div style="display:flex; align-items:center; gap:4px;">
-                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Chart type:</span>
+                <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Chart:</span>
                         <div style="display:flex; gap:2px;">
                             <button type="button" class="straddle-btn btn-outline active-toggle" id="btnPnlTypeLine" style="padding:3px 10px; font-size:11px;" onclick="setPnlChartType('line')">Line</button>
                             <button type="button" class="straddle-btn btn-outline" id="btnPnlTypeCandle" style="padding:3px 10px; font-size:11px;" onclick="setPnlChartType('candle')">Candle</button>
                         </div>
                     </div>
 
-                    <div style="display:flex; align-items:center; gap:4px;">
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Resolution:</span>
+                        <select id="pnlTimeframeSelect" class="straddle-select" style="padding:3px 8px; font-size:11px;" onchange="loadStraddlePnlChart()">
+                            <option value="1m">1 min</option>
+                            <option value="5m" selected>5 min</option>
+                            <option value="15m">15 min</option>
+                        </select>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <span style="font-size:11px; color:#94a3b8; font-weight:700;">Date:</span>
+                        <input type="date" id="pnlDateSelect" class="straddle-input" style="padding:2px 8px; font-size:11px; width:125px;" onchange="loadStraddlePnlChart()">
+                        <input type="hidden" id="pnlStartDate">
+                        <input type="hidden" id="pnlEndDate">
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:5px;">
                         <span style="font-size:11px; color:#94a3b8; font-weight:700;">Underlying:</span>
-                        <select id="pnlUnderlyingSelect" class="straddle-select" onchange="loadStraddlePnlChart()">
+                        <select id="pnlUnderlyingSelect" class="straddle-select" style="padding:3px 8px; font-size:11px;" onchange="loadStraddlePnlChart()">
                             <option value="None" selected>None</option>
                             <option value="NIFTY">NIFTY</option>
                             <option value="BANKNIFTY">BANKNIFTY</option>
@@ -2258,11 +2274,13 @@
                             <option value="COPPER">Copper (MCX)</option>
                         </select>
                     </div>
+
+                    <button type="button" class="straddle-btn btn-outline" style="padding:3px 10px; font-size:11px;" onclick="loadStraddlePnlChart()" title="Refresh Chart Data">🔄 Refresh</button>
                 </div>
             </div>
 
             <!-- Main Layout: Sidebar List + Canvas Chart Area -->
-            <div class="pnl-main-layout" style="display:grid; grid-template-columns: 240px 1fr; gap:14px;">
+            <div class="pnl-main-layout" style="display:grid; grid-template-columns: 280px 1fr; gap:14px;">
                 <!-- Left Entity Selector Sidebar -->
                 <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; height:520px; overflow-y:auto;">
                     <input type="text" id="pnlSearchEntities" class="straddle-input" placeholder="Search Strategy / Algo..." oninput="filterPnlEntitiesList()">
@@ -2284,7 +2302,7 @@
                     <!-- Bottom Metrics Strip (Matching Kotak Neo Analytics) -->
                     <div class="straddle-pnl-stats-strip" style="background:#080c14; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px 18px; margin-top:10px;">
                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; width:100%;">
-                            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                            <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
                                 <div style="display:flex; flex-direction:column; gap:2px; background:#0c0d12; border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:6px 12px;">
                                     <span style="color:#94a3b8; font-size:11px; font-weight:700;">Max Profit:</span>
                                     <div style="display:flex; align-items:baseline; gap:6px;">
@@ -2312,14 +2330,15 @@
                                 <div style="display:flex; flex-direction:column; gap:2px; background:#0c0d12; border:1px solid rgba(6,182,212,0.25); border-radius:6px; padding:6px 12px;">
                                     <span style="color:#94a3b8; font-size:11px; font-weight:700;">Profit Kept:</span>
                                     <div style="display:flex; align-items:baseline; gap:6px;">
-                                        <span id="pnlStatProfitKept" style="color:#06b6d4; font-family:var(--font-mono); font-size:14px; font-weight:800;">100%</span>
+                                        <span id="pnlStatProfitKept" style="color:#06b6d4; font-family:var(--font-mono); font-size:14px; font-weight:800;">0.0%</span>
                                         <span style="color:#64748b; font-size:11px;">of Max Profit</span>
                                     </div>
                                 </div>
 
-                                <div style="display:flex; flex-direction:column; gap:2px; background:linear-gradient(135deg, rgba(16,185,129,0.15), rgba(6,182,212,0.1)); border:1px solid rgba(16,185,129,0.4); border-radius:6px; padding:6px 14px;">
+                                <div id="pnlCardNetPnl" style="display:flex; flex-direction:column; gap:2px; background:linear-gradient(135deg, rgba(16,185,129,0.15), rgba(6,182,212,0.1)); border:1px solid rgba(16,185,129,0.4); border-radius:6px; padding:6px 14px; transition:all 0.3s ease;">
                                     <span style="color:#94a3b8; font-size:11px; font-weight:700;">Day's Net P&L:</span>
                                     <span id="pnlStatTotal" style="color:#10b981; font-family:var(--font-mono); font-size:15px; font-weight:900;">₹ 0.00</span>
+                                    <span id="pnlStatRealisedBreakdown" style="font-size:10px; color:#94a3b8; font-family:var(--font-mono); margin-top:1px;">Realised: ₹ 0.00 | Open: ₹ 0.00</span>
                                 </div>
                             </div>
 

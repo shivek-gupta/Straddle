@@ -2809,7 +2809,7 @@ function setPnlChartType(type) {
     document.getElementById("btnPnlTypeLine")?.classList.toggle("active-toggle", type === "line");
     document.getElementById("btnPnlTypeCandle")?.classList.toggle("active-toggle", type === "candle");
     if (window._straddleState.pnlDataCache) {
-        drawPnlCanvas(window._straddleState.pnlDataCache, type);
+        drawPnlCanvas(window._straddleState.pnlDataCache, type, null);
     }
 }
 
@@ -2817,8 +2817,16 @@ function renderPnlEntitiesList() {
     const list = document.getElementById("pnlEntitiesList");
     if (!list) return;
 
-    const selector = window._straddleState.pnlChartSelector || "client";
     const searchVal = (document.getElementById("pnlSearchEntities")?.value || "").toLowerCase().trim();
+
+    // Compute live portfolio total MTM
+    let portfolioMtm = 0.0;
+    const strats = window._straddleState.allStrategies || [];
+    if (window._straddleState.pnlDataCache && typeof window._straddleState.pnlDataCache.total_pnl === "number") {
+        portfolioMtm = window._straddleState.pnlDataCache.total_pnl;
+    } else {
+        portfolioMtm = strats.reduce((acc, s) => acc + (Number(s.mtm) || 0.0), 0.0);
+    }
 
     let items = [];
     // Always pin Overall Portfolio Total P&L
@@ -2826,10 +2834,10 @@ function renderPnlEntitiesList() {
         id: "OVERALL",
         name: "Overall Total P&L (All Positions)",
         is_overall: true,
-        status: "LIVE_STREAM"
+        status: "LIVE_STREAM",
+        mtm: portfolioMtm
     });
 
-    const strats = window._straddleState.allStrategies || [];
     strats.forEach(s => {
         const isEnabled = s.enabled !== false;
         const status = s.status || (isEnabled ? "Trade Active" : "Stopped");
@@ -2839,7 +2847,7 @@ function renderPnlEntitiesList() {
             is_overall: false,
             status: status,
             enabled: isEnabled,
-            mtm: s.mtm || 0.0
+            mtm: Number(s.mtm) || 0.0
         });
     });
 
@@ -2848,33 +2856,40 @@ function renderPnlEntitiesList() {
     }
 
     let html = "";
-    items.forEach((it, idx) => {
+    items.forEach((it) => {
         const isSelected = (it.id === window._straddleState.pnlSelectedEntityId) || (!window._straddleState.pnlSelectedEntityId && it.id === "OVERALL");
         if (isSelected) window._straddleState.pnlSelectedEntityId = it.id;
 
         const isOverall = it.is_overall;
         let badgeHtml = "";
         if (isOverall) {
-            badgeHtml = `<span style="background:rgba(59,130,246,0.25); color:#60a5fa; font-size:10px; padding:1px 6px; border-radius:4px; font-weight:800;">PORTFOLIO</span>`;
+            badgeHtml = `<span style="background:rgba(59,130,246,0.25); color:#60a5fa; font-size:9.5px; padding:1px 6px; border-radius:4px; font-weight:800;">PORTFOLIO</span>`;
         } else {
-            const isAct = (it.status === "TRADE_ACTIVE" || it.status === "Trade Active");
+            const isAct = (it.status === "TRADE_ACTIVE" || it.status === "Trade Active" || it.enabled);
             const bg = isAct ? "rgba(16,185,129,0.2)" : "rgba(244,63,94,0.15)";
             const col = isAct ? "#10b981" : "#94a3b8";
-            badgeHtml = `<span style="background:${bg}; color:${col}; font-size:9.5px; padding:1px 5px; border-radius:4px; font-weight:700;">${isAct ? '● ACTIVE' : 'STOPPED'}</span>`;
+            badgeHtml = `<span style="background:${bg}; color:${col}; font-size:9px; padding:1px 5px; border-radius:4px; font-weight:700;">${isAct ? '● ACTIVE' : 'STOPPED'}</span>`;
         }
 
+        const mtmVal = it.mtm || 0.0;
+        const mtmColor = mtmVal >= 0 ? "#10b981" : "#f43f5e";
+        const mtmFormatted = (mtmVal >= 0 ? "+₹" : "-₹") + Math.abs(mtmVal).toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
         html += `
-            <div style="display:flex; align-items:center; justify-content:space-between; padding:7px 9px; border-radius:6px; cursor:pointer; background:${isSelected ? 'rgba(37,99,235,0.2)' : 'transparent'}; border:${isSelected ? '1px solid #3b82f6' : '1px solid transparent'}; color:${isSelected ? '#60a5fa' : '#cbd5e1'}; font-size:12px; font-weight:700; margin-bottom:3px;" onclick="selectPnlEntity('${it.id}', '${it.name.replace(/'/g, "\\'")}')">
-                <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                    <input type="radio" name="pnl_entity" ${isSelected ? "checked" : ""}>
-                    <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${it.name}</span>
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border-radius:6px; cursor:pointer; background:${isSelected ? 'rgba(37,99,235,0.22)' : 'rgba(255,255,255,0.02)'}; border:${isSelected ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.04)'}; color:${isSelected ? '#60a5fa' : '#cbd5e1'}; font-size:12px; font-weight:700; margin-bottom:4px; transition:all 0.15s ease;" onclick="selectPnlEntity('${it.id}', '${it.name.replace(/'/g, "\\'")}')" title="${it.name}">
+                <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;">
+                    <input type="radio" name="pnl_entity" ${isSelected ? "checked" : ""} style="cursor:pointer; accent-color:#3b82f6;">
+                    <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${it.name}">${it.name}</span>
                 </div>
-                <div>${badgeHtml}</div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-family:var(--font-mono); font-size:11px; font-weight:800; color:${mtmColor};">${mtmFormatted}</span>
+                    ${badgeHtml}
+                </div>
             </div>
         `;
     });
 
-    list.innerHTML = html || `<div style="color:#64748b; font-size:11px; padding:10px;">No items match.</div>`;
+    list.innerHTML = html || `<div style="color:#64748b; font-size:11px; padding:12px; text-align:center;">No strategies match query.</div>`;
 }
 
 function filterPnlEntitiesList() {
@@ -2892,12 +2907,23 @@ function selectPnlEntity(id, name) {
 async function loadStraddlePnlChart() {
     const entityId = window._straddleState.pnlSelectedEntityId || "OVERALL";
     const selector = (entityId === "OVERALL") ? "overall" : "algo";
-    const start = document.getElementById("pnlStartDate")?.value || "";
-    const end = document.getElementById("pnlEndDate")?.value || "";
+    
+    const dateInput = document.getElementById("pnlDateSelect");
+    if (dateInput && !dateInput.value) {
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, "0");
+        const dd = String(now.getDate()).padStart(2, "0");
+        dateInput.value = `${yyyy}-${mm}-${dd}`;
+    }
+
+    const start = dateInput?.value || document.getElementById("pnlStartDate")?.value || "";
+    const end = document.getElementById("pnlEndDate")?.value || start;
     const und = document.getElementById("pnlUnderlyingSelect")?.value || "None";
+    const tf = document.getElementById("pnlTimeframeSelect")?.value || "5m";
 
     try {
-        const resp = await fetch(`/api/straddle/pnl_chart?selector_type=${selector}&entity_id=${encodeURIComponent(entityId)}&start_date=${start}&end_date=${end}&underlying=${encodeURIComponent(und)}`);
+        const resp = await fetch(`/api/straddle/pnl_chart?selector_type=${selector}&entity_id=${encodeURIComponent(entityId)}&start_date=${start}&end_date=${end}&underlying=${encodeURIComponent(und)}&timeframe=${encodeURIComponent(tf)}`);
         const data = await resp.json();
         if (data && data.success && data.data) {
             window._straddleState.pnlDataCache = data.data;
@@ -2908,7 +2934,7 @@ async function loadStraddlePnlChart() {
                 titleEl.textContent = data.data.strategy_name || data.data.strategy_id || "Overall Portfolio P&L";
             }
 
-            // Update stats
+            // Update stats cards
             const maxEl = document.getElementById("pnlStatMax");
             const minEl = document.getElementById("pnlStatMin");
             const totEl = document.getElementById("pnlStatTotal");
@@ -2917,77 +2943,96 @@ async function loadStraddlePnlChart() {
             const totVal = data.data.total_pnl || 0.0;
             const maxTime = data.data.max_pnl_time || "--:--";
             const minTime = data.data.min_pnl_time || "--:--";
-            const drawdown = data.data.max_drawdown !== undefined ? data.data.max_drawdown : minVal;
+            const drawdown = data.data.max_drawdown || 0.0;
             const drawdownPeriod = data.data.max_drawdown_period || "--";
-            const profitKept = data.data.profit_kept || "100%";
+            const profitKept = data.data.profit_kept || (totVal < 0 ? "0.0%" : "100%");
 
-            if (maxEl) maxEl.textContent = (maxVal >= 0 ? "+₹ " : "-₹ ") + Math.abs(maxVal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            if (document.getElementById("pnlStatMaxTime")) document.getElementById("pnlStatMaxTime").textContent = `at ${maxTime}`;
+            if (maxEl) maxEl.textContent = (maxVal > 0 ? "+₹ " : "₹ ") + Math.abs(maxVal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            if (document.getElementById("pnlStatMaxTime")) {
+                document.getElementById("pnlStatMaxTime").textContent = maxVal > 0 ? `at ${maxTime}` : `at ${maxTime !== '--:--' ? maxTime : '09:15'}`;
+            }
 
-            if (minEl) minEl.textContent = (minVal >= 0 ? "+₹ " : "-₹ ") + Math.abs(minVal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            if (document.getElementById("pnlStatMinTime")) document.getElementById("pnlStatMinTime").textContent = `at ${minTime}`;
+            if (minEl) minEl.textContent = (minVal < 0 ? "-₹ " : "₹ ") + Math.abs(minVal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            if (document.getElementById("pnlStatMinTime")) {
+                document.getElementById("pnlStatMinTime").textContent = minVal < 0 ? `at ${minTime}` : `at ${minTime !== '--:--' ? minTime : '--:--'}`;
+            }
 
-            if (document.getElementById("pnlStatDrawdown")) document.getElementById("pnlStatDrawdown").textContent = (drawdown >= 0 ? "+₹ " : "-₹ ") + Math.abs(drawdown).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            if (document.getElementById("pnlStatDrawdownPeriod")) document.getElementById("pnlStatDrawdownPeriod").textContent = drawdownPeriod;
+            if (document.getElementById("pnlStatDrawdown")) {
+                document.getElementById("pnlStatDrawdown").textContent = "₹ " + Math.abs(drawdown).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+            if (document.getElementById("pnlStatDrawdownPeriod")) {
+                document.getElementById("pnlStatDrawdownPeriod").textContent = drawdownPeriod;
+            }
 
-            if (document.getElementById("pnlStatProfitKept")) document.getElementById("pnlStatProfitKept").textContent = profitKept;
+            if (document.getElementById("pnlStatProfitKept")) {
+                document.getElementById("pnlStatProfitKept").textContent = profitKept;
+            }
 
             if (totEl) {
                 totEl.textContent = (totVal >= 0 ? "+₹ " : "-₹ ") + Math.abs(totVal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 totEl.style.color = totVal >= 0 ? "#10b981" : "#f43f5e";
             }
+
+            // Dynamically adjust Day's Net P&L card background & border
+            const netCard = document.getElementById("pnlCardNetPnl");
+            if (netCard) {
+                if (totVal >= 0) {
+                    netCard.style.background = "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(6,182,212,0.1))";
+                    netCard.style.borderColor = "rgba(16,185,129,0.45)";
+                    netCard.style.boxShadow = "0 0 12px rgba(16,185,129,0.12)";
+                } else {
+                    netCard.style.background = "linear-gradient(135deg, rgba(244,63,94,0.18), rgba(244,63,94,0.06))";
+                    netCard.style.borderColor = "rgba(244,63,94,0.45)";
+                    netCard.style.boxShadow = "0 0 12px rgba(244,63,94,0.12)";
+                }
+            }
+
+            // Realised vs Open breakdown
+            const breakdownEl = document.getElementById("pnlStatRealisedBreakdown");
+            if (breakdownEl) {
+                const realVal = data.data.total_realised_pnl || 0.0;
+                const openVal = data.data.total_open_mtm || 0.0;
+                const realTxt = (realVal >= 0 ? "+₹" : "-₹") + Math.abs(realVal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const openTxt = (openVal >= 0 ? "+₹" : "-₹") + Math.abs(openVal).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                breakdownEl.innerHTML = `Realised: <span style="color:${realVal >= 0 ? '#10b981' : '#f43f5e'}; font-weight:700;">${realTxt}</span> | Open: <span style="color:${openVal >= 0 ? '#10b981' : '#f43f5e'}; font-weight:700;">${openTxt}</span>`;
+            }
+
+            // Re-render sidebar to update live MTM
+            renderPnlEntitiesList();
         }
     } catch (e) {
         console.error("Error loading PnL chart:", e);
     }
 }
 
-// Expert Recommendation 2: Largest-Triangle-Three-Buckets (LTTB) downsampling algorithm
-// Keeps visual peaks, troughs and inflection points 100% accurate while decimating 5,000+ points to ~200 points
-function downsamplePointsLTTB(data, threshold) {
-    if (!data || data.length <= threshold || threshold <= 2) return data;
-    const sampled = [];
-    let sampledIndex = 0;
-    const every = (data.length - 2) / (threshold - 2);
-    let a = 0;
-    sampled[sampledIndex++] = data[a];
-
-    for (let i = 0; i < threshold - 2; i++) {
-        let avgX = 0, avgY = 0;
-        let avgRangeStart = Math.floor((i + 1) * every) + 1;
-        let avgRangeEnd = Math.floor((i + 2) * every) + 1;
-        avgRangeEnd = avgRangeEnd < data.length ? avgRangeEnd : data.length;
-        const avgRangeLength = avgRangeEnd - avgRangeStart;
-
-        for (let j = avgRangeStart; j < avgRangeEnd; j++) {
-            avgX += j;
-            avgY += (data[j].pnl || 0);
-        }
-        avgX /= (avgRangeLength || 1);
-        avgY /= (avgRangeLength || 1);
-
-        let rangeOffs = Math.floor(i * every) + 1;
-        let rangeTo = Math.floor((i + 1) * every) + 1;
-        const pointAX = a;
-        const pointAY = (data[a].pnl || 0);
-        let maxArea = -1;
-        let maxAreaPoint = rangeOffs;
-
-        for (let j = rangeOffs; j < rangeTo; j++) {
-            const area = Math.abs((pointAX - avgX) * ((data[j].pnl || 0) - pointAY) - (pointAX - j) * (avgY - pointAY)) * 0.5;
-            if (area > maxArea) {
-                maxArea = area;
-                maxAreaPoint = j;
-            }
-        }
-        sampled[sampledIndex++] = data[maxAreaPoint];
-        a = maxAreaPoint;
-    }
-    sampled[sampledIndex++] = data[data.length - 1];
-    return sampled;
+// Helper: Convert "HH:MM" to minutes from midnight
+function _pnlTimeToMin(t) {
+    if (!t || typeof t !== "string") return 0;
+    const parts = t.split(":").map(Number);
+    return (parts[0] || 0) * 60 + (parts[1] || 0);
 }
 
-let _pnlCanvasRafId = null;
+// Helper: Calculate nice tick intervals for axes
+function _getNiceTickSteps(minVal, maxVal, maxTicks = 6) {
+    let rawRange = maxVal - minVal;
+    if (rawRange <= 0) rawRange = 100;
+    const rawStep = rawRange / Math.max(1, maxTicks);
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+    let step;
+    const residual = rawStep / mag;
+    if (residual <= 1.5) step = 1 * mag;
+    else if (residual <= 3.5) step = 2 * mag;
+    else if (residual <= 7.5) step = 5 * mag;
+    else step = 10 * mag;
+
+    const start = Math.floor(minVal / step) * step;
+    const end = Math.ceil(maxVal / step) * step;
+    const ticks = [];
+    for (let v = start; v <= end + step * 0.01; v += step) {
+        ticks.push(Math.round(v * 100) / 100);
+    }
+    return { ticks, step, min: start, max: end };
+}
 
 function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     const canvas = document.getElementById("straddlePnlCanvas");
@@ -3004,21 +3049,24 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     }
     if (!H || H < 100) H = 420;
 
-    canvas.style.width = W + "px";
-    canvas.style.height = H + "px";
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    ctx.scale(dpr, dpr);
+    // Resize canvas buffer only when physical dimensions change
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+        canvas.style.width = W + "px";
+        canvas.style.height = H + "px";
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(H * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const hasUnderlying = Boolean(pnlData && pnlData.underlying_points && pnlData.underlying_points.length > 0 && pnlData.underlying && pnlData.underlying !== "None");
-    const padLeft = 75;
-    const padRight = hasUnderlying ? 75 : 35;
-    const padTop = 38;
-    const padBottom = 45;
+    const padLeft = 78;
+    const padRight = hasUnderlying ? 78 : 38;
+    const padTop = 42;
+    const padBottom = 46;
     const chartW = W - padLeft - padRight;
     const chartH = H - padTop - padBottom;
 
-    // Clear background with soft gradient
+    // Clear background with rich dark institutional gradient
     const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
     bgGrad.addColorStop(0, "#080c14");
     bgGrad.addColorStop(1, "#0a101d");
@@ -3026,50 +3074,65 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     ctx.fillRect(0, 0, W, H);
 
     let rawPoints = pnlData.points || [];
-    let points = (rawPoints.length > 250) ? downsamplePointsLTTB(rawPoints, 200) : rawPoints;
+    let points = rawPoints;
 
     if (points.length === 0) {
-        // Build fallback intraday points so the chart structure is always visible
-        const nowHM = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
         const curTot = pnlData.total_pnl || 0.0;
         points = [
             { timestamp: "09:15", pnl: 0.0, open: 0.0, high: 0.0, low: 0.0, close: 0.0 },
-            { timestamp: (nowHM >= "09:15" && nowHM <= "15:30") ? nowHM : "15:30", pnl: curTot, open: curTot, high: curTot, low: 0.0, close: curTot }
+            { timestamp: "15:30", pnl: curTot, open: curTot, high: curTot, low: 0.0, close: curTot }
         ];
     } else if (points.length === 1) {
-        // If only 1 point, clone it across session to ensure line renders cleanly
         const p0 = points[0];
-        const nowHM = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-        const endTimestamp = (nowHM >= "09:15" && nowHM <= "15:30") ? nowHM : "15:30";
         points = [
             { ...p0 },
-            { ...p0, timestamp: (p0.timestamp !== endTimestamp ? endTimestamp : "15:30") }
+            { ...p0, timestamp: "15:30" }
         ];
     }
 
-    // Determine Y-axis bounds with breathing room for P&L
-    let maxVal = Math.max(200, (pnlData.max_pnl || 0) * 1.15);
-    let minVal = Math.min(-200, (pnlData.min_pnl || 0) * 1.15);
-    const range = Math.max(100, maxVal - minVal);
+    // Master Timeline bounds
+    const sessionStartMin = _pnlTimeToMin(points[0].timestamp);
+    const sessionEndMin = _pnlTimeToMin(points[points.length - 1].timestamp);
+    const sessionSpan = Math.max(1, sessionEndMin - sessionStartMin);
 
-    const getY = (val) => padTop + chartH - ((val - minVal) / range) * chartH;
+    const getXByTime = (tStr) => {
+        const tMin = _pnlTimeToMin(tStr);
+        const ratio = Math.max(0, Math.min(1, (tMin - sessionStartMin) / sessionSpan));
+        return padLeft + ratio * chartW;
+    };
+
     const getX = (idx) => padLeft + (idx / Math.max(1, points.length - 1)) * chartW;
 
+    // Determine Y-axis bounds with nice integer intervals for P&L
+    let rawMax = Math.max(100, (pnlData.max_pnl || 0) * 1.15);
+    let rawMin = Math.min(-100, (pnlData.min_pnl || 0) * 1.15);
+    if (rawMax - rawMin < 100) {
+        rawMax = Math.max(rawMax, 100);
+        rawMin = Math.min(rawMin, -100);
+    }
+    const yTickObj = _getNiceTickSteps(rawMin, rawMax, 6);
+    const yMin = yTickObj.min;
+    const yMax = yTickObj.max;
+    const yRange = Math.max(1, yMax - yMin);
+
+    const getY = (val) => padTop + chartH - ((val - yMin) / yRange) * chartH;
+
     // Determine Y-axis bounds for Underlying Spot if active
-    let undMin = 0, undMax = 0, undRange = 1;
+    let undMin = 0, undMax = 0, undRange = 1, undTickObj = null;
     let getUndY = (val) => padTop + chartH / 2;
     if (hasUnderlying) {
         const undPrices = pnlData.underlying_points.map(u => Number(u.price || u.close || 0)).filter(p => p > 0);
         if (undPrices.length > 0) {
-            undMin = Math.min(...undPrices);
-            undMax = Math.max(...undPrices);
-            if (undMin === undMax) {
-                undMin = undMin * 0.995;
-                undMax = undMax * 1.005;
+            let uMinRaw = Math.min(...undPrices);
+            let uMaxRaw = Math.max(...undPrices);
+            if (uMinRaw === uMaxRaw) {
+                uMinRaw *= 0.995;
+                uMaxRaw *= 1.005;
             }
-            const buf = (undMax - undMin) * 0.12;
-            undMin -= buf;
-            undMax += buf;
+            const buf = (uMaxRaw - uMinRaw) * 0.12;
+            undTickObj = _getNiceTickSteps(uMinRaw - buf, uMaxRaw + buf, 6);
+            undMin = undTickObj.min;
+            undMax = undTickObj.max;
             undRange = Math.max(1, undMax - undMin);
             getUndY = (price) => padTop + chartH - ((price - undMin) / undRange) * chartH;
         }
@@ -3082,35 +3145,37 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     ctx.font = "10.5px monospace";
     ctx.textAlign = "right";
 
-    const ySteps = 6;
-    for (let i = 0; i <= ySteps; i++) {
-        const val = minVal + (i / ySteps) * range;
+    yTickObj.ticks.forEach(val => {
         const y = getY(val);
         ctx.beginPath();
         ctx.moveTo(padLeft, y);
         ctx.lineTo(W - padRight, y);
         ctx.stroke();
-        const formattedVal = (val >= 0 ? "+₹ " : "-₹ ") + Math.abs(Math.round(val)).toLocaleString("en-IN");
+
+        let formattedVal = "";
+        if (val === 0) formattedVal = "₹ 0";
+        else formattedVal = (val > 0 ? "+₹ " : "-₹ ") + Math.abs(Math.round(val)).toLocaleString("en-IN");
         ctx.fillText(formattedVal, padLeft - 8, y + 3.5);
-    }
+    });
 
     // 1b. Draw Right Y-axis labels for Underlying Spot if active
-    if (hasUnderlying && undRange > 1) {
+    if (hasUnderlying && undTickObj && undTickObj.ticks) {
         ctx.fillStyle = "#38bdf8";
         ctx.font = "bold 10px monospace";
         ctx.textAlign = "left";
-        for (let i = 0; i <= ySteps; i++) {
-            const uVal = undMin + (i / ySteps) * undRange;
-            const uy = padTop + chartH - (i / ySteps) * chartH;
-            ctx.fillText(Math.round(uVal).toLocaleString("en-IN"), W - padRight + 8, uy + 3.5);
-        }
+        undTickObj.ticks.forEach(uVal => {
+            const uy = getUndY(uVal);
+            if (uy >= padTop - 5 && uy <= padTop + chartH + 5) {
+                ctx.fillText(Math.round(uVal).toLocaleString("en-IN"), W - padRight + 8, uy + 3.5);
+            }
+        });
     }
 
     // 2. Draw Zero Baseline Line
     const zeroY = getY(0);
     ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+    ctx.lineWidth = 1.3;
     ctx.beginPath();
     ctx.moveTo(padLeft, zeroY);
     ctx.lineTo(W - padRight, zeroY);
@@ -3119,61 +3184,85 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
 
     // 3. Draw Max P&L Reference (Green Dashed)
     const maxPnl = pnlData.max_pnl !== undefined ? pnlData.max_pnl : 0;
-    const maxY = getY(maxPnl);
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = "rgba(16, 185, 129, 0.5)";
-    ctx.beginPath();
-    ctx.moveTo(padLeft, maxY);
-    ctx.lineTo(W - padRight, maxY);
-    ctx.stroke();
+    if (maxPnl > 0) {
+        const maxY = getY(maxPnl);
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = "rgba(16, 185, 129, 0.55)";
+        ctx.beginPath();
+        ctx.moveTo(padLeft, maxY);
+        ctx.lineTo(W - padRight, maxY);
+        ctx.stroke();
+        ctx.setLineDash([]);
 
-    // Max PnL badge tag
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#10b981";
-    ctx.beginPath();
-    ctx.roundRect(padLeft, Math.max(padTop - 12, maxY - 16), 85, 16, 4);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 9px monospace";
-    ctx.textAlign = "center";
-    const maxPrefix = maxPnl >= 0 ? "+₹" : "-₹";
-    ctx.fillText(`Max ${maxPrefix}${Math.abs(Math.round(maxPnl))}`, padLeft + 42.5, Math.max(padTop - 12, maxY - 16) + 11.5);
+        ctx.fillStyle = "#10b981";
+        const badgeY = Math.max(padTop - 14, maxY - 17);
+        if (ctx.roundRect) ctx.roundRect(padLeft, badgeY, 88, 16, 4);
+        else ctx.rect(padLeft, badgeY, 88, 16);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 9px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`Max +₹${Math.abs(Math.round(maxPnl))}`, padLeft + 44, badgeY + 11.5);
+    }
 
     // 4. Draw Min P&L Reference (Red Dashed)
     const minPnl = pnlData.min_pnl !== undefined ? pnlData.min_pnl : 0;
-    const minY = getY(minPnl);
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = "rgba(244, 63, 94, 0.5)";
-    ctx.beginPath();
-    ctx.moveTo(padLeft, minY);
-    ctx.lineTo(W - padRight, minY);
-    ctx.stroke();
+    if (minPnl < 0) {
+        const minY = getY(minPnl);
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = "rgba(244, 63, 94, 0.55)";
+        ctx.beginPath();
+        ctx.moveTo(padLeft, minY);
+        ctx.lineTo(W - padRight, minY);
+        ctx.stroke();
+        ctx.setLineDash([]);
 
-    // Min PnL badge tag
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#f43f5e";
-    ctx.beginPath();
-    ctx.roundRect(padLeft, Math.min(H - padBottom - 4, minY + 2), 85, 16, 4);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 9px monospace";
-    ctx.textAlign = "center";
-    const minPrefix = minPnl >= 0 ? "+₹" : "-₹";
-    ctx.fillText(`Min ${minPrefix}${Math.abs(Math.round(minPnl))}`, padLeft + 42.5, Math.min(H - padBottom - 4, minY + 2) + 11.5);
+        ctx.fillStyle = "#f43f5e";
+        const badgeMinY = Math.min(H - padBottom - 2, minY + 2);
+        if (ctx.roundRect) ctx.roundRect(padLeft, badgeMinY, 88, 16, 4);
+        else ctx.rect(padLeft, badgeMinY, 88, 16);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 9px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`Min -₹${Math.abs(Math.round(minPnl))}`, padLeft + 44, badgeMinY + 11.5);
+    }
 
-    // 5. Draw Curve / Candles
+    // 5. Draw Curve / Candlesticks
     if (chartType === "candle") {
-        const barW = Math.max(3, (chartW / points.length) * 0.7);
-        points.forEach((pt, idx) => {
-            const x = getX(idx);
-            const openY = getY(pt.open || pt.pnl);
-            const closeY = getY(pt.close || pt.pnl);
-            const highY = getY(pt.high || pt.pnl);
-            const lowY = getY(pt.low || pt.pnl);
-            const isUp = (pt.close || pt.pnl) >= (pt.open || pt.pnl);
+        // Aggregate 1-minute points into 5-minute OHLC candlesticks
+        const candleBuckets = [];
+        const bucketSize = 5;
+        for (let i = 0; i < points.length; i += bucketSize) {
+            const slice = points.slice(i, i + bucketSize);
+            if (slice.length > 0) {
+                const cOpen = slice[0].open || slice[0].pnl;
+                const cClose = slice[slice.length - 1].close || slice[slice.length - 1].pnl;
+                const cHigh = Math.max(...slice.map(s => s.high !== undefined ? s.high : s.pnl));
+                const cLow = Math.min(...slice.map(s => s.low !== undefined ? s.low : s.pnl));
+                candleBuckets.push({
+                    timestamp: slice[0].timestamp,
+                    open: cOpen,
+                    high: cHigh,
+                    low: cLow,
+                    close: cClose,
+                    pnl: cClose
+                });
+            }
+        }
+
+        const barW = Math.max(3.5, Math.min(18, (chartW / candleBuckets.length) * 0.72));
+        candleBuckets.forEach((cd) => {
+            const x = getXByTime(cd.timestamp);
+            const openY = getY(cd.open);
+            const closeY = getY(cd.close);
+            const highY = getY(cd.high);
+            const lowY = getY(cd.low);
+            const isUp = cd.close >= cd.open;
 
             ctx.strokeStyle = isUp ? "#10b981" : "#f43f5e";
             ctx.fillStyle = isUp ? "#10b981" : "#f43f5e";
+            ctx.lineWidth = 1.2;
 
             // Wick
             ctx.beginPath();
@@ -3181,13 +3270,13 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
             ctx.lineTo(x, lowY);
             ctx.stroke();
 
-            // Body
+            // Candle Body
             const top = Math.min(openY, closeY);
-            const h = Math.max(2, Math.abs(closeY - openY));
-            ctx.fillRect(x - barW / 2, top, barW, h);
+            const bodyH = Math.max(2, Math.abs(closeY - openY));
+            ctx.fillRect(x - barW / 2, top, barW, bodyH);
         });
     } else {
-        // Line Mode with Spline & Area Glow Fill
+        // Line Mode with Spline & Zero-Split Area Glow
         // Top Fill (above Zero)
         ctx.save();
         ctx.beginPath();
@@ -3205,7 +3294,7 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.lineTo(getX(0), zeroY);
         ctx.closePath();
         const topGrad = ctx.createLinearGradient(0, padTop, 0, zeroY);
-        topGrad.addColorStop(0, "rgba(16, 185, 129, 0.28)");
+        topGrad.addColorStop(0, "rgba(16, 185, 129, 0.32)");
         topGrad.addColorStop(1, "rgba(16, 185, 129, 0.02)");
         ctx.fillStyle = topGrad;
         ctx.fill();
@@ -3229,12 +3318,12 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.closePath();
         const btmGrad = ctx.createLinearGradient(0, zeroY, 0, padTop + chartH);
         btmGrad.addColorStop(0, "rgba(244, 63, 94, 0.02)");
-        btmGrad.addColorStop(1, "rgba(244, 63, 94, 0.28)");
+        btmGrad.addColorStop(1, "rgba(244, 63, 94, 0.32)");
         ctx.fillStyle = btmGrad;
         ctx.fill();
         ctx.restore();
 
-        // Stroke line with zero-crossing color transition (Green above 0, Red below 0)
+        // Stroke line with dynamic zero-crossing color transition
         ctx.beginPath();
         points.forEach((pt, idx) => {
             const x = getX(idx);
@@ -3252,37 +3341,35 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.strokeStyle = strokeGrad;
         ctx.stroke();
 
-        // Draw point dots
-        points.forEach((pt, idx) => {
-            if (points.length <= 40 || idx === 0 || idx === points.length - 1) {
-                const x = getX(idx);
-                const y = getY(pt.pnl);
-                ctx.beginPath();
-                ctx.arc(x, y, (idx === points.length - 1 ? 4.5 : 3), 0, Math.PI * 2);
-                ctx.fillStyle = pt.pnl >= 0 ? "#10b981" : "#f43f5e";
-                ctx.fill();
-                ctx.lineWidth = 1.5;
-                ctx.strokeStyle = "#ffffff";
-                ctx.stroke();
-            }
-        });
+        // Highlight endpoint dot
+        if (points.length > 0) {
+            const lastIdx = points.length - 1;
+            const lx = getX(lastIdx);
+            const ly = getY(points[lastIdx].pnl);
+            ctx.beginPath();
+            ctx.arc(lx, ly, 4.5, 0, Math.PI * 2);
+            ctx.fillStyle = points[lastIdx].pnl >= 0 ? "#10b981" : "#f43f5e";
+            ctx.fill();
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = "#ffffff";
+            ctx.stroke();
+        }
     }
 
-    // 5b. Draw Underlying Spot Intraday Price Curve (Electric Cyan Line Overlay)
+    // 5b. Draw Underlying Spot Intraday Curve (Electric Cyan Line Overlay with exact timestamp alignment)
     if (hasUnderlying && pnlData.underlying_points && pnlData.underlying_points.length > 0) {
         const uPts = pnlData.underlying_points;
         ctx.save();
         ctx.beginPath();
         uPts.forEach((uPt, uIdx) => {
-            const uRatio = uIdx / Math.max(1, uPts.length - 1);
-            const ux = padLeft + uRatio * chartW;
+            const ux = getXByTime(uPt.time);
             const uy = getUndY(Number(uPt.price || uPt.close || 0));
             if (uIdx === 0) ctx.moveTo(ux, uy);
             else ctx.lineTo(ux, uy);
         });
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#38bdf8";
-        ctx.shadowColor = "rgba(56, 189, 248, 0.4)";
+        ctx.shadowColor = "rgba(56, 189, 248, 0.45)";
         ctx.shadowBlur = 6;
         ctx.stroke();
         ctx.restore();
@@ -3292,7 +3379,7 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
     ctx.textAlign = "left";
     ctx.font = "bold 11px Inter, sans-serif";
     // Strategy P&L Chip
-    ctx.fillStyle = "#10b981";
+    ctx.fillStyle = (pnlData.total_pnl || 0) >= 0 ? "#10b981" : "#f43f5e";
     ctx.fillRect(padLeft + 6, padTop - 22, 10, 10);
     ctx.fillStyle = "#cbd5e1";
     ctx.fillText("Strategy P&L (₹)", padLeft + 22, padTop - 13);
@@ -3304,23 +3391,38 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.strokeStyle = "#38bdf8";
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(padLeft + 140, padTop - 17);
-        ctx.lineTo(padLeft + 160, padTop - 17);
+        ctx.moveTo(padLeft + 145, padTop - 17);
+        ctx.lineTo(padLeft + 165, padTop - 17);
         ctx.stroke();
         ctx.fillStyle = "#38bdf8";
-        ctx.fillText(`⚡ ${uSym} Intraday Spot (₹ ${Number(curSpot).toLocaleString('en-IN', { minimumFractionDigits: 1 })})`, padLeft + 166, padTop - 13);
+        ctx.fillText(`⚡ ${uSym} Intraday Spot (₹ ${Number(curSpot).toLocaleString('en-IN', { minimumFractionDigits: 1 })})`, padLeft + 172, padTop - 13);
     }
 
-    // 6. X-axis timestamps
+    // 6. X-axis Clean Timestamps (Round half-hour and hour ticks)
     ctx.fillStyle = "#64748b";
-    ctx.font = "10.5px monospace";
+    ctx.font = "10px monospace";
     ctx.textAlign = "center";
-    const xInterval = Math.max(1, Math.floor(points.length / 8));
-    for (let i = 0; i < points.length; i += xInterval) {
-        const x = getX(i);
-        const timeStr = points[i].timestamp || "";
-        ctx.fillText(timeStr, x, H - 14);
-    }
+
+    const drawnXTimes = new Set();
+    points.forEach((pt, idx) => {
+        const tm = pt.timestamp || "";
+        const isStandardMark = tm.endsWith(":00") || tm.endsWith(":30") || tm === "09:15" || tm === "15:30" || idx === 0 || idx === points.length - 1;
+        if (isStandardMark) {
+            const x = getX(idx);
+            // Avoid overlapping text within 45px
+            const isTooClose = Array.from(drawnXTimes).some(dx => Math.abs(dx - x) < 45);
+            if (!isTooClose) {
+                drawnXTimes.add(x);
+                // Draw tiny tick marker
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+                ctx.beginPath();
+                ctx.moveTo(x, padTop + chartH);
+                ctx.lineTo(x, padTop + chartH + 4);
+                ctx.stroke();
+                ctx.fillText(tm, x, H - 16);
+            }
+        }
+    });
 
     // 7. Interactive Crosshair HUD Rendering
     if (mousePos && mousePos.active && points.length > 0) {
@@ -3345,7 +3447,7 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Snapping Glowing Circle
+        // Snapping Circle
         ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
         ctx.beginPath();
         ctx.arc(ptX, ptY, 7, 0, Math.PI * 2);
@@ -3364,20 +3466,22 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         ctx.strokeStyle = "#38bdf8";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.roundRect(ptX - 25, H - 28, 50, 18, 4);
+        if (ctx.roundRect) ctx.roundRect(ptX - 26, H - 32, 52, 18, 4);
+        else ctx.rect(ptX - 26, H - 32, 52, 18);
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 10px monospace";
         ctx.textAlign = "center";
-        ctx.fillText(pt.timestamp, ptX, H - 15);
+        ctx.fillText(pt.timestamp, ptX, H - 19);
 
         // Side Left Y-Axis P&L Badge Pill
-        const yBadgeW = 80;
+        const yBadgeW = 82;
         const yBadgeH = 18;
         ctx.fillStyle = (pt.pnl >= 0) ? "#10b981" : "#f43f5e";
         ctx.beginPath();
-        ctx.roundRect(padLeft - yBadgeW - 6, ptY - yBadgeH / 2, yBadgeW, yBadgeH, 4);
+        if (ctx.roundRect) ctx.roundRect(padLeft - yBadgeW - 6, ptY - yBadgeH / 2, yBadgeW, yBadgeH, 4);
+        else ctx.rect(padLeft - yBadgeW - 6, ptY - yBadgeH / 2, yBadgeW, yBadgeH);
         ctx.fill();
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 10px monospace";
@@ -3388,33 +3492,44 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         // Side Right Y-Axis Underlying Badge Pill (if active)
         let currUndPrice = null;
         if (hasUnderlying && pnlData.underlying_points && pnlData.underlying_points.length > 0) {
-            const uIdx = Math.min(pnlData.underlying_points.length - 1, Math.max(0, Math.round((targetIdx / (points.length - 1)) * (pnlData.underlying_points.length - 1))));
-            const uPt = pnlData.underlying_points[uIdx];
-            if (uPt) {
-                currUndPrice = Number(uPt.price || uPt.close || 0);
+            const uPts = pnlData.underlying_points;
+            const targetMin = _pnlTimeToMin(pt.timestamp);
+            let closestU = uPts[0];
+            let minDiff = 99999;
+            for (let u of uPts) {
+                const diff = Math.abs(_pnlTimeToMin(u.time) - targetMin);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestU = u;
+                }
+            }
+            if (closestU) {
+                currUndPrice = Number(closestU.price || closestU.close || 0);
                 const uY = getUndY(currUndPrice);
                 ctx.fillStyle = "#0284c7";
                 ctx.beginPath();
-                ctx.roundRect(W - padRight + 6, uY - yBadgeH / 2, yBadgeW - 10, yBadgeH, 4);
+                if (ctx.roundRect) ctx.roundRect(W - padRight + 6, uY - yBadgeH / 2, yBadgeW - 8, yBadgeH, 4);
+                else ctx.rect(W - padRight + 6, uY - yBadgeH / 2, yBadgeW - 8, yBadgeH);
                 ctx.fill();
                 ctx.fillStyle = "#ffffff";
                 ctx.font = "bold 10px monospace";
                 ctx.textAlign = "center";
-                ctx.fillText(`₹ ${Math.round(currUndPrice).toLocaleString('en-IN')}`, W - padRight + 6 + (yBadgeW - 10) / 2, uY + 3.5);
+                ctx.fillText(`₹ ${Math.round(currUndPrice).toLocaleString('en-IN')}`, W - padRight + 6 + (yBadgeW - 8) / 2, uY + 3.5);
             }
         }
 
         // Floating Glassmorphism Tooltip Card
-        const tipW = hasUnderlying ? 195 : 165;
-        const tipH = hasUnderlying ? 86 : 68;
+        const tipW = hasUnderlying ? 200 : 170;
+        const tipH = hasUnderlying ? 90 : 70;
         let tipX = (ptX > W - padRight - tipW - 20) ? (ptX - tipW - 14) : (ptX + 14);
         let tipY = Math.max(padTop + 8, Math.min(padTop + chartH - tipH - 8, ptY - tipH / 2));
 
-        ctx.fillStyle = "rgba(13, 21, 39, 0.94)";
+        ctx.fillStyle = "rgba(13, 21, 39, 0.95)";
         ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.roundRect(tipX, tipY, tipW, tipH, 8);
+        if (ctx.roundRect) ctx.roundRect(tipX, tipY, tipW, tipH, 8);
+        else ctx.rect(tipX, tipY, tipW, tipH);
         ctx.fill();
         ctx.stroke();
 
@@ -3429,17 +3544,16 @@ function drawPnlCanvas(pnlData, chartType, mousePos = null) {
         const tipPnlFormatted = (pt.pnl >= 0 ? "+₹ " : "-₹ ") + Math.abs(pt.pnl).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         ctx.fillText(`P&L: ${tipPnlFormatted}`, tipX + 10, tipY + 38);
 
+        const drawdownVal = Math.max(0, ((pnlData.max_pnl || 0) - pt.pnl));
         if (hasUnderlying && currUndPrice !== null) {
             ctx.font = "bold 11px monospace";
             ctx.fillStyle = "#38bdf8";
             ctx.fillText(`Spot: ₹ ${currUndPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, tipX + 10, tipY + 56);
 
-            const drawdownVal = Math.max(0, (pnlData.max_pnl - pt.pnl));
             ctx.font = "10px Inter, sans-serif";
             ctx.fillStyle = "#94a3b8";
             ctx.fillText(`Drawdown: -₹ ${drawdownVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`, tipX + 10, tipY + 74);
         } else {
-            const drawdownVal = Math.max(0, (pnlData.max_pnl - pt.pnl));
             ctx.font = "10.5px Inter, sans-serif";
             ctx.fillStyle = "#cbd5e1";
             ctx.fillText(`Drawdown: -₹ ${drawdownVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`, tipX + 10, tipY + 56);
@@ -3455,12 +3569,14 @@ function setupPnlCanvasEvents() {
         const pnlData = window._straddleState.pnlDataCache;
         if (!pnlData || !pnlData.points || pnlData.points.length === 0) return;
 
+        window._straddleState._pnlHoverActive = true;
+
         const rect = canvas.getBoundingClientRect();
         const mouseX = clientX - rect.left;
         const mouseY = clientY - rect.top;
         const hasUnderlying = Boolean(pnlData && pnlData.underlying_points && pnlData.underlying_points.length > 0 && pnlData.underlying && pnlData.underlying !== "None");
-        const padLeft = 75;
-        const padRight = hasUnderlying ? 75 : 35;
+        const padLeft = 78;
+        const padRight = hasUnderlying ? 78 : 38;
         const chartW = rect.width - padLeft - padRight;
 
         if (mouseX < padLeft || mouseX > rect.width - padRight) {
@@ -3486,21 +3602,34 @@ function setupPnlCanvasEvents() {
             const color = pt.pnl >= 0 ? "#10b981" : "#f43f5e";
             let spotText = "";
             if (hasUnderlying && pnlData.underlying_points && pnlData.underlying_points.length > 0) {
-                const uIdx = Math.min(pnlData.underlying_points.length - 1, Math.max(0, Math.round((idx / (pnlData.points.length - 1)) * (pnlData.underlying_points.length - 1))));
-                const uPt = pnlData.underlying_points[uIdx];
-                if (uPt) {
-                    spotText = ` | Spot: <b style="color:#38bdf8;">₹ ${Number(uPt.price || uPt.close || 0).toLocaleString('en-IN', { minimumFractionDigits: 1 })}</b>`;
+                const targetMin = _pnlTimeToMin(pt.timestamp);
+                let closestU = pnlData.underlying_points[0];
+                let minDiff = 99999;
+                for (let u of pnlData.underlying_points) {
+                    const diff = Math.abs(_pnlTimeToMin(u.time) - targetMin);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestU = u;
+                    }
+                }
+                if (closestU) {
+                    spotText = ` | Spot: <b style="color:#38bdf8;">₹ ${Number(closestU.price || closestU.close || 0).toLocaleString('en-IN', { minimumFractionDigits: 1 })}</b>`;
                 }
             }
             cursorLabel.innerHTML = `Time: <b style="color:#ffffff;">${pt.timestamp}</b> | P&L: <b style="color:${color};">${pnlFormatted}</b>${spotText}`;
         }
     };
 
+    canvas.addEventListener("mouseenter", () => {
+        window._straddleState._pnlHoverActive = true;
+    });
+
     canvas.addEventListener("mousemove", (e) => {
         handlePointerMove(e.clientX, e.clientY);
     });
 
     canvas.addEventListener("mouseleave", () => {
+        window._straddleState._pnlHoverActive = false;
         const pnlData = window._straddleState.pnlDataCache;
         if (pnlData) {
             drawPnlCanvas(pnlData, window._straddleState.pnlChartType || "line", null);
@@ -3516,6 +3645,7 @@ function setupPnlCanvasEvents() {
     }, { passive: true });
 
     canvas.addEventListener("touchend", () => {
+        window._straddleState._pnlHoverActive = false;
         const pnlData = window._straddleState.pnlDataCache;
         if (pnlData) {
             drawPnlCanvas(pnlData, window._straddleState.pnlChartType || "line", null);
@@ -3530,26 +3660,131 @@ function exportStraddlePnlData() {
         return;
     }
 
-    let csv = "Timestamp,P&L (INR),Open,High,Low,Close\n";
+    const stratName = data.strategy_name || "portfolio";
+    const dateStr = data.date || new Date().toISOString().split("T")[0];
+
+    let csv = `Date,Time,Strategy,P&L (INR),Open,High,Low,Close,Underlying Spot\n`;
     data.points.forEach(p => {
-        csv += `${p.timestamp},${p.pnl},${p.open || p.pnl},${p.high || p.pnl},${p.low || p.pnl},${p.close || p.pnl}\n`;
+        let spotVal = "";
+        if (data.underlying_points && data.underlying_points.length > 0) {
+            const pMin = _pnlTimeToMin(p.timestamp);
+            let closestU = data.underlying_points[0];
+            let minDiff = 99999;
+            for (let u of data.underlying_points) {
+                const diff = Math.abs(_pnlTimeToMin(u.time) - pMin);
+                if (diff < minDiff) { minDiff = diff; closestU = u; }
+            }
+            if (closestU) spotVal = closestU.price || closestU.close || "";
+        }
+        csv += `${dateStr},${p.timestamp},"${stratName}",${p.pnl},${p.open || p.pnl},${p.high || p.pnl},${p.low || p.pnl},${p.close || p.pnl},${spotVal}\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `pnl_data_${new Date().toISOString().split("T")[0]}.csv`;
+    const sanitized = stratName.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase();
+    link.download = `pnl_${sanitized}_${dateStr}.csv`;
     link.click();
 }
 
 function captureStraddlePnlScreenshot() {
     const canvas = document.getElementById("straddlePnlCanvas");
     if (!canvas) return;
-    const url = canvas.toDataURL("image/png");
+    const pnlData = window._straddleState.pnlDataCache || {};
+
+    const dpr = window.devicePixelRatio || 1;
+    const cw = canvas.width / dpr;
+    const ch = canvas.height / dpr;
+
+    // Create high-res offscreen canvas with branded header & summary strip
+    const outCanvas = document.createElement("canvas");
+    const headerH = 68;
+    const footerH = 64;
+    outCanvas.width = cw * dpr;
+    outCanvas.height = (headerH + ch + footerH) * dpr;
+    const outCtx = outCanvas.getContext("2d");
+    outCtx.scale(dpr, dpr);
+
+    // Background
+    outCtx.fillStyle = "#070a12";
+    outCtx.fillRect(0, 0, cw, headerH + ch + footerH);
+
+    // Header Card
+    outCtx.fillStyle = "#0c101d";
+    outCtx.fillRect(0, 0, cw, headerH);
+    outCtx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    outCtx.beginPath();
+    outCtx.moveTo(0, headerH);
+    outCtx.lineTo(cw, headerH);
+    outCtx.stroke();
+
+    outCtx.font = "bold 15px Inter, sans-serif";
+    outCtx.fillStyle = "#f8fafc";
+    outCtx.textAlign = "left";
+    outCtx.fillText("⚡ STRADDLE PRO | P&L Analysis", 16, 28);
+
+    outCtx.font = "12px Inter, sans-serif";
+    outCtx.fillStyle = "#94a3b8";
+    outCtx.fillText(`${pnlData.strategy_name || 'Portfolio'} • ${pnlData.date || new Date().toISOString().split('T')[0]}`, 16, 48);
+
+    const netTot = pnlData.total_pnl || 0.0;
+    const netFormatted = (netTot >= 0 ? "+₹ " : "-₹ ") + Math.abs(netTot).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    outCtx.textAlign = "right";
+    outCtx.font = "bold 16px monospace";
+    outCtx.fillStyle = netTot >= 0 ? "#10b981" : "#f43f5e";
+    outCtx.fillText(`Net P&L: ${netFormatted}`, cw - 16, 38);
+
+    // Draw main chart canvas
+    outCtx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, headerH, cw, ch);
+
+    // Footer summary card
+    outCtx.fillStyle = "#0a0e1a";
+    outCtx.fillRect(0, headerH + ch, cw, footerH);
+    outCtx.beginPath();
+    outCtx.moveTo(0, headerH + ch);
+    outCtx.lineTo(cw, headerH + ch);
+    outCtx.stroke();
+
+    const maxP = pnlData.max_pnl || 0.0;
+    const minP = pnlData.min_pnl || 0.0;
+    const dd = pnlData.max_drawdown || 0.0;
+    const kept = pnlData.profit_kept || "0.0%";
+
+    outCtx.textAlign = "left";
+    outCtx.font = "11px Inter, sans-serif";
+    outCtx.fillStyle = "#94a3b8";
+    outCtx.fillText("Max Profit:", 20, headerH + ch + 24);
+    outCtx.font = "bold 12px monospace";
+    outCtx.fillStyle = "#10b981";
+    outCtx.fillText(`+₹${Math.abs(maxP).toLocaleString('en-IN')}`, 20, headerH + ch + 44);
+
+    outCtx.font = "11px Inter, sans-serif";
+    outCtx.fillStyle = "#94a3b8";
+    outCtx.fillText("Max Loss:", 170, headerH + ch + 24);
+    outCtx.font = "bold 12px monospace";
+    outCtx.fillStyle = "#f43f5e";
+    outCtx.fillText(`-₹${Math.abs(minP).toLocaleString('en-IN')}`, 170, headerH + ch + 44);
+
+    outCtx.font = "11px Inter, sans-serif";
+    outCtx.fillStyle = "#94a3b8";
+    outCtx.fillText("Max Drawdown:", 320, headerH + ch + 24);
+    outCtx.font = "bold 12px monospace";
+    outCtx.fillStyle = "#f59e0b";
+    outCtx.fillText(`₹${Math.abs(dd).toLocaleString('en-IN')}`, 320, headerH + ch + 44);
+
+    outCtx.font = "11px Inter, sans-serif";
+    outCtx.fillStyle = "#94a3b8";
+    outCtx.fillText("Profit Kept:", 470, headerH + ch + 24);
+    outCtx.font = "bold 12px monospace";
+    outCtx.fillStyle = "#06b6d4";
+    outCtx.fillText(`${kept}`, 470, headerH + ch + 44);
+
+    const url = outCanvas.toDataURL("image/png");
     const link = document.createElement("a");
     link.href = url;
-    link.download = `pnl_chart_${new Date().toISOString().split("T")[0]}.png`;
+    const sanitized = (pnlData.strategy_name || "pnl").replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase();
+    link.download = `pnl_chart_${sanitized}_${pnlData.date || 'today'}.png`;
     link.click();
 }
 
