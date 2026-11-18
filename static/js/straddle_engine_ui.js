@@ -11300,6 +11300,11 @@ function setOptionChainBasketMode(isMode) {
         thPe.style.width = isMode ? "136px" : "104px";
         thPe.className = "opt-action-col";
     }
+    const colgroup = document.getElementById("optChainColgroup");
+    if (colgroup && colgroup.children && colgroup.children.length >= 9) {
+        colgroup.children[0].style.width = isMode ? "136px" : "104px";
+        colgroup.children[8].style.width = isMode ? "136px" : "104px";
+    }
     if (thCeSuper) thCeSuper.setAttribute("colspan", "4");
     if (thPeSuper) thPeSuper.setAttribute("colspan", "4");
     if (botBar) botBar.style.display = isMode ? "flex" : "none";
@@ -11967,7 +11972,6 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                             </label>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#38bdf8 !important; border:1px solid rgba(56,189,248,0.4) !important;" title="Candlestick Chart: ${ceSym}" onclick="event.stopPropagation(); openActiveAssetChartModal('${ceSym}')">📈</button>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important;" title="Market Depth: ${ceSym}" onclick="event.stopPropagation(); window.openMarketDepthModal('${ceSym}', '${ceKey}', ${ceLtpNum}, '${und}', ${strike}, 'CE')">📑</button>
-                            <button type="button" class="chain-quick-trade-btn chain-btn-algo" title="Add ${ceSym} to Algo Strategy Builder" onclick="event.stopPropagation(); addOptionChainLegToStrategy(${strike}, 'CE', 'SELL', '${ceSym}', ${ceLtpNum})">⚡</button>
                         </div>
                     </td>
                 ` : `
@@ -11977,7 +11981,6 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                             <button type="button" class="chain-quick-trade-btn chain-btn-sell" title="Direct Trade: SELL ${ceSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${ceSym}', '${ceKey}', ${strike}, 'CE', 'SELL', ${ceLtpNum}, ${ceLot}, ${ceChg}, ${ceChgPct})">S</button>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#38bdf8 !important; border:1px solid rgba(56,189,248,0.4) !important;" title="Candlestick Chart: ${ceSym}" onclick="event.stopPropagation(); openActiveAssetChartModal('${ceSym}')">📈</button>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important;" title="Market Depth: ${ceSym}" onclick="event.stopPropagation(); window.openMarketDepthModal('${ceSym}', '${ceKey}', ${ceLtpNum}, '${und}', ${strike}, 'CE')">📑</button>
-                            <button type="button" class="chain-quick-trade-btn chain-btn-algo" title="Add ${ceSym} to Algo Strategy Builder" onclick="event.stopPropagation(); addOptionChainLegToStrategy(${strike}, 'CE', 'SELL', '${ceSym}', ${ceLtpNum})">⚡</button>
                         </div>
                     </td>
                 `;
@@ -11995,7 +11998,6 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                             </label>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#38bdf8 !important; border:1px solid rgba(56,189,248,0.4) !important;" title="Candlestick Chart: ${peSym}" onclick="event.stopPropagation(); openActiveAssetChartModal('${peSym}')">📈</button>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important;" title="Market Depth: ${peSym}" onclick="event.stopPropagation(); window.openMarketDepthModal('${peSym}', '${peKey}', ${peLtpNum}, '${und}', ${strike}, 'PE')">📑</button>
-                            <button type="button" class="chain-quick-trade-btn chain-btn-algo" title="Add ${peSym} to Algo Strategy Builder" onclick="event.stopPropagation(); addOptionChainLegToStrategy(${strike}, 'PE', 'SELL', '${peSym}', ${peLtpNum})">⚡</button>
                         </div>
                     </td>
                 ` : `
@@ -12005,7 +12007,6 @@ async function loadStraddleOptionChain(expiryMs, isBackgroundUpdate = false) {
                             <button type="button" class="chain-quick-trade-btn chain-btn-sell" title="Direct Trade: SELL ${peSym}" onclick="event.stopPropagation(); openStraddleDirectOrderModal('${peSym}', '${peKey}', ${strike}, 'PE', 'SELL', ${peLtpNum}, ${peLot}, ${peChg}, ${peChgPct})">S</button>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#38bdf8 !important; border:1px solid rgba(56,189,248,0.4) !important;" title="Candlestick Chart: ${peSym}" onclick="event.stopPropagation(); openActiveAssetChartModal('${peSym}')">📈</button>
                             <button type="button" class="chain-quick-trade-btn" style="background:#0f172a !important; color:#fbbf24 !important; border:1px solid rgba(251,191,36,0.4) !important;" title="Market Depth: ${peSym}" onclick="event.stopPropagation(); window.openMarketDepthModal('${peSym}', '${peKey}', ${peLtpNum}, '${und}', ${strike}, 'PE')">📑</button>
-                            <button type="button" class="chain-quick-trade-btn chain-btn-algo" title="Add ${peSym} to Algo Strategy Builder" onclick="event.stopPropagation(); addOptionChainLegToStrategy(${strike}, 'PE', 'SELL', '${peSym}', ${peLtpNum})">⚡</button>
                         </div>
                     </td>
                 `;
