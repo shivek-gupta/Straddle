@@ -12709,30 +12709,106 @@ async function submitStraddleDirectOrder() {
 // AUDIT LOGS MODAL
 // =========================================================================
 
-function openStraddleLogsModal() {
-    const modal = document.getElementById("straddleLogsModal");
-    if (!modal) return;
-    modal.style.display = "flex";
-    renderStraddleAuditLogs();
-}
-
-function closeStraddleLogsModal() {
-    const modal = document.getElementById("straddleLogsModal");
-    if (modal) modal.style.display = "none";
-}
-
-function downloadAuditLogsExcel() {
-    window.location.href = "/api/straddle/download_audit_logs";
-}
+// =========================================================================
+// STRADDLE ALGORITHMIC EXECUTION AUDIT LOGS CONTROLLER (INSTITUTIONAL GRADE)
+// =========================================================================
 
 window._straddleAuditLogsFilter = "all"; // "all" | "actual" | "paper" | "trades"
 window._straddleAuditSideFilter = "ALL"; // "ALL" | "BUY" | "SELL"
 window._straddleAuditLevelFilter = "ALL"; // "ALL" | "INFO" | "SUCCESS" | "INFO_SUCCESS" | "WARNING" | "ERROR"
 window._straddleAuditOptionFilter = "ALL"; // "ALL" | "CE" | "PE"
 window._straddleAuditRoleFilter = "ALL"; // "ALL" | "MAIN" | "HEDGE"
-window._straddleAuditTriggerFilter = "ALL"; // "ALL" | "TARGET" | "STOPLOSS"
+window._straddleAuditTriggerFilter = "ALL"; // "ALL" | "TARGET" | "STOPLOSS" | "REENTRY"
+window._straddleAuditStrategyFilter = "ALL"; // "ALL" | strategy_name
+window._straddleAuditAssetFilter = "ALL"; // "ALL" | asset_name
+window._straddleAuditSearchTerm = "";
+window._straddleAuditQuickMode = "all";
 window._straddleAuditFilterCollapsed = false;
+window._straddleAuditLiveStreamActive = true;
+window._auditLogsPollTimer = null;
 window._cachedAuditLogsList = [];
+
+function openStraddleLogsModal() {
+    const modal = document.getElementById("straddleLogsModal");
+    if (!modal) return;
+    modal.style.display = "flex";
+    _populateAuditStrategyOptions();
+    renderStraddleAuditLogs();
+    startAuditLiveStreamTimer();
+}
+window.openStraddleLogsModal = openStraddleLogsModal;
+
+function closeStraddleLogsModal() {
+    const modal = document.getElementById("straddleLogsModal");
+    if (modal) modal.style.display = "none";
+    stopAuditLiveStreamTimer();
+}
+window.closeStraddleLogsModal = closeStraddleLogsModal;
+
+function startAuditLiveStreamTimer() {
+    stopAuditLiveStreamTimer();
+    if (!window._straddleAuditLiveStreamActive) return;
+    window._auditLogsPollTimer = setInterval(() => {
+        const modal = document.getElementById("straddleLogsModal");
+        if (modal && modal.style.display === "flex") {
+            renderStraddleAuditLogs(true);
+        } else {
+            stopAuditLiveStreamTimer();
+        }
+    }, 2500);
+}
+
+function stopAuditLiveStreamTimer() {
+    if (window._auditLogsPollTimer) {
+        clearInterval(window._auditLogsPollTimer);
+        window._auditLogsPollTimer = null;
+    }
+}
+
+function toggleAuditLiveStream() {
+    window._straddleAuditLiveStreamActive = !window._straddleAuditLiveStreamActive;
+    const dot = document.getElementById("auditLiveStreamDot");
+    const txt = document.getElementById("auditLiveStreamText");
+    const btn = document.getElementById("btnToggleAuditLiveStream");
+
+    if (window._straddleAuditLiveStreamActive) {
+        if (dot) {
+            dot.style.background = "#10b981";
+            dot.style.boxShadow = "0 0 6px #10b981";
+        }
+        if (txt) txt.textContent = "LIVE: ON";
+        if (btn) {
+            btn.style.color = "#34d399";
+            btn.style.borderColor = "#10b981";
+            btn.style.background = "rgba(16,185,129,0.12)";
+        }
+        startAuditLiveStreamTimer();
+        renderStraddleAuditLogs(true);
+    } else {
+        if (dot) {
+            dot.style.background = "#64748b";
+            dot.style.boxShadow = "none";
+        }
+        if (txt) txt.textContent = "LIVE: PAUSED";
+        if (btn) {
+            btn.style.color = "#94a3b8";
+            btn.style.borderColor = "rgba(255,255,255,0.15)";
+            btn.style.background = "rgba(255,255,255,0.05)";
+        }
+        stopAuditLiveStreamTimer();
+    }
+}
+window.toggleAuditLiveStream = toggleAuditLiveStream;
+
+function downloadAuditLogsExcel() {
+    window.location.href = "/api/straddle/download_audit_logs?format=xlsx";
+}
+window.downloadAuditLogsExcel = downloadAuditLogsExcel;
+
+function downloadAuditLogsCsv() {
+    window.location.href = "/api/straddle/download_audit_logs?format=csv";
+}
+window.downloadAuditLogsCsv = downloadAuditLogsCsv;
 
 function toggleAuditFilterBar() {
     const pane = document.getElementById("auditCollapsibleFilterPane");
@@ -12749,16 +12825,94 @@ window.toggleAuditFilterBar = toggleAuditFilterBar;
 
 function _updateAuditSummaryLabel() {
     const label = document.getElementById("auditFilterSummaryLabel");
+    const resetBtn = document.getElementById("btnResetAuditFilters");
     if (!label) return;
     const parts = [];
+    if (window._straddleAuditStrategyFilter !== "ALL") parts.push(`Strat: ${window._straddleAuditStrategyFilter}`);
+    if (window._straddleAuditAssetFilter !== "ALL") parts.push(`Asset: ${window._straddleAuditAssetFilter}`);
     if (window._straddleAuditLevelFilter !== "ALL") parts.push(`Level: ${window._straddleAuditLevelFilter}`);
     if (window._straddleAuditOptionFilter !== "ALL") parts.push(`Opt: ${window._straddleAuditOptionFilter}`);
     if (window._straddleAuditRoleFilter !== "ALL") parts.push(`Role: ${window._straddleAuditRoleFilter}`);
     if (window._straddleAuditTriggerFilter !== "ALL") parts.push(`Trig: ${window._straddleAuditTriggerFilter}`);
     if (window._straddleAuditSideFilter !== "ALL") parts.push(`Side: ${window._straddleAuditSideFilter}`);
     if (window._straddleAuditLogsFilter !== "all") parts.push(`Mode: ${window._straddleAuditLogsFilter.toUpperCase()}`);
-    label.textContent = parts.length > 0 ? `Filters: ${parts.join(" • ")}` : "All Events";
+    if (window._straddleAuditSearchTerm) parts.push(`Search: "${window._straddleAuditSearchTerm}"`);
+
+    const hasFilters = parts.length > 0;
+    label.textContent = hasFilters ? `Filters: ${parts.join(" • ")}` : "All Events";
+    if (resetBtn) {
+        resetBtn.style.display = hasFilters ? "inline-block" : "none";
+    }
 }
+
+function resetAuditFilters() {
+    window._straddleAuditLogsFilter = "all";
+    window._straddleAuditSideFilter = "ALL";
+    window._straddleAuditLevelFilter = "ALL";
+    window._straddleAuditOptionFilter = "ALL";
+    window._straddleAuditRoleFilter = "ALL";
+    window._straddleAuditTriggerFilter = "ALL";
+    window._straddleAuditStrategyFilter = "ALL";
+    window._straddleAuditAssetFilter = "ALL";
+    window._straddleAuditSearchTerm = "";
+    window._straddleAuditQuickMode = "all";
+
+    const sStrat = document.getElementById("selAuditStrategyFilter");
+    const sAsset = document.getElementById("selAuditAssetFilter");
+    const sLvl = document.getElementById("selAuditLevelFilter");
+    const sOpt = document.getElementById("selAuditOptionFilter");
+    const sRole = document.getElementById("selAuditRoleFilter");
+    const sTrig = document.getElementById("selAuditTriggerFilter");
+    const sSide = document.getElementById("selAuditSideFilter");
+    const sMode = document.getElementById("selAuditModeFilter");
+    const sSearch = document.getElementById("inputAuditSearch");
+
+    if (sStrat) sStrat.value = "ALL";
+    if (sAsset) sAsset.value = "ALL";
+    if (sLvl) sLvl.value = "ALL";
+    if (sOpt) sOpt.value = "ALL";
+    if (sRole) sRole.value = "ALL";
+    if (sTrig) sTrig.value = "ALL";
+    if (sSide) sSide.value = "ALL";
+    if (sMode) sMode.value = "all";
+    if (sSearch) sSearch.value = "";
+
+    document.querySelectorAll(".algo-filter-pill").forEach(p => {
+        p.classList.toggle("active", p.id === "btnAuditQuickAll");
+        if (p.id === "btnAuditQuickAll") {
+            p.style.background = "#1e293b";
+            p.style.color = "#f8fafc";
+        } else {
+            p.style.background = "";
+            p.style.color = "";
+        }
+    });
+
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.resetAuditFilters = resetAuditFilters;
+
+function onAuditSearchInput(val) {
+    window._straddleAuditSearchTerm = (val || "").trim().toLowerCase();
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.onAuditSearchInput = onAuditSearchInput;
+
+function setStraddleAuditStrategyFilter(strat) {
+    window._straddleAuditStrategyFilter = strat || "ALL";
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.setStraddleAuditStrategyFilter = setStraddleAuditStrategyFilter;
+
+function setStraddleAuditAssetFilter(asset) {
+    window._straddleAuditAssetFilter = asset || "ALL";
+    _updateAuditSummaryLabel();
+    renderStraddleAuditLogsFiltered();
+}
+window.setStraddleAuditAssetFilter = setStraddleAuditAssetFilter;
 
 function setStraddleAuditLevelFilter(lvl) {
     window._straddleAuditLevelFilter = lvl || "ALL";
@@ -12769,7 +12923,6 @@ window.setStraddleAuditLevelFilter = setStraddleAuditLevelFilter;
 
 function setStraddleAuditOptionFilter(opt) {
     window._straddleAuditOptionFilter = opt || "ALL";
-    window._straddleAuditQuickCePeOnly = false;
     _updateAuditSummaryLabel();
     renderStraddleAuditLogsFiltered();
 }
@@ -12777,7 +12930,6 @@ window.setStraddleAuditOptionFilter = setStraddleAuditOptionFilter;
 
 function setStraddleAuditRoleFilter(role) {
     window._straddleAuditRoleFilter = role || "ALL";
-    window._straddleAuditQuickHedgeMainOnly = false;
     _updateAuditSummaryLabel();
     renderStraddleAuditLogsFiltered();
 }
@@ -12807,86 +12959,171 @@ function setStraddleAuditFilter(filterType) {
 window.setStraddleAuditFilter = setStraddleAuditFilter;
 
 function setAuditQuickFilter(type) {
-    const selLvl = document.getElementById("selAuditLevelFilter");
-    const selOpt = document.getElementById("selAuditOptionFilter");
-    const selRole = document.getElementById("selAuditRoleFilter");
-    const selTrig = document.getElementById("selAuditTriggerFilter");
-    const selSide = document.getElementById("selAuditSideFilter");
-    const selMode = document.getElementById("selAuditModeFilter");
+    window._straddleAuditQuickMode = type || "all";
 
-    ["btnAuditQuickAll", "btnAuditQuickInfoSuccess", "btnAuditQuickCePe", "btnAuditQuickHedgeMain"].forEach(id => {
-        const b = document.getElementById(id);
-        if (b) {
-            b.classList.remove("active");
-            b.style.background = "transparent";
-            b.style.color = "#94a3b8";
-        }
+    document.querySelectorAll(".algo-filter-pill").forEach(btn => {
+        btn.classList.remove("active");
+        btn.style.background = "";
+        btn.style.color = "";
     });
 
-    window._straddleAuditQuickCePeOnly = false;
-    window._straddleAuditQuickHedgeMainOnly = false;
+    const sLvl = document.getElementById("selAuditLevelFilter");
+    const sTrig = document.getElementById("selAuditTriggerFilter");
+    const sRole = document.getElementById("selAuditRoleFilter");
+    const sMode = document.getElementById("selAuditModeFilter");
 
     if (type === "all") {
-        window._straddleAuditLevelFilter = "ALL";
-        window._straddleAuditOptionFilter = "ALL";
-        window._straddleAuditRoleFilter = "ALL";
-        window._straddleAuditTriggerFilter = "ALL";
-        window._straddleAuditSideFilter = "ALL";
-        window._straddleAuditLogsFilter = "all";
-        if (selLvl) selLvl.value = "ALL";
-        if (selOpt) selOpt.value = "ALL";
-        if (selRole) selRole.value = "ALL";
-        if (selTrig) selTrig.value = "ALL";
-        if (selSide) selSide.value = "ALL";
-        if (selMode) selMode.value = "all";
         const b = document.getElementById("btnAuditQuickAll");
         if (b) { b.classList.add("active"); b.style.background = "#1e293b"; b.style.color = "#f8fafc"; }
-    } else if (type === "info_success") {
-        window._straddleAuditLevelFilter = "INFO_SUCCESS";
-        if (selLvl) selLvl.value = "INFO_SUCCESS";
-        const b = document.getElementById("btnAuditQuickInfoSuccess");
-        if (b) { b.classList.add("active"); b.style.background = "rgba(16,185,129,0.2)"; b.style.color = "#10b981"; }
-    } else if (type === "ce_pe") {
-        window._straddleAuditOptionFilter = "ALL";
-        window._straddleAuditQuickCePeOnly = true;
-        const b = document.getElementById("btnAuditQuickCePe");
-        if (b) { b.classList.add("active"); b.style.background = "rgba(56,189,248,0.2)"; b.style.color = "#38bdf8"; }
-    } else if (type === "hedge_main") {
+        window._straddleAuditLevelFilter = "ALL";
+        window._straddleAuditTriggerFilter = "ALL";
         window._straddleAuditRoleFilter = "ALL";
-        window._straddleAuditQuickHedgeMainOnly = true;
-        const b = document.getElementById("btnAuditQuickHedgeMain");
-        if (b) { b.classList.add("active"); b.style.background = "rgba(245,158,11,0.2)"; b.style.color = "#fbbf24"; }
+        window._straddleAuditLogsFilter = "all";
+        if (sLvl) sLvl.value = "ALL";
+        if (sTrig) sTrig.value = "ALL";
+        if (sRole) sRole.value = "ALL";
+        if (sMode) sMode.value = "all";
+    } else if (type === "trades") {
+        const b = document.getElementById("btnAuditQuickTrades");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(56,189,248,0.3)"; b.style.color = "#38bdf8"; }
+        window._straddleAuditLogsFilter = "trades";
+        if (sMode) sMode.value = "all";
+    } else if (type === "targets") {
+        const b = document.getElementById("btnAuditQuickTargets");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(16,185,129,0.3)"; b.style.color = "#10b981"; }
+        window._straddleAuditTriggerFilter = "TARGET";
+        if (sTrig) sTrig.value = "TARGET";
+    } else if (type === "stoploss") {
+        const b = document.getElementById("btnAuditQuickStoploss");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(244,63,94,0.3)"; b.style.color = "#f43f5e"; }
+        window._straddleAuditTriggerFilter = "STOPLOSS";
+        if (sTrig) sTrig.value = "STOPLOSS";
+    } else if (type === "hedges") {
+        const b = document.getElementById("btnAuditQuickHedges");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(245,158,11,0.3)"; b.style.color = "#fbbf24"; }
+        window._straddleAuditRoleFilter = "HEDGE";
+        if (sRole) sRole.value = "HEDGE";
+    } else if (type === "errors") {
+        const b = document.getElementById("btnAuditQuickErrors");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(239,68,68,0.35)"; b.style.color = "#fca5a5"; }
+        window._straddleAuditLevelFilter = "ERROR";
+        if (sLvl) sLvl.value = "ERROR";
     }
+
     _updateAuditSummaryLabel();
     renderStraddleAuditLogsFiltered();
 }
 window.setAuditQuickFilter = setAuditQuickFilter;
 
+function _populateAuditStrategyOptions() {
+    const sel = document.getElementById("selAuditStrategyFilter");
+    if (!sel) return;
+
+    const currentVal = window._straddleAuditStrategyFilter || "ALL";
+    const strats = new Set();
+
+    // From active state strategies
+    const stateStrats = (window._straddleState && window._straddleState.strategies)
+        || (window._straddleState && window._straddleState.state && window._straddleState.state.strategies)
+        || [];
+    if (Array.isArray(stateStrats)) {
+        stateStrats.forEach(s => {
+            const name = (typeof s === "object" && s) ? (s.name || s.id) : String(s);
+            if (name) strats.add(name);
+        });
+    }
+
+    // Also scan cached logs for any mentioned strategy names
+    if (Array.isArray(window._cachedAuditLogsList)) {
+        window._cachedAuditLogsList.forEach(l => {
+            if (l.strategy_name) strats.add(l.strategy_name);
+            const det = l.details;
+            if (det && typeof det === "object" && det.strategy_name) strats.add(det.strategy_name);
+        });
+    }
+
+    let opts = '<option value="ALL">All Strategies</option>';
+    Array.from(strats).sort().forEach(sName => {
+        const isSel = (sName === currentVal) ? 'selected' : '';
+        opts += `<option value="${sName}" ${isSel}>${sName}</option>`;
+    });
+    sel.innerHTML = opts;
+}
+
 function _parseAuditLogBadges(l) {
     const msg = String(l.message || "");
     const msgU = msg.toUpperCase();
+    const det = (l.details && typeof l.details === "object") ? l.details : {};
+
+    // 1. Level Badge
     const lvl = String(l.level || "INFO").toUpperCase();
+    let lvlBadge = "";
+    let lvlColor = "#38bdf8";
+    let lvlBg = "rgba(15, 23, 42, 0.75)";
+    let lvlBorder = "rgba(255, 255, 255, 0.08)";
 
-    // 1. Level Color & Badge
-    const lvlColor = lvl === "ERROR" ? "#f43f5e" : (lvl === "WARN" || lvl === "WARNING" ? "#f59e0b" : (lvl === "SUCCESS" ? "#10b981" : "#38bdf8"));
-    const lvlBg = lvl === "ERROR" ? "rgba(244,63,94,0.14)" : (lvl === "WARN" || lvl === "WARNING" ? "rgba(245,158,11,0.14)" : (lvl === "SUCCESS" ? "rgba(16,185,129,0.14)" : "rgba(56,189,248,0.12)"));
-    const lvlBorder = lvl === "ERROR" ? "rgba(244,63,94,0.4)" : (lvl === "WARN" || lvl === "WARNING" ? "rgba(245,158,11,0.4)" : (lvl === "SUCCESS" ? "rgba(16,185,129,0.4)" : "rgba(56,189,248,0.3)"));
-    const levelBadge = `<span style="background:${lvlBg}; border:1px solid ${lvlBorder}; color:${lvlColor}; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:0.4px;">${lvl}</span>`;
-
-    // 2. Trade Type Badge (Live vs Paper)
-    const tt = (l.trade_type || (msgU.includes("[PAPER") || msgU.includes("PAPER FILL") ? "PAPER" : (msgU.includes("ENTERED") || msgU.includes("EXITED") || msgU.includes("FILLED") || msgU.includes("STOPLOSS") || msgU.includes("TARGET") ? "LIVE" : ""))).toUpperCase();
-    let modeBadge = "";
-    if (tt === "LIVE") {
-        modeBadge = `<span style="background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.5); color:#10b981; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; letter-spacing:0.5px;">LIVE</span>`;
-    } else if (tt === "PAPER") {
-        modeBadge = `<span style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.5); color:#c084fc; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; letter-spacing:0.5px;">PAPER</span>`;
+    if (lvl === "SUCCESS" || msgU.includes("✅") || msgU.includes("SUCCESSFULLY")) {
+        lvlBadge = `<span style="background:rgba(16,185,129,0.2); border:1px solid rgba(16,185,129,0.5); color:#10b981; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">SUCCESS</span>`;
+        lvlColor = "#10b981";
+        lvlBg = "rgba(6, 78, 59, 0.15)";
+        lvlBorder = "rgba(16, 185, 129, 0.4)";
+    } else if (lvl === "ERROR" || msgU.includes("FAILED") || msgU.includes("REJECTED") || msgU.includes("ERROR")) {
+        lvlBadge = `<span style="background:rgba(239,68,68,0.22); border:1px solid rgba(239,68,68,0.55); color:#f87171; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">ERROR</span>`;
+        lvlColor = "#f87171";
+        lvlBg = "rgba(127, 29, 29, 0.2)";
+        lvlBorder = "rgba(239, 68, 68, 0.45)";
+    } else if (lvl === "WARNING" || lvl === "WARN" || msgU.includes("⚠️") || msgU.includes("MARGIN GUARD") || msgU.includes("BLOCKED")) {
+        lvlBadge = `<span style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.55); color:#fbbf24; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">WARNING</span>`;
+        lvlColor = "#fbbf24";
+        lvlBg = "rgba(120, 53, 15, 0.18)";
+        lvlBorder = "rgba(245, 158, 11, 0.4)";
+    } else {
+        lvlBadge = `<span style="background:rgba(56,189,248,0.18); border:1px solid rgba(56,189,248,0.45); color:#38bdf8; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">INFO</span>`;
     }
 
-    // 3. Role Badge (Main vs Hedge)
+    // 2. Mode Badge (Live vs Paper)
+    let tt = String(l.trade_type || "").toUpperCase();
+    if (!tt) {
+        if (msgU.includes("[PAPER") || msgU.includes("PAPER TRADE") || det.mode === "PAPER") tt = "PAPER";
+        else if (anyMatch(msgU, ["ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS", "TARGET", "RE-EXECUTE", "HEDGE"])) tt = "LIVE";
+        else tt = "SYSTEM";
+    }
+    let modeBadge = "";
+    if (tt === "LIVE") {
+        modeBadge = `<span style="background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.5); color:#34d399; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">🟢 LIVE</span>`;
+    } else if (tt === "PAPER") {
+        modeBadge = `<span style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.5); color:#c084fc; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">🟣 PAPER</span>`;
+    }
+
+    // 3. Strategy Name Badge
+    let stratName = l.strategy_name || det.strategy_name || "";
+    if (!stratName) {
+        const m = msg.match(/(?:Strategy|Algorithm)\s+'([^']+)'/i);
+        if (m) stratName = m[1];
+    }
+    let stratBadge = "";
+    if (stratName) {
+        stratBadge = `<span style="background:rgba(147,197,253,0.15); border:1px solid rgba(147,197,253,0.35); color:#93c5fd; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">⚡ ${stratName}</span>`;
+    }
+
+    // 4. Underlying Asset Badge
+    let und = l.underlying || det.underlying || "";
+    if (!und) {
+        const candidates = ["NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL", "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "BANKEX", "SENSEX", "NIFTY"];
+        for (const u of candidates) {
+            if (msgU.includes(u)) { und = u; break; }
+        }
+    }
+    let undBadge = "";
+    if (und) {
+        undBadge = `<span style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; font-weight:800; padding:1px 5px; border-radius:4px;">${und}</span>`;
+    }
+
+    // 5. Leg Role: Main vs Hedge
     let role = "";
-    if (l.is_associated_hedge || msgU.includes("HEDGE")) {
+    if (l.is_associated_hedge || anyMatch(msgU, ["HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO", "ORPHAN HEDGE"])) {
         role = "HEDGE";
-    } else if (msgU.includes("MAIN") || msgU.includes("SHORT STRADDLE") || msgU.includes("ENTERED SELL") || msgU.includes("RE-EXECUTE") || msgU.includes("RE-ENTRY")) {
+    } else if (anyMatch(msgU, ["MAIN", "SHORT STRADDLE", "ENTERED SELL", "SHORT RE-ENTRY"])) {
         role = "MAIN";
     }
     let roleBadge = "";
@@ -12896,7 +13133,7 @@ function _parseAuditLogBadges(l) {
         roleBadge = `<span style="background:rgba(139,92,246,0.18); border:1px solid rgba(139,92,246,0.5); color:#a78bfa; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">⚡ MAIN</span>`;
     }
 
-    // 4. Side Badge (Buy vs Sell)
+    // 6. Transaction Side: BUY vs SELL
     let side = String(l.side || "").toUpperCase();
     if (!side || side === "-") {
         if (msgU.includes("ENTERED BUY") || msgU.includes("BUYING") || msgU.includes("BUY NEW HEDGE") || msgU.includes(" BUY ")) side = "BUY";
@@ -12909,7 +13146,7 @@ function _parseAuditLogBadges(l) {
         sideBadge = `<span style="background:rgba(249,115,22,0.18); border:1px solid rgba(249,115,22,0.5); color:#fb923c; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">SELL</span>`;
     }
 
-    // 5. Option Type Badge (CE vs PE)
+    // 7. Option Type: CE vs PE
     let opt = "";
     if (msgU.includes(" CE ") || msgU.includes(" CALL ") || msgU.includes("CE]") || msgU.includes("(CE)") || /\b\d+\s*CE\b/.test(msgU)) {
         opt = "CE";
@@ -12923,25 +13160,36 @@ function _parseAuditLogBadges(l) {
         optBadge = `<span style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.5); color:#c084fc; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">📉 PE</span>`;
     }
 
-    // 6. Trigger Badge (Target vs Stoploss)
+    // 8. Trigger / Action
     let trig = "";
-    if (msgU.includes("TARGET HIT") || msgU.includes("TARGET ORDER") || msgU.includes("TGT:") || msgU.includes("TGT HIT") || msgU.includes("(TARGET)")) {
+    if (anyMatch(msgU, ["TARGET HIT", "TARGET ORDER", "TGT:", "TGT HIT", "(TARGET)"])) {
         trig = "TARGET";
-    } else if (msgU.includes("STOPLOSS HIT") || msgU.includes("STOPLOSS ORDER") || msgU.includes("SL HIT") || msgU.includes("SL:") || msgU.includes("(STOPLOSS)") || msgU.includes("SL CANCEL")) {
+    } else if (anyMatch(msgU, ["STOPLOSS HIT", "STOPLOSS ORDER", "SL HIT", "SL:", "(STOPLOSS)", "SL CANCEL"])) {
         trig = "STOPLOSS";
+    } else if (anyMatch(msgU, ["RE-EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST", "TRIGGERING RE"])) {
+        trig = "REENTRY";
     }
     let trigBadge = "";
     if (trig === "TARGET") {
-        trigBadge = `<span style="background:rgba(16,185,129,0.2); border:1px solid rgba(16,185,129,0.55); color:#10b981; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🎯 TARGET</span>`;
+        trigBadge = `<span style="background:rgba(16,185,129,0.22); border:1px solid rgba(16,185,129,0.55); color:#10b981; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🎯 TARGET</span>`;
     } else if (trig === "STOPLOSS") {
-        trigBadge = `<span style="background:rgba(244,63,94,0.2); border:1px solid rgba(244,63,94,0.55); color:#f43f5e; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🛑 STOPLOSS</span>`;
+        trigBadge = `<span style="background:rgba(244,63,94,0.22); border:1px solid rgba(244,63,94,0.55); color:#f43f5e; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🛑 STOPLOSS</span>`;
+    } else if (trig === "REENTRY") {
+        trigBadge = `<span style="background:rgba(6,182,212,0.22); border:1px solid rgba(6,182,212,0.55); color:#06b6d4; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🔄 RE-ENTRY</span>`;
     }
 
     return {
-        levelBadge, modeBadge, roleBadge, sideBadge, optBadge, trigBadge,
-        level: lvl, tradeType: tt, role, side, optType: opt, trigger: trig,
-        color: lvlColor, bg: lvlBg, border: lvlBorder
+        levelBadge, modeBadge, stratBadge, undBadge, roleBadge, sideBadge, optBadge, trigBadge,
+        level: lvl, tradeType: tt, strategyName: stratName, underlying: und, role, side, optType: opt, trigger: trig,
+        color: lvlColor, bg: lvlBg, border: lvlBorder, details: det
     };
+}
+
+function anyMatch(text, words) {
+    for (let i = 0; i < words.length; i++) {
+        if (text.includes(words[i])) return true;
+    }
+    return false;
 }
 
 function renderStraddleAuditLogsFiltered() {
@@ -12952,64 +13200,129 @@ function renderStraddleAuditLogsFiltered() {
 
 function _buildAuditLogsHtml(logsList) {
     if (!logsList || logsList.length === 0) {
-        return `<div style="color:#64748b; text-align:center; padding:25px;">No audit events recorded yet.</div>`;
+        return `<div style="color:#64748b; text-align:center; padding:30px; font-size:13px;">No audit events recorded yet.</div>`;
     }
+
+    // Always clean out unnecessary focused underlying asset switch logs from display
+    const validLogs = logsList.filter(l => {
+        const msg = String(l.message || "").toLowerCase();
+        return !msg.includes("focused underlying switched to");
+    });
+
     const filterType = window._straddleAuditLogsFilter || "all";
     const sideFilter = window._straddleAuditSideFilter || "ALL";
     const levelFilter = window._straddleAuditLevelFilter || "ALL";
     const optionFilter = window._straddleAuditOptionFilter || "ALL";
     const roleFilter = window._straddleAuditRoleFilter || "ALL";
     const triggerFilter = window._straddleAuditTriggerFilter || "ALL";
-    const quickCePeOnly = !!window._straddleAuditQuickCePeOnly;
-    const quickHedgeMainOnly = !!window._straddleAuditQuickHedgeMainOnly;
+    const strategyFilter = window._straddleAuditStrategyFilter || "ALL";
+    const assetFilter = window._straddleAuditAssetFilter || "ALL";
+    const searchTerm = window._straddleAuditSearchTerm || "";
+    const quickMode = window._straddleAuditQuickMode || "all";
 
-    const filtered = logsList.filter(l => {
+    const filtered = validLogs.filter(l => {
         const parsed = _parseAuditLogBadges(l);
+        const msg = String(l.message || "").toLowerCase();
 
-        // Level filter
+        // 1. Live Keyword Search
+        if (searchTerm) {
+            const detStr = l.details ? JSON.stringify(l.details).toLowerCase() : "";
+            if (!msg.includes(searchTerm) && !detStr.includes(searchTerm) && !parsed.strategyName.toLowerCase().includes(searchTerm) && !parsed.underlying.toLowerCase().includes(searchTerm)) {
+                return false;
+            }
+        }
+
+        // 2. Strategy Filter
+        if (strategyFilter !== "ALL" && parsed.strategyName !== strategyFilter) {
+            return false;
+        }
+
+        // 3. Asset Filter
+        if (assetFilter !== "ALL" && parsed.underlying !== assetFilter) {
+            return false;
+        }
+
+        // 4. Level Filter
         if (levelFilter === "INFO" && parsed.level !== "INFO") return false;
         if (levelFilter === "SUCCESS" && parsed.level !== "SUCCESS") return false;
         if (levelFilter === "INFO_SUCCESS" && parsed.level !== "INFO" && parsed.level !== "SUCCESS") return false;
         if (levelFilter === "WARNING" && parsed.level !== "WARNING" && parsed.level !== "WARN") return false;
         if (levelFilter === "ERROR" && parsed.level !== "ERROR") return false;
 
-        // Trade Mode filter
+        // 5. Trade Mode Filter
         if (filterType === "actual" && parsed.tradeType !== "LIVE") return false;
         if (filterType === "paper" && parsed.tradeType !== "PAPER") return false;
         if (filterType === "trades" && parsed.tradeType !== "LIVE" && parsed.tradeType !== "PAPER") return false;
 
-        // Side filter
+        // 6. Side Filter
         if (sideFilter !== "ALL" && parsed.side !== sideFilter) return false;
 
-        // Option Type filter (CE / PE)
+        // 7. Option Type Filter (CE / PE)
         if (optionFilter !== "ALL" && parsed.optType !== optionFilter) return false;
-        if (quickCePeOnly && !parsed.optType) return false;
 
-        // Role filter (Main / Hedge)
+        // 8. Role Filter (Main / Hedge)
         if (roleFilter !== "ALL" && parsed.role !== roleFilter) return false;
-        if (quickHedgeMainOnly && !parsed.role) return false;
 
-        // Trigger filter (Target / Stoploss)
-        if (triggerFilter !== "ALL" && parsed.trigger !== triggerFilter) return false;
+        // 9. Trigger Filter
+        if (triggerFilter === "TARGET" && parsed.trigger !== "TARGET") return false;
+        if (triggerFilter === "STOPLOSS" && parsed.trigger !== "STOPLOSS") return false;
+        if (triggerFilter === "REENTRY" && parsed.trigger !== "REENTRY") return false;
+
+        // 10. Quick Filter Mode overrides
+        if (quickMode === "trades" && parsed.tradeType !== "LIVE") return false;
+        if (quickMode === "targets" && parsed.trigger !== "TARGET") return false;
+        if (quickMode === "stoploss" && parsed.trigger !== "STOPLOSS") return false;
+        if (quickMode === "hedges" && parsed.role !== "HEDGE") return false;
+        if (quickMode === "errors" && parsed.level !== "ERROR") return false;
 
         return true;
     });
 
+    // Update real-time event counter badge
+    const badge = document.getElementById("auditLogCountBadge");
+    if (badge) {
+        badge.textContent = `${filtered.length} / ${validLogs.length} Events`;
+    }
+
     if (filtered.length === 0) {
-        return `<div style="color:#64748b; text-align:center; padding:25px;">No matching log events for current filter settings.</div>`;
+        return `<div style="color:#64748b; text-align:center; padding:30px; font-size:12.5px;">No matching log events for current filter settings. <button type="button" class="straddle-btn btn-outline" style="padding:2px 8px; font-size:11px; margin-left:8px;" onclick="resetAuditFilters()">Reset Filters</button></div>`;
     }
 
     let html = "";
-    filtered.forEach(l => {
+    filtered.forEach((l, idx) => {
         const parsed = _parseAuditLogBadges(l);
         const dateStr = l.date ? `${l.date} ` : "";
+        const det = l.details;
+        const hasDet = det && typeof det === "object" && Object.keys(det).length > 0;
+        const detId = `audit_det_${idx}_${Date.now()}`;
+
+        let detailsHtml = "";
+        if (hasDet) {
+            const chips = [];
+            if (det.order_id) chips.push(`<span style="color:#94a3b8;">Order: <b style="color:#f8fafc;">${det.order_id}</b></span>`);
+            if (det.price) chips.push(`<span style="color:#94a3b8;">Price: <b style="color:#38bdf8;">₹${det.price}</b></span>`);
+            if (det.qty) chips.push(`<span style="color:#94a3b8;">Qty: <b style="color:#f8fafc;">${det.qty}</b></span>`);
+            if (det.symbol) chips.push(`<span style="color:#94a3b8;">Symbol: <b style="color:#cbd5e1;">${det.symbol}</b></span>`);
+            if (det.error_code) chips.push(`<span style="color:#f87171;">Error: <b>${det.error_code}</b></span>`);
+            if (det.reason) chips.push(`<span style="color:#fbbf24;">Reason: <b>${det.reason}</b></span>`);
+
+            if (chips.length > 0) {
+                detailsHtml = `
+                    <div style="margin-top:4px; padding:3px 8px; background:rgba(0,0,0,0.3); border-radius:4px; display:flex; flex-wrap:wrap; gap:8px; font-size:10.5px; border-left:2px solid ${parsed.color};">
+                        ${chips.join("<span style='color:rgba(255,255,255,0.15);'>|</span>")}
+                    </div>
+                `;
+            }
+        }
 
         html += `
-            <div class="audit-log-card" style="padding:8px 12px; background:${parsed.bg}; border:1px solid ${parsed.border}; border-radius:6px; margin-bottom:6px; display:flex; flex-direction:column; gap:4px;">
+            <div class="audit-log-card" style="padding:8px 12px; background:${parsed.bg}; border:1px solid ${parsed.border}; border-radius:6px; margin-bottom:4px; display:flex; flex-direction:column; gap:4px; transition:border-color 0.15s ease;">
                 <div class="audit-log-card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
-                    <div style="display:inline-flex; align-items:center; gap:6px;">
+                    <div style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;">
                         <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:700;">🕒 [${dateStr}${l.timestamp || ''}]</span>
                         ${parsed.levelBadge}
+                        ${parsed.stratBadge}
+                        ${parsed.undBadge}
                     </div>
                     <div style="display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap;">
                         ${parsed.modeBadge}
@@ -13022,55 +13335,46 @@ function _buildAuditLogsHtml(logsList) {
                 <div style="color:#f1f5f9; font-size:12px; line-height:1.45; word-break:break-word; overflow-wrap:break-word;">
                     ${l.message || ''}
                 </div>
+                ${detailsHtml}
             </div>
         `;
     });
     return html;
 }
 
-function renderStraddleAuditLogs() {
+function renderStraddleAuditLogs(isSilent = false) {
     const container = document.getElementById("straddleAuditLogsContainer");
     if (!container) return;
 
-    // Instant optimistic render from in-memory cache
-    const cachedLogs = window._cachedAuditLogsList
-        || (window._straddleState && window._straddleState.logs)
-        || (window._straddleState && window._straddleState.state && window._straddleState.state.logs)
-        || [];
-    if (cachedLogs && cachedLogs.length > 0) {
-        window._cachedAuditLogsList = cachedLogs;
-        container.innerHTML = _buildAuditLogsHtml(cachedLogs);
-    } else {
+    if (!isSilent && (!window._cachedAuditLogsList || window._cachedAuditLogsList.length === 0)) {
         container.innerHTML = `<div style="color:#64748b; text-align:center; padding:20px;">Fetching live audit logs...</div>`;
     }
 
     const abortCtrl = new AbortController();
-    const timeoutId = setTimeout(() => abortCtrl.abort(), 25000);
+    const timeoutId = setTimeout(() => abortCtrl.abort(), 20000);
 
-    fetch("/api/straddle/logs", { signal: abortCtrl.signal })
+    fetch("/api/straddle/logs?limit=1000", { signal: abortCtrl.signal })
         .then(r => r.json())
         .then(data => {
             clearTimeout(timeoutId);
-            const logs = (data && data.success && data.logs) ? data.logs : [];
-            if (logs && logs.length > 0) {
-                window._cachedAuditLogsList = logs;
-                container.innerHTML = _buildAuditLogsHtml(logs);
-            } else if (!cachedLogs || cachedLogs.length === 0) {
-                container.innerHTML = `<div style="color:#64748b; text-align:center; padding:25px;">No audit events recorded yet.</div>`;
-            }
+            const logs = (data && data.success && Array.isArray(data.logs)) ? data.logs : [];
+            // Filter out any lingering underlying asset switch logs
+            const cleanLogs = logs.filter(l => !String(l.message || "").toLowerCase().includes("focused underlying switched to"));
+            window._cachedAuditLogsList = cleanLogs;
+            _populateAuditStrategyOptions();
+            container.innerHTML = _buildAuditLogsHtml(cleanLogs);
         })
         .catch(e => {
             clearTimeout(timeoutId);
-            // On abort or network blip, fall back to cached logs gracefully
-            const fallback = window._cachedAuditLogsList || (window._straddleState && window._straddleState.logs) || cachedLogs || [];
+            const fallback = window._cachedAuditLogsList || [];
             if (fallback && fallback.length > 0) {
                 container.innerHTML = _buildAuditLogsHtml(fallback);
-            } else {
+            } else if (!isSilent) {
                 container.innerHTML = `<div style="color:#f43f5e; text-align:center; padding:20px;">Error loading logs: ${e.message}</div>`;
             }
         });
 }
-
+window.renderStraddleAuditLogs = renderStraddleAuditLogs;
 // Window global bindings for Straddle error retry and modal controls
 window.renderStraddlePositions = renderStraddlePositions;
 window.onStraddlePositionCheckboxChange = onStraddlePositionCheckboxChange;

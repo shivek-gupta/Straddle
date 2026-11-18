@@ -11479,5 +11479,15 @@ input[type="checkbox"]:checked + .tradeable-toggle-switch .toggle-circle {
     font-size: 11px !important;
 }
 
+/* Institutional Audit Logs Card Enhancements */
+.audit-log-card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease !important;
+}
+.audit-log-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    border-color: rgba(255, 255, 255, 0.22) !important;
+}
+
 
 

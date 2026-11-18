@@ -2291,7 +2291,7 @@ class StraddleManager:
                 pass
         threading.Thread(target=_persist_logs, daemon=True).start()
 
-    def get_logs(self, limit: int = 250) -> List[Dict[str, Any]]:
+    def get_logs(self, limit: int = 1000) -> List[Dict[str, Any]]:
         with _LOGS_LOCK:
             logs = self._state.get("logs", [])
             if not logs and STRADDLE_LOGS_FILE.exists():
@@ -2302,10 +2302,34 @@ class StraddleManager:
                     logs = []
             
             enriched = []
-            for l in logs[:limit]:
+            for l in logs:
+                msg = str(l.get("message") or "")
+                # Deliberately filter out unnecessary focused underlying asset switch logs
+                if "focused underlying switched to" in msg.lower():
+                    continue
+
                 l_copy = dict(l)
+                det = l_copy.get("details") or {}
+
+                # Strategy name resolution for UI sync
+                if not l_copy.get("strategy_name") and isinstance(det, dict) and det.get("strategy_name"):
+                    l_copy["strategy_name"] = det["strategy_name"]
+                elif not l_copy.get("strategy_name"):
+                    m_strat = re.search(r"(?:Strategy|Algorithm)\s+'([^']+)'", msg, re.IGNORECASE)
+                    if m_strat:
+                        l_copy["strategy_name"] = m_strat.group(1)
+
+                # Underlying asset resolution for UI sync
+                if not l_copy.get("underlying") and isinstance(det, dict) and det.get("underlying"):
+                    l_copy["underlying"] = det["underlying"]
+                elif not l_copy.get("underlying"):
+                    for u in ("NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL", "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "BANKEX", "SENSEX", "NIFTY"):
+                        if u in msg.upper():
+                            l_copy["underlying"] = u
+                            break
+
                 if not l_copy.get("trade_type"):
-                    msg_u = str(l_copy.get("message", "")).upper()
+                    msg_u = msg.upper()
                     if any(k in msg_u for k in ("[PAPER", "PAPER BENCHMARK", "PAPER FILL", "PAPER TRADE")):
                         l_copy["trade_type"] = "PAPER"
                     elif any(k in msg_u for k in (
@@ -2323,7 +2347,7 @@ class StraddleManager:
                     else:
                         l_copy["trade_type"] = "SYSTEM"
                 if not l_copy.get("side"):
-                    msg_u = str(l_copy.get("message", "")).upper()
+                    msg_u = msg.upper()
                     if "HEDGE EXIT" in msg_u or "(EXIT SELL)" in msg_u or "ENTERED SELL" in msg_u:
                         l_copy["side"] = "SELL"
                     elif "ENTERED BUY" in msg_u or "(EXIT BUY)" in msg_u or "BUY HEDGE" in msg_u:
@@ -2335,6 +2359,8 @@ class StraddleManager:
                     else:
                         l_copy["side"] = ""
                 enriched.append(l_copy)
+                if len(enriched) >= limit:
+                    break
             return enriched
 
     def _send_telegram_alert(self, message: str):
@@ -4374,7 +4400,7 @@ class StraddleManager:
             logger.debug(f"Pre-indexing strikes error: {e_pre}")
 
         self._save_state(force=True)
-        self._log_event(f"Focused Underlying switched to: {clean}")
+        # Note: Underlying asset switches are deliberately excluded from audit logs to prevent log clutter
         return clean
 
     def toggle_strategy_advance_sl(self, strategy_id: str, enabled: bool) -> Dict[str, Any]:

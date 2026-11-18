@@ -230,7 +230,10 @@ def api_straddle_set_active_underlying():
 def api_straddle_logs():
     try:
         mgr = get_straddle_manager()
-        logs = mgr.get_logs(limit=250)
+        limit = int(request.args.get("limit", 1000))
+        logs = mgr.get_logs(limit=limit)
+        # Ensure no focused underlying asset switch logs slip through
+        logs = [l for l in logs if "focused underlying switched to" not in str(l.get("message") or "").lower()]
         resp = jsonify({"success": True, "logs": logs})
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return resp
@@ -241,9 +244,72 @@ def api_straddle_logs():
 
 @app.route("/api/straddle/download_audit_logs", methods=["GET"])
 def api_straddle_download_audit_logs():
-    """Generates and downloads a beautifully styled Excel (.xlsx) file containing all audit logs, with automatic UTF-8 BOM CSV spreadsheet fallback if openpyxl is not installed."""
+    """Generates and downloads a beautifully styled Excel (.xlsx) file or UTF-8 BOM CSV containing all audit logs."""
     mgr = get_straddle_manager()
-    logs = mgr.get_logs(limit=2000)
+    raw_logs = mgr.get_logs(limit=int(request.args.get("limit", 5000)))
+    logs = [l for l in raw_logs if "focused underlying switched to" not in str(l.get("message") or "").lower()]
+    req_format = request.args.get("format", "xlsx").lower()
+
+    if req_format == "csv":
+        try:
+            import csv
+            import io
+            str_io = io.StringIO()
+            writer = csv.writer(str_io, quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(["Timestamp", "Date", "Level", "Trade Type", "Strategy", "Underlying", "Role", "Side", "Option Type", "Trigger", "Message", "Details"])
+            for log in logs:
+                ts = str(log.get("timestamp") or "")
+                dt = str(log.get("date") or "")
+                lvl = str(log.get("level") or "INFO").upper()
+                msg = str(log.get("message") or "")
+                msg_u = msg.upper()
+                tt = str(log.get("trade_type") or ("PAPER" if "[PAPER" in msg_u else ("LIVE" if any(k in msg_u for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET")) else "-"))).upper()
+                strat_name = str(log.get("strategy_name") or "-")
+                und = str(log.get("underlying") or "-")
+
+                role = "-"
+                if log.get("is_associated_hedge") or any(k in msg_u for k in ("HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO")):
+                    role = "HEDGE"
+                elif any(k in msg_u for k in ("MAIN", "SHORT STRADDLE", "ENTERED SELL", "RE-EXECUTE", "RE-ENTRY")):
+                    role = "MAIN"
+
+                side = str(log.get("side") or "").upper()
+                if not side or side == "-":
+                    if any(k in msg_u for k in ("ENTERED BUY", "BUYING", "BUY NEW HEDGE", "BUY ")):
+                        side = "BUY"
+                    elif any(k in msg_u for k in ("ENTERED SELL", "SELLING", "SHORT RE-ENTRY", "SELL ")):
+                        side = "SELL"
+                    else:
+                        side = "-"
+
+                opt_type = "-"
+                if " CE " in msg_u or " CALL " in msg_u or "CE]" in msg_u or "(CE)" in msg_u or re.search(r"\b\d+\s*CE\b", msg_u):
+                    opt_type = "CE"
+                elif " PE " in msg_u or " PUT " in msg_u or "PE]" in msg_u or "(PE)" in msg_u or re.search(r"\b\d+\s*PE\b", msg_u):
+                    opt_type = "PE"
+
+                trigger = "-"
+                if any(k in msg_u for k in ("TARGET HIT", "TARGET ORDER", "TGT:", "TGT HIT", "(TARGET)")):
+                    trigger = "TARGET"
+                elif any(k in msg_u for k in ("STOPLOSS HIT", "STOPLOSS ORDER", "SL HIT", "SL:", "(STOPLOSS)", "SL CANCEL")):
+                    trigger = "STOPLOSS"
+
+                det = log.get("details")
+                det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
+                writer.writerow([ts, dt, lvl, tt, strat_name, und, role, side, opt_type, trigger, msg, det_str])
+
+            csv_bytes = str_io.getvalue().encode("utf-8-sig")
+            bytes_io = io.BytesIO(csv_bytes)
+            filename = f"straddle_audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            return send_file(
+                bytes_io,
+                as_attachment=True,
+                download_name=filename,
+                mimetype="text/csv; charset=utf-8"
+            )
+        except Exception as e_csv:
+            logger.error(f"Error generating audit logs CSV: {e_csv}")
+            return jsonify({"success": False, "error": str(e_csv)}), 500
 
     try:
         import io
@@ -255,7 +321,7 @@ def api_straddle_download_audit_logs():
         ws.title = "Audit Logs"
         ws.views.sheetView[0].showGridLines = True
 
-        headers = ["Timestamp", "Date", "Level", "Trade Type", "Role", "Side", "Option Type", "Trigger", "Message", "Details"]
+        headers = ["Timestamp", "Date", "Level", "Trade Type", "Strategy", "Underlying", "Role", "Side", "Option Type", "Trigger", "Message", "Details"]
         ws.append(headers)
 
         header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
@@ -292,15 +358,15 @@ def api_straddle_download_audit_logs():
             msg = str(log.get("message") or "")
             msg_u = msg.upper()
             tt = str(log.get("trade_type") or ("PAPER" if "[PAPER" in msg_u else ("LIVE" if any(k in msg_u for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET")) else "-"))).upper()
-            
-            # Leg Role: Main vs Hedge
+            strat_name = str(log.get("strategy_name") or "-")
+            und = str(log.get("underlying") or "-")
+
             role = "-"
             if log.get("is_associated_hedge") or any(k in msg_u for k in ("HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO")):
                 role = "HEDGE"
             elif any(k in msg_u for k in ("MAIN", "SHORT STRADDLE", "ENTERED SELL", "RE-EXECUTE", "RE-ENTRY")):
                 role = "MAIN"
 
-            # Transaction Side: BUY vs SELL
             side = str(log.get("side") or "").upper()
             if not side or side == "-":
                 if any(k in msg_u for k in ("ENTERED BUY", "BUYING", "BUY NEW HEDGE", "BUY ")):
@@ -310,14 +376,12 @@ def api_straddle_download_audit_logs():
                 else:
                     side = "-"
 
-            # Option Type: CE vs PE
             opt_type = "-"
             if " CE " in msg_u or " CALL " in msg_u or "CE]" in msg_u or "(CE)" in msg_u or re.search(r"\b\d+\s*CE\b", msg_u):
                 opt_type = "CE"
             elif " PE " in msg_u or " PUT " in msg_u or "PE]" in msg_u or "(PE)" in msg_u or re.search(r"\b\d+\s*PE\b", msg_u):
                 opt_type = "PE"
 
-            # Trigger: Target vs Stoploss
             trigger = "-"
             if any(k in msg_u for k in ("TARGET HIT", "TARGET ORDER", "TGT:", "TGT HIT", "(TARGET)")):
                 trigger = "TARGET"
@@ -327,7 +391,7 @@ def api_straddle_download_audit_logs():
             det = log.get("details")
             det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
 
-            ws.append([ts, dt, lvl, tt, role, side, opt_type, trigger, msg, det_str])
+            ws.append([ts, dt, lvl, tt, strat_name, und, role, side, opt_type, trigger, msg, det_str])
 
             font_color, bg_color = level_colors.get(lvl, ("334155", "FFFFFF"))
 
@@ -350,8 +414,12 @@ def api_straddle_download_audit_logs():
                 tt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="8B5CF6")
                 tt_cell.fill = PatternFill(start_color="F5F3FF", end_color="F5F3FF", fill_type="solid")
 
-            # Role (Col 5)
-            role_cell = ws.cell(row=row_idx, column=5)
+            # Strategy (Col 5) & Underlying (Col 6)
+            ws.cell(row=row_idx, column=5).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(row=row_idx, column=6).alignment = Alignment(horizontal="center", vertical="center")
+
+            # Role (Col 7)
+            role_cell = ws.cell(row=row_idx, column=7)
             role_cell.alignment = Alignment(horizontal="center", vertical="center")
             if role == "MAIN":
                 role_cell.font = Font(name="Segoe UI", size=10, bold=True, color="6D28D9")
@@ -360,8 +428,8 @@ def api_straddle_download_audit_logs():
                 role_cell.font = Font(name="Segoe UI", size=10, bold=True, color="B45309")
                 role_cell.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
-            # Side (Col 6)
-            side_cell = ws.cell(row=row_idx, column=6)
+            # Side (Col 8)
+            side_cell = ws.cell(row=row_idx, column=8)
             side_cell.alignment = Alignment(horizontal="center", vertical="center")
             if side == "BUY":
                 side_cell.font = Font(name="Segoe UI", size=10, bold=True, color="16A34A")
@@ -370,8 +438,8 @@ def api_straddle_download_audit_logs():
                 side_cell.font = Font(name="Segoe UI", size=10, bold=True, color="DC2626")
                 side_cell.fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
 
-            # Option Type (Col 7)
-            opt_cell = ws.cell(row=row_idx, column=7)
+            # Option Type (Col 9)
+            opt_cell = ws.cell(row=row_idx, column=9)
             opt_cell.alignment = Alignment(horizontal="center", vertical="center")
             if opt_type == "CE":
                 opt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="0284C7")
@@ -380,8 +448,8 @@ def api_straddle_download_audit_logs():
                 opt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="7E22CE")
                 opt_cell.fill = PatternFill(start_color="F3E8FF", end_color="F3E8FF", fill_type="solid")
 
-            # Trigger (Col 8)
-            trig_cell = ws.cell(row=row_idx, column=8)
+            # Trigger (Col 10)
+            trig_cell = ws.cell(row=row_idx, column=10)
             trig_cell.alignment = Alignment(horizontal="center", vertical="center")
             if trigger == "TARGET":
                 trig_cell.font = Font(name="Segoe UI", size=10, bold=True, color="047857")
@@ -390,16 +458,16 @@ def api_straddle_download_audit_logs():
                 trig_cell.font = Font(name="Segoe UI", size=10, bold=True, color="B91C1C")
                 trig_cell.fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
 
-            msg_cell = ws.cell(row=row_idx, column=9)
+            msg_cell = ws.cell(row=row_idx, column=11)
             msg_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-            det_cell = ws.cell(row=row_idx, column=10)
+            det_cell = ws.cell(row=row_idx, column=12)
             det_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-            for c in range(1, 11):
+            for c in range(1, 13):
                 cell = ws.cell(row=row_idx, column=c)
                 cell.border = thin_border
-                if c not in (3, 4, 5, 6, 7, 8):
+                if c not in (3, 4, 7, 8, 9, 10):
                     cell.font = Font(name="Segoe UI", size=10)
 
             ws.row_dimensions[row_idx].height = 22
@@ -410,12 +478,14 @@ def api_straddle_download_audit_logs():
         ws.column_dimensions["B"].width = 14
         ws.column_dimensions["C"].width = 12
         ws.column_dimensions["D"].width = 13
-        ws.column_dimensions["E"].width = 12
-        ws.column_dimensions["F"].width = 10
-        ws.column_dimensions["G"].width = 13
-        ws.column_dimensions["H"].width = 13
-        ws.column_dimensions["I"].width = 85
-        ws.column_dimensions["J"].width = 40
+        ws.column_dimensions["E"].width = 18
+        ws.column_dimensions["F"].width = 14
+        ws.column_dimensions["G"].width = 12
+        ws.column_dimensions["H"].width = 10
+        ws.column_dimensions["I"].width = 13
+        ws.column_dimensions["J"].width = 13
+        ws.column_dimensions["K"].width = 80
+        ws.column_dimensions["L"].width = 40
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -435,7 +505,7 @@ def api_straddle_download_audit_logs():
             import io
             str_io = io.StringIO()
             writer = csv.writer(str_io, quoting=csv.QUOTE_MINIMAL)
-            writer.writerow(["Timestamp", "Date", "Level", "Trade Type", "Role", "Side", "Option Type", "Trigger", "Message", "Details"])
+            writer.writerow(["Timestamp", "Date", "Level", "Trade Type", "Strategy", "Underlying", "Role", "Side", "Option Type", "Trigger", "Message", "Details"])
             for log in logs:
                 ts = str(log.get("timestamp") or "")
                 dt = str(log.get("date") or "")
@@ -443,6 +513,8 @@ def api_straddle_download_audit_logs():
                 msg = str(log.get("message") or "")
                 msg_u = msg.upper()
                 tt = str(log.get("trade_type") or ("PAPER" if "[PAPER" in msg_u else ("LIVE" if any(k in msg_u for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET")) else "-"))).upper()
+                strat_name = str(log.get("strategy_name") or "-")
+                und = str(log.get("underlying") or "-")
                 
                 role = "-"
                 if log.get("is_associated_hedge") or any(k in msg_u for k in ("HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO")):
@@ -473,7 +545,7 @@ def api_straddle_download_audit_logs():
 
                 det = log.get("details")
                 det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
-                writer.writerow([ts, dt, lvl, tt, role, side, opt_type, trigger, msg, det_str])
+                writer.writerow([ts, dt, lvl, tt, strat_name, und, role, side, opt_type, trigger, msg, det_str])
 
             # UTF-8 with BOM (0xEF, 0xBB, 0xBF) guarantees Microsoft Excel opens it directly with correct columns
             csv_bytes = str_io.getvalue().encode("utf-8-sig")

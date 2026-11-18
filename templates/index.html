@@ -2898,18 +2898,35 @@
             </div>
         </div>
 
-        <!-- Audit Logs Modal -->
-        <div id="straddleLogsModal" class="straddle-modal-backdrop" style="display:none;">
-            <div class="straddle-modal-dialog" style="max-width:850px;">
-                <div class="straddle-modal-header" style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="display:flex; align-items:center; gap:12px;">
-                        <h3 style="margin:0;">📜 Straddle Algorithmic Execution Audit Logs</h3>
-                        <button type="button" class="straddle-btn" style="padding:4px 10px; font-size:11.5px; font-weight:700; background:rgba(16,185,129,0.15); border:1px solid #10b981; color:#10b981; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" onclick="downloadAuditLogsExcel()" title="Download audit logs in formatted Excel (.xlsx) spreadsheet">
-                            <span>📥</span> Download Excel
-                        </button>
+        <!-- Audit Logs Modal (Institutional Algorithmic Execution Audit Trail) -->
+        <div id="straddleLogsModal" class="straddle-modal-backdrop" style="display:none;" onclick="if(event.target === this) closeStraddleLogsModal()">
+            <div class="straddle-modal-dialog" style="max-width:980px; width:95%; background:#090d16; border:1px solid rgba(255,255,255,0.12); border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.9); overflow:hidden;">
+                <!-- Header with Live Controls & Export Options -->
+                <div class="straddle-modal-header" style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:#060911; border-bottom:1px solid rgba(255,255,255,0.08); flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <h3 style="margin:0; font-size:15px; font-weight:800; color:#f8fafc; display:inline-flex; align-items:center; gap:6px;">
+                            <span>📜</span> Straddle Algorithmic Execution Audit Logs
+                        </h3>
+                        <span id="auditLogCountBadge" style="font-size:11px; font-weight:800; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); padding:2px 8px; border-radius:9999px; font-family:var(--font-mono);">0 Events</span>
                     </div>
-                    <button class="straddle-modal-close" onclick="closeStraddleLogsModal()">×</button>
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <button type="button" class="straddle-btn btn-outline" id="btnToggleAuditLiveStream" onclick="toggleAuditLiveStream()" style="padding:4px 9px; font-size:11px; font-weight:800; border-radius:5px; color:#34d399; border-color:#10b981; background:rgba(16,185,129,0.12); cursor:pointer;" title="Toggle Live Real-Time Auto-Refresh Stream">
+                            <span id="auditLiveStreamDot" style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#10b981; margin-right:4px; box-shadow:0 0 6px #10b981;"></span>
+                            <span id="auditLiveStreamText">LIVE: ON</span>
+                        </button>
+                        <button type="button" class="straddle-btn btn-outline" onclick="renderStraddleAuditLogs()" style="padding:4px 9px; font-size:11px; font-weight:700; border-radius:5px; cursor:pointer;" title="Refresh audit log stream">
+                            🔄 Refresh
+                        </button>
+                        <button type="button" class="straddle-btn" style="padding:4px 10px; font-size:11.5px; font-weight:700; background:rgba(16,185,129,0.15); border:1px solid #10b981; color:#10b981; border-radius:5px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" onclick="downloadAuditLogsExcel()" title="Download audit logs in formatted Excel (.xlsx) spreadsheet">
+                            <span>📥</span> Excel
+                        </button>
+                        <button type="button" class="straddle-btn btn-outline" style="padding:4px 9px; font-size:11px; font-weight:700; border-radius:5px; color:#38bdf8; border-color:rgba(56,189,248,0.4); cursor:pointer;" onclick="downloadAuditLogsCsv()" title="Download audit logs in CSV format">
+                            <span>📄</span> CSV
+                        </button>
+                        <button class="straddle-modal-close" onclick="closeStraddleLogsModal()" style="font-size:16px; font-weight:800; color:#f8fafc; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); border-radius:5px; cursor:pointer; padding:2px 10px; line-height:1;" title="Close Modal (Esc)">×</button>
+                    </div>
                 </div>
+
                 <!-- Compact & Collapsible Audit Filter Bar -->
                 <div style="background:#0b101b; border-bottom:1px solid rgba(255,255,255,0.08);">
                     <!-- Compact Summary Row (Always Visible) -->
@@ -2919,18 +2936,48 @@
                                 <span id="iconToggleAuditFilter">🔽</span> <span id="textToggleAuditFilter">Filters</span>
                             </button>
                             <span id="auditFilterSummaryLabel" style="color:#94a3b8; font-family:var(--font-mono); font-size:11px;">All Events</span>
+                            <button type="button" id="btnResetAuditFilters" class="straddle-btn btn-outline" style="padding:1px 6px; font-size:10px; font-weight:700; border-radius:4px; color:#cbd5e1; border-color:rgba(255,255,255,0.15); display:none;" onclick="resetAuditFilters()" title="Reset all filters to default">↺ Reset</button>
                         </div>
                         <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                             <span style="font-size:10px; color:#64748b; font-weight:800; text-transform:uppercase;">Quick:</span>
                             <button type="button" class="algo-filter-pill active" id="btnAuditQuickAll" onclick="setAuditQuickFilter('all')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:#1e293b; color:#f8fafc; cursor:pointer;">All</button>
-                            <button type="button" class="algo-filter-pill" id="btnAuditQuickInfoSuccess" onclick="setAuditQuickFilter('info_success')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; cursor:pointer;" title="Show Info and Success logs">Info+Success</button>
-                            <button type="button" class="algo-filter-pill" id="btnAuditQuickCePe" onclick="setAuditQuickFilter('ce_pe')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; cursor:pointer;" title="Show only Option CE and PE trade logs">CE/PE Trades</button>
-                            <button type="button" class="algo-filter-pill" id="btnAuditQuickHedgeMain" onclick="setAuditQuickFilter('hedge_main')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(245,158,11,0.15); color:#fbbf24; cursor:pointer;" title="Show Main and Hedge execution logs">Main/Hedge</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickTrades" onclick="setAuditQuickFilter('trades')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; cursor:pointer;" title="Show all live trade fills and entries">⚡ Trades</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickTargets" onclick="setAuditQuickFilter('targets')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; cursor:pointer;" title="Show Target hit events">🎯 Targets</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickStoploss" onclick="setAuditQuickFilter('stoploss')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(244,63,94,0.15); color:#f43f5e; cursor:pointer;" title="Show Stoploss hit and trailing events">🛑 Stoploss</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickHedges" onclick="setAuditQuickFilter('hedges')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(245,158,11,0.15); color:#fbbf24; cursor:pointer;" title="Show Hedge realignment and margin protection events">🛡️ Hedges</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickErrors" onclick="setAuditQuickFilter('errors')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(239,68,68,0.2); color:#f87171; cursor:pointer;" title="Show Errors and Rejected orders">⚠️ Errors</button>
                         </div>
                     </div>
 
-                    <!-- Collapsible Controls Drawer (Compact) -->
-                    <div id="auditCollapsibleFilterPane" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; padding:6px 14px 8px 14px; border-top:1px dashed rgba(255,255,255,0.06); background:#070a13;">
+                    <!-- Collapsible Controls Drawer (Compact & Complete Algo Sync) -->
+                    <div id="auditCollapsibleFilterPane" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 10px; padding:8px 14px 10px 14px; border-top:1px dashed rgba(255,255,255,0.06); background:#070a13;">
+                        <!-- Strategy Filter (Sync with Algo Strategies) -->
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Strategy:</span>
+                            <select id="selAuditStrategyFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditStrategyFilter(this.value)">
+                                <option value="ALL">All Strategies</option>
+                            </select>
+                        </div>
+
+                        <!-- Underlying Asset Filter (Sync with Algo Underlyings) -->
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Asset:</span>
+                            <select id="selAuditAssetFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditAssetFilter(this.value)">
+                                <option value="ALL">All Assets</option>
+                                <option value="NIFTY">NIFTY</option>
+                                <option value="BANKNIFTY">BANKNIFTY</option>
+                                <option value="FINNIFTY">FINNIFTY</option>
+                                <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+                                <option value="SENSEX">SENSEX</option>
+                                <option value="BANKEX">BANKEX</option>
+                                <option value="CRUDEOIL">CRUDEOIL</option>
+                                <option value="NATURALGAS">NATURALGAS</option>
+                                <option value="GOLD">GOLD</option>
+                                <option value="SILVER">SILVER</option>
+                                <option value="COPPER">COPPER</option>
+                            </select>
+                        </div>
+
                         <!-- Level Filter -->
                         <div style="display:flex; align-items:center; gap:4px;">
                             <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Level:</span>
@@ -2964,13 +3011,14 @@
                             </select>
                         </div>
 
-                        <!-- Trigger Filter (SL / Target / Both) -->
+                        <!-- Trigger Filter -->
                         <div style="display:flex; align-items:center; gap:4px;">
                             <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Trigger:</span>
                             <select id="selAuditTriggerFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditTriggerFilter(this.value)">
                                 <option value="ALL">All Triggers</option>
                                 <option value="TARGET">🎯 Target Only</option>
                                 <option value="STOPLOSS">🛑 Stoploss Only</option>
+                                <option value="REENTRY">🔄 Re-Entry Only</option>
                             </select>
                         </div>
 
@@ -2993,9 +3041,16 @@
                                 <option value="paper">🟣 Paper Only</option>
                             </select>
                         </div>
+
+                        <!-- Live Keyword Search -->
+                        <div style="display:flex; align-items:center; gap:4px; flex-grow:1; min-width:200px;">
+                            <input type="text" id="inputAuditSearch" placeholder="🔍 Search logs (symbol, order id, strike, error...)" oninput="onAuditSearchInput(this.value)" style="width:100%; padding:3px 8px; font-size:11px; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#f8fafc; border-radius:4px; outline:none; font-family:var(--font-mono);">
+                        </div>
                     </div>
                 </div>
-                <div class="straddle-modal-body" style="background:#090d15; max-height:65vh; overflow-y:auto; font-family:var(--font-mono); font-size:12px;">
+
+                <!-- Modal Body with Scrollable Container -->
+                <div class="straddle-modal-body" style="background:#090d15; max-height:68vh; overflow-y:auto; font-family:var(--font-mono); font-size:12px; padding:12px;">
                     <div id="straddleAuditLogsContainer" style="display:flex; flex-direction:column; gap:6px;">
                         <!-- Logs rendered dynamically -->
                     </div>
