@@ -5187,6 +5187,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                         <div class="straddle-status-container">
                             <span class="straddle-status-pill status-badge-closed">CLOSED</span>
                             ${isReEntry ? '<span class="status-badge-reentry">RE-ENTRY</span>' : ''}
+                            ${pos.re_execution_pending ? `<span style="font-size:9.5px; font-weight:800; color:#f59e0b; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); border-radius:3px; padding:1px 5px; margin-top:2px; display:inline-block;" title="Next Re-entry scheduled at ${pos.re_execution_target_time || ''}">⏳ Re-Entering @ ${pos.re_execution_target_time || 'Next Candle'}</span>` : ''}
                         </div>
                     `;
             }
@@ -7259,6 +7260,12 @@ function populateStraddleSettingsForm(s) {
     if (reMethodEl) reMethodEl.value = adv.re_execute_method || "Immediate";
     const reDelayEl = document.getElementById("cfgReExecuteOrderDelaySec");
     if (reDelayEl) reDelayEl.value = (adv.re_execute_order_delay_sec !== undefined && adv.re_execute_order_delay_sec !== null) ? adv.re_execute_order_delay_sec : 0;
+    const reFilterEl = document.getElementById("cfgReExecuteTriggerFilter");
+    if (reFilterEl) reFilterEl.value = adv.re_execute_trigger_filter || "BOTH";
+    const marginGraceEl = document.getElementById("cfgMarginExitGraceSec");
+    if (marginGraceEl) marginGraceEl.value = adv.margin_error_grace_sec !== undefined ? String(adv.margin_error_grace_sec) : "15";
+    const rePlacementEl = document.getElementById("cfgReEntryPlacement");
+    if (rePlacementEl) rePlacementEl.value = adv.re_entry_placement || "Place in advance";
     const autoRelMarginEl = document.getElementById("cfgAutoReleaseMarginReEntry");
     if (autoRelMarginEl) autoRelMarginEl.checked = (adv.auto_release_margin_reentry !== false);
 
@@ -7312,6 +7319,9 @@ function populateStraddleSettingsForm(s) {
 
     document.getElementById("cfgAutoHandlingSl").checked = adv.auto_handling_sl_cancellation !== false;
     document.getElementById("cfgAutoExitMargin").checked = !!(adv.auto_exit_margin_error || adv.auto_exit_on_margin_error);
+    if (typeof onReExecuteSettingsChange === "function") {
+        onReExecuteSettingsChange();
+    }
 
     // Render Leg rows
     const tbody = document.getElementById("straddleLegsBuilderBody");
@@ -8765,6 +8775,108 @@ function updateBenchmarkPreview() {
 window.updateBenchmarkPreview = updateBenchmarkPreview;
 
 
+
+// -------------------------------------------------------------
+// ⚡ RE-EXECUTION, RE-ENTRY & MARGIN SAFETY GUARDS CONTROLLERS
+// -------------------------------------------------------------
+function onReExecuteSettingsChange() {
+    const methodEl = document.getElementById("cfgReExecuteMethod");
+    const method = methodEl ? methodEl.value : "Immediate";
+    const delayEl = document.getElementById("cfgReExecuteOrderDelaySec");
+    const delaySec = parseInt(delayEl ? delayEl.value : 0, 10) || 0;
+    const badgeEl = document.getElementById("badgeReExecuteStatus");
+    const helpEl = document.getElementById("cfgReExecuteMethodHelp");
+
+    if (badgeEl) {
+        if (method.includes("Candle Close")) {
+            badgeEl.textContent = delaySec > 0 ? `Candle Close :00 (+${delaySec}s Delay)` : "Candle Close :00 (Stockmock)";
+            badgeEl.style.color = "#f59e0b";
+            badgeEl.style.background = "rgba(245,158,11,0.12)";
+            badgeEl.style.borderColor = "rgba(245,158,11,0.3)";
+        } else if (method.includes("Next Minute Open")) {
+            badgeEl.textContent = delaySec > 0 ? `Next Min :01 (+${delaySec}s Delay)` : "Next Minute Open (:01s)";
+            badgeEl.style.color = "#38bdf8";
+            badgeEl.style.background = "rgba(56,189,248,0.12)";
+            badgeEl.style.borderColor = "rgba(56,189,248,0.3)";
+        } else if (method.includes("Complete 1-Minute")) {
+            badgeEl.textContent = `1-Min Cooldown (${60 + delaySec}s Delay)`;
+            badgeEl.style.color = "#a855f7";
+            badgeEl.style.background = "rgba(168,85,247,0.12)";
+            badgeEl.style.borderColor = "rgba(168,85,247,0.3)";
+        } else {
+            badgeEl.textContent = delaySec > 0 ? `Immediate (+${delaySec}s Delay)` : "Immediate (0ms Delay)";
+            badgeEl.style.color = "#10b981";
+            badgeEl.style.background = "rgba(16,185,129,0.12)";
+            badgeEl.style.borderColor = "rgba(16,185,129,0.3)";
+        }
+    }
+
+    if (helpEl) {
+        if (method.includes("Candle Close")) {
+            helpEl.textContent = "Waits for the active 1-minute candle to complete, punching the re-entry order at :00s of the next minute (Stockmock parity).";
+        } else if (method.includes("Next Minute Open")) {
+            helpEl.textContent = "Punches the re-entry order at :01s of the next minute, ensuring the opening quote is fully established.";
+        } else if (method.includes("Complete 1-Minute")) {
+            helpEl.textContent = "Applies a strict 60-second cooldown period from the moment of exit before re-executing.";
+        } else {
+            helpEl.textContent = "Dispatches re-entry order instantaneously (0ms delay) the moment a leg's SL or Target is breached.";
+        }
+    }
+
+    updateReExecutePreview();
+}
+window.onReExecuteSettingsChange = onReExecuteSettingsChange;
+
+function setReExecuteDelayPreset(sec) {
+    const delayEl = document.getElementById("cfgReExecuteOrderDelaySec");
+    if (delayEl) {
+        delayEl.value = sec;
+    }
+    onReExecuteSettingsChange();
+}
+window.setReExecuteDelayPreset = setReExecuteDelayPreset;
+
+function updateReExecutePreview() {
+    const method = document.getElementById("cfgReExecuteMethod")?.value || "Immediate";
+    const delaySec = parseInt(document.getElementById("cfgReExecuteOrderDelaySec")?.value || 0, 10) || 0;
+    const filter = document.getElementById("cfgReExecuteTriggerFilter")?.value || "BOTH";
+    const graceSec = document.getElementById("cfgMarginExitGraceSec")?.value || "15";
+    const autoRel = document.getElementById("cfgAutoReleaseMarginReEntry")?.checked !== false;
+    const autoSl = document.getElementById("cfgAutoHandlingSl")?.checked !== false;
+    const autoExit = !!document.getElementById("cfgAutoExitMargin")?.checked;
+
+    const badgeEl = document.getElementById("prevReExecuteBadge");
+    const summaryEl = document.getElementById("prevReExecuteSummaryText");
+    const timingEl = document.getElementById("prevReExecuteTimingText");
+
+    if (!summaryEl || !timingEl) return;
+
+    let filterLabel = filter === "STOPLOSS_ONLY" ? "SL Only" : (filter === "TARGET_ONLY" ? "Target Only" : "Both SL & Target");
+    let marginReliefLabel = autoRel ? "Margin Relief: Active" : "Margin Relief: Off";
+    let slDesyncLabel = autoSl ? "SL Desync Guard: Active" : "SL Desync Guard: Off";
+    let autoExitLabel = autoExit ? `Margin Auto-Exit: ${graceSec}s Grace` : "Margin Auto-Exit: Disabled";
+
+    let timingStr = "";
+    if (method.includes("Candle Close")) {
+        if (badgeEl) badgeEl.textContent = "Candle Close Re-Entry";
+        timingStr = `⏳ <strong>Candle Close Timing:</strong> Waits until next minute :00${delaySec > 0 ? ` + ${delaySec}s delay` : ''} before re-entering.`;
+    } else if (method.includes("Next Minute Open")) {
+        if (badgeEl) badgeEl.textContent = "Next Minute Open";
+        timingStr = `⏱️ <strong>Next Minute Open:</strong> Enters at :01s of next minute${delaySec > 0 ? ` + ${delaySec}s delay` : ''}.`;
+    } else if (method.includes("Complete 1-Minute")) {
+        if (badgeEl) badgeEl.textContent = "1-Min Cooldown";
+        timingStr = `⏱️ <strong>Cooldown:</strong> Exact ${60 + delaySec}s wait from exit before re-entering.`;
+    } else {
+        if (badgeEl) badgeEl.textContent = "Immediate Execution";
+        timingStr = `⏱️ <strong>Zero Latency:</strong> Dispatched immediately (${delaySec}s delay) upon leg exit.`;
+    }
+
+    summaryEl.innerHTML = `Mode: ${method.split(' ')[0]} (${delaySec}s delay) | Scope: ${filterLabel} | ${marginReliefLabel} | ${slDesyncLabel} | ${autoExitLabel}`;
+    timingEl.innerHTML = timingStr;
+}
+window.updateReExecutePreview = updateReExecutePreview;
+
+
 function toggleAlgoBuilderSection(secId, forceState = null) {
     const sec = document.getElementById(secId);
     const chevron = document.getElementById("chevron_" + secId);
@@ -9167,6 +9279,10 @@ function serializeCurrentStrategySettings() {
             mtm_sl_delay_sec: isNaN(parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgMtmSlDelaySec")?.value, 10),
             re_execute_method: document.getElementById("cfgReExecuteMethod")?.value || "Immediate",
             re_execute_order_delay_sec: isNaN(parseInt(document.getElementById("cfgReExecuteOrderDelaySec")?.value, 10)) ? 0 : parseInt(document.getElementById("cfgReExecuteOrderDelaySec")?.value, 10),
+            re_execute_trigger_filter: document.getElementById("cfgReExecuteTriggerFilter")?.value || "BOTH",
+            margin_error_grace_sec: parseInt(document.getElementById("cfgMarginExitGraceSec")?.value, 10) || 15,
+            re_entry_placement: document.getElementById("cfgReEntryPlacement")?.value || "Place in advance",
+            re_cost_activation: document.getElementById("cfgReCostActivation")?.value || "Immediate",
             no_reentry_after_enabled: !!document.getElementById("cfgToggleNoReEntryAfter")?.checked,
             no_reentry_after_time: document.getElementById("cfgNoReEntryAfterTime")?.value || "15:00:00",
             re_entry_before_time: document.getElementById("cfgNoReEntryAfterTime")?.value || "15:00:00",

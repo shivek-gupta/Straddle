@@ -1857,44 +1857,199 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_reentry')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_reentry" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">RE-EXECUTION, RE-ENTRY & MARGIN SAFETY GUARDS 🔗</span>
+                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f59e0b;">⚡ RE-EXECUTION, RE-ENTRY & MARGIN SAFETY GUARDS 🔗</span>
                     </div>
+                    <span style="font-size:11px; color:#64748b; font-weight:600;">Quantiply & Stockmock Parity with Zero-Delay Margin Unblocking</span>
                 </div>
 
                 <div id="sec_builder_reentry" class="straddle-collapsible-body collapsed" style="display:none;">
-                    <!-- Re-Execute Method & Order Delay (Quantiply Parity) -->
-                    <div style="background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px; margin-bottom:10px;">
-                        <div style="font-size:12px; font-weight:700; color:#cbd5e1; margin-bottom:10px;">Re-Entry / Re-Execute Method & Timing (Quantiply Parity)</div>
-                        <div class="straddle-grid-2col">
-                            <div class="straddle-form-group">
-                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">Re-Execute method:</label>
-                                <select id="cfgReExecuteMethod" class="straddle-select" style="font-weight:700;">
-                                    <option value="Immediate" selected>Immediate</option>
-                                    <option value="Candle Close (Stockmock)">Candle Close (Stockmock)</option>
-                                </select>
-                            </div>
-                            <div class="straddle-form-group">
-                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">Re-execute order delay (seconds):</label>
-                                <div style="display:flex; align-items:center; gap:8px;">
-                                    <input type="number" id="cfgReExecuteOrderDelaySec" class="straddle-input" value="0" min="0" max="600" style="flex:1; font-weight:700;">
-                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
+                    <div style="background:#090a0e; border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:16px;">
+                        
+                        <!-- Header Banner -->
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.06);">
+                            <div>
+                                <div style="font-size:13px; font-weight:800; color:#f59e0b; display:flex; align-items:center; gap:6px;">
+                                    <span>⚡ Re-Entry Execution, Timing & Margin Safeguards</span>
+                                    <span style="font-size:10px; font-weight:700; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); border-radius:3px; padding:1px 6px;">Quantiply & Stockmock Parity</span>
                                 </div>
-                                <div style="font-size:10px; color:#64748b; font-style:italic; margin-top:2px;">min: 0; max: 600</div>
+                                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+                                    Enforce exact minute candle close re-entries, prevent RMS margin rejections, and protect against unexpected broker SL cancellations.
+                                </div>
+                            </div>
+                            <div style="text-align:right;">
+                                <span id="badgeReExecuteStatus" style="font-size:10.5px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:4px; padding:3px 8px;">
+                                    Immediate (0s Delay)
+                                </span>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Additional Execution Controls (Quantiply Standard Safety Guards) -->
-                    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; background:#090a0e; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px;">
-                        <label class="straddle-checkbox-label" title="Continuously tracks broker-placed SL orders. If cancelled unexpectedly by client or broker, the algo automatically takes over live price monitoring and triggers exit on SL/Target hit to avoid naked exposure.">
-                            <input type="checkbox" id="cfgAutoHandlingSl" checked> Auto handling of unexpected Stoploss order cancellations
-                        </label>
-                        <label class="straddle-checkbox-label" title="If any leg encounters a margin/RMS shortfall error during Entry, Re-Entry, or Re-Execute, the algo displays a 15-second grace countdown buffer with 'Square Off Now' & 'Cancel Auto-Exit' options before automatically squaring off all open positions to prevent naked exposure.">
-                            <input type="checkbox" id="cfgAutoExitMargin"> Auto exit on margin error (Exit all open positions)
-                        </label>
-                        <label class="straddle-checkbox-label" title="When enabled: if resting SL/Target broker orders are blocking margin during re-entry, the algo temporarily cancels opposite legs' resting broker orders for a fraction of a second to release broker margin, executes the re-entry order, and immediately re-places advance SL/Target orders on the broker for all legs while maintaining continuous platform monitoring.">
-                            <input type="checkbox" id="cfgAutoReleaseMarginReEntry" checked> Auto-release margin for re-execution (Temporarily unblock broker margin during re-entry)
-                        </label>
+                        <!-- Row 1: Timing, Delay & Scope Grid -->
+                        <div class="straddle-grid-3col" style="gap:14px; margin-bottom:14px;">
+                            <!-- 1. Re-Execute Method -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Re-Execute Method:
+                                </label>
+                                <select id="cfgReExecuteMethod" class="straddle-select" style="font-weight:700; color:#f59e0b;" onchange="onReExecuteSettingsChange()">
+                                    <option value="Immediate" selected>Immediate (0ms - Instant on SL/Target Breach)</option>
+                                    <option value="Candle Close (Stockmock)">Candle Close (Stockmock) - Wait until next minute :00</option>
+                                    <option value="Next Minute Open">Next Minute Open - Wait until next minute :01</option>
+                                    <option value="Complete 1-Minute Bar">Complete 1-Minute Bar - 60s Cooldown Delay</option>
+                                </select>
+                                <div id="cfgReExecuteMethodHelp" style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Dispatches re-entry order instantaneously the moment a leg's SL or Target is breached.
+                                </div>
+                            </div>
+
+                            <!-- 2. Re-Execute Order Delay -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Re-Execute Order Delay:
+                                </label>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <input type="number" id="cfgReExecuteOrderDelaySec" class="straddle-input" value="0" min="0" max="600" style="flex:1; font-weight:700; color:#f59e0b;" oninput="onReExecuteSettingsChange()">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
+                                </div>
+                                <!-- Quick Delay Presets -->
+                                <div style="display:flex; gap:4px; margin-top:5px; flex-wrap:wrap;">
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setReExecuteDelayPreset(0)">0s</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setReExecuteDelayPreset(1)">1s</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setReExecuteDelayPreset(2)">2s</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setReExecuteDelayPreset(3)">3s</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setReExecuteDelayPreset(5)">5s</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setReExecuteDelayPreset(10)">10s</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setReExecuteDelayPreset(30)">30s</button>
+                                    <button type="button" class="straddle-btn btn-outline" style="font-size:9.5px; padding:1px 6px; border-radius:3px;" onclick="setReExecuteDelayPreset(60)">60s</button>
+                                </div>
+                            </div>
+
+                            <!-- 3. Re-Execution Trigger Filter -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Trigger Re-Execution On:
+                                </label>
+                                <select id="cfgReExecuteTriggerFilter" class="straddle-select" style="font-weight:700;" onchange="onReExecuteSettingsChange()">
+                                    <option value="BOTH" selected>Both Stoploss & Target Breaches</option>
+                                    <option value="STOPLOSS_ONLY">Stoploss Hits Only (Ignore Targets)</option>
+                                    <option value="TARGET_ONLY">Target Hits Only (Ignore Stoploss)</option>
+                                </select>
+                                <div style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Filters which leg exits qualify for automated re-entry execution.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Row 2: Margin Shortfall & RMS Controls -->
+                        <div class="straddle-grid-3col" style="gap:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.06); margin-bottom:14px;">
+                            <!-- 4. Margin Error Grace Buffer -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Margin Error Grace Countdown:
+                                </label>
+                                <select id="cfgMarginExitGraceSec" class="straddle-select" style="font-weight:700;" onchange="onReExecuteSettingsChange()">
+                                    <option value="15" selected>15 Seconds Grace (Recommended - Allows Manual Choice)</option>
+                                    <option value="10">10 Seconds Grace Buffer</option>
+                                    <option value="30">30 Seconds Grace Buffer</option>
+                                    <option value="0">0 Seconds (Immediate Square-Off on Margin Error)</option>
+                                </select>
+                                <div style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Grace countdown before auto-squaring off all open positions upon broker margin rejection.
+                                </div>
+                            </div>
+
+                            <!-- 5. Re-Cost Activation Timing -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Re-Cost / Re-Entry Order Placement:
+                                </label>
+                                <select id="cfgReEntryPlacement" class="straddle-select" style="font-weight:700;" onchange="onReExecuteSettingsChange()">
+                                    <option value="Place in advance" selected>Place in Advance with Broker (Kotak Neo OMS)</option>
+                                    <option value="Keep with self">Keep with Platform (Platform Trigger Monitoring)</option>
+                                </select>
+                                <div style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Determines whether new SL/Target orders for re-entered legs are rested in broker OMS or tracked by algo.
+                                </div>
+                            </div>
+
+                            <!-- 6. Margin Relief Lead Time -->
+                            <div class="straddle-form-group">
+                                <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
+                                    Hedge Pre-Shift & Margin Window:
+                                </label>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <input type="text" class="straddle-input" value="2.5s Lead Time" readonly style="flex:1; font-weight:700; color:#10b981; background:#0b1120;">
+                                </div>
+                                <div style="font-size:10px; color:#64748b; margin-top:4px;">
+                                    Pre-shifts dynamic hedge 2.5s before main re-entry so broker margin is 100% unlocked with zero latency.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Row 3: Institutional Safety Guard Switches -->
+                        <div style="background:#030712; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:12px 14px; margin-bottom:14px; display:flex; flex-direction:column; gap:10px;">
+                            
+                            <!-- Switch 1: Auto Release Margin -->
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;" title="When enabled: if resting SL/Target broker orders are blocking margin during re-entry, the algo temporarily cancels opposite legs' resting broker orders for a fraction of a second to release broker margin, executes the re-entry order, and immediately re-places advance SL/Target orders on the broker for all legs while maintaining continuous platform monitoring.">
+                                <input type="checkbox" id="cfgAutoReleaseMarginReEntry" checked style="margin-top:2px;" onchange="onReExecuteSettingsChange()">
+                                <div>
+                                    <div style="font-size:12px; font-weight:800; color:#f8fafc; display:flex; align-items:center; gap:8px;">
+                                        <span>Auto-Release Margin for Re-Execution</span>
+                                        <span style="font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); padding:1px 6px; border-radius:3px;">⚡ Highly Recommended</span>
+                                    </div>
+                                    <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+                                        Temporarily unblocks opposite legs' resting advance broker orders during re-entry to eliminate RMS margin shortfall rejection, then instantly reinstates resting orders with broker with zero slippage.
+                                    </div>
+                                </div>
+                            </label>
+
+                            <div style="height:1px; background:rgba(255,255,255,0.05);"></div>
+
+                            <!-- Switch 2: Auto Handling SL Cancellation -->
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;" title="Continuously tracks broker-placed SL orders. If cancelled unexpectedly by client or broker, the algo automatically takes over live price monitoring and triggers exit on SL/Target hit to avoid naked exposure.">
+                                <input type="checkbox" id="cfgAutoHandlingSl" checked style="margin-top:2px;" onchange="onReExecuteSettingsChange()">
+                                <div>
+                                    <div style="font-size:12px; font-weight:800; color:#f8fafc; display:flex; align-items:center; gap:8px;">
+                                        <span>Auto-Handling of Unexpected Stoploss Order Cancellations</span>
+                                        <span style="font-size:9.5px; font-weight:800; color:#38bdf8; background:rgba(56,189,248,0.15); padding:1px 6px; border-radius:3px;">🛡️ Anti-Desync Guard</span>
+                                    </div>
+                                    <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+                                        Continuously tracks broker-placed SL triggers. If cancelled by broker OMS or user, platform immediately takes over live monitoring and executes market exit on SL breach to prevent unhedged exposure.
+                                    </div>
+                                </div>
+                            </label>
+
+                            <div style="height:1px; background:rgba(255,255,255,0.05);"></div>
+
+                            <!-- Switch 3: Auto Exit on Margin Error -->
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;" title="If any leg encounters a margin/RMS shortfall error during Entry, Re-Entry, or Re-Execute, the algo displays a grace countdown buffer with 'Square Off Now' & 'Cancel Auto-Exit' options before automatically squaring off all open positions to prevent naked exposure.">
+                                <input type="checkbox" id="cfgAutoExitMargin" style="margin-top:2px;" onchange="onReExecuteSettingsChange()">
+                                <div>
+                                    <div style="font-size:12px; font-weight:800; color:#f8fafc; display:flex; align-items:center; gap:8px;">
+                                        <span>Auto Exit on Margin Error (Exit All Open Positions)</span>
+                                        <span style="font-size:9.5px; font-weight:800; color:#ef4444; background:rgba(239,68,68,0.15); padding:1px 6px; border-radius:3px;">🚨 Capital Protection</span>
+                                    </div>
+                                    <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+                                        If any leg encounters a margin/RMS rejection during entry or re-execution, shows a grace countdown banner before automatically squaring off all open positions to eliminate unhedged risk.
+                                    </div>
+                                </div>
+                            </label>
+
+                        </div>
+
+                        <!-- Live Interactive Blueprint Card -->
+                        <div id="reExecuteLiveBlueprintCard" style="background:#030712; border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:10px 14px; font-size:11px; display:flex; flex-direction:column; gap:4px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-weight:800; color:#f59e0b;">📐 Live Re-Execution Blueprint:</span>
+                                <span id="prevReExecuteBadge" style="font-size:9.5px; font-weight:800; color:#f59e0b; background:rgba(245,158,11,0.15); padding:1px 6px; border-radius:3px;">Immediate Execution</span>
+                            </div>
+                            <div id="prevReExecuteSummaryText" style="color:#e2e8f0; font-family:monospace; font-size:11px;">
+                                Execution: Immediate (0s delay) | Scope: Both SL & Target | Margin Relief: Active | SL Desync Guard: Active
+                            </div>
+                            <div id="prevReExecuteTimingText" style="color:#94a3b8; font-size:10.5px;">
+                                ⏱️ Zero Latency: Re-entry order is dispatched immediately upon leg square-off with no delay.
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 

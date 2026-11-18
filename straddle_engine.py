@@ -10395,17 +10395,21 @@ class StraddleManager:
             return {"success": True, "reset_count": count}
 
     def _is_margin_error(self, err_val: Any) -> bool:
-        """Determines if an error message represents a margin shortfall or RMS limit error."""
+        """Determines if an error message represents a margin shortfall or RMS limit error across brokers."""
         if not err_val:
             return False
         s = str(err_val).lower()
-        keywords = ["margin", "fund", "insufficient", "rms", "shortfall", "limit exceeded", "exceeds"]
+        keywords = [
+            "margin", "fund", "insufficient", "rms", "shortfall", "limit exceeded",
+            "exceeds", "balance", "collateral", "exposure", "span", "peak margin",
+            "blocked margin", "unallocated", "not enough", "shortage", "required margin"
+        ]
         return any(k in s for k in keywords)
 
     def _trigger_margin_auto_exit(self, strat: Dict[str, Any], broker: Any, source: str = "Order") -> bool:
         """
         Quantiply Standard 'Auto exit on margin error (Exit all open positions)':
-        When enabled, any margin failure triggers a 15-second grace countdown buffer.
+        When enabled, any margin failure triggers a grace countdown buffer (configurable, e.g. 15s).
         If not cancelled or squared off manually, all open positions in the strategy are automatically
         squared off upon countdown expiration to avoid unhedged / naked exposure.
         """
@@ -10418,31 +10422,49 @@ class StraddleManager:
         if not open_positions:
             return False
 
+        grace_sec = int(adv.get("margin_error_grace_sec", 15) if adv.get("margin_error_grace_sec") is not None else 15)
+
+        if grace_sec <= 0:
+            self._log_event(
+                f"[SAFETY GUARD] Margin error during {source} in '{strat.get('name')}'. "
+                f"Immediate square-off active (0s grace). Exiting {len(open_positions)} open position(s)...",
+                level="WARNING"
+            )
+            for p in open_positions:
+                self._square_off_single_position(p, broker, reason=f"IMMEDIATE AUTO EXIT ON MARGIN ERROR ({source})")
+            strat["status"] = "ENTRY_FAILED"
+            strat["enabled"] = False
+            strat["_manual_reset"] = True
+            strat["last_trade_date"] = today_ist_str()
+            self._save_strategies()
+            self._save_state(force=True)
+            return True
+
         if strat.get("_margin_auto_exit_pending"):
             return True
 
         strat["_margin_auto_exit_pending"] = True
         strat["_margin_auto_exit_source"] = source
-        strat["_margin_auto_exit_deadline"] = time.time() + 15.0
-        strat["margin_exit_countdown"] = 15
+        strat["_margin_auto_exit_deadline"] = time.time() + float(grace_sec)
+        strat["margin_exit_countdown"] = grace_sec
         if self._active_strategy_id == strat.get("strategy_id"):
             self._state["_margin_auto_exit_pending"] = True
-            self._state["margin_exit_countdown"] = 15
+            self._state["margin_exit_countdown"] = grace_sec
 
         self._save_strategies()
         self._save_state()
 
         self._log_event(
             f"[SAFETY GUARD] Margin error during {source} in '{strat.get('name')}'. "
-            f"Auto-exit countdown initiated: All {len(open_positions)} open positions will be squared off in 15 seconds unless cancelled.",
+            f"Auto-exit countdown initiated: All {len(open_positions)} open positions will be squared off in {grace_sec} seconds unless cancelled.",
             level="WARNING"
         )
         self._send_telegram_alert(
             f"🚨 *[SAFETY GUARD] Margin Error Detected ({source})!*\n"
             f"• Strategy: `{strat.get('name')}`\n"
             f"• Open Positions: `{len(open_positions)}`\n"
-            f"• Auto-Exit Countdown: *15 SECONDS*\n"
-            f"Algo will auto square-off all open positions in 15s to prevent naked risk unless cancelled from dashboard."
+            f"• Auto-Exit Countdown: *{grace_sec} SECONDS*\n"
+            f"Algo will auto square-off all open positions in {grace_sec}s to prevent naked risk unless cancelled from dashboard."
         )
         return True
 
@@ -10941,10 +10963,11 @@ class StraddleManager:
             pos["exit_time"] = now_ist_str()
             pos["_exit_retry_count"] = 0
 
+            ent_p = float(pos.get("avg_ent_price", 0.0) or 0.0)
             if pos.get("side") == "SELL":
-                pos["mtm"] = round((pos["avg_ent_price"] - exit_price) * qty, 2)
+                pos["mtm"] = round((ent_p - exit_price) * qty, 2)
             else:
-                pos["mtm"] = round((exit_price - pos["avg_ent_price"]) * qty, 2)
+                pos["mtm"] = round((exit_price - ent_p) * qty, 2)
 
             exit_cat = "Square Off" if "SQUARE OFF" in reason.upper() else ("Target" if "TARGET" in reason.upper() else "Stoploss")
 
@@ -11266,20 +11289,32 @@ class StraddleManager:
                 re_method = str(adv.get("re_execute_method", "Immediate")).strip()
                 ref_mode = str(adv.get("reference_price_mode", "ENTRY_PRICE")).strip()
                 bm_scope = str(adv.get("benchmark_scope", "INITIAL_ONLY")).strip().upper()
+                re_filter = str(adv.get("re_execute_trigger_filter", "BOTH")).strip().upper()
+                extra_delay = max(0, int(adv.get("re_execute_order_delay_sec", 0) or 0))
 
-                # Parity: Re-Execution timing
-                # If Re-Execute method is "Candle Close (Stockmock)" OR reference price mode is "ENTRY_CANDLE_CLOSE" with all entries scope or "CANDLE_CLOSE_ALL"
-                is_candle_close = ("candle" in re_method.lower()) or (ref_mode in ("CANDLE_CLOSE_ALL", "ENTRY_CANDLE_CLOSE") and bm_scope != "INITIAL_ONLY")
+                # Re-execution trigger filter check
+                clean_trig = str(trigger or "STOPLOSS").upper()
+                if re_filter == "STOPLOSS_ONLY" and ("TARGET" in clean_trig or "TGT" in clean_trig):
+                    self._log_event(f"[{strat.get('name')}] Re-Execution skipped for {pos.get('symbol')}: Trigger filter is set to Stoploss Only.", level="INFO")
+                    return
+                if re_filter == "TARGET_ONLY" and ("SL" in clean_trig or "STOPLOSS" in clean_trig):
+                    self._log_event(f"[{strat.get('name')}] Re-Execution skipped for {pos.get('symbol')}: Trigger filter is set to Target Only.", level="INFO")
+                    return
 
                 now_dt = now_ist()
-                if is_candle_close:
+                if "candle" in re_method.lower() or "stockmock" in re_method.lower() or (ref_mode in ("CANDLE_CLOSE_ALL", "ENTRY_CANDLE_CLOSE") and bm_scope != "INITIAL_ONLY"):
                     # Sleep until second :00 of the next minute (close of current 1-minute candle)
                     sec_left = 60.0 - now_dt.second - (now_dt.microsecond / 1_000_000.0)
-                    extra_delay = int(adv.get("re_execute_order_delay_sec", 0) or 0)
                     total_wait = max(0.0, sec_left + extra_delay)
+                elif "next minute open" in re_method.lower():
+                    # Sleep until :01s of next minute
+                    sec_left = 60.0 - now_dt.second - (now_dt.microsecond / 1_000_000.0) + 1.0
+                    total_wait = max(0.0, sec_left + extra_delay)
+                elif "complete 1-minute" in re_method.lower():
+                    # Cooldown of 60s from exit moment
+                    total_wait = max(0.0, 60.0 + extra_delay)
                 else:
-                    delay_sec = int(adv.get("re_execute_order_delay_sec", 0) or 0)
-                    total_wait = max(0.0, float(delay_sec))
+                    total_wait = float(extra_delay)
 
                 target_dt = now_dt + timedelta(seconds=total_wait)
                 target_sec = target_dt.hour * 3600 + target_dt.minute * 60 + target_dt.second
@@ -11316,8 +11351,24 @@ class StraddleManager:
                 # When immediate (total_wait <= 3.0s), shift hedge and re-execute
                 # instantaneously back-to-back.
                 # -----------------------------------------------------------------
+                # Mark position as pending re-execution for real-time dashboard countdown
+                pos["re_execution_pending"] = True
+                pos["re_execution_target_time"] = target_dt.strftime("%H:%M:%S")
+                pos["re_execution_wait_sec"] = total_wait
+                strat["re_execution_pending"] = True
+
                 PRE_SHIFT_LEAD_SEC = 2.5
                 should_pre_shift = (total_wait > 3.0)
+
+                def _safe_interruptible_sleep(secs: float) -> bool:
+                    start_s = time.time()
+                    while (time.time() - start_s) < secs:
+                        if self._stop_event.is_set():
+                            return False
+                        if strat.get("status") in ("STOPPED", "TERMINATED", "COMPLETED", "SQUARED_OFF") or not strat.get("enabled"):
+                            return False
+                        time.sleep(min(0.20, max(0.01, secs - (time.time() - start_s))))
+                    return True
 
                 if should_pre_shift:
                     lead_sleep = total_wait - PRE_SHIFT_LEAD_SEC
@@ -11326,13 +11377,21 @@ class StraddleManager:
                         f"Waiting {lead_sleep:.2f}s until pre-shift window (T-{PRE_SHIFT_LEAD_SEC}s) to shift hedge & release margin ahead of time...",
                         level="INFO"
                     )
-                    time.sleep(lead_sleep)
+                    if not _safe_interruptible_sleep(lead_sleep):
+                        self._log_event(f"[{strat.get('name')}] Re-Execution aborted: Strategy stopped or squared off.", level="INFO")
+                        pos["re_execution_pending"] = False
+                        strat["re_execution_pending"] = False
+                        return
                 elif total_wait > 0:
                     self._log_event(
                         f"[{strat.get('name')}] Re-Execution waiting {total_wait:.2f}s delay...",
                         level="INFO"
                     )
-                    time.sleep(total_wait)
+                    if not _safe_interruptible_sleep(total_wait):
+                        self._log_event(f"[{strat.get('name')}] Re-Execution aborted: Strategy stopped or squared off.", level="INFO")
+                        pos["re_execution_pending"] = False
+                        strat["re_execution_pending"] = False
+                        return
                 else:
                     self._log_event(
                         f"[{strat.get('name')}] Re-Execution 'Immediate' (0s delay). Dispatching hedge shift and re-entry instantaneously.",
@@ -11602,11 +11661,13 @@ class StraddleManager:
                             if item["sl_order_id"]:
                                 s_oids = [o.strip() for o in str(item["sl_order_id"]).split(",") if o.strip()]
                                 total_sl_slices += len(s_oids)
-                                cancel_futs.append((p_cand, "SL", item["sl_order_id"], _PERSISTENT_LEG_POOL.submit(broker.cancel_order, str(item["sl_order_id"]))))
+                                for s_oid in s_oids:
+                                    cancel_futs.append((p_cand, "SL", s_oid, _PERSISTENT_LEG_POOL.submit(broker.cancel_order, s_oid)))
                             if item["tgt_order_id"]:
                                 t_oids = [o.strip() for o in str(item["tgt_order_id"]).split(",") if o.strip()]
                                 total_tgt_slices += len(t_oids)
-                                cancel_futs.append((p_cand, "TARGET", item["tgt_order_id"], _PERSISTENT_LEG_POOL.submit(broker.cancel_order, str(item["tgt_order_id"]))))
+                                for t_oid in t_oids:
+                                    cancel_futs.append((p_cand, "TARGET", t_oid, _PERSISTENT_LEG_POOL.submit(broker.cancel_order, t_oid)))
 
                         self._log_event(
                             f"[Margin Auto-Release] ⚡ Releasing broker margin for Re-entry by cancelling ALL resting advance orders across {len(unblocked_items)} open position(s) ({total_sl_slices} SL slices, {total_tgt_slices} Target slices)...",
@@ -11758,6 +11819,8 @@ class StraddleManager:
                     self._log_event(f"[RE-ENTRY WORKER ERROR] Failed executing re-entry for {pos.get('symbol')}: {e_run}", level="ERROR")
                 finally:
                     pos["_re_entry_in_progress"] = False
+                    pos["re_execution_pending"] = False
+                    strat["re_execution_pending"] = False
                     strat.setdefault("_active_re_entries", set()).discard(pos.get("id") or pos.get("symbol"))
                     strat["_re_entry_in_progress"] = bool(strat.get("_active_re_entries"))
 
