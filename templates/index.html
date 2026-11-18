@@ -1027,7 +1027,9 @@
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                         <button type="button" class="straddle-btn btn-outline" onclick="toggleAllAlgoBuilderSections()" title="Toggle Expand / Collapse All Sections" style="border-color:#64748b; color:#cbd5e1; font-size:11.5px; font-weight:700;">↕ Expand / Collapse All</button>
+                        <button type="button" class="straddle-btn btn-outline" onclick="openAdoptBrokerPositionModal()" title="Adopt Trade into this Algo" style="border-color:#38bdf8; color:#38bdf8; font-size:11.5px; font-weight:700;">📥 Adopt Trade</button>
                         <button type="button" class="straddle-btn btn-primary" onclick="saveStraddleStrategySettings()" title="Save strategy settings without placing orders">💾 Save Changes</button>
+                        <button type="button" class="straddle-btn btn-outline" onclick="toggleStraddleSettingsPanel(false)" title="Close Settings" style="border-color:#64748b; color:#cbd5e1; font-size:11.5px; font-weight:700;">✕ Close</button>
                     </div>
                 </div>
                                       <!-- SECTION 1: POSITIONS & LEGS BUILDER (Collapsible) -->
@@ -1921,13 +1923,19 @@
                                 <label style="font-size:11.5px; font-weight:700; color:#cbd5e1; margin-bottom:6px; display:block;">
                                     Re-Entry Benchmark Scope:
                                 </label>
-                                <select id="cfgBenchmarkScope" class="straddle-select" style="font-weight:700;" onchange="updateBenchmarkPreview()">
-                                    <option value="INITIAL_ONLY" selected>Initial Entry Only (Re-entries use fill price) [Recommended]</option>
-                                    <option value="ALL_ENTRIES">All Entries & Re-entries (Each uses its own candle close)</option>
-                                    <option value="INHERIT_INITIAL">Inherit Initial Benchmark (Re-entries reuse 1st entry benchmark)</option>
-                                </select>
+                                <div style="display:flex; flex-direction:column; gap:6px;">
+                                    <label class="straddle-checkbox-label" style="display:inline-flex; align-items:center; gap:8px; cursor:pointer;" title="Calculate SL/Target % based on 1-min candle close vs actual broker fill price">
+                                        <input type="checkbox" id="cfgBenchmarkInitialOnly" checked onchange="if (document.getElementById('cfgBenchmarkScope')) { document.getElementById('cfgBenchmarkScope').value = this.checked ? 'INITIAL_ONLY' : 'ALL_ENTRIES'; if (typeof updateBenchmarkPreview === 'function') updateBenchmarkPreview(); }">
+                                        <span style="font-size:11.5px; font-weight:700; color:#f8fafc;">Apply benchmark only to Initial Entry</span>
+                                    </label>
+                                    <select id="cfgBenchmarkScope" class="straddle-select" style="font-weight:700; font-size:11px;" onchange="if (document.getElementById('cfgBenchmarkInitialOnly')) { document.getElementById('cfgBenchmarkInitialOnly').checked = (this.value === 'INITIAL_ONLY'); } if (typeof updateBenchmarkPreview === 'function') updateBenchmarkPreview();">
+                                        <option value="INITIAL_ONLY" selected>Initial Entry Only (Re-entries use fill price) [Recommended]</option>
+                                        <option value="ALL_ENTRIES">All Entries & Re-entries (Each uses its own candle close)</option>
+                                        <option value="INHERIT_INITIAL">Inherit Initial Benchmark (Re-entries reuse 1st entry benchmark)</option>
+                                    </select>
+                                </div>
                                 <div style="font-size:10px; color:#64748b; margin-top:4px;">
-                                    Governs how subsequent re-executed or re-entered legs establish their reference price.
+                                    Calculate SL/Target % based on 1-min candle close vs actual broker fill price.
                                 </div>
                             </div>
                         </div>

@@ -1422,6 +1422,7 @@ function updateBulkActionsBar() {
 async function bulkToggleSelectedAlgos(enabled) {
     const ids = Array.from(window._selectedAlgoIds);
     if (ids.length === 0) return;
+    showStraddleToast(`${enabled ? 'Enabling' : 'Disabling'} ${ids.length} selected algo(s)...`, "info", 1500);
     try {
         const resp = await fetch("/api/straddle/strategy/batch_toggle_enable", {
             method: "POST",
@@ -1430,19 +1431,21 @@ async function bulkToggleSelectedAlgos(enabled) {
         });
         const res = await resp.json();
         if (res.success) {
+            showStraddleToast(`${ids.length} algo(s) ${enabled ? 'Enabled' : 'Disabled'}`, enabled ? "success" : "info", 2000);
             await fetchStraddleState();
-            renderStraddleAlgosTable();
+            renderStraddleAlgosTable(true);
         } else {
-            alert("Error: " + (res.error || "Failed"));
+            showStraddleToast("Error: " + (res.error || "Failed"), "error", 3500);
         }
     } catch (e) {
-        alert("Error: " + e.message);
+        showStraddleToast("Error: " + e.message, "error", 3500);
     }
 }
 
 async function bulkDuplicateSelectedAlgos() {
     const ids = Array.from(window._selectedAlgoIds);
     if (ids.length === 0) return;
+    showStraddleToast(`📑 Duplicating ${ids.length} algo(s)...`, "info", 1500);
     try {
         const resp = await fetch("/api/straddle/strategy/batch_duplicate", {
             method: "POST",
@@ -1452,13 +1455,14 @@ async function bulkDuplicateSelectedAlgos() {
         const res = await resp.json();
         if (res.success) {
             window._selectedAlgoIds.clear();
+            showStraddleToast(`✅ ${ids.length} algo(s) duplicated!`, "success", 2000);
             await fetchStraddleState();
-            renderStraddleAlgosTable();
+            renderStraddleAlgosTable(true);
         } else {
-            alert("Error: " + (res.error || "Failed"));
+            showStraddleToast("Error: " + (res.error || "Failed"), "error", 3500);
         }
     } catch (e) {
-        alert("Error: " + e.message);
+        showStraddleToast("Error: " + e.message, "error", 3500);
     }
 }
 
@@ -1481,13 +1485,14 @@ async function bulkDeleteSelectedAlgos() {
         });
         const res = await resp.json();
         if (res.success) {
+            showStraddleToast(`🗑️ ${ids.length} algo(s) deleted successfully`, "success", 2000);
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
             if (typeof renderStraddlePositions === "function") {
                 renderStraddlePositions();
             }
         } else {
-            alert("Error: " + (res.error || "Failed"));
+            showStraddleToast("Error deleting: " + (res.error || "Failed"), "error", 3500);
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
             if (typeof renderStraddlePositions === "function") {
@@ -1495,28 +1500,52 @@ async function bulkDeleteSelectedAlgos() {
             }
         }
     } catch (e) {
-        alert("Error: " + e.message);
+        showStraddleToast("Error: " + e.message, "error", 3500);
     }
 }
 
 async function bulkSetDaysSelectedAlgos(days) {
     const ids = Array.from(window._selectedAlgoIds);
     if (ids.length === 0) return;
+    const targetDays = days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+    // Optimistic local update
+    if (window._straddleState && Array.isArray(window._straddleState.allStrategies)) {
+        window._straddleState.allStrategies.forEach(s => {
+            if (window._selectedAlgoIds.has(s.strategy_id)) {
+                s.schedule_days = [...targetDays];
+            }
+        });
+    }
+    const activeStrat = window._straddleState?.activeStrategy;
+    if (activeStrat && window._selectedAlgoIds.has(activeStrat.strategy_id)) {
+        activeStrat.schedule_days = [...targetDays];
+        document.querySelectorAll(".day-pill-btn").forEach(btn => {
+            const btnDay = btn.getAttribute("data-day");
+            if (btnDay) {
+                btn.classList.toggle("active", targetDays.includes(btnDay));
+            }
+        });
+    }
+    renderStraddleAlgosTable(true);
+    showStraddleToast(`📅 Updating working days for ${ids.length} algos...`, "info", 1500);
+
     try {
         const resp = await fetch("/api/straddle/strategy/batch_set_days", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy_ids: ids, days: days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"] })
+            body: JSON.stringify({ strategy_ids: ids, days: targetDays })
         });
         const res = await resp.json();
         if (res.success) {
+            showStraddleToast(`📅 Working days set to Mon-Fri for ${ids.length} algos`, "success", 2000);
             await fetchStraddleState();
-            renderStraddleAlgosTable();
+            renderStraddleAlgosTable(true);
         } else {
-            alert("Error: " + (res.error || "Failed"));
+            showStraddleToast("Error: " + (res.error || "Failed"), "error", 3500);
         }
     } catch (e) {
-        alert("Error: " + e.message);
+        showStraddleToast("Error: " + e.message, "error", 3500);
     }
 }
 
@@ -1556,10 +1585,10 @@ async function bulkResetSelectedAlgos() {
             await loadStraddleOpenPositions();
             renderStraddleAlgosTable(true);
         } else {
-            alert("Error: " + (res.error || "Failed"));
+            showStraddleToast("Error: " + (res.error || "Failed"), "error", 3500);
         }
     } catch (e) {
-        alert("Error: " + e.message);
+        showStraddleToast("Error: " + e.message, "error", 3500);
     }
 }
 window.bulkResetSelectedAlgos = bulkResetSelectedAlgos;
@@ -1716,6 +1745,11 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                         advSwitchInput.checked = isAdv;
                         const slider = advSwitchInput.nextElementSibling;
                         if (slider) slider.style.background = isAdv ? "#10b981" : "";
+                    }
+
+                    const multInput = document.getElementById(`algo_mult_input_${sid}`);
+                    if (multInput && multInput !== document.activeElement) {
+                        multInput.value = s.multiplier || 1;
                     }
 
                     const mtm = s.mtm || 0.0;
@@ -1890,14 +1924,18 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 <td class="algo-col-days">
                     ${daysHtml}
                 </td>
-                <td class="algo-col-mult" id="algo_mult_cell_${s.strategy_id}" style="text-align:center; min-width:115px; padding:6px 6px;">
-                    <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                <td class="algo-col-mult" id="algo_mult_cell_${s.strategy_id}" style="text-align:center; min-width:125px; padding:6px 6px;">
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
                         <div style="display:inline-flex; background:#0b1120; border:1px solid #334155; border-radius:4px; padding:1px;">
-                            <button type="button" onclick="setAlgoMultiplierMode('${safeJsSid}', 'MANUAL')" style="background:${isManual ? '#2563eb' : 'transparent'}; color:${isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Manual Lots Multiplier">Manual</button>
-                            <button type="button" onclick="setAlgoMultiplierMode('${safeJsSid}', 'AUTO')" style="background:${!isManual ? '#059669' : 'transparent'}; color:${!isManual ? '#fff' : '#64748b'}; border:none; padding:1px 6px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Auto Multiplier based on Available Capital & Cushion Margin">Auto</button>
+                            <button type="button" onclick="setAlgoMultiplierMode('${safeJsSid}', 'MANUAL')" style="background:${isManual ? '#2563eb' : 'transparent'}; color:${isManual ? '#fff' : '#64748b'}; border:none; padding:1px 7px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Manual Lots Multiplier">Manual</button>
+                            <button type="button" onclick="setAlgoMultiplierMode('${safeJsSid}', 'AUTO')" style="background:${!isManual ? '#059669' : 'transparent'}; color:${!isManual ? '#fff' : '#64748b'}; border:none; padding:1px 7px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Auto Multiplier based on Available Capital & Cushion Margin">Auto</button>
                         </div>
                         ${isManual ? `
-                            <input type="number" class="straddle-input" style="width:52px; text-align:center; padding:2px 4px; font-weight:800;" value="${multiplier}" min="1" max="100" onchange="onChangeAlgoMultiplier('${safeJsSid}', this.value)" title="Manual Lots Multiplier">
+                            <div class="straddle-stepper-box" style="display:inline-flex; align-items:center; background:#0b1120; border:1px solid #334155; border-radius:4px; overflow:hidden;">
+                                <button type="button" onclick="stepAlgoMultiplier('${safeJsSid}', -1)" style="background:transparent; border:none; color:#94a3b8; width:22px; height:24px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; font-weight:bold; transition:all 0.15s;" onmouseover="this.style.color='#fff'; this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.color='#94a3b8'; this.style.background='transparent'">−</button>
+                                <input type="number" id="algo_mult_input_${s.strategy_id}" class="straddle-input" style="width:38px; height:24px; border:none; background:transparent; text-align:center; padding:0; font-family:var(--font-mono); font-weight:800; font-size:11.5px; color:#f8fafc;" value="${multiplier}" min="1" max="100" onchange="onChangeAlgoMultiplier('${safeJsSid}', this.value)" title="Manual Lots Multiplier">
+                                <button type="button" onclick="stepAlgoMultiplier('${safeJsSid}', 1)" style="background:transparent; border:none; color:#94a3b8; width:22px; height:24px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; font-weight:bold; transition:all 0.15s;" onmouseover="this.style.color='#fff'; this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.color='#94a3b8'; this.style.background='transparent'">+</button>
+                            </div>
                         ` : `
                             <div style="display:flex; align-items:center; gap:4px;" title="Auto Determined: ${effMult} Lots&#10;Broker Req: ₹${(brokerMargin / 100000).toFixed(2)}L + Cushion: ₹${(cushionMargin / 1000).toFixed(0)}k = ₹${(totalMarginPerLot / 100000).toFixed(2)}L per lot">
                                 <span style="font-size:11px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:1px 5px; border-radius:3px; white-space:nowrap;">⚡ ${effMult}x</span>
@@ -1985,7 +2023,8 @@ async function restartOrRetryStraddleAlgo(strategyId) {
 }
 
 async function toggleAlgoDay(strategyId, day) {
-    const strat = window._straddleState.allStrategies.find(s => s.strategy_id === strategyId);
+    const sIdStr = String(strategyId).trim();
+    const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
     if (!strat) return;
 
     let days = strat.schedule_days ? [...strat.schedule_days] : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
@@ -1997,11 +2036,23 @@ async function toggleAlgoDay(strategyId, day) {
     strat.schedule_days = days;
     renderStraddleAlgosTable(true);
 
+    // CRITICAL TWO-WAY SYNC: If active strategy in builder is this strategy, sync builder pills immediately!
+    const activeStrat = window._straddleState?.activeStrategy;
+    if (activeStrat && (String(activeStrat.strategy_id || "").trim() === sIdStr || String(activeStrat.name || "").trim() === sIdStr)) {
+        activeStrat.schedule_days = [...days];
+        document.querySelectorAll(".day-pill-btn").forEach(btn => {
+            const btnDay = btn.getAttribute("data-day");
+            if (btnDay) {
+                btn.classList.toggle("active", days.includes(btnDay));
+            }
+        });
+    }
+
     try {
         await fetch("/api/straddle/strategy/set_days", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy_id: strategyId, days: days })
+            body: JSON.stringify({ strategy_id: strat.strategy_id || strategyId, days: days })
         });
     } catch (e) {
         console.error("Error saving strategy days:", e);
@@ -2047,13 +2098,36 @@ function toggleDropdownMenu(id, evt) {
 }
 
 async function toggleAlgoAdvanceSl(strategyId, isChecked) {
-    const strat = (window._straddleState.allStrategies || []).find(s => s.strategy_id === strategyId);
+    const sIdStr = String(strategyId).trim();
+    const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
+    const val = isChecked ? "Place in advance" : "Keep with self";
     if (strat) {
         if (!strat.advanced) strat.advanced = {};
-        strat.advanced.sl_order_placement = isChecked ? "Place in advance" : "Keep with self";
-        if (strat.advanced_settings) strat.advanced_settings.sl_order_placement = strat.advanced.sl_order_placement;
+        strat.advanced.sl_order_placement = val;
+        if (strat.advanced_settings) strat.advanced_settings.sl_order_placement = val;
+        if (Array.isArray(strat.legs)) {
+            strat.legs.forEach(leg => { leg.sl_order_placement = val; });
+        }
+        if (Array.isArray(strat.positions)) {
+            strat.positions.forEach(pos => { pos.sl_order_placement = val; });
+        }
         renderStraddleAlgosTable(false);
     }
+
+    // Two-way sync: If this strategy is open in the builder, update all builder fields immediately!
+    const activeStrat = window._straddleState?.activeStrategy;
+    if (activeStrat && (String(activeStrat.strategy_id || "").trim() === sIdStr || String(activeStrat.name || "").trim() === sIdStr)) {
+        if (!activeStrat.advanced) activeStrat.advanced = {};
+        activeStrat.advanced.sl_order_placement = val;
+        if (activeStrat.advanced_settings) activeStrat.advanced_settings.sl_order_placement = val;
+        const slOrderEl = document.getElementById("cfgSlOrderPlacement");
+        if (slOrderEl) slOrderEl.value = val;
+        document.querySelectorAll(".leg-sl-placement").forEach(el => {
+            el.value = val;
+            el.style.color = (val === "Place in advance" ? "#10b981" : "#94a3b8");
+        });
+    }
+
     const name = strat ? strat.name : strategyId;
     showStraddleToast(
         isChecked ? `Strategy '${name}': Advance Exchange SL Activated (0ms Fill)` : `Strategy '${name}': Software SL Activated`,
@@ -2065,11 +2139,12 @@ async function toggleAlgoAdvanceSl(strategyId, isChecked) {
         const resp = await fetch("/api/straddle/strategy/toggle_advance_sl", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy_id: strategyId, enabled: isChecked })
+            body: JSON.stringify({ strategy_id: strat ? strat.strategy_id : strategyId, enabled: isChecked })
         });
         const res = await resp.json();
         if (res.success) {
             await fetchStraddleState();
+            renderStraddleAlgosTable(false);
         } else {
             showStraddleToast("Advance SL update failed: " + (res.error || "Unknown error"), "error", 3000);
         }
@@ -2092,7 +2167,8 @@ function toggleShowAllUnderlyingsAlgos() {
 window.toggleShowAllUnderlyingsAlgos = toggleShowAllUnderlyingsAlgos;
 
 async function onToggleAlgoEnable(strategyId, isChecked) {
-    const strat = (window._straddleState.allStrategies || []).find(s => s.strategy_id === strategyId);
+    const sIdStr = String(strategyId).trim();
+    const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
     if (strat) {
         strat.enabled = isChecked;
         if (isChecked) {
@@ -2102,7 +2178,12 @@ async function onToggleAlgoEnable(strategyId, isChecked) {
             strat.status = "STOPPED";
         }
         renderStraddleAlgosTable(true);
-        if (window._straddleState.activeStrategyId === strategyId) {
+        if (String(window._straddleState.activeStrategyId || "").trim() === sIdStr ||
+            String(window._straddleState.activeStrategy?.strategy_id || "").trim() === sIdStr) {
+            if (window._straddleState.activeStrategy) {
+                window._straddleState.activeStrategy.enabled = isChecked;
+                window._straddleState.activeStrategy.status = strat.status;
+            }
             renderStraddleHeader(window._straddleState);
         }
     }
@@ -2112,7 +2193,7 @@ async function onToggleAlgoEnable(strategyId, isChecked) {
         const resp = await fetch("/api/straddle/strategy/toggle_enable", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy_id: strategyId, enabled: isChecked })
+            body: JSON.stringify({ strategy_id: strat ? strat.strategy_id : strategyId, enabled: isChecked })
         });
         const res = await resp.json();
         if (res.success) {
@@ -2128,6 +2209,15 @@ async function onToggleAlgoEnable(strategyId, isChecked) {
     }
 }
 
+function stepAlgoMultiplier(strategyId, delta) {
+    const sIdStr = String(strategyId).trim();
+    const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
+    const curr = strat ? (strat.multiplier || 1) : 1;
+    const next = Math.max(1, Math.min(100, curr + delta));
+    onChangeAlgoMultiplier(strategyId, next);
+}
+window.stepAlgoMultiplier = stepAlgoMultiplier;
+
 async function setAlgoMultiplierMode(strategyId, mode) {
     const sIdStr = String(strategyId).trim();
     const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
@@ -2142,6 +2232,9 @@ async function setAlgoMultiplierMode(strategyId, mode) {
     // Sync to strategy builder form if this strategy is active
     if (String(window._straddleState?.activeStrategyId || "").trim() === sIdStr || String(window._straddleState?.activeStrategy?.strategy_id || "").trim() === sIdStr) {
         setFormMultiplierMode(mode, false);
+        if (window._straddleState?.activeStrategy) {
+            window._straddleState.activeStrategy.multiplier_type = mode;
+        }
     }
 
     renderStraddleAlgosTable(true);
@@ -2182,6 +2275,9 @@ async function onChangeAlgoCushionMargin(strategyId, val) {
     if (String(window._straddleState?.activeStrategyId || "").trim() === sIdStr || String(window._straddleState?.activeStrategy?.strategy_id || "").trim() === sIdStr) {
         const formInput = document.getElementById("cfgCushionMargin");
         if (formInput && parseFloat(formInput.value) !== cushion) formInput.value = cushion;
+        if (window._straddleState?.activeStrategy) {
+            window._straddleState.activeStrategy.cushion_margin = cushion;
+        }
         updateFormAutoMultiplierPreview();
         if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
             scheduleAutoMultiplierLiveRecalc();
@@ -2228,6 +2324,10 @@ async function onChangeAlgoMultiplier(strategyId, val) {
             const formInput = document.getElementById("cfgMultiplier");
             if (formInput && parseInt(formInput.value) !== num) formInput.value = num;
             setFormMultiplierMode("MANUAL", false);
+            if (window._straddleState?.activeStrategy) {
+                window._straddleState.activeStrategy.multiplier = num;
+                window._straddleState.activeStrategy.multiplier_type = "MANUAL";
+            }
         }
 
         showStraddleToast(`Multiplier set to ${num}x for '${strat.name}'`, "info", 1500);
@@ -2508,7 +2608,7 @@ async function duplicateStraddleAlgo(strategyId) {
             showStraddleToast("Error duplicating: " + (res.error || "Failed"), "error", 3000);
         }
     } catch (e) {
-        alert("Network error: " + e.message);
+        showStraddleToast("Network error: " + e.message, "error", 3000);
     }
 }
 
@@ -2528,13 +2628,14 @@ async function deleteStraddleAlgo(strategyId) {
         });
         const res = await resp.json();
         if (res.success) {
+            showStraddleToast("Strategy deleted successfully", "success", 2000);
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
             if (typeof renderStraddlePositions === "function") {
                 renderStraddlePositions();
             }
         } else {
-            alert("Error deleting: " + (res.error || "Failed"));
+            showStraddleToast("Error deleting: " + (res.error || "Failed"), "error", 3500);
             await fetchStraddleState();
             renderStraddleAlgosTable(true);
             if (typeof renderStraddlePositions === "function") {
@@ -2542,7 +2643,7 @@ async function deleteStraddleAlgo(strategyId) {
             }
         }
     } catch (e) {
-        alert("Error: " + e.message);
+        showStraddleToast("Error: " + e.message, "error", 3500);
     }
 }
 
@@ -2667,13 +2768,26 @@ async function submitRenameStraddleAlgo() {
         const res = await resp.json();
         if (res.success) {
             closeRenameStraddleAlgoModal();
+            showStraddleToast(`Strategy renamed to '${newName}'`, "success", 2000);
+
+            // Sync with active strategy if currently open
+            if (window._straddleState?.activeStrategy && window._straddleState.activeStrategy.strategy_id === strategyId) {
+                window._straddleState.activeStrategy.name = newName;
+                const cfgName = document.getElementById("cfgStrategyName");
+                if (cfgName) cfgName.value = newName;
+                const titleEl = document.getElementById("straddleTerminalStrategyTitle");
+                if (titleEl) titleEl.textContent = newName;
+                const opt = document.querySelector(`#straddleStrategySelect option[value="${strategyId}"]`);
+                if (opt) opt.textContent = newName;
+            }
+
             await fetchStraddleState();
-            renderStraddleAlgosTable();
+            renderStraddleAlgosTable(true);
         } else {
-            alert("Error renaming: " + (res.error || "Failed"));
+            showStraddleToast("Error renaming: " + (res.error || "Failed"), "error", 3500);
         }
     } catch (e) {
-        alert("Error: " + e.message);
+        showStraddleToast("Error: " + e.message, "error", 3500);
     }
 }
 
@@ -7507,6 +7621,9 @@ function populateStraddleSettingsForm(s) {
                 el.value = val;
                 el.style.color = (val === "Place in advance" ? "#10b981" : "#94a3b8");
             });
+            if (typeof syncBuilderAdvanceSlToTable === "function") {
+                syncBuilderAdvanceSlToTable(val);
+            }
             if (typeof syncStrategyLegChange === "function") syncStrategyLegChange();
         });
     }
@@ -8913,6 +9030,38 @@ function setAllScheduleDays(enableAll) {
 }
 window.setAllScheduleDays = setAllScheduleDays;
 
+function syncBuilderAdvanceSlToTable(val) {
+    const isAdv = (val === "Place in advance");
+    const activeStrat = window._straddleState?.activeStrategy;
+    if (!activeStrat) return;
+    const sid = activeStrat.strategy_id;
+    if (!activeStrat.advanced) activeStrat.advanced = {};
+    activeStrat.advanced.sl_order_placement = val;
+    if (activeStrat.advanced_settings) activeStrat.advanced_settings.sl_order_placement = val;
+
+    // Sync to allStrategies
+    if (sid && Array.isArray(window._straddleState?.allStrategies)) {
+        const found = window._straddleState.allStrategies.find(s => s.strategy_id === sid);
+        if (found) {
+            if (!found.advanced) found.advanced = {};
+            found.advanced.sl_order_placement = val;
+            if (found.advanced_settings) found.advanced_settings.sl_order_placement = val;
+            if (Array.isArray(found.legs)) {
+                found.legs.forEach(l => { l.sl_order_placement = val; });
+            }
+        }
+    }
+
+    // Sync switch in table row
+    const advSwitch = document.querySelector(`input[data-adv-sl-sid="${sid}"]`);
+    if (advSwitch) {
+        advSwitch.checked = isAdv;
+        const slider = advSwitch.nextElementSibling;
+        if (slider) slider.style.background = isAdv ? "#10b981" : "";
+    }
+}
+window.syncBuilderAdvanceSlToTable = syncBuilderAdvanceSlToTable;
+
 function syncScheduleDaysToActiveStrategy() {
     if (!window._straddleState?.activeStrategy) return;
     const days = [];
@@ -8920,7 +9069,19 @@ function syncScheduleDaysToActiveStrategy() {
         const d = btn.getAttribute("data-day");
         if (d) days.push(d);
     });
-    window._straddleState.activeStrategy.schedule_days = days.length > 0 ? days : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    const finalDays = days.length > 0 ? days : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    window._straddleState.activeStrategy.schedule_days = finalDays;
+
+    const sid = window._straddleState.activeStrategy.strategy_id;
+    if (sid && Array.isArray(window._straddleState?.allStrategies)) {
+        const found = window._straddleState.allStrategies.find(s => s.strategy_id === sid);
+        if (found) {
+            found.schedule_days = [...finalDays];
+        }
+    }
+    if (typeof renderStraddleAlgosTable === "function") {
+        renderStraddleAlgosTable(false);
+    }
 }
 window.syncScheduleDaysToActiveStrategy = syncScheduleDaysToActiveStrategy;
 
@@ -8933,6 +9094,7 @@ function applyStraddleBulkEdit(action) {
         if (slOrderEl) slOrderEl.value = "Place in advance";
         const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
         if (tgtOrderEl) tgtOrderEl.value = "Place in advance";
+        syncBuilderAdvanceSlToTable("Place in advance");
     } else if (action === "BOTH_SELF") {
         document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
         document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
@@ -8940,14 +9102,25 @@ function applyStraddleBulkEdit(action) {
         if (slOrderEl) slOrderEl.value = "Keep with self";
         const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
         if (tgtOrderEl) tgtOrderEl.value = "Keep with self";
+        syncBuilderAdvanceSlToTable("Keep with self");
     } else if (action === "SL_BROKER") {
         document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Place in advance"; el.style.color = "#10b981"; });
+        const slOrderEl = document.getElementById("cfgSlOrderPlacement");
+        if (slOrderEl) slOrderEl.value = "Place in advance";
+        syncBuilderAdvanceSlToTable("Place in advance");
     } else if (action === "SL_SELF") {
         document.querySelectorAll(".leg-sl-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
+        const slOrderEl = document.getElementById("cfgSlOrderPlacement");
+        if (slOrderEl) slOrderEl.value = "Keep with self";
+        syncBuilderAdvanceSlToTable("Keep with self");
     } else if (action === "TGT_BROKER") {
         document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Place in advance"; el.style.color = "#10b981"; });
+        const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
+        if (tgtOrderEl) tgtOrderEl.value = "Place in advance";
     } else if (action === "TGT_SELF") {
         document.querySelectorAll(".leg-tgt-placement").forEach(el => { el.value = "Keep with self"; el.style.color = "#94a3b8"; });
+        const tgtOrderEl = document.getElementById("cfgTargetOrderPlacement");
+        if (tgtOrderEl) tgtOrderEl.value = "Keep with self";
     } else if (action === "HEDGE_ON") {
         document.querySelectorAll("#straddleLegsBuilderBody tr.straddle-leg-builder-row").forEach(tr => {
             const side = tr.querySelector(".leg-side")?.value || "Sell";
@@ -14090,6 +14263,15 @@ function setFormMultiplierMode(mode, syncToServer = true) {
     const activeStrat = window._straddleState?.activeStrategy;
     if (activeStrat) {
         activeStrat.multiplier_type = mode;
+        const sid = activeStrat.strategy_id;
+        if (sid && Array.isArray(window._straddleState?.allStrategies)) {
+            const found = window._straddleState.allStrategies.find(s => s.strategy_id === sid);
+            if (found) {
+                found.multiplier_type = mode;
+            }
+        }
+        renderStraddleAlgosTable(false);
+
         if (syncToServer && activeStrat.strategy_id) {
             fetch("/api/straddle/strategy/update_multiplier", {
                 method: "POST",

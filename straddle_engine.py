@@ -4278,6 +4278,16 @@ class StraddleManager:
             if "advanced_settings" in strat and isinstance(strat["advanced_settings"], dict):
                 strat["advanced_settings"]["sl_order_placement"] = val
 
+            # Synchronize all strategy legs for consistent future re-entries
+            for leg in strat.get("legs", []):
+                if isinstance(leg, dict):
+                    leg["sl_order_placement"] = val
+
+            # Synchronize open positions
+            for pos in strat.get("positions", []):
+                if isinstance(pos, dict):
+                    pos["sl_order_placement"] = val
+
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
@@ -4297,10 +4307,13 @@ class StraddleManager:
                             pass
                         pos["sl_broker_order_id"] = None
 
+            if self._active_strategy_id and str(self._active_strategy_id).strip() == str(strat.get("strategy_id")).strip():
+                self._state["active_strategy"] = strat
+
             self._save_strategies()
             self._save_state(force=True)
             self._log_event(f"Strategy '{strat.get('name')}' Advance Broker SL set to: {val}")
-            return {"success": True, "strategy_id": strategy_id, "sl_order_placement": val, "enabled": enabled}
+            return {"success": True, "strategy_id": strategy_id, "sl_order_placement": val, "enabled": enabled, "strategy": strat}
 
     def toggle_strategy_advance_target(self, strategy_id: str, enabled: bool) -> Dict[str, Any]:
         """Toggles placing advance Target orders on Exchange matching engine vs keeping in software."""
@@ -4313,6 +4326,16 @@ class StraddleManager:
             adv["target_order_placement"] = val
             if "advanced_settings" in strat and isinstance(strat["advanced_settings"], dict):
                 strat["advanced_settings"]["target_order_placement"] = val
+
+            # Synchronize all strategy legs for consistent future re-entries
+            for leg in strat.get("legs", []):
+                if isinstance(leg, dict):
+                    leg["target_order_placement"] = val
+
+            # Synchronize open positions
+            for pos in strat.get("positions", []):
+                if isinstance(pos, dict):
+                    pos["target_order_placement"] = val
 
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
@@ -4333,10 +4356,13 @@ class StraddleManager:
                             pass
                         pos["target_broker_order_id"] = None
 
+            if self._active_strategy_id and str(self._active_strategy_id).strip() == str(strat.get("strategy_id")).strip():
+                self._state["active_strategy"] = strat
+
             self._save_strategies()
             self._save_state(force=True)
             self._log_event(f"Strategy '{strat.get('name')}' Advance Broker Target set to: {val}")
-            return {"success": True, "strategy_id": strategy_id, "target_order_placement": val, "enabled": enabled}
+            return {"success": True, "strategy_id": strategy_id, "target_order_placement": val, "enabled": enabled, "strategy": strat}
 
     # ==========================================================
     # Strategy CRUD & Multi-Algo Management
@@ -5092,6 +5118,9 @@ class StraddleManager:
                 self._state["algo_running"] = True
                 if self._state.get("status") in ("TERMINATED", "STOPPED") and not has_open:
                     self._state["status"] = "READY"
+
+            if self._active_strategy_id and str(self._active_strategy_id).strip() == str(strat.get("strategy_id")).strip():
+                self._state["active_strategy"] = strat
 
             self._save_strategies()
             self._save_state()
