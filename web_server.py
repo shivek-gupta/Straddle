@@ -771,8 +771,10 @@ def api_straddle_strategy_reset():
 @app.route("/api/straddle/positions/clear_closed", methods=["POST"])
 def api_straddle_positions_clear_closed():
     try:
+        data = request.get_json(silent=True) or {}
+        sid = data.get("strategy_id")
         mgr = get_straddle_manager()
-        res = mgr.clear_closed_positions()
+        res = mgr.clear_closed_positions(strategy_id=sid)
         return jsonify(res)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

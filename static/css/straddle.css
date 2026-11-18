@@ -364,11 +364,43 @@ body {
     align-items: center;
     gap: 5px;
     letter-spacing: 0.02em;
+    transition: all 0.2s ease;
+}
+
+.straddle-running-badge.badge-running {
+    background: #089981 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 8px rgba(8, 153, 129, 0.4);
 }
 
 .straddle-running-badge.badge-off {
-    background: #475569;
-    color: #cbd5e1;
+    background: #334155 !important;
+    color: #94a3b8 !important;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.straddle-running-badge.badge-terminated {
+    background: rgba(244, 63, 94, 0.18) !important;
+    border: 1px solid rgba(244, 63, 94, 0.5) !important;
+    color: #f43f5e !important;
+}
+
+.straddle-running-badge.badge-stopped {
+    background: rgba(245, 158, 11, 0.18) !important;
+    border: 1px solid rgba(245, 158, 11, 0.5) !important;
+    color: #f59e0b !important;
+}
+
+.straddle-running-badge.badge-ready {
+    background: rgba(56, 189, 248, 0.18) !important;
+    border: 1px solid rgba(56, 189, 248, 0.5) !important;
+    color: #38bdf8 !important;
+}
+
+.straddle-running-badge.badge-failed {
+    background: rgba(239, 68, 68, 0.18) !important;
+    border: 1px solid rgba(239, 68, 68, 0.5) !important;
+    color: #ef4444 !important;
 }
 
 .straddle-mode-badge {

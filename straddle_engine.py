@@ -6151,14 +6151,15 @@ class StraddleManager:
         """Clear completed/expired/failed positions from a strategy and reset its runtime state to READY."""
         return self.reset_algo(strategy_id=strategy_id)
 
-    def clear_closed_positions(self) -> Dict[str, Any]:
+    def clear_closed_positions(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
         """Clear all closed, completed, and expired positions from memory and paper broker."""
         with _ENGINE_LOCK:
             cleared_strat_legs = 0
-            for strat in self._strategies:
-                open_legs = [p for p in strat.get("positions", []) if p.get("status") == "OPEN"]
+            strats_to_clear = [s for s in self._strategies if s.get("strategy_id") == strategy_id or s.get("name") == strategy_id] if strategy_id else self._strategies
+            for strat in strats_to_clear:
+                open_legs = [p for p in strat.get("positions", []) if p.get("status") in ("OPEN", "LIVE OPEN")]
                 for p in strat.get("positions", []):
-                    if p.get("status") != "OPEN":
+                    if p.get("status") not in ("OPEN", "LIVE OPEN"):
                         cleared_strat_legs += 1
                         k = p.get("instrument_key") or p.get("symbol") or p.get("trading_symbol")
                         if k:
@@ -6175,11 +6176,11 @@ class StraddleManager:
 
             if self._state.get("positions"):
                 for p in self._state["positions"]:
-                    if p.get("status") != "OPEN":
+                    if p.get("status") not in ("OPEN", "LIVE OPEN"):
                         k = p.get("instrument_key") or p.get("symbol") or p.get("trading_symbol")
                         if k:
                             self._cleared_closed_keys.add(str(k))
-                self._state["positions"] = [p for p in self._state["positions"] if p.get("status") == "OPEN"]
+                self._state["positions"] = [p for p in self._state["positions"] if p.get("status") in ("OPEN", "LIVE OPEN")]
 
             # Invalidate cached response
             self._cached_open_positions_response = None

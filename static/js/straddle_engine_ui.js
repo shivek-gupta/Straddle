@@ -614,9 +614,42 @@ function renderStraddleHeader(state) {
     const bOrder = document.getElementById("badgeOrderApi");
     const bFeed = document.getElementById("badgeLiveFeed");
     const bAlgo = document.getElementById("badgeAlgoStatus");
-    if (bOrder) bOrder.className = "straddle-running-badge " + (state.order_api_running ? "" : "badge-off");
-    if (bFeed) bFeed.className = "straddle-running-badge " + (state.live_feed_running ? "" : "badge-off");
-    if (bAlgo) bAlgo.className = "straddle-running-badge " + (state.algo_running ? "" : "badge-off");
+    if (bOrder) {
+        const isOrderOn = !!state.order_api_running;
+        bOrder.className = "straddle-running-badge " + (isOrderOn ? "badge-running" : "badge-off");
+        bOrder.textContent = isOrderOn ? "Order API: Running" : "Order API: Stopped";
+    }
+    if (bFeed) {
+        const isFeedOn = !!state.live_feed_running;
+        bFeed.className = "straddle-running-badge " + (isFeedOn ? "badge-running" : "badge-off");
+        bFeed.textContent = isFeedOn ? "Live Feed: Running" : "Live Feed: Stalled";
+    }
+    if (bAlgo) {
+        const strat = activeStrat || state.activeStrategy;
+        const stratStatus = strat ? String(strat.status || "").toUpperCase() : String(state.status || "READY").toUpperCase();
+        const hasOpen = Array.isArray(strat?.positions) && strat.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+        const isRunning = (state.algo_running && stratStatus === "TRADE_ACTIVE") || hasOpen;
+
+        if (isRunning) {
+            bAlgo.className = "straddle-running-badge badge-running";
+            bAlgo.textContent = "● Algo: Running";
+        } else if (stratStatus === "TERMINATED") {
+            bAlgo.className = "straddle-running-badge badge-terminated";
+            bAlgo.textContent = "■ Algo: Terminated";
+        } else if (stratStatus === "ENTRY_FAILED") {
+            bAlgo.className = "straddle-running-badge badge-failed";
+            bAlgo.textContent = "⚠️ Algo: Entry Failed";
+        } else if (stratStatus === "STOPPED") {
+            bAlgo.className = "straddle-running-badge badge-stopped";
+            bAlgo.textContent = "■ Algo: Stopped";
+        } else if (stratStatus === "READY") {
+            bAlgo.className = "straddle-running-badge badge-ready";
+            bAlgo.textContent = "⏳ Algo: Armed (Ready)";
+        } else {
+            bAlgo.className = "straddle-running-badge badge-off";
+            bAlgo.textContent = "○ Algo: Offline";
+        }
+    }
 
     // Update terminal action bar with clean, contextual states
     updateTerminalActionBar(activeStrat);
@@ -4820,6 +4853,15 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
                     mtmTgtEl.textContent = "None";
                 }
             }
+
+            // Also display configured MTM Stoploss if active
+            const slCfg = activeStratForTarget.mtm_stoploss || activeStratForTarget.stoploss;
+            if (slCfg && slCfg.type && slCfg.type !== "None") {
+                const slVal = Number(slCfg.value || 0) * mult;
+                if (slVal !== 0) {
+                    mtmTgtEl.innerHTML += ` <span style="color:#64748b; margin:0 4px;">|</span> <span style="color:#f43f5e; font-weight:800;" title="MTM Stoploss">SL: ₹ ${Math.abs(slVal).toFixed(2)}</span>`;
+                }
+            }
         }
     }
 
@@ -4878,6 +4920,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
 
     // Multi-Criteria Sorting (Open/Closed, CE/PE, Main/Hedges, MTM)
     const sortOrder = window._straddleAlgoSortOrder || "default";
+    const sortSelect = document.getElementById("algoPositionsSortSelect");
+    if (sortSelect && sortSelect.value !== sortOrder && document.activeElement !== sortSelect) {
+        sortSelect.value = sortOrder;
+    }
     if (sortOrder !== "default") {
         displayPositions.sort((a, b) => {
             const rawA = String(a.status || "OPEN").toUpperCase();
@@ -5962,21 +6008,70 @@ function toggleAlgoClosedTrades() {
 function setAlgoTradeFilter(filter) {
     window._straddleAlgoTradeFilter = filter;
     document.querySelectorAll(".algo-filter-pill").forEach(btn => {
-        if (btn.getAttribute("data-filter") === filter) {
-            btn.style.background = "#1e293b";
-            btn.style.color = "#f8fafc";
-            btn.classList.add("active");
+        const f = btn.getAttribute("data-filter");
+        const isActive = (f === filter);
+        btn.classList.toggle("active", isActive);
+
+        if (isActive) {
+            if (f === "ce") {
+                btn.style.background = "#10b981";
+                btn.style.color = "#ffffff";
+                btn.style.border = "1px solid #10b981";
+            } else if (f === "pe") {
+                btn.style.background = "#ef4444";
+                btn.style.color = "#ffffff";
+                btn.style.border = "1px solid #ef4444";
+            } else if (f === "main") {
+                btn.style.background = "rgba(245,158,11,0.22)";
+                btn.style.color = "#f59e0b";
+                btn.style.border = "1px solid #f59e0b";
+            } else if (f === "hedge") {
+                btn.style.background = "rgba(56,189,248,0.22)";
+                btn.style.color = "#38bdf8";
+                btn.style.border = "1px solid #38bdf8";
+            } else if (f === "open") {
+                btn.style.background = "rgba(16,185,129,0.2)";
+                btn.style.color = "#10b981";
+                btn.style.border = "1px solid #10b981";
+            } else if (f === "closed") {
+                btn.style.background = "#334155";
+                btn.style.color = "#f8fafc";
+                btn.style.border = "1px solid #64748b";
+            } else {
+                btn.style.background = "#1e293b";
+                btn.style.color = "#f8fafc";
+                btn.style.border = "1px solid rgba(255,255,255,0.2)";
+            }
         } else {
-            btn.style.background = "transparent";
-            btn.classList.remove("active");
-            const f = btn.getAttribute("data-filter");
-            if (f === "open") btn.style.color = "#10b981";
-            else if (f === "closed") btn.style.color = "#94a3b8";
-            else if (f === "main") btn.style.color = "#f59e0b";
-            else if (f === "hedge") btn.style.color = "#38bdf8";
-            else if (f === "ce") { btn.style.color = "#10b981"; btn.style.background = "rgba(16,185,129,0.12)"; }
-            else if (f === "pe") { btn.style.color = "#ef4444"; btn.style.background = "rgba(239,68,68,0.12)"; }
-            else btn.style.color = "#cbd5e1";
+            if (f === "ce") {
+                btn.style.background = "rgba(16,185,129,0.12)";
+                btn.style.color = "#10b981";
+                btn.style.border = "1px solid rgba(16,185,129,0.45)";
+            } else if (f === "pe") {
+                btn.style.background = "rgba(239,68,68,0.12)";
+                btn.style.color = "#ef4444";
+                btn.style.border = "1px solid rgba(239,68,68,0.45)";
+            } else if (f === "main") {
+                btn.style.background = "transparent";
+                btn.style.color = "#f59e0b";
+                btn.style.border = "1px solid transparent";
+            } else if (f === "hedge") {
+                btn.style.background = "transparent";
+                btn.style.color = "#38bdf8";
+                btn.style.border = "1px solid transparent";
+            } else if (f === "open") {
+                btn.style.background = "transparent";
+                btn.style.color = "#10b981";
+                btn.style.border = "1px solid transparent";
+            } else if (f === "closed") {
+                btn.style.background = "transparent";
+                btn.style.color = "#94a3b8";
+                btn.style.border = "1px solid transparent";
+            } else {
+                btn.style.background = "transparent";
+                btn.style.color = "#cbd5e1";
+                btn.style.border = "1px solid transparent";
+            }
         }
     });
     const strat = window._straddleState?.activeStrategy;
@@ -9827,13 +9922,16 @@ window.straddleResetActiveStrategy = straddleResetActiveStrategy;
 async function clearStraddleClosedAndExpiredPositions() {
     showStraddleToast("🧹 Clearing closed & expired positions...", "info", 1500);
     try {
+        const strat = window._straddleState?.activeStrategy;
+        const targetSid = strat?.strategy_id || window._straddleState?.activeStrategyId || "";
         const resp = await fetch("/api/straddle/positions/clear_closed", {
             method: "POST",
-            headers: { "Content-Type": "application/json" }
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ strategy_id: targetSid })
         });
         const res = await resp.json();
         if (res.success) {
-            showStraddleToast("✅ Closed positions cleared.", "success", 2000);
+            showStraddleToast(`✅ Cleared ${res.cleared_count || 0} closed position(s).`, "success", 2000);
             if (window._straddleState?.activeStrategy) {
                 const openLegs = (window._straddleState.activeStrategy.positions || []).filter(p => p.status === "OPEN" || p.status === "LIVE OPEN");
                 window._straddleState.activeStrategy.positions = openLegs;
@@ -9891,8 +9989,19 @@ async function straddleTerminateAlgo() {
 }
 
 async function straddleSquareOffAllAndTerminate() {
-    if (!confirm("EMERGENCY ACTION: Square off ALL open strategy positions and terminate algorithm immediately?")) return;
-    showStraddleToast("⚠️ Executing Emergency Square-Off...", "warning", 2000);
+    const posList = window._straddleState?.positions || window._straddleState?.activeStrategy?.positions || [];
+    const hasOpen = posList.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
+
+    if (!hasOpen) {
+        if (!confirm("No open positions are currently active. Do you want to stop/terminate all running algorithms?")) {
+            return;
+        }
+    } else {
+        if (!confirm("EMERGENCY ACTION: Square off ALL open strategy positions and terminate algorithm immediately?")) {
+            return;
+        }
+    }
+    showStraddleToast("⚠️ Executing Square-Off & Termination...", "warning", 2000);
 
     // Instant optimistic state change
     if (window._straddleState && window._straddleState.allStrategies) {
