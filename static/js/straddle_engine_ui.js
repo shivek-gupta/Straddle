@@ -13022,28 +13022,35 @@ function _populateAuditStrategyOptions() {
     const currentVal = window._straddleAuditStrategyFilter || "ALL";
     const strats = new Set();
 
-    // From active state strategies
-    const stateStrats = (window._straddleState && window._straddleState.strategies)
-        || (window._straddleState && window._straddleState.state && window._straddleState.state.strategies)
+    // From active state strategies (sync directly with algo strategies)
+    const stateStrats = (window._straddleState && (window._straddleState.allStrategies || window._straddleState.strategies))
+        || (window._straddleState && window._straddleState.state && (window._straddleState.state.all_strategies || window._straddleState.state.strategies))
         || [];
     if (Array.isArray(stateStrats)) {
         stateStrats.forEach(s => {
-            const name = (typeof s === "object" && s) ? (s.name || s.id) : String(s);
-            if (name) strats.add(name);
+            const name = (typeof s === "object" && s) ? (s.name || s.strategy_name || s.strategy_id || s.id) : String(s);
+            if (name) strats.add(String(name).trim());
+        });
+    } else if (stateStrats && typeof stateStrats === "object") {
+        Object.values(stateStrats).forEach(s => {
+            const name = (typeof s === "object" && s) ? (s.name || s.strategy_name || s.strategy_id || s.id) : String(s);
+            if (name) strats.add(String(name).trim());
         });
     }
 
     // Also scan cached logs for any mentioned strategy names
     if (Array.isArray(window._cachedAuditLogsList)) {
         window._cachedAuditLogsList.forEach(l => {
-            if (l.strategy_name) strats.add(l.strategy_name);
-            const det = l.details;
-            if (det && typeof det === "object" && det.strategy_name) strats.add(det.strategy_name);
+            if (l && typeof l === "object") {
+                if (l.strategy_name) strats.add(String(l.strategy_name).trim());
+                const det = l.details;
+                if (det && typeof det === "object" && det.strategy_name) strats.add(String(det.strategy_name).trim());
+            }
         });
     }
 
     let opts = '<option value="ALL">All Strategies</option>';
-    Array.from(strats).sort().forEach(sName => {
+    Array.from(strats).filter(Boolean).sort().forEach(sName => {
         const isSel = (sName === currentVal) ? 'selected' : '';
         opts += `<option value="${sName}" ${isSel}>${sName}</option>`;
     });
@@ -13057,28 +13064,28 @@ function _parseAuditLogBadges(l) {
 
     // 1. Level Badge
     const lvl = String(l.level || "INFO").toUpperCase();
-    let lvlBadge = "";
+    let levelBadge = "";
     let lvlColor = "#38bdf8";
     let lvlBg = "rgba(15, 23, 42, 0.75)";
     let lvlBorder = "rgba(255, 255, 255, 0.08)";
 
     if (lvl === "SUCCESS" || msgU.includes("✅") || msgU.includes("SUCCESSFULLY")) {
-        lvlBadge = `<span style="background:rgba(16,185,129,0.2); border:1px solid rgba(16,185,129,0.5); color:#10b981; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">SUCCESS</span>`;
+        levelBadge = `<span style="background:rgba(16,185,129,0.2); border:1px solid rgba(16,185,129,0.5); color:#10b981; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">SUCCESS</span>`;
         lvlColor = "#10b981";
         lvlBg = "rgba(6, 78, 59, 0.15)";
         lvlBorder = "rgba(16, 185, 129, 0.4)";
     } else if (lvl === "ERROR" || msgU.includes("FAILED") || msgU.includes("REJECTED") || msgU.includes("ERROR")) {
-        lvlBadge = `<span style="background:rgba(239,68,68,0.22); border:1px solid rgba(239,68,68,0.55); color:#f87171; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">ERROR</span>`;
+        levelBadge = `<span style="background:rgba(239,68,68,0.22); border:1px solid rgba(239,68,68,0.55); color:#f87171; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">ERROR</span>`;
         lvlColor = "#f87171";
         lvlBg = "rgba(127, 29, 29, 0.2)";
         lvlBorder = "rgba(239, 68, 68, 0.45)";
     } else if (lvl === "WARNING" || lvl === "WARN" || msgU.includes("⚠️") || msgU.includes("MARGIN GUARD") || msgU.includes("BLOCKED")) {
-        lvlBadge = `<span style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.55); color:#fbbf24; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">WARNING</span>`;
+        levelBadge = `<span style="background:rgba(245,158,11,0.2); border:1px solid rgba(245,158,11,0.55); color:#fbbf24; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">WARNING</span>`;
         lvlColor = "#fbbf24";
         lvlBg = "rgba(120, 53, 15, 0.18)";
         lvlBorder = "rgba(245, 158, 11, 0.4)";
     } else {
-        lvlBadge = `<span style="background:rgba(56,189,248,0.18); border:1px solid rgba(56,189,248,0.45); color:#38bdf8; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">INFO</span>`;
+        levelBadge = `<span style="background:rgba(56,189,248,0.18); border:1px solid rgba(56,189,248,0.45); color:#38bdf8; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">INFO</span>`;
     }
 
     // 2. Mode Badge (Live vs Paper)
@@ -13199,154 +13206,179 @@ function renderStraddleAuditLogsFiltered() {
 }
 
 function _buildAuditLogsHtml(logsList) {
-    if (!logsList || logsList.length === 0) {
-        return `<div style="color:#64748b; text-align:center; padding:30px; font-size:13px;">No audit events recorded yet.</div>`;
-    }
+    try {
+        if (!logsList || !Array.isArray(logsList) || logsList.length === 0) {
+            const badge = document.getElementById("auditLogCountBadge");
+            if (badge) badge.textContent = "0 Events";
+            return `<div style="color:#64748b; text-align:center; padding:30px; font-size:13px;">No audit events recorded yet.</div>`;
+        }
 
-    // Always clean out unnecessary focused underlying asset switch logs from display
-    const validLogs = logsList.filter(l => {
-        const msg = String(l.message || "").toLowerCase();
-        return !msg.includes("focused underlying switched to");
-    });
+        // Always clean out unnecessary focused underlying asset switch logs from display
+        const validLogs = logsList.filter(l => {
+            if (!l || typeof l !== "object") return false;
+            const msg = String(l.message || "").toLowerCase();
+            return !msg.includes("focused underlying switched to");
+        });
 
-    const filterType = window._straddleAuditLogsFilter || "all";
-    const sideFilter = window._straddleAuditSideFilter || "ALL";
-    const levelFilter = window._straddleAuditLevelFilter || "ALL";
-    const optionFilter = window._straddleAuditOptionFilter || "ALL";
-    const roleFilter = window._straddleAuditRoleFilter || "ALL";
-    const triggerFilter = window._straddleAuditTriggerFilter || "ALL";
-    const strategyFilter = window._straddleAuditStrategyFilter || "ALL";
-    const assetFilter = window._straddleAuditAssetFilter || "ALL";
-    const searchTerm = window._straddleAuditSearchTerm || "";
-    const quickMode = window._straddleAuditQuickMode || "all";
+        const filterType = window._straddleAuditLogsFilter || "all";
+        const sideFilter = window._straddleAuditSideFilter || "ALL";
+        const levelFilter = window._straddleAuditLevelFilter || "ALL";
+        const optionFilter = window._straddleAuditOptionFilter || "ALL";
+        const roleFilter = window._straddleAuditRoleFilter || "ALL";
+        const triggerFilter = window._straddleAuditTriggerFilter || "ALL";
+        const strategyFilter = window._straddleAuditStrategyFilter || "ALL";
+        const assetFilter = window._straddleAuditAssetFilter || "ALL";
+        const searchTerm = (window._straddleAuditSearchTerm || "").toLowerCase().trim();
+        const quickMode = window._straddleAuditQuickMode || "all";
 
-    const filtered = validLogs.filter(l => {
-        const parsed = _parseAuditLogBadges(l);
-        const msg = String(l.message || "").toLowerCase();
+        const filtered = validLogs.filter(l => {
+            const parsed = _parseAuditLogBadges(l);
+            const msg = String(l.message || "").toLowerCase();
 
-        // 1. Live Keyword Search
-        if (searchTerm) {
-            const detStr = l.details ? JSON.stringify(l.details).toLowerCase() : "";
-            if (!msg.includes(searchTerm) && !detStr.includes(searchTerm) && !parsed.strategyName.toLowerCase().includes(searchTerm) && !parsed.underlying.toLowerCase().includes(searchTerm)) {
+            // 1. Live Keyword Search
+            if (searchTerm) {
+                const detStr = (l.details && typeof l.details === "object") ? JSON.stringify(l.details).toLowerCase() : "";
+                const stratLower = String(parsed.strategyName || "").toLowerCase();
+                const undLower = String(parsed.underlying || "").toLowerCase();
+                if (!msg.includes(searchTerm) && !detStr.includes(searchTerm) && !stratLower.includes(searchTerm) && !undLower.includes(searchTerm)) {
+                    return false;
+                }
+            }
+
+            // 2. Strategy Filter
+            if (strategyFilter !== "ALL" && String(parsed.strategyName || "").trim() !== String(strategyFilter).trim()) {
                 return false;
             }
-        }
 
-        // 2. Strategy Filter
-        if (strategyFilter !== "ALL" && parsed.strategyName !== strategyFilter) {
-            return false;
-        }
-
-        // 3. Asset Filter
-        if (assetFilter !== "ALL" && parsed.underlying !== assetFilter) {
-            return false;
-        }
-
-        // 4. Level Filter
-        if (levelFilter === "INFO" && parsed.level !== "INFO") return false;
-        if (levelFilter === "SUCCESS" && parsed.level !== "SUCCESS") return false;
-        if (levelFilter === "INFO_SUCCESS" && parsed.level !== "INFO" && parsed.level !== "SUCCESS") return false;
-        if (levelFilter === "WARNING" && parsed.level !== "WARNING" && parsed.level !== "WARN") return false;
-        if (levelFilter === "ERROR" && parsed.level !== "ERROR") return false;
-
-        // 5. Trade Mode Filter
-        if (filterType === "actual" && parsed.tradeType !== "LIVE") return false;
-        if (filterType === "paper" && parsed.tradeType !== "PAPER") return false;
-        if (filterType === "trades" && parsed.tradeType !== "LIVE" && parsed.tradeType !== "PAPER") return false;
-
-        // 6. Side Filter
-        if (sideFilter !== "ALL" && parsed.side !== sideFilter) return false;
-
-        // 7. Option Type Filter (CE / PE)
-        if (optionFilter !== "ALL" && parsed.optType !== optionFilter) return false;
-
-        // 8. Role Filter (Main / Hedge)
-        if (roleFilter !== "ALL" && parsed.role !== roleFilter) return false;
-
-        // 9. Trigger Filter
-        if (triggerFilter === "TARGET" && parsed.trigger !== "TARGET") return false;
-        if (triggerFilter === "STOPLOSS" && parsed.trigger !== "STOPLOSS") return false;
-        if (triggerFilter === "REENTRY" && parsed.trigger !== "REENTRY") return false;
-
-        // 10. Quick Filter Mode overrides
-        if (quickMode === "trades" && parsed.tradeType !== "LIVE") return false;
-        if (quickMode === "targets" && parsed.trigger !== "TARGET") return false;
-        if (quickMode === "stoploss" && parsed.trigger !== "STOPLOSS") return false;
-        if (quickMode === "hedges" && parsed.role !== "HEDGE") return false;
-        if (quickMode === "errors" && parsed.level !== "ERROR") return false;
-
-        return true;
-    });
-
-    // Update real-time event counter badge
-    const badge = document.getElementById("auditLogCountBadge");
-    if (badge) {
-        badge.textContent = `${filtered.length} / ${validLogs.length} Events`;
-    }
-
-    if (filtered.length === 0) {
-        return `<div style="color:#64748b; text-align:center; padding:30px; font-size:12.5px;">No matching log events for current filter settings. <button type="button" class="straddle-btn btn-outline" style="padding:2px 8px; font-size:11px; margin-left:8px;" onclick="resetAuditFilters()">Reset Filters</button></div>`;
-    }
-
-    let html = "";
-    filtered.forEach((l, idx) => {
-        const parsed = _parseAuditLogBadges(l);
-        const dateStr = l.date ? `${l.date} ` : "";
-        const det = l.details;
-        const hasDet = det && typeof det === "object" && Object.keys(det).length > 0;
-        const detId = `audit_det_${idx}_${Date.now()}`;
-
-        let detailsHtml = "";
-        if (hasDet) {
-            const chips = [];
-            if (det.order_id) chips.push(`<span style="color:#94a3b8;">Order: <b style="color:#f8fafc;">${det.order_id}</b></span>`);
-            if (det.price) chips.push(`<span style="color:#94a3b8;">Price: <b style="color:#38bdf8;">₹${det.price}</b></span>`);
-            if (det.qty) chips.push(`<span style="color:#94a3b8;">Qty: <b style="color:#f8fafc;">${det.qty}</b></span>`);
-            if (det.symbol) chips.push(`<span style="color:#94a3b8;">Symbol: <b style="color:#cbd5e1;">${det.symbol}</b></span>`);
-            if (det.error_code) chips.push(`<span style="color:#f87171;">Error: <b>${det.error_code}</b></span>`);
-            if (det.reason) chips.push(`<span style="color:#fbbf24;">Reason: <b>${det.reason}</b></span>`);
-
-            if (chips.length > 0) {
-                detailsHtml = `
-                    <div style="margin-top:4px; padding:3px 8px; background:rgba(0,0,0,0.3); border-radius:4px; display:flex; flex-wrap:wrap; gap:8px; font-size:10.5px; border-left:2px solid ${parsed.color};">
-                        ${chips.join("<span style='color:rgba(255,255,255,0.15);'>|</span>")}
-                    </div>
-                `;
+            // 3. Asset Filter
+            if (assetFilter !== "ALL" && String(parsed.underlying || "").toUpperCase() !== String(assetFilter).toUpperCase()) {
+                return false;
             }
+
+            // 4. Level Filter
+            if (levelFilter === "INFO" && parsed.level !== "INFO") return false;
+            if (levelFilter === "SUCCESS" && parsed.level !== "SUCCESS") return false;
+            if (levelFilter === "INFO_SUCCESS" && parsed.level !== "INFO" && parsed.level !== "SUCCESS") return false;
+            if (levelFilter === "WARNING" && parsed.level !== "WARNING" && parsed.level !== "WARN") return false;
+            if (levelFilter === "ERROR" && parsed.level !== "ERROR") return false;
+
+            // 5. Trade Mode Filter
+            if (filterType === "actual" && parsed.tradeType !== "LIVE") return false;
+            if (filterType === "paper" && parsed.tradeType !== "PAPER") return false;
+            if (filterType === "trades" && parsed.tradeType !== "LIVE" && parsed.tradeType !== "PAPER") return false;
+
+            // 6. Side Filter
+            if (sideFilter !== "ALL" && parsed.side !== sideFilter) return false;
+
+            // 7. Option Type Filter (CE / PE)
+            if (optionFilter !== "ALL" && parsed.optType !== optionFilter) return false;
+
+            // 8. Role Filter (Main / Hedge)
+            if (roleFilter !== "ALL" && parsed.role !== roleFilter) return false;
+
+            // 9. Trigger Filter
+            if (triggerFilter === "TARGET" && parsed.trigger !== "TARGET") return false;
+            if (triggerFilter === "STOPLOSS" && parsed.trigger !== "STOPLOSS") return false;
+            if (triggerFilter === "REENTRY" && parsed.trigger !== "REENTRY") return false;
+
+            // 10. Quick Filter Mode overrides
+            if (quickMode === "trades" && parsed.tradeType !== "LIVE") return false;
+            if (quickMode === "targets" && parsed.trigger !== "TARGET") return false;
+            if (quickMode === "stoploss" && parsed.trigger !== "STOPLOSS") return false;
+            if (quickMode === "hedges" && parsed.role !== "HEDGE") return false;
+            if (quickMode === "errors" && parsed.level !== "ERROR") return false;
+
+            return true;
+        });
+
+        // Update real-time event counter badge
+        const badge = document.getElementById("auditLogCountBadge");
+        if (badge) {
+            badge.textContent = `${filtered.length} / ${validLogs.length} Events`;
         }
 
-        html += `
-            <div class="audit-log-card" style="padding:8px 12px; background:${parsed.bg}; border:1px solid ${parsed.border}; border-radius:6px; margin-bottom:4px; display:flex; flex-direction:column; gap:4px; transition:border-color 0.15s ease;">
-                <div class="audit-log-card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
-                    <div style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:700;">🕒 [${dateStr}${l.timestamp || ''}]</span>
-                        ${parsed.levelBadge}
-                        ${parsed.stratBadge}
-                        ${parsed.undBadge}
+        if (filtered.length === 0) {
+            return `<div style="color:#64748b; text-align:center; padding:30px; font-size:12.5px;">No matching log events for current filter settings. <button type="button" class="straddle-btn btn-outline" style="padding:2px 8px; font-size:11px; margin-left:8px;" onclick="resetAuditFilters()">Reset Filters</button></div>`;
+        }
+
+        let html = "";
+        filtered.forEach((l, idx) => {
+            if (!l || typeof l !== "object") return;
+            const parsed = _parseAuditLogBadges(l);
+            const ts = String(l.timestamp || "");
+            const dt = String(l.date || "");
+            const dateStr = (dt && !ts.startsWith(dt)) ? `${dt} ` : "";
+            const det = (l.details && typeof l.details === "object") ? l.details : {};
+            const hasDet = Object.keys(det).length > 0;
+
+            let detailsHtml = "";
+            if (hasDet) {
+                const chips = [];
+                if (det.order_id) chips.push(`<span style="color:#94a3b8;">Order: <b style="color:#f8fafc;">${det.order_id}</b></span>`);
+                if (det.price) chips.push(`<span style="color:#94a3b8;">Price: <b style="color:#38bdf8;">₹${det.price}</b></span>`);
+                if (det.qty) chips.push(`<span style="color:#94a3b8;">Qty: <b style="color:#f8fafc;">${det.qty}</b></span>`);
+                if (det.symbol) chips.push(`<span style="color:#cbd5e1;">Symbol: <b style="color:#cbd5e1;">${det.symbol}</b></span>`);
+                if (det.error_code) chips.push(`<span style="color:#f87171;">Error: <b>${det.error_code}</b></span>`);
+                if (det.reason) chips.push(`<span style="color:#fbbf24;">Reason: <b>${det.reason}</b></span>`);
+
+                if (chips.length > 0) {
+                    detailsHtml = `
+                        <div style="margin-top:4px; padding:3px 8px; background:rgba(0,0,0,0.3); border-radius:4px; display:flex; flex-wrap:wrap; gap:8px; font-size:10.5px; border-left:2px solid ${parsed.color};">
+                            ${chips.join("<span style='color:rgba(255,255,255,0.15);'>|</span>")}
+                        </div>
+                    `;
+                }
+            }
+
+            html += `
+                <div class="audit-log-card" style="padding:8px 12px; background:${parsed.bg}; border:1px solid ${parsed.border}; border-radius:6px; margin-bottom:4px; display:flex; flex-direction:column; gap:4px; transition:border-color 0.15s ease;">
+                    <div class="audit-log-card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                        <div style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                            <span style="color:#94a3b8; font-size:11px; white-space:nowrap; font-family:var(--font-mono); font-weight:700;">🕒 [${dateStr}${ts}]</span>
+                            ${parsed.levelBadge}
+                            ${parsed.stratBadge}
+                            ${parsed.undBadge}
+                        </div>
+                        <div style="display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                            ${parsed.modeBadge}
+                            ${parsed.roleBadge}
+                            ${parsed.sideBadge}
+                            ${parsed.optBadge}
+                            ${parsed.trigBadge}
+                        </div>
                     </div>
-                    <div style="display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap;">
-                        ${parsed.modeBadge}
-                        ${parsed.roleBadge}
-                        ${parsed.sideBadge}
-                        ${parsed.optBadge}
-                        ${parsed.trigBadge}
+                    <div style="color:#f1f5f9; font-size:12px; line-height:1.45; word-break:break-word; overflow-wrap:break-word;">
+                        ${l.message || ''}
                     </div>
+                    ${detailsHtml}
                 </div>
-                <div style="color:#f1f5f9; font-size:12px; line-height:1.45; word-break:break-word; overflow-wrap:break-word;">
-                    ${l.message || ''}
-                </div>
-                ${detailsHtml}
-            </div>
-        `;
-    });
-    return html;
+            `;
+        });
+        return html;
+    } catch (err) {
+        console.error("Critical error in _buildAuditLogsHtml:", err);
+        return `<div style="color:#f43f5e; text-align:center; padding:20px; font-size:12.5px;">Log display error: ${err.message}</div>`;
+    }
 }
 
 function renderStraddleAuditLogs(isSilent = false) {
     const container = document.getElementById("straddleAuditLogsContainer");
     if (!container) return;
 
-    if (!isSilent && (!window._cachedAuditLogsList || window._cachedAuditLogsList.length === 0)) {
+    // Instant optimistic render from in-memory cache or state so modal is NEVER stuck on "Fetching..."
+    const cachedLogs = (window._cachedAuditLogsList && window._cachedAuditLogsList.length > 0)
+        ? window._cachedAuditLogsList
+        : ((window._straddleState && (window._straddleState.logs || (window._straddleState.state && window._straddleState.state.logs))) || []);
+
+    if (cachedLogs && cachedLogs.length > 0) {
+        window._cachedAuditLogsList = cachedLogs;
+        _populateAuditStrategyOptions();
+        try {
+            container.innerHTML = _buildAuditLogsHtml(cachedLogs);
+        } catch (err) {
+            console.warn("Optimistic audit log render error:", err);
+        }
+    } else if (!isSilent) {
         container.innerHTML = `<div style="color:#64748b; text-align:center; padding:20px;">Fetching live audit logs...</div>`;
     }
 
@@ -13354,21 +13386,33 @@ function renderStraddleAuditLogs(isSilent = false) {
     const timeoutId = setTimeout(() => abortCtrl.abort(), 20000);
 
     fetch("/api/straddle/logs?limit=1000", { signal: abortCtrl.signal })
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        })
         .then(data => {
             clearTimeout(timeoutId);
             const logs = (data && data.success && Array.isArray(data.logs)) ? data.logs : [];
             // Filter out any lingering underlying asset switch logs
-            const cleanLogs = logs.filter(l => !String(l.message || "").toLowerCase().includes("focused underlying switched to"));
+            const cleanLogs = logs.filter(l => l && !String(l.message || "").toLowerCase().includes("focused underlying switched to"));
             window._cachedAuditLogsList = cleanLogs;
             _populateAuditStrategyOptions();
-            container.innerHTML = _buildAuditLogsHtml(cleanLogs);
+            try {
+                container.innerHTML = _buildAuditLogsHtml(cleanLogs);
+            } catch (renderErr) {
+                console.error("Error rendering audit logs:", renderErr);
+                container.innerHTML = `<div style="color:#f43f5e; text-align:center; padding:20px;">Error rendering logs: ${renderErr.message}</div>`;
+            }
         })
         .catch(e => {
             clearTimeout(timeoutId);
             const fallback = window._cachedAuditLogsList || [];
             if (fallback && fallback.length > 0) {
-                container.innerHTML = _buildAuditLogsHtml(fallback);
+                try {
+                    container.innerHTML = _buildAuditLogsHtml(fallback);
+                } catch (renderErr) {
+                    container.innerHTML = `<div style="color:#f43f5e; text-align:center; padding:20px;">Error loading logs: ${e.message}</div>`;
+                }
             } else if (!isSilent) {
                 container.innerHTML = `<div style="color:#f43f5e; text-align:center; padding:20px;">Error loading logs: ${e.message}</div>`;
             }
