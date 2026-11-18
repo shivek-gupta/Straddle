@@ -17001,8 +17001,16 @@ function setKronosHorizon(horizon) {
     window._kronosForecastHorizon = parseInt(horizon) || 24;
     document.querySelectorAll(".kronos-horizon-btn").forEach(btn => {
         const h = parseInt(btn.getAttribute("data-horizon"));
-        btn.classList.toggle("active", h === window._kronosForecastHorizon);
+        const isActive = (h === window._kronosForecastHorizon);
+        btn.classList.toggle("active", isActive);
+        btn.style.background = isActive ? "#a855f7" : "none";
+        btn.style.color = isActive ? "#ffffff" : "#cbd5e1";
+        btn.style.fontWeight = isActive ? "800" : "700";
     });
+    const statusText = document.getElementById("kronosStatusText");
+    if (statusText) {
+        statusText.textContent = `Horizon: ${window._kronosForecastHorizon} candles • Recalculating...`;
+    }
     if (window._kronosForecastActive) {
         triggerKronosForecast(true);
     }
@@ -17049,23 +17057,28 @@ function updateKronosForecastUI(data) {
     const summary = data.summary || {};
 
     const dirBadge = document.getElementById("kronosDirectionBadge");
-    const targetBadge = document.getElementById("kronosTargetPrice");
-    const confBadge = document.getElementById("kronosConfidenceScore");
+    const chgPtsEl = document.getElementById("kronosChangePoints");
+    const highEl = document.getElementById("kronosProjectedHigh");
+    const lowEl = document.getElementById("kronosProjectedLow");
+    const spreadEl = document.getElementById("kronosProjectedSpread");
+    const edgeEl = document.getElementById("kronosStraddleEdgePill");
     const statusText = document.getElementById("kronosStatusText");
 
+    // 1. Predicted Direction & Change Points
     if (dirBadge) {
         const dir = (summary.direction || "NEUTRAL").toUpperCase();
-        let icon = "⚡";
+        let icon = summary.direction_icon || "⚡";
         let bg = "rgba(56, 189, 248, 0.25)";
         let border = "#38bdf8";
         let color = "#38bdf8";
-        if (dir === "BULLISH") {
-            icon = "▲";
+
+        if (dir.includes("BULLISH")) {
+            icon = "📈";
             bg = "rgba(16, 185, 129, 0.25)";
             border = "#10b981";
             color = "#34d399";
-        } else if (dir === "BEARISH") {
-            icon = "▼";
+        } else if (dir.includes("BEARISH")) {
+            icon = "📉";
             bg = "rgba(244, 63, 94, 0.25)";
             border = "#f43f5e";
             color = "#fb7185";
@@ -17076,16 +17089,60 @@ function updateKronosForecastUI(data) {
         dirBadge.style.color = color;
     }
 
-    if (targetBadge && summary.final_projected_price) {
-        targetBadge.textContent = "₹" + summary.final_projected_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (chgPtsEl) {
+        const chg = summary.change_points !== undefined ? summary.change_points : 0;
+        const sign = chg >= 0 ? "+" : "";
+        chgPtsEl.textContent = `(${sign}${Number(chg).toFixed(2)} pts)`;
+        chgPtsEl.style.color = chg >= 0 ? "#34d399" : "#fb7185";
     }
 
-    if (confBadge && summary.confidence_pct) {
-        confBadge.textContent = `${summary.confidence_pct}% Confidence`;
+    // 2. Projected High, Low, and Spread
+    if (highEl) {
+        const maxH = summary.projected_high || (Array.isArray(data.candles) && data.candles.length ? Math.max(...data.candles.map(c => c.high)) : 0);
+        if (maxH > 0) {
+            highEl.textContent = "₹ " + Number(maxH).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
     }
 
+    if (lowEl) {
+        const minL = summary.projected_low || (Array.isArray(data.candles) && data.candles.length ? Math.min(...data.candles.map(c => c.low)) : 0);
+        if (minL > 0) {
+            lowEl.textContent = "₹ " + Number(minL).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+    }
+
+    if (spreadEl) {
+        const spread = summary.projected_range_pts || (summary.projected_high && summary.projected_low ? (summary.projected_high - summary.projected_low) : 0);
+        spreadEl.textContent = `${Number(spread).toFixed(2)} pts`;
+    }
+
+    // 3. Straddle Edge Pill
+    if (edgeEl) {
+        const edge = data.straddle_edge || {};
+        const assessment = edge.assessment || (summary.projected_range_pct !== undefined ? (summary.projected_range_pct <= 1.0 ? "HIGH THETA DECAY EDGE (Tight Corridor)" : (summary.projected_range_pct <= 2.2 ? "MODERATE VOLATILITY (Standard Range)" : "HIGH VOLATILITY EXPANSION WARNING")) : "THETA CORRIDOR EVALUATED");
+        edgeEl.textContent = assessment;
+        edgeEl.title = edge.recommendation || "Straddle Strategy Edge Evaluation";
+
+        if (assessment.includes("HIGH THETA") || assessment.includes("OVERPRICED")) {
+            edgeEl.style.background = "rgba(16, 185, 129, 0.2)";
+            edgeEl.style.borderColor = "#10b981";
+            edgeEl.style.color = "#34d399";
+        } else if (assessment.includes("EXPANSION") || assessment.includes("UNDERPRICED") || assessment.includes("WARNING")) {
+            edgeEl.style.background = "rgba(244, 63, 94, 0.2)";
+            edgeEl.style.borderColor = "#f43f5e";
+            edgeEl.style.color = "#fb7185";
+        } else {
+            edgeEl.style.background = "rgba(56, 189, 248, 0.15)";
+            edgeEl.style.borderColor = "#38bdf8";
+            edgeEl.style.color = "#38bdf8";
+        }
+    }
+
+    // 4. Status and Drift
     if (statusText) {
-        statusText.textContent = `Horizon: ${window._kronosForecastHorizon || 24} candles • Drift: ${summary.expected_return_pct > 0 ? '+' : ''}${summary.expected_return_pct || 0}%`;
+        const drift = summary.change_percent !== undefined ? summary.change_percent : (summary.expected_return_pct || 0);
+        const sign = drift > 0 ? "+" : "";
+        statusText.textContent = `Horizon: ${window._kronosForecastHorizon || 24} candles • Drift: ${sign}${Number(drift).toFixed(2)}%`;
     }
 }
 
@@ -17094,31 +17151,53 @@ function updateDerivativesUI(der) {
     const mpEl = document.getElementById("lblMaxPainStrike");
     const cwEl = document.getElementById("lblCallWallStrike");
     const pwEl = document.getElementById("lblPutWallStrike");
-    const pcrEl = document.getElementById("lblDerivativesPcr");
+    const pcrEl = document.getElementById("lblPcrRatio") || document.getElementById("lblDerivativesPcr");
     const atmEl = document.getElementById("lblAtmStraddlePremium");
     const misEl = document.getElementById("lblStraddleMispricingBadge");
     const mtfEl = document.getElementById("lblMtfTrendBadge");
 
-    if (mpEl && der.max_pain_strike) mpEl.textContent = "₹" + Number(der.max_pain_strike).toLocaleString('en-IN');
-    if (cwEl && der.call_wall_strike) {
-        const dist = der.call_wall_distance ? ` (+${der.call_wall_distance.toFixed(2)})` : "";
-        cwEl.textContent = "₹" + Number(der.call_wall_strike).toLocaleString('en-IN') + dist;
+    const maxPain = der.max_pain !== undefined ? der.max_pain : der.max_pain_strike;
+    if (mpEl && maxPain) {
+        mpEl.textContent = "₹ " + Number(maxPain).toLocaleString('en-IN');
     }
-    if (pwEl && der.put_wall_strike) {
-        const dist = der.put_wall_distance ? ` (-${Math.abs(der.put_wall_distance).toFixed(2)})` : "";
-        pwEl.textContent = "₹" + Number(der.put_wall_strike).toLocaleString('en-IN') + dist;
+
+    const callWall = der.call_oi_wall !== undefined ? der.call_oi_wall : der.call_wall_strike;
+    if (cwEl && callWall) {
+        const spot = der.spot_price || (window._activeCandles && window._activeCandles.length ? window._activeCandles[window._activeCandles.length - 1].close : 0);
+        const dist = spot > 0 ? (callWall - spot) : (der.call_wall_distance || der.call_wall_dist || 0);
+        const distStr = dist > 0 ? ` (+${dist.toFixed(2)})` : (dist < 0 ? ` (${dist.toFixed(2)})` : "");
+        cwEl.textContent = "₹ " + Number(callWall).toLocaleString('en-IN') + distStr;
     }
-    if (pcrEl && der.pcr) {
-        pcrEl.textContent = `${der.pcr.toFixed(2)} (${der.pcr_sentiment || "Neutral"})`;
+
+    const putWall = der.put_oi_wall !== undefined ? der.put_oi_wall : der.put_wall_strike;
+    if (pwEl && putWall) {
+        const spot = der.spot_price || (window._activeCandles && window._activeCandles.length ? window._activeCandles[window._activeCandles.length - 1].close : 0);
+        const dist = spot > 0 ? (spot - putWall) : (der.put_wall_distance || der.put_wall_dist || 0);
+        const distStr = dist > 0 ? ` (-${dist.toFixed(2)})` : (dist < 0 ? ` (+${Math.abs(dist).toFixed(2)})` : "");
+        pwEl.textContent = "₹ " + Number(putWall).toLocaleString('en-IN') + distStr;
     }
+
+    if (pcrEl && der.pcr !== undefined) {
+        const sentiment = der.sentiment || der.pcr_sentiment || (der.pcr > 1.2 ? "Bullish" : (der.pcr < 0.8 ? "Bearish" : "Neutral"));
+        pcrEl.textContent = `${Number(der.pcr).toFixed(2)} (${sentiment})`;
+        pcrEl.style.color = der.sentiment_color || (der.pcr > 1.0 ? "#34d399" : (der.pcr < 0.8 ? "#fb7185" : "#38bdf8"));
+    }
+
     if (atmEl && der.atm_straddle_premium) {
-        const pct = der.atm_straddle_pct ? ` (±${der.atm_straddle_pct.toFixed(2)}%)` : "";
-        atmEl.textContent = "₹" + der.atm_straddle_premium.toFixed(2) + pct;
+        const pct = der.atm_implied_move_pct ? ` (±${der.atm_implied_move_pct.toFixed(2)}%)` : (der.atm_straddle_pct ? ` (±${der.atm_straddle_pct.toFixed(2)}%)` : "");
+        atmEl.textContent = "₹ " + Number(der.atm_straddle_premium).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + pct;
     }
-    if (misEl && der.straddle_edge) {
-        const isOver = (der.straddle_edge.verdict || "").includes("OVERPRICED");
-        const isUnder = (der.straddle_edge.verdict || "").includes("UNDERPRICED");
-        misEl.textContent = `${der.straddle_edge.verdict} [${der.straddle_edge.mispricing_ratio}x]`;
+
+    // Straddle Mispricing Badge
+    if (misEl) {
+        const badgeText = der.mispricing_badge || (der.straddle_edge && der.straddle_edge.verdict) || (der.mispricing_status ? `${der.mispricing_status} [${der.mispricing_ratio || 1.0}x]` : "BALANCED");
+        const ratio = der.mispricing_ratio ? ` [${der.mispricing_ratio}x]` : "";
+        const fullText = badgeText.includes("[") ? badgeText : `${badgeText}${ratio}`;
+        misEl.textContent = fullText;
+
+        const isOver = fullText.includes("OVERPRICED") || der.mispricing_status === "OVERPRICED";
+        const isUnder = fullText.includes("UNDERPRICED") || der.mispricing_status === "UNDERPRICED";
+
         if (isOver) {
             misEl.className = "mispricing-badge-overpriced";
             misEl.style.background = "rgba(16, 185, 129, 0.2)";
@@ -17136,13 +17215,16 @@ function updateDerivativesUI(der) {
             misEl.style.color = "#38bdf8";
         }
     }
-    if (mtfEl && der.mtf_bias) {
-        mtfEl.textContent = der.mtf_bias;
-        if (der.mtf_bias.includes("BULLISH")) {
+
+    // MTF Trend Badge
+    if (mtfEl) {
+        const bias = der.mtf_bias || (der.mtf_confluence && der.mtf_confluence.bias) || "NEUTRAL";
+        mtfEl.textContent = bias;
+        if (bias.includes("BULLISH")) {
             mtfEl.style.background = "rgba(16, 185, 129, 0.2)";
             mtfEl.style.borderColor = "#10b981";
             mtfEl.style.color = "#34d399";
-        } else if (der.mtf_bias.includes("BEARISH")) {
+        } else if (bias.includes("BEARISH")) {
             mtfEl.style.background = "rgba(244, 63, 94, 0.2)";
             mtfEl.style.borderColor = "#f43f5e";
             mtfEl.style.color = "#fb7185";
@@ -17769,10 +17851,7 @@ function renderCandlestickCanvas() {
         const wickX = Math.floor(x) + 0.5;
         ctx.save();
         ctx.strokeStyle = color;
-        ctx.lineWidth = isForecast ? 1.4 : 1.2;
-        if (isForecast) {
-            ctx.setLineDash([3, 2]);
-        }
+        ctx.lineWidth = isForecast ? 1.5 : 1.2;
         ctx.beginPath();
         ctx.moveTo(wickX, yHigh);
         ctx.lineTo(wickX, yLow);
@@ -17781,16 +17860,15 @@ function renderCandlestickCanvas() {
 
         // Body
         const bodyTop = Math.min(yOpen, yClose);
-        const bodyH = Math.max(1.5, Math.abs(yClose - yOpen));
+        const bodyH = Math.max(2, Math.abs(yClose - yOpen));
         const bodyLeft = Math.floor(x - (candleW / 2));
 
         if (isForecast) {
             ctx.save();
-            ctx.fillStyle = isUp ? "rgba(16, 185, 129, 0.45)" : "rgba(244, 63, 94, 0.45)";
+            ctx.fillStyle = isUp ? "rgba(16, 185, 129, 0.85)" : "rgba(244, 63, 94, 0.85)";
             ctx.fillRect(bodyLeft, bodyTop, Math.floor(candleW), bodyH);
-            ctx.strokeStyle = color;
+            ctx.strokeStyle = isUp ? "#34d399" : "#fb7185";
             ctx.lineWidth = 1.2;
-            ctx.setLineDash([2, 2]);
             ctx.strokeRect(bodyLeft, bodyTop, Math.floor(candleW), bodyH);
             ctx.restore();
         } else {
@@ -17959,10 +18037,15 @@ function renderCandlestickCanvas() {
         }
     }
 
-    // If not hovering over a valid candle, default to the latest candle
-    if (!targetCandle && allCandles.length > 0) {
-        targetCandle = allCandles[allCandles.length - 1];
-        targetIdx = allCandles.length - 1;
+    // If not hovering over a valid candle, default to the latest real historical candle
+    if (!targetCandle) {
+        if (baseCandles.length > 0) {
+            targetCandle = baseCandles[baseCandles.length - 1];
+            targetIdx = baseCandles.length - 1;
+        } else if (allCandles.length > 0) {
+            targetCandle = allCandles[allCandles.length - 1];
+            targetIdx = allCandles.length - 1;
+        }
     }
 
     if (targetCandle) {
@@ -17989,10 +18072,9 @@ function renderCandlestickCanvas() {
         }
 
         if (priceEl) {
-            if (isHovering && crosshairPrice !== null) {
-                priceEl.textContent = "₹" + (crosshairPrice >= 1000 ? crosshairPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : crosshairPrice.toFixed(2));
-            } else {
-                priceEl.textContent = "₹" + targetCandle.close.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const p = (isHovering && crosshairPrice !== null) ? crosshairPrice : (targetCandle ? targetCandle.close : 0);
+            if (p > 0) {
+                priceEl.textContent = "₹" + Number(p).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             }
         }
 

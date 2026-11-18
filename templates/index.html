@@ -3837,13 +3837,6 @@
                             <span style="color:#10b981; font-size:10px; font-weight:700;">LIVE FEED</span>
                         </div>
                     </div>
-
-                    <!-- Direct Trade & Algo Action Buttons -->
-                    <div style="display:inline-flex; align-items:center; gap:5px;">
-                        <button type="button" class="straddle-btn" id="btnChartQuickBuy" onclick="executeChartDirectOrder('BUY')" style="background:linear-gradient(135deg, #059669, #10b981); color:#fff; border:1px solid #34d399; font-weight:800; font-size:11px; padding:3px 9px; border-radius:5px; cursor:pointer;" title="Place direct BUY order for active asset">BUY</button>
-                        <button type="button" class="straddle-btn" id="btnChartQuickSell" onclick="executeChartDirectOrder('SELL')" style="background:linear-gradient(135deg, #dc2626, #ef4444); color:#fff; border:1px solid #f87171; font-weight:800; font-size:11px; padding:3px 9px; border-radius:5px; cursor:pointer;" title="Place direct SELL order for active asset">SELL</button>
-                        <button type="button" class="straddle-btn btn-outline" id="btnChartAddAlgo" onclick="addChartAssetToAlgoStrategy()" style="padding:3px 9px; font-size:11px; font-weight:800; color:#c084fc; border-color:rgba(192,132,252,0.4);" title="Add active asset to Algo Strategy Builder">⚡ Algo</button>
-                    </div>
                 </div>
 
                 <!-- Right: Action Buttons (Fullscreen, Compact, Refresh, Close) -->
@@ -3917,9 +3910,9 @@
                         
                         <div style="display:flex; align-items:center; gap:4px; background:#0c0f1d; padding:2px 4px; border-radius:6px; border:1px solid rgba(255,255,255,0.1);">
                             <span style="font-size:11px; color:#94a3b8; padding:0 4px;">Horizon:</span>
-                            <button type="button" class="kronos-horizon-btn" data-horizon="12" onclick="setKronosHorizon(12)" style="background:none; border:none; color:#cbd5e1; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; cursor:pointer;">12 Bars</button>
-                            <button type="button" class="kronos-horizon-btn active" data-horizon="24" onclick="setKronosHorizon(24)" style="background:#a855f7; border:none; color:#fff; font-weight:800; font-size:11px; padding:2px 8px; border-radius:4px; cursor:pointer;">24 Bars</button>
-                            <button type="button" class="kronos-horizon-btn" data-horizon="48" onclick="setKronosHorizon(48)" style="background:none; border:none; color:#cbd5e1; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; cursor:pointer;">48 Bars</button>
+                            <button type="button" class="kronos-horizon-btn" data-horizon="12" onclick="setKronosHorizon(12)" style="border:none; padding:2px 8px; border-radius:4px; cursor:pointer;">12 Bars</button>
+                            <button type="button" class="kronos-horizon-btn active" data-horizon="24" onclick="setKronosHorizon(24)" style="border:none; padding:2px 8px; border-radius:4px; cursor:pointer;">24 Bars</button>
+                            <button type="button" class="kronos-horizon-btn" data-horizon="48" onclick="setKronosHorizon(48)" style="border:none; padding:2px 8px; border-radius:4px; cursor:pointer;">48 Bars</button>
                         </div>
 
                         <span id="kronosStatusBadge" style="font-size:11px; color:#a855f7; display:inline-flex; align-items:center; gap:4px;">
@@ -4224,7 +4217,7 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261118_topbar_algos_sync_v7"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261118_chart_forecast_fix_v8"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
