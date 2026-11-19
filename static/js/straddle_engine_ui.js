@@ -13177,6 +13177,11 @@ function setAuditQuickFilter(type) {
         if (b) { b.classList.add("active"); b.style.background = "rgba(56,189,248,0.3)"; b.style.color = "#38bdf8"; }
         window._straddleAuditLogsFilter = "trades";
         if (sMode) sMode.value = "all";
+    } else if (type === "entries") {
+        const b = document.getElementById("btnAuditQuickEntries");
+        if (b) { b.classList.add("active"); b.style.background = "rgba(14,165,233,0.3)"; b.style.color = "#38bdf8"; }
+        window._straddleAuditTriggerFilter = "ENTRY";
+        if (sTrig) sTrig.value = "ENTRY";
     } else if (type === "targets") {
         const b = document.getElementById("btnAuditQuickTargets");
         if (b) { b.classList.add("active"); b.style.background = "rgba(16,185,129,0.3)"; b.style.color = "#10b981"; }
@@ -13277,12 +13282,16 @@ function _parseAuditLogBadges(l) {
         levelBadge = `<span style="background:rgba(56,189,248,0.18); border:1px solid rgba(56,189,248,0.45); color:#38bdf8; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">INFO</span>`;
     }
 
-    // 2. Mode Badge (Live vs Paper)
+    // 2. Mode Badge (Live vs Paper vs System)
     let tt = String(l.trade_type || "").toUpperCase();
-    if (!tt) {
-        if (msgU.includes("[PAPER") || msgU.includes("PAPER TRADE") || det.mode === "PAPER") tt = "PAPER";
-        else if (anyMatch(msgU, ["ENTERED BUY", "ENTERED SELL", "EXITED", "STOPLOSS", "TARGET", "RE-EXECUTE", "HEDGE"])) tt = "LIVE";
-        else tt = "SYSTEM";
+    if (!tt || tt === "-") {
+        if (msgU.includes("[PAPER") || msgU.includes("PAPER TRADE") || det.mode === "PAPER") {
+            tt = "PAPER";
+        } else if (anyMatch(msgU, ["ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET", "RE-EXECUTE", "RE-ENTRY", "HEDGE", "MARGIN AUTO-RELEASE"])) {
+            tt = "LIVE";
+        } else {
+            tt = "SYSTEM";
+        }
     }
     let modeBadge = "";
     if (tt === "LIVE") {
@@ -13292,35 +13301,72 @@ function _parseAuditLogBadges(l) {
     }
 
     // 3. Strategy Name Badge
-    let stratName = l.strategy_name || det.strategy_name || "";
-    if (!stratName) {
-        const m = msg.match(/(?:Strategy|Algorithm)\s+'([^']+)'/i);
-        if (m) stratName = m[1];
+    let stratName = String(l.strategy_name || det.strategy_name || det.algo_name || det.strategy || "").trim();
+    if (!stratName || stratName === "-") {
+        const mTag = msg.match(/^\[([a-zA-Z0-9_\- ]+)\]/);
+        const systemTags = [
+            "algotest parity", "hedge retained", "re-entry #1", "re-entry #2", "re-entry #3",
+            "re-entry #4", "re-entry #5", "re-entry", "margin auto-release", "auto-reconciled position",
+            "fail-safe sweep", "order blocked", "lpp auto-clamp", "hedge auto square-off", "hedge exit",
+            "move sl to cost", "basket margin priority", "advance orders blocked", "pre-flight",
+            "paper benchmark", "paper"
+        ];
+        if (mTag && !systemTags.includes(mTag[1].toLowerCase().trim())) {
+            stratName = mTag[1].trim();
+        }
+    }
+    if (!stratName || stratName === "-") {
+        const m = msg.match(/(?:strategy|algorithm|for|into strategy)\s+['"]([^'"]+)['"]/i);
+        if (m) stratName = m[1].trim();
+    }
+    if (!stratName || stratName === "-") {
+        const activeS = (window._straddleState && (window._straddleState.activeStrategy || (window._straddleState.state && window._straddleState.state.activeStrategy)));
+        stratName = (activeS ? (activeS.name || activeS.strategy_id) : "") || "nifty";
     }
     let stratBadge = "";
-    if (stratName) {
+    if (stratName && stratName !== "-") {
         stratBadge = `<span style="background:rgba(147,197,253,0.15); border:1px solid rgba(147,197,253,0.35); color:#93c5fd; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">⚡ ${stratName}</span>`;
     }
 
     // 4. Underlying Asset Badge
-    let und = l.underlying || det.underlying || "";
-    if (!und) {
+    let und = String(l.underlying || det.underlying || "").trim();
+    if (!und || und === "-") {
         const candidates = ["NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL", "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "BANKEX", "SENSEX", "NIFTY"];
         for (const u of candidates) {
             if (msgU.includes(u)) { und = u; break; }
         }
     }
+    if (!und || und === "-") {
+        und = "NIFTY";
+    }
     let undBadge = "";
-    if (und) {
-        undBadge = `<span style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; font-weight:800; padding:1px 5px; border-radius:4px;">${und}</span>`;
+    if (und && und !== "-") {
+        undBadge = `<span style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; font-weight:800; padding:1px 5px; border-radius:4px;">${canonicalUnderlying(und)}</span>`;
     }
 
     // 5. Leg Role: Main vs Hedge
-    let role = "";
-    if (l.is_associated_hedge || anyMatch(msgU, ["HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO", "ORPHAN HEDGE"])) {
-        role = "HEDGE";
-    } else if (anyMatch(msgU, ["MAIN", "SHORT STRADDLE", "ENTERED SELL", "SHORT RE-ENTRY"])) {
-        role = "MAIN";
+    let role = String(l.role || det.role || "").toUpperCase().trim();
+    if (!role || role === "-") {
+        const isHedge = Boolean(
+            l.is_associated_hedge || det.is_associated_hedge || det.is_hedge
+            || anyMatch(msgU, [
+                "HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO", "ORPHAN HEDGE",
+                "BUY HEDGE", "BUY NEW HEDGE", "HEDGE RETAINED", "HEDGE AUTO-EXIT",
+                "HEDGE EXIT", "HEDGE REALIGNED", "ASSOCIATED HEDGE"
+            ])
+            || (msgU.includes("ENTERED BUY") && (msgU.includes("TGT: 0") || msgU.includes("TGT: 0.0") || msgU.includes("SL: 0")))
+        );
+        const isMain = Boolean(
+            anyMatch(msgU, [
+                "MAIN", "SHORT STRADDLE", "ENTERED SELL", "SHORT RE-ENTRY", "MAIN LEG",
+                "TARGET ORDER", "STOPLOSS ORDER", "TARGET HIT", "STOPLOSS HIT", "TRAILING SL",
+                "MOVE SL TO COST", "TARGET CANCELLED", "SL CANCELLED", "RE-EXECUTE", "RE-ENTRY"
+            ])
+            || msgU.includes("ENTERED SELL")
+        );
+        if (isHedge) role = "HEDGE";
+        else if (isMain) role = "MAIN";
+        else role = "-";
     }
     let roleBadge = "";
     if (role === "HEDGE") {
@@ -13330,10 +13376,21 @@ function _parseAuditLogBadges(l) {
     }
 
     // 6. Transaction Side: BUY vs SELL
-    let side = String(l.side || "").toUpperCase();
+    let side = String(l.side || det.side || "").toUpperCase().trim();
     if (!side || side === "-") {
-        if (msgU.includes("ENTERED BUY") || msgU.includes("BUYING") || msgU.includes("BUY NEW HEDGE") || msgU.includes(" BUY ")) side = "BUY";
-        else if (msgU.includes("ENTERED SELL") || msgU.includes("SELLING") || msgU.includes("SHORT RE-ENTRY") || msgU.includes(" SELL ")) side = "SELL";
+        if (anyMatch(msgU, ["ENTERED BUY", "BUY NEW HEDGE", "BUY HEDGE", "BUYING", "BUY ", "(EXIT BUY)"])) {
+            side = "BUY";
+        } else if (anyMatch(msgU, ["ENTERED SELL", "SELLING", "SHORT RE-ENTRY", "SELL ", "(EXIT SELL)"])) {
+            side = "SELL";
+        } else if (anyMatch(msgU, ["SQUARING OFF ASSOCIATED HEDGE", "HEDGE AUTO SQUARE-OFF", "HEDGE AUTO-EXIT", "HEDGE EXIT", "ORPHAN HEDGE AUTO-EXIT"])) {
+            side = "SELL";
+        } else if (anyMatch(msgU, ["TARGET ORDER", "STOPLOSS ORDER", "TARGET HIT", "STOPLOSS HIT"])) {
+            side = (role === "MAIN") ? "BUY" : "SELL";
+        } else if (anyMatch(msgU, ["RE-EXECUTE", "RE EXECUTE"])) {
+            side = (role === "MAIN") ? "SELL" : "BUY";
+        } else {
+            side = "-";
+        }
     }
     let sideBadge = "";
     if (side === "BUY") {
@@ -13343,11 +13400,15 @@ function _parseAuditLogBadges(l) {
     }
 
     // 7. Option Type: CE vs PE
-    let opt = "";
-    if (msgU.includes(" CE ") || msgU.includes(" CALL ") || msgU.includes("CE]") || msgU.includes("(CE)") || /\b\d+\s*CE\b/.test(msgU)) {
-        opt = "CE";
-    } else if (msgU.includes(" PE ") || msgU.includes(" PUT ") || msgU.includes("PE]") || msgU.includes("(PE)") || /\b\d+\s*PE\b/.test(msgU)) {
-        opt = "PE";
+    let opt = String(l.option_type || det.option_type || "").toUpperCase().trim();
+    if (!opt || opt === "-") {
+        if (/\bCE\b/.test(msgU) || msgU.includes(" CALL ") || msgU.includes("CE]") || msgU.includes("(CE)")) {
+            opt = "CE";
+        } else if (/\bPE\b/.test(msgU) || msgU.includes(" PUT ") || msgU.includes("PE]") || msgU.includes("(PE)")) {
+            opt = "PE";
+        } else {
+            opt = "-";
+        }
     }
     let optBadge = "";
     if (opt === "CE") {
@@ -13356,22 +13417,34 @@ function _parseAuditLogBadges(l) {
         optBadge = `<span style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.5); color:#c084fc; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">📉 PE</span>`;
     }
 
-    // 8. Trigger / Action
-    let trig = "";
-    if (anyMatch(msgU, ["TARGET HIT", "TARGET ORDER", "TGT:", "TGT HIT", "(TARGET)"])) {
-        trig = "TARGET";
-    } else if (anyMatch(msgU, ["STOPLOSS HIT", "STOPLOSS ORDER", "SL HIT", "SL:", "(STOPLOSS)", "SL CANCEL"])) {
-        trig = "STOPLOSS";
-    } else if (anyMatch(msgU, ["RE-EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST", "TRIGGERING RE"])) {
-        trig = "REENTRY";
+    // 8. Trigger / Action: ENTRY vs REENTRY vs TARGET vs STOPLOSS vs EXIT
+    let trig = String(l.trigger || det.trigger || det.action || "").toUpperCase().trim();
+    if (!trig || trig === "-") {
+        const isReEntry = anyMatch(msgU, ["RE-EXECUTE", "RE EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST", "TRIGGERING RE"]);
+        const isEntry = anyMatch(msgU, ["ENTERED BUY", "ENTERED SELL", "ENTERED ", "INITIAL STRATEGY ENTRY"]);
+        const isTarget = anyMatch(msgU, ["TARGET HIT", "TARGET REACHED", "PROFIT TARGET", "HIT TARGET", "(TARGET HIT)", "TARGET ORDER", "TARGET FILLED", "(TARGET)"]) && !isEntry;
+        const isStoploss = anyMatch(msgU, ["STOPLOSS HIT", "SL HIT", "HIT SL", "STOP LOSS HIT", "SL TRIGGERED", "(STOPLOSS HIT)", "STOPLOSS ORDER", "STOPLOSS FILLED", "(STOPLOSS)"]) && !isEntry;
+        const isExit = anyMatch(msgU, ["EXITED", "SQUARE OFF", "SQUARED OFF", "MANUAL EXIT", "EOD EXIT", "AUTO-RECONCILED POSITION", "HEDGE AUTO SQUARE-OFF", "HEDGE AUTO-EXIT", "ORPHAN HEDGE AUTO-EXIT", "HEDGE EXIT"]) && !isEntry && !isTarget && !isStoploss;
+
+        if (isReEntry) trig = "REENTRY";
+        else if (isEntry) trig = "ENTRY";
+        else if (isTarget) trig = "TARGET";
+        else if (isStoploss) trig = "STOPLOSS";
+        else if (isExit) trig = "EXIT";
+        else trig = "-";
     }
+
     let trigBadge = "";
-    if (trig === "TARGET") {
+    if (trig === "ENTRY") {
+        trigBadge = `<span style="background:rgba(14,165,233,0.18); border:1px solid rgba(14,165,233,0.5); color:#38bdf8; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">📥 ENTRY</span>`;
+    } else if (trig === "REENTRY") {
+        trigBadge = `<span style="background:rgba(6,182,212,0.22); border:1px solid rgba(6,182,212,0.55); color:#06b6d4; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🔄 RE-ENTRY</span>`;
+    } else if (trig === "TARGET") {
         trigBadge = `<span style="background:rgba(16,185,129,0.22); border:1px solid rgba(16,185,129,0.55); color:#10b981; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🎯 TARGET</span>`;
     } else if (trig === "STOPLOSS") {
         trigBadge = `<span style="background:rgba(244,63,94,0.22); border:1px solid rgba(244,63,94,0.55); color:#f43f5e; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🛑 STOPLOSS</span>`;
-    } else if (trig === "REENTRY") {
-        trigBadge = `<span style="background:rgba(6,182,212,0.22); border:1px solid rgba(6,182,212,0.55); color:#06b6d4; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">🔄 RE-ENTRY</span>`;
+    } else if (trig === "EXIT") {
+        trigBadge = `<span style="background:rgba(244,63,94,0.18); border:1px solid rgba(244,63,94,0.45); color:#fb7185; font-size:10px; font-weight:900; padding:1px 6px; border-radius:4px;">⏹️ EXIT</span>`;
     }
 
     return {
@@ -13469,9 +13542,12 @@ function _buildAuditLogsHtml(logsList) {
             if (triggerFilter === "TARGET" && parsed.trigger !== "TARGET") return false;
             if (triggerFilter === "STOPLOSS" && parsed.trigger !== "STOPLOSS") return false;
             if (triggerFilter === "REENTRY" && parsed.trigger !== "REENTRY") return false;
+            if (triggerFilter === "ENTRY" && parsed.trigger !== "ENTRY") return false;
+            if (triggerFilter === "EXIT" && parsed.trigger !== "EXIT") return false;
 
             // 10. Quick Filter Mode overrides
             if (quickMode === "trades" && parsed.tradeType !== "LIVE") return false;
+            if (quickMode === "entries" && parsed.trigger !== "ENTRY") return false;
             if (quickMode === "targets" && parsed.trigger !== "TARGET") return false;
             if (quickMode === "stoploss" && parsed.trigger !== "STOPLOSS") return false;
             if (quickMode === "hedges" && parsed.role !== "HEDGE") return false;

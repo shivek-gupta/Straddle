@@ -2946,6 +2946,7 @@
                             <span style="font-size:10px; color:#64748b; font-weight:800; text-transform:uppercase;">Quick:</span>
                             <button type="button" class="algo-filter-pill active" id="btnAuditQuickAll" onclick="setAuditQuickFilter('all')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:#1e293b; color:#f8fafc; cursor:pointer;">All</button>
                             <button type="button" class="algo-filter-pill" id="btnAuditQuickTrades" onclick="setAuditQuickFilter('trades')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(56,189,248,0.15); color:#38bdf8; cursor:pointer;" title="Show all live trade fills and entries">⚡ Trades</button>
+                            <button type="button" class="algo-filter-pill" id="btnAuditQuickEntries" onclick="setAuditQuickFilter('entries')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(14,165,233,0.15); color:#38bdf8; cursor:pointer;" title="Show initial leg entries">📥 Entries</button>
                             <button type="button" class="algo-filter-pill" id="btnAuditQuickTargets" onclick="setAuditQuickFilter('targets')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; cursor:pointer;" title="Show Target hit events">🎯 Targets</button>
                             <button type="button" class="algo-filter-pill" id="btnAuditQuickStoploss" onclick="setAuditQuickFilter('stoploss')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(244,63,94,0.15); color:#f43f5e; cursor:pointer;" title="Show Stoploss hit and trailing events">🛑 Stoploss</button>
                             <button type="button" class="algo-filter-pill" id="btnAuditQuickHedges" onclick="setAuditQuickFilter('hedges')" style="padding:2px 7px; font-size:10px; font-weight:800; border:none; border-radius:4px; background:rgba(245,158,11,0.15); color:#fbbf24; cursor:pointer;" title="Show Hedge realignment and margin protection events">🛡️ Hedges</button>
@@ -3019,10 +3020,12 @@
                         <div style="display:flex; align-items:center; gap:4px;">
                             <span style="font-size:10px; color:#94a3b8; font-weight:800; text-transform:uppercase;">Trigger:</span>
                             <select id="selAuditTriggerFilter" class="straddle-select" style="padding:2px 6px; font-size:10.5px; font-weight:700; background:#111827; border:1px solid rgba(255,255,255,0.15); color:#cbd5e1; border-radius:4px;" onchange="setStraddleAuditTriggerFilter(this.value)">
-                                <option value="ALL">All Triggers</option>
+                                <option value="ALL">All Triggers & Actions</option>
+                                <option value="ENTRY">📥 Entry Only</option>
+                                <option value="REENTRY">🔄 Re-Entry Only</option>
                                 <option value="TARGET">🎯 Target Only</option>
                                 <option value="STOPLOSS">🛑 Stoploss Only</option>
-                                <option value="REENTRY">🔄 Re-Entry Only</option>
+                                <option value="EXIT">⏹️ Exit Only</option>
                             </select>
                         </div>
 

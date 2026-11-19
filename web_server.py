@@ -242,6 +242,187 @@ def api_straddle_logs():
         return jsonify({"success": False, "error": str(e), "logs": []}), 500
 
 
+def _parse_audit_log_record(log: dict, active_strategy: str = "nifty", default_underlying: str = "NIFTY") -> dict:
+    ts = str(log.get("timestamp") or "")
+    dt = str(log.get("date") or "")
+    lvl = str(log.get("level") or "INFO").upper()
+    msg = str(log.get("message") or "")
+    msg_u = msg.upper()
+    det = log.get("details") if isinstance(log.get("details"), dict) else {}
+
+    # 1. Trade Type (LIVE, PAPER, SYSTEM)
+    tt = str(log.get("trade_type") or "").upper()
+    if not tt or tt == "-":
+        if "[PAPER" in msg_u or det.get("mode") == "PAPER":
+            tt = "PAPER"
+        elif any(k in msg_u for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET", "RE-EXECUTE", "RE-ENTRY", "HEDGE", "MARGIN AUTO-RELEASE")):
+            tt = "LIVE"
+        else:
+            tt = "SYSTEM"
+
+    # 2. Strategy Name
+    strat_name = str(log.get("strategy_name") or "").strip()
+    if not strat_name or strat_name == "-":
+        strat_name = str(det.get("strategy_name") or det.get("algo_name") or det.get("strategy") or "").strip()
+    if not strat_name or strat_name == "-":
+        m_tag = re.search(r"^\[([a-zA-Z0-9_\- ]+)\]", msg)
+        system_tags = {
+            "algotest parity", "hedge retained", "re-entry #1", "re-entry #2", "re-entry #3",
+            "re-entry #4", "re-entry #5", "re-entry", "margin auto-release", "auto-reconciled position",
+            "fail-safe sweep", "order blocked", "lpp auto-clamp", "hedge auto square-off", "hedge exit",
+            "move sl to cost", "basket margin priority", "advance orders blocked", "pre-flight",
+            "paper benchmark", "paper"
+        }
+        if m_tag and m_tag.group(1).lower() not in system_tags:
+            strat_name = m_tag.group(1).strip()
+    if not strat_name or strat_name == "-":
+        m_txt = re.search(r"(?:strategy|algorithm|for|into strategy)\s+['\"]([^'\"]+)['\"]", msg, re.I)
+        if m_txt:
+            strat_name = m_txt.group(1).strip()
+    if not strat_name or strat_name == "-":
+        strat_name = active_strategy or "nifty"
+
+    # 3. Underlying Asset
+    und = str(log.get("underlying") or "").strip()
+    if not und or und == "-":
+        und = str(det.get("underlying") or "").strip()
+    if not und or und == "-":
+        for cand in ("NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL", "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "BANKEX", "SENSEX", "NIFTY"):
+            if cand in msg_u:
+                und = cand
+                break
+    if not und or und == "-":
+        und = default_underlying or "NIFTY"
+
+    # 4. Leg Role (MAIN vs HEDGE)
+    role = str(log.get("role") or "").upper().strip()
+    if not role or role == "-":
+        role = str(det.get("role") or "").upper().strip()
+    if not role or role == "-":
+        is_hedge = (
+            bool(log.get("is_associated_hedge"))
+            or bool(det.get("is_associated_hedge"))
+            or bool(det.get("is_hedge"))
+            or any(k in msg_u for k in (
+                "HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO", "ORPHAN HEDGE",
+                "BUY HEDGE", "BUY NEW HEDGE", "HEDGE RETAINED", "HEDGE AUTO-EXIT",
+                "HEDGE EXIT", "HEDGE REALIGNED", "ASSOCIATED HEDGE"
+            ))
+            or ("ENTERED BUY" in msg_u and ("TGT: 0" in msg_u or "TGT: 0.0" in msg_u or "SL: 0" in msg_u))
+        )
+        is_main = (
+            any(k in msg_u for k in (
+                "MAIN", "SHORT STRADDLE", "ENTERED SELL", "SHORT RE-ENTRY", "MAIN LEG",
+                "TARGET ORDER", "STOPLOSS ORDER", "TARGET HIT", "STOPLOSS HIT", "TRAILING SL",
+                "MOVE SL TO COST", "TARGET CANCELLED", "SL CANCELLED", "RE-EXECUTE", "RE-ENTRY"
+            ))
+            or "ENTERED SELL" in msg_u
+        )
+        if is_hedge:
+            role = "HEDGE"
+        elif is_main:
+            role = "MAIN"
+        else:
+            role = "-"
+
+    # 5. Side (BUY vs SELL)
+    side = str(log.get("side") or "").upper().strip()
+    if not side or side == "-":
+        side = str(det.get("side") or "").upper().strip()
+    if not side or side == "-":
+        if any(k in msg_u for k in ("ENTERED BUY", "BUY NEW HEDGE", "BUY HEDGE", "BUYING", "BUY ", "(EXIT BUY)")):
+            side = "BUY"
+        elif any(k in msg_u for k in ("ENTERED SELL", "SELLING", "SHORT RE-ENTRY", "SELL ", "(EXIT SELL)")):
+            side = "SELL"
+        elif any(k in msg_u for k in ("SQUARING OFF ASSOCIATED HEDGE", "HEDGE AUTO SQUARE-OFF", "HEDGE AUTO-EXIT", "HEDGE EXIT", "ORPHAN HEDGE AUTO-EXIT")):
+            side = "SELL"
+        elif any(k in msg_u for k in ("TARGET ORDER", "STOPLOSS ORDER", "TARGET HIT", "STOPLOSS HIT")):
+            side = "BUY" if role == "MAIN" else "SELL"
+        elif "RE-EXECUTE" in msg_u or "RE EXECUTE" in msg_u:
+            side = "SELL" if role == "MAIN" else "BUY"
+        else:
+            side = "-"
+
+    # 6. Option Type (CE vs PE)
+    opt_type = str(log.get("option_type") or "").upper().strip()
+    if not opt_type or opt_type == "-":
+        opt_type = str(det.get("option_type") or "").upper().strip()
+    if not opt_type or opt_type == "-":
+        if re.search(r"\bCE\b", msg_u) or " CALL " in msg_u or "CE]" in msg_u or "(CE)" in msg_u:
+            opt_type = "CE"
+        elif re.search(r"\bPE\b", msg_u) or " PUT " in msg_u or "PE]" in msg_u or "(PE)" in msg_u:
+            opt_type = "PE"
+        else:
+            opt_type = "-"
+
+    # 7. Trigger / Action (ENTRY, REENTRY, TARGET, STOPLOSS, EXIT)
+    trigger = str(log.get("trigger") or "").upper().strip()
+    if not trigger or trigger == "-":
+        trigger = str(det.get("trigger") or det.get("action") or "").upper().strip()
+    if not trigger or trigger == "-":
+        is_re_entry = any(k in msg_u for k in (
+            "RE-EXECUTE", "RE EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST", "TRIGGERING RE"
+        ))
+        is_entry = (
+            "ENTERED BUY" in msg_u or "ENTERED SELL" in msg_u or "ENTERED " in msg_u or "INITIAL STRATEGY ENTRY" in msg_u
+        )
+        is_target = any(k in msg_u for k in (
+            "TARGET HIT", "TARGET REACHED", "PROFIT TARGET", "HIT TARGET", "(TARGET HIT)",
+            "TARGET ORDER", "TARGET FILLED", "(TARGET)"
+        )) and not is_entry
+        is_stoploss = any(k in msg_u for k in (
+            "STOPLOSS HIT", "SL HIT", "HIT SL", "STOP LOSS HIT", "SL TRIGGERED", "(STOPLOSS HIT)",
+            "STOPLOSS ORDER", "STOPLOSS FILLED", "(STOPLOSS)"
+        )) and not is_entry
+        is_exit = any(k in msg_u for k in (
+            "EXITED", "SQUARE OFF", "SQUARED OFF", "MANUAL EXIT", "EOD EXIT", "AUTO-RECONCILED POSITION",
+            "HEDGE AUTO SQUARE-OFF", "HEDGE AUTO-EXIT", "ORPHAN HEDGE AUTO-EXIT", "HEDGE EXIT"
+        )) and not is_entry and not is_target and not is_stoploss
+
+        if is_re_entry:
+            trigger = "REENTRY"
+        elif is_entry:
+            trigger = "ENTRY"
+        elif is_target:
+            trigger = "TARGET"
+        elif is_stoploss:
+            trigger = "STOPLOSS"
+        elif is_exit:
+            trigger = "EXIT"
+        else:
+            trigger = "-"
+
+    # 8. Details Formatting
+    det_str = "-"
+    if det:
+        chips = []
+        if det.get("order_id"): chips.append(f"Order: {det['order_id']}")
+        if det.get("price"): chips.append(f"Price: ₹{det['price']}")
+        if det.get("qty"): chips.append(f"Qty: {det['qty']}")
+        if det.get("symbol"): chips.append(f"Symbol: {det['symbol']}")
+        if det.get("error"): chips.append(f"Error: {det['error']}")
+        if det.get("reason"): chips.append(f"Reason: {det['reason']}")
+        if chips:
+            det_str = " | ".join(chips)
+        else:
+            det_str = json.dumps(det)
+
+    return {
+        "timestamp": ts,
+        "date": dt,
+        "level": lvl,
+        "trade_type": tt,
+        "strategy_name": strat_name,
+        "underlying": und,
+        "role": role,
+        "side": side,
+        "option_type": opt_type,
+        "trigger": trigger,
+        "message": msg,
+        "details_str": det_str
+    }
+
+
 @app.route("/api/straddle/download_audit_logs", methods=["GET"])
 def api_straddle_download_audit_logs():
     """Generates and downloads a beautifully styled Excel (.xlsx) file or UTF-8 BOM CSV containing all audit logs."""
@@ -249,6 +430,11 @@ def api_straddle_download_audit_logs():
     raw_logs = mgr.get_logs(limit=int(request.args.get("limit", 5000)))
     logs = [l for l in raw_logs if "focused underlying switched to" not in str(l.get("message") or "").lower()]
     req_format = request.args.get("format", "xlsx").lower()
+
+    # Determine default active strategy name and underlying for context
+    active_strat = mgr.get_strategy(mgr._active_strategy_id) if hasattr(mgr, "_active_strategy_id") else None
+    active_strat_name = (active_strat.get("name") if active_strat else None) or "nifty"
+    active_und = (active_strat.get("underlying") if active_strat else None) or "NIFTY"
 
     if req_format == "csv":
         try:
@@ -258,45 +444,8 @@ def api_straddle_download_audit_logs():
             writer = csv.writer(str_io, quoting=csv.QUOTE_MINIMAL)
             writer.writerow(["Timestamp", "Date", "Level", "Trade Type", "Strategy", "Underlying", "Role", "Side", "Option Type", "Trigger", "Message", "Details"])
             for log in logs:
-                ts = str(log.get("timestamp") or "")
-                dt = str(log.get("date") or "")
-                lvl = str(log.get("level") or "INFO").upper()
-                msg = str(log.get("message") or "")
-                msg_u = msg.upper()
-                tt = str(log.get("trade_type") or ("PAPER" if "[PAPER" in msg_u else ("LIVE" if any(k in msg_u for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET")) else "-"))).upper()
-                strat_name = str(log.get("strategy_name") or "-")
-                und = str(log.get("underlying") or "-")
-
-                role = "-"
-                if log.get("is_associated_hedge") or any(k in msg_u for k in ("HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO")):
-                    role = "HEDGE"
-                elif any(k in msg_u for k in ("MAIN", "SHORT STRADDLE", "ENTERED SELL", "RE-EXECUTE", "RE-ENTRY")):
-                    role = "MAIN"
-
-                side = str(log.get("side") or "").upper()
-                if not side or side == "-":
-                    if any(k in msg_u for k in ("ENTERED BUY", "BUYING", "BUY NEW HEDGE", "BUY ")):
-                        side = "BUY"
-                    elif any(k in msg_u for k in ("ENTERED SELL", "SELLING", "SHORT RE-ENTRY", "SELL ")):
-                        side = "SELL"
-                    else:
-                        side = "-"
-
-                opt_type = "-"
-                if " CE " in msg_u or " CALL " in msg_u or "CE]" in msg_u or "(CE)" in msg_u or re.search(r"\b\d+\s*CE\b", msg_u):
-                    opt_type = "CE"
-                elif " PE " in msg_u or " PUT " in msg_u or "PE]" in msg_u or "(PE)" in msg_u or re.search(r"\b\d+\s*PE\b", msg_u):
-                    opt_type = "PE"
-
-                trigger = "-"
-                if any(k in msg_u for k in ("TARGET HIT", "TARGET ORDER", "TGT:", "TGT HIT", "(TARGET)")):
-                    trigger = "TARGET"
-                elif any(k in msg_u for k in ("STOPLOSS HIT", "STOPLOSS ORDER", "SL HIT", "SL:", "(STOPLOSS)", "SL CANCEL")):
-                    trigger = "STOPLOSS"
-
-                det = log.get("details")
-                det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
-                writer.writerow([ts, dt, lvl, tt, strat_name, und, role, side, opt_type, trigger, msg, det_str])
+                r = _parse_audit_log_record(log, active_strategy=active_strat_name, default_underlying=active_und)
+                writer.writerow([r["timestamp"], r["date"], r["level"], r["trade_type"], r["strategy_name"], r["underlying"], r["role"], r["side"], r["option_type"], r["trigger"], r["message"], r["details_str"]])
 
             csv_bytes = str_io.getvalue().encode("utf-8-sig")
             bytes_io = io.BytesIO(csv_bytes)
@@ -352,48 +501,10 @@ def api_straddle_download_audit_logs():
 
         row_idx = 2
         for log in logs:
-            ts = str(log.get("timestamp") or "")
-            dt = str(log.get("date") or "")
-            lvl = str(log.get("level") or "INFO").upper()
-            msg = str(log.get("message") or "")
-            msg_u = msg.upper()
-            tt = str(log.get("trade_type") or ("PAPER" if "[PAPER" in msg_u else ("LIVE" if any(k in msg_u for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET")) else "-"))).upper()
-            strat_name = str(log.get("strategy_name") or "-")
-            und = str(log.get("underlying") or "-")
+            r = _parse_audit_log_record(log, active_strategy=active_strat_name, default_underlying=active_und)
+            ws.append([r["timestamp"], r["date"], r["level"], r["trade_type"], r["strategy_name"], r["underlying"], r["role"], r["side"], r["option_type"], r["trigger"], r["message"], r["details_str"]])
 
-            role = "-"
-            if log.get("is_associated_hedge") or any(k in msg_u for k in ("HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO")):
-                role = "HEDGE"
-            elif any(k in msg_u for k in ("MAIN", "SHORT STRADDLE", "ENTERED SELL", "RE-EXECUTE", "RE-ENTRY")):
-                role = "MAIN"
-
-            side = str(log.get("side") or "").upper()
-            if not side or side == "-":
-                if any(k in msg_u for k in ("ENTERED BUY", "BUYING", "BUY NEW HEDGE", "BUY ")):
-                    side = "BUY"
-                elif any(k in msg_u for k in ("ENTERED SELL", "SELLING", "SHORT RE-ENTRY", "SELL ")):
-                    side = "SELL"
-                else:
-                    side = "-"
-
-            opt_type = "-"
-            if " CE " in msg_u or " CALL " in msg_u or "CE]" in msg_u or "(CE)" in msg_u or re.search(r"\b\d+\s*CE\b", msg_u):
-                opt_type = "CE"
-            elif " PE " in msg_u or " PUT " in msg_u or "PE]" in msg_u or "(PE)" in msg_u or re.search(r"\b\d+\s*PE\b", msg_u):
-                opt_type = "PE"
-
-            trigger = "-"
-            if any(k in msg_u for k in ("TARGET HIT", "TARGET ORDER", "TGT:", "TGT HIT", "(TARGET)")):
-                trigger = "TARGET"
-            elif any(k in msg_u for k in ("STOPLOSS HIT", "STOPLOSS ORDER", "SL HIT", "SL:", "(STOPLOSS)", "SL CANCEL")):
-                trigger = "STOPLOSS"
-
-            det = log.get("details")
-            det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
-
-            ws.append([ts, dt, lvl, tt, strat_name, und, role, side, opt_type, trigger, msg, det_str])
-
-            font_color, bg_color = level_colors.get(lvl, ("334155", "FFFFFF"))
+            font_color, bg_color = level_colors.get(r["level"], ("334155", "FFFFFF"))
 
             ws.cell(row=row_idx, column=1).alignment = Alignment(horizontal="center", vertical="center")
             ws.cell(row=row_idx, column=2).alignment = Alignment(horizontal="center", vertical="center")
@@ -407,10 +518,10 @@ def api_straddle_download_audit_logs():
             # Trade Type (Col 4)
             tt_cell = ws.cell(row=row_idx, column=4)
             tt_cell.alignment = Alignment(horizontal="center", vertical="center")
-            if tt == "LIVE":
+            if r["trade_type"] == "LIVE":
                 tt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="10B981")
                 tt_cell.fill = PatternFill(start_color="ECFDF5", end_color="ECFDF5", fill_type="solid")
-            elif tt == "PAPER":
+            elif r["trade_type"] == "PAPER":
                 tt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="8B5CF6")
                 tt_cell.fill = PatternFill(start_color="F5F3FF", end_color="F5F3FF", fill_type="solid")
 
@@ -421,42 +532,51 @@ def api_straddle_download_audit_logs():
             # Role (Col 7)
             role_cell = ws.cell(row=row_idx, column=7)
             role_cell.alignment = Alignment(horizontal="center", vertical="center")
-            if role == "MAIN":
+            if r["role"] == "MAIN":
                 role_cell.font = Font(name="Segoe UI", size=10, bold=True, color="6D28D9")
                 role_cell.fill = PatternFill(start_color="EDE9FE", end_color="EDE9FE", fill_type="solid")
-            elif role == "HEDGE":
+            elif r["role"] == "HEDGE":
                 role_cell.font = Font(name="Segoe UI", size=10, bold=True, color="B45309")
                 role_cell.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
             # Side (Col 8)
             side_cell = ws.cell(row=row_idx, column=8)
             side_cell.alignment = Alignment(horizontal="center", vertical="center")
-            if side == "BUY":
+            if r["side"] == "BUY":
                 side_cell.font = Font(name="Segoe UI", size=10, bold=True, color="16A34A")
                 side_cell.fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
-            elif side == "SELL":
+            elif r["side"] == "SELL":
                 side_cell.font = Font(name="Segoe UI", size=10, bold=True, color="DC2626")
                 side_cell.fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
 
             # Option Type (Col 9)
             opt_cell = ws.cell(row=row_idx, column=9)
             opt_cell.alignment = Alignment(horizontal="center", vertical="center")
-            if opt_type == "CE":
+            if r["option_type"] == "CE":
                 opt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="0284C7")
                 opt_cell.fill = PatternFill(start_color="E0F2FE", end_color="E0F2FE", fill_type="solid")
-            elif opt_type == "PE":
+            elif r["option_type"] == "PE":
                 opt_cell.font = Font(name="Segoe UI", size=10, bold=True, color="7E22CE")
                 opt_cell.fill = PatternFill(start_color="F3E8FF", end_color="F3E8FF", fill_type="solid")
 
-            # Trigger (Col 10)
+            # Trigger / Action (Col 10)
             trig_cell = ws.cell(row=row_idx, column=10)
             trig_cell.alignment = Alignment(horizontal="center", vertical="center")
-            if trigger == "TARGET":
+            if r["trigger"] == "ENTRY":
+                trig_cell.font = Font(name="Segoe UI", size=10, bold=True, color="0284C7")
+                trig_cell.fill = PatternFill(start_color="E0F2FE", end_color="E0F2FE", fill_type="solid")
+            elif r["trigger"] == "REENTRY":
+                trig_cell.font = Font(name="Segoe UI", size=10, bold=True, color="0D9488")
+                trig_cell.fill = PatternFill(start_color="CCFBF1", end_color="CCFBF1", fill_type="solid")
+            elif r["trigger"] == "TARGET":
                 trig_cell.font = Font(name="Segoe UI", size=10, bold=True, color="047857")
                 trig_cell.fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
-            elif trigger == "STOPLOSS":
+            elif r["trigger"] == "STOPLOSS":
                 trig_cell.font = Font(name="Segoe UI", size=10, bold=True, color="B91C1C")
                 trig_cell.fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+            elif r["trigger"] == "EXIT":
+                trig_cell.font = Font(name="Segoe UI", size=10, bold=True, color="E11D48")
+                trig_cell.fill = PatternFill(start_color="FFE4E6", end_color="FFE4E6", fill_type="solid")
 
             msg_cell = ws.cell(row=row_idx, column=11)
             msg_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
@@ -507,45 +627,8 @@ def api_straddle_download_audit_logs():
             writer = csv.writer(str_io, quoting=csv.QUOTE_MINIMAL)
             writer.writerow(["Timestamp", "Date", "Level", "Trade Type", "Strategy", "Underlying", "Role", "Side", "Option Type", "Trigger", "Message", "Details"])
             for log in logs:
-                ts = str(log.get("timestamp") or "")
-                dt = str(log.get("date") or "")
-                lvl = str(log.get("level") or "INFO").upper()
-                msg = str(log.get("message") or "")
-                msg_u = msg.upper()
-                tt = str(log.get("trade_type") or ("PAPER" if "[PAPER" in msg_u else ("LIVE" if any(k in msg_u for k in ("ENTERED", "EXITED", "FILLED", "STOPLOSS", "TARGET")) else "-"))).upper()
-                strat_name = str(log.get("strategy_name") or "-")
-                und = str(log.get("underlying") or "-")
-                
-                role = "-"
-                if log.get("is_associated_hedge") or any(k in msg_u for k in ("HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO")):
-                    role = "HEDGE"
-                elif any(k in msg_u for k in ("MAIN", "SHORT STRADDLE", "ENTERED SELL", "RE-EXECUTE", "RE-ENTRY")):
-                    role = "MAIN"
-
-                side = str(log.get("side") or "").upper()
-                if not side or side == "-":
-                    if any(k in msg_u for k in ("ENTERED BUY", "BUYING", "BUY NEW HEDGE", "BUY ")):
-                        side = "BUY"
-                    elif any(k in msg_u for k in ("ENTERED SELL", "SELLING", "SHORT RE-ENTRY", "SELL ")):
-                        side = "SELL"
-                    else:
-                        side = "-"
-
-                opt_type = "-"
-                if " CE " in msg_u or " CALL " in msg_u or "CE]" in msg_u or "(CE)" in msg_u or re.search(r"\b\d+\s*CE\b", msg_u):
-                    opt_type = "CE"
-                elif " PE " in msg_u or " PUT " in msg_u or "PE]" in msg_u or "(PE)" in msg_u or re.search(r"\b\d+\s*PE\b", msg_u):
-                    opt_type = "PE"
-
-                trigger = "-"
-                if any(k in msg_u for k in ("TARGET HIT", "TARGET ORDER", "TGT:", "TGT HIT", "(TARGET)")):
-                    trigger = "TARGET"
-                elif any(k in msg_u for k in ("STOPLOSS HIT", "STOPLOSS ORDER", "SL HIT", "SL:", "(STOPLOSS)", "SL CANCEL")):
-                    trigger = "STOPLOSS"
-
-                det = log.get("details")
-                det_str = json.dumps(det) if isinstance(det, dict) and det else (str(det) if det else "-")
-                writer.writerow([ts, dt, lvl, tt, strat_name, und, role, side, opt_type, trigger, msg, det_str])
+                r = _parse_audit_log_record(log, active_strategy=active_strat_name, default_underlying=active_und)
+                writer.writerow([r["timestamp"], r["date"], r["level"], r["trade_type"], r["strategy_name"], r["underlying"], r["role"], r["side"], r["option_type"], r["trigger"], r["message"], r["details_str"]])
 
             # UTF-8 with BOM (0xEF, 0xBB, 0xBF) guarantees Microsoft Excel opens it directly with correct columns
             csv_bytes = str_io.getvalue().encode("utf-8-sig")

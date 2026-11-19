@@ -1332,11 +1332,18 @@ class StraddleManager:
         details: Optional[Dict] = None,
         trade_type: Optional[str] = None,
         side: Optional[str] = None,
+        strategy_name: Optional[str] = None,
+        strategy_id: Optional[str] = None,
+        underlying: Optional[str] = None,
+        is_associated_hedge: Optional[bool] = None,
+        role: Optional[str] = None,
+        trigger: Optional[str] = None,
     ):
         det = details or {}
+        msg_u = message.upper()
+
         # Auto-detect trade_type if not explicitly passed
         if not trade_type:
-            msg_u = message.upper()
             if any(k in msg_u for k in ("[PAPER", "PAPER BENCHMARK", "PAPER FILL", "PAPER TRADE")):
                 trade_type = "PAPER"
             elif det.get("mode") == "PAPER" or det.get("broker") == "PAPER" or det.get("paper"):
@@ -1357,19 +1364,123 @@ class StraddleManager:
             else:
                 trade_type = "SYSTEM"
 
-        # Auto-detect side if not explicitly passed
+        # Auto-detect strategy_name & strategy_id
+        if not strategy_name:
+            strategy_name = str(det.get("strategy_name") or det.get("algo_name") or det.get("strategy") or "").strip()
+        if not strategy_name:
+            m_tag = re.search(r"^\[([a-zA-Z0-9_\- ]+)\]", message)
+            system_tags = {
+                "algotest parity", "hedge retained", "re-entry #1", "re-entry #2", "re-entry #3",
+                "re-entry #4", "re-entry #5", "re-entry", "margin auto-release", "auto-reconciled position",
+                "fail-safe sweep", "order blocked", "lpp auto-clamp", "hedge auto square-off", "hedge exit",
+                "move sl to cost", "basket margin priority", "advance orders blocked", "pre-flight",
+                "paper benchmark", "paper"
+            }
+            if m_tag and m_tag.group(1).lower() not in system_tags:
+                strategy_name = m_tag.group(1).strip()
+        if not strategy_name:
+            m_txt = re.search(r"(?:strategy|algorithm|for|into strategy)\s+['\"]([^'\"]+)['\"]", message, re.I)
+            if m_txt:
+                strategy_name = m_txt.group(1).strip()
+        if not strategy_name:
+            active_s = self.get_strategy(getattr(self, "_active_strategy_id", None))
+            if active_s:
+                strategy_name = active_s.get("name") or active_s.get("strategy_id") or "nifty"
+            else:
+                strategy_name = "nifty"
+
+        if not strategy_id:
+            strategy_id = str(det.get("strategy_id") or "")
+            if not strategy_id and hasattr(self, "_active_strategy_id"):
+                strategy_id = str(self._active_strategy_id or "")
+
+        # Auto-detect underlying
+        if not underlying:
+            underlying = str(det.get("underlying") or "").strip()
+        if not underlying:
+            for cand in ("NATGASMINI", "NATURALGAS", "CRUDEOILM", "CRUDEOIL", "SILVERM", "SILVER", "GOLDM", "GOLD", "COPPER", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "BANKEX", "SENSEX", "NIFTY"):
+                if cand in msg_u:
+                    underlying = cand
+                    break
+        if not underlying:
+            active_s = self.get_strategy(getattr(self, "_active_strategy_id", None))
+            underlying = (active_s.get("underlying") if active_s else None) or "NIFTY"
+
+        # Auto-detect role & is_associated_hedge
+        if role is None:
+            role = str(det.get("role") or "").strip()
+        if is_associated_hedge is None:
+            is_associated_hedge = bool(det.get("is_associated_hedge") or det.get("is_hedge"))
+
+        if not role:
+            if is_associated_hedge or any(k in msg_u for k in (
+                "HEDGE", "HEDGE SHIFT", "HEDGE CHECK", "HEDGE AUTO", "ORPHAN HEDGE",
+                "BUY HEDGE", "BUY NEW HEDGE", "HEDGE RETAINED", "HEDGE AUTO-EXIT",
+                "HEDGE EXIT", "HEDGE REALIGNED", "ASSOCIATED HEDGE"
+            )) or ("ENTERED BUY" in msg_u and ("TGT: 0" in msg_u or "TGT: 0.0" in msg_u or "SL: 0" in msg_u)):
+                role = "HEDGE"
+                is_associated_hedge = True
+            elif any(k in msg_u for k in (
+                "MAIN", "SHORT STRADDLE", "ENTERED SELL", "SHORT RE-ENTRY", "MAIN LEG",
+                "TARGET ORDER", "STOPLOSS ORDER", "TARGET HIT", "STOPLOSS HIT", "TRAILING SL",
+                "MOVE SL TO COST", "TARGET CANCELLED", "SL CANCELLED", "RE-EXECUTE", "RE-ENTRY"
+            )) or "ENTERED SELL" in msg_u:
+                role = "MAIN"
+            else:
+                role = ""
+
+        # Auto-detect side
         if not side:
-            msg_u = message.upper()
-            if "HEDGE EXIT" in msg_u or "(EXIT SELL)" in msg_u or "ENTERED SELL" in msg_u:
-                side = "SELL"
-            elif "ENTERED BUY" in msg_u or "(EXIT BUY)" in msg_u or "BUY HEDGE" in msg_u:
+            side = str(det.get("side") or "").upper().strip()
+        if not side:
+            if any(k in msg_u for k in ("ENTERED BUY", "BUY NEW HEDGE", "BUY HEDGE", "BUYING", "BUY ", "(EXIT BUY)")):
                 side = "BUY"
-            elif "BUY" in msg_u and "SELL" not in msg_u:
-                side = "BUY"
-            elif "SELL" in msg_u and "BUY" not in msg_u:
+            elif any(k in msg_u for k in ("ENTERED SELL", "SELLING", "SHORT RE-ENTRY", "SELL ", "(EXIT SELL)")):
                 side = "SELL"
+            elif any(k in msg_u for k in ("SQUARING OFF ASSOCIATED HEDGE", "HEDGE AUTO SQUARE-OFF", "HEDGE AUTO-EXIT", "HEDGE EXIT", "ORPHAN HEDGE AUTO-EXIT")):
+                side = "SELL"
+            elif any(k in msg_u for k in ("TARGET ORDER", "STOPLOSS ORDER", "TARGET HIT", "STOPLOSS HIT")):
+                side = "BUY" if role == "MAIN" else "SELL"
+            elif "RE-EXECUTE" in msg_u or "RE EXECUTE" in msg_u:
+                side = "SELL" if role == "MAIN" else "BUY"
             else:
                 side = ""
+
+        # Auto-detect trigger / action
+        if not trigger:
+            trigger = str(det.get("trigger") or det.get("action") or "").upper().strip()
+        if not trigger:
+            is_re_entry = any(k in msg_u for k in (
+                "RE-EXECUTE", "RE EXECUTE", "RE-ENTRY", "RE ENTRY", "RE COST", "RE-COST", "TRIGGERING RE"
+            ))
+            is_entry = (
+                "ENTERED BUY" in msg_u or "ENTERED SELL" in msg_u or "ENTERED " in msg_u or "INITIAL STRATEGY ENTRY" in msg_u
+            )
+            is_target = any(k in msg_u for k in (
+                "TARGET HIT", "TARGET REACHED", "PROFIT TARGET", "HIT TARGET", "(TARGET HIT)",
+                "TARGET ORDER", "TARGET FILLED", "(TARGET)"
+            )) and not is_entry
+            is_stoploss = any(k in msg_u for k in (
+                "STOPLOSS HIT", "SL HIT", "HIT SL", "STOP LOSS HIT", "SL TRIGGERED", "(STOPLOSS HIT)",
+                "STOPLOSS ORDER", "STOPLOSS FILLED", "(STOPLOSS)"
+            )) and not is_entry
+            is_exit = any(k in msg_u for k in (
+                "EXITED", "SQUARE OFF", "SQUARED OFF", "MANUAL EXIT", "EOD EXIT", "AUTO-RECONCILED POSITION",
+                "HEDGE AUTO SQUARE-OFF", "HEDGE AUTO-EXIT", "ORPHAN HEDGE AUTO-EXIT", "HEDGE EXIT"
+            )) and not is_entry and not is_target and not is_stoploss
+
+            if is_re_entry:
+                trigger = "REENTRY"
+            elif is_entry:
+                trigger = "ENTRY"
+            elif is_target:
+                trigger = "TARGET"
+            elif is_stoploss:
+                trigger = "STOPLOSS"
+            elif is_exit:
+                trigger = "EXIT"
+            else:
+                trigger = ""
 
         entry = {
             "timestamp": now_ist_str(),
@@ -1378,6 +1489,12 @@ class StraddleManager:
             "message": message,
             "trade_type": trade_type,
             "side": side,
+            "strategy_name": strategy_name or "",
+            "strategy_id": strategy_id or "",
+            "underlying": underlying or "",
+            "is_associated_hedge": bool(is_associated_hedge),
+            "role": role or "",
+            "trigger": trigger or "",
             "details": det,
         }
         with _LOGS_LOCK:
@@ -7404,9 +7521,39 @@ class StraddleManager:
                 logger.warning(f"Error recording entry benchmark: {e_bmk}")
         threading.Thread(target=_bg_entry_benchmark, daemon=True).start()
 
+        is_buy_hedge = is_hedge_leg or (side == "BUY" and any(l.get("side", "").upper() == "SELL" for l in (strategy.get("legs", []) if strategy else [])))
+        if is_hedge_leg or is_buy_hedge:
+            log_msg = f"Entered HEDGE BUY {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty})"
+        elif is_re_entry:
+            log_msg = f"Entered RE-ENTRY {side} {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty}, TGT: ₹{target_price}, SL: ₹{sl_price})"
+        else:
+            log_msg = f"Entered {side} {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty}, TGT: ₹{target_price}, SL: ₹{sl_price})"
+
+        log_details = dict(order_res) if isinstance(order_res, dict) else {}
+        log_details.update({
+            "strategy_id": strat_id,
+            "strategy_name": strat_name,
+            "underlying": und_name,
+            "symbol": contract.get("trading_symbol", ""),
+            "qty": total_qty,
+            "price": entry_price,
+            "role": "HEDGE" if (is_hedge_leg or is_buy_hedge) else "MAIN",
+            "is_associated_hedge": bool(is_hedge_leg or is_buy_hedge),
+            "side": side,
+            "option_type": contract.get("option_type", leg_cfg.get("option_type", "")),
+        })
+
         self._log_event(
-            f"Entered {side} {contract['trading_symbol']} @ ₹{entry_price:.2f} (Qty: {total_qty}, TGT: ₹{target_price}, SL: ₹{sl_price})",
-            details=order_res,
+            log_msg,
+            details=log_details,
+            trade_type="PAPER" if exec_mode == "PAPER" else "LIVE",
+            side=side,
+            strategy_name=strat_name,
+            strategy_id=strat_id,
+            underlying=und_name,
+            is_associated_hedge=bool(is_hedge_leg or is_buy_hedge),
+            role="HEDGE" if (is_hedge_leg or is_buy_hedge) else "MAIN",
+            trigger="REENTRY" if is_re_entry else "ENTRY",
         )
         return pos_record
 
