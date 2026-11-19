@@ -24,6 +24,7 @@ jobs:
             echo "Step 1: Backing up live runtime data..."
             mkdir -p /home/ubuntu/straddle_data_persist
             cp -p data/kotak_credentials.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
+            cp -p data/kotak_session.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
             cp -p data/straddle_strategies.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
             cp -p data/straddle_state.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
             cp -p data/straddle_pnl_history.json /home/ubuntu/straddle_data_persist/ 2>/dev/null || true
@@ -35,26 +36,43 @@ jobs:
 
             echo "Step 3: Restoring persisted data and merging strategies..."
             cp -p /home/ubuntu/straddle_data_persist/kotak_credentials.json data/ 2>/dev/null || true
+            cp -p /home/ubuntu/straddle_data_persist/kotak_session.json data/ 2>/dev/null || true
             cp -p /home/ubuntu/straddle_data_persist/straddle_state.json data/ 2>/dev/null || true
             cp -p /home/ubuntu/straddle_data_persist/straddle_pnl_history.json data/ 2>/dev/null || true
+            cp -p /home/ubuntu/straddle_data_persist/straddle_deleted_strategies.json data/ 2>/dev/null || true
             python3 -c "import json, os; \
             disk_f = 'data/straddle_strategies.json'; \
             persist_f = '/home/ubuntu/straddle_data_persist/straddle_strategies.json'; \
-            disk_strats = json.load(open(disk_f)) if os.path.exists(disk_f) else []; \
+            del_f = '/home/ubuntu/straddle_data_persist/straddle_deleted_strategies.json'; \
+            disk_del_f = 'data/straddle_deleted_strategies.json'; \
+            del_ids = set(); \
+            for df in [del_f, disk_del_f]: \
+              if os.path.exists(df): \
+                try: \
+                  for x in json.load(open(df)): \
+                    if x: del_ids.add(str(x).strip().lower()); \
+                except: pass; \
+            preset_blacklist = {'straddle_nifty_920', 'test_strat_update', 'test_strat_001', 'strat_preset_iron_condor_1791454639', 'strat_preset_custom_1791454643', 'strat_preset_short_straddle_1791454683', 'nifty 9:20 short straddle (45% tgt / 66% sl)', 'test strategy', 'nifty test 9:20 straddle', 'iron condor monday', 'blank custom strategy', 'live nifty test strategy'}; \
+            del_ids.update(preset_blacklist); \
             persist_strats = json.load(open(persist_f)) if os.path.exists(persist_f) else []; \
+            disk_strats = json.load(open(disk_f)) if os.path.exists(disk_f) else []; \
+            clean_persist = [s for s in persist_strats if isinstance(s, dict) and str(s.get('strategy_id','')).strip().lower() not in del_ids and str(s.get('name','')).strip().lower() not in del_ids]; \
+            clean_disk = [s for s in disk_strats if isinstance(s, dict) and str(s.get('strategy_id','')).strip().lower() not in del_ids and str(s.get('name','')).strip().lower() not in del_ids]; \
             merged_map = {}; \
-            for ps in persist_strats: \
-              if isinstance(ps, dict) and ps.get('strategy_id'): \
+            for ps in clean_persist: \
+              if ps.get('strategy_id'): \
                 merged_map[str(ps['strategy_id']).lower()] = ps; \
-            for ds in disk_strats: \
-              if isinstance(ds, dict) and ds.get('strategy_id'): \
-                did = str(ds['strategy_id']).lower(); \
-                dname = str(ds.get('name','')).strip().lower(); \
-                if did not in merged_map and not any(str(v.get('name','')).strip().lower() == dname for v in merged_map.values()): \
-                  merged_map[did] = ds; \
-            final_list = list(merged_map.values()) if merged_map else disk_strats; \
+            for ds in clean_disk: \
+              did = str(ds.get('strategy_id','')).lower(); \
+              dname = str(ds.get('name','')).strip().lower(); \
+              if did and did not in merged_map and not any(str(v.get('name','')).strip().lower() == dname for v in merged_map.values()): \
+                merged_map[did] = ds; \
+            final_list = list(merged_map.values()); \
             json.dump(final_list, open(disk_f, 'w'), indent=2); \
-            json.dump(final_list, open(persist_f, 'w'), indent=2);" 2>/dev/null || true
+            json.dump(final_list, open(persist_f, 'w'), indent=2); \
+            safe_del = sorted(list(del_ids - {'nifty', 'banknifty', 'finnifty', 'sensex'})); \
+            json.dump(safe_del, open(del_f, 'w'), indent=2); \
+            json.dump(safe_del, open(disk_del_f, 'w'), indent=2);" 2>/dev/null || true
 
             echo "Step 4: Installing requirements..."
             python3 -m pip install -r requirements.txt --quiet || true

@@ -663,6 +663,10 @@ function renderStraddleHeader(state) {
     if (titleEl && activeStrat) {
         titleEl.textContent = activeStrat.name || activeStrat.strategy_id;
     }
+    const undBadge = document.getElementById("straddleTerminalUnderlyingBadge");
+    if (undBadge && activeStrat) {
+        undBadge.textContent = canonicalUnderlying(activeStrat.underlying || "NIFTY");
+    }
 
     if (typeof updateExecutionModeUI === "function") {
         updateExecutionModeUI(state.execution_mode || "LIVE_BROKER");
@@ -1836,6 +1840,11 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                         dot.style.color = dotColor;
                     }
 
+                    const undPill = document.getElementById(`algo_und_pill_${sid}`);
+                    if (undPill) {
+                        undPill.textContent = canonicalUnderlying(s.underlying || "NIFTY");
+                    }
+
                     const errCell = document.getElementById(`algo_entry_err_${sid}`);
                     const err = s.entry_error ? String(s.entry_error) : "-";
                     if (errCell) {
@@ -2017,6 +2026,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                             <span style="font-size:12px;">⚠️</span><span class="algo-error-counter">${errCount}</span>
                         </span>
                         <span id="algo_dot_${s.strategy_id}" style="color:${dotColor}; font-size:8px;">●</span>
+                        <span id="algo_und_pill_${s.strategy_id}" class="algo-underlying-pill" style="font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:0.3px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.35);">${canonicalUnderlying(s.underlying || 'NIFTY')}</span>
                         <a href="javascript:void(0)" onclick="openStrategyInTerminal('${safeJsSid}')" style="color:#60a5fa; font-weight:700; font-size:13px; text-decoration:none; cursor:pointer;" title="Click to open Builder & Live Legs" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${safeDispName}</a>
                         ${s.mtm_calc_mode === 'Per Lot' ? `<span style="font-size:9px; background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); border-radius:3px; padding:1px 4px; font-weight:800;" title="MTM Per Lot Mode Active">Per Lot</span>` : ''}
                         <div class="straddle-dropdown" style="display:inline-block; margin-left:4px;">
@@ -2435,6 +2445,10 @@ function openStrategyInTerminal(strategyId) {
     if (strat) {
         window._straddleState.activeStrategy = strat;
         window._straddleState.activeStrategyId = strat.strategy_id;
+        const undBadge = document.getElementById("straddleTerminalUnderlyingBadge");
+        if (undBadge) {
+            undBadge.textContent = canonicalUnderlying(strat.underlying || "NIFTY");
+        }
     }
 
     // Switch view to terminal / algo detail
@@ -7727,6 +7741,10 @@ function populateStraddleSettingsForm(s) {
     if (titleEl) {
         titleEl.textContent = s.name || s.strategy_id || "Custom Strategy";
     }
+    const undBadge = document.getElementById("straddleTerminalUnderlyingBadge");
+    if (undBadge) {
+        undBadge.textContent = canonicalUnderlying(s.underlying || "NIFTY");
+    }
 
     document.getElementById("cfgSegment").value = s.segment || "Options";
     const multType = (s.multiplier_type || "MANUAL").toUpperCase();
@@ -10454,6 +10472,10 @@ async function onStraddleStrategySelect(stratId) {
         const titleEl = document.getElementById("straddleTerminalStrategyTitle");
         if (titleEl && strat) {
             titleEl.textContent = strat.name || strat.strategy_id;
+        }
+        const undBadge = document.getElementById("straddleTerminalUnderlyingBadge");
+        if (undBadge && strat) {
+            undBadge.textContent = canonicalUnderlying(strat.underlying || "NIFTY");
         }
 
         const sel = document.getElementById("straddleStrategySelect");

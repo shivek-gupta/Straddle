@@ -3,7 +3,7 @@
   "algo_running": false,
   "live_feed_running": true,
   "order_api_running": true,
-  "active_strategy_id": "straddle_nifty_920",
+  "active_strategy_id": "strat_nifty",
   "positions": [],
   "group_mtm": 0.0,
   "total_mtm": 0.0,
@@ -11,10 +11,10 @@
   "min_mtm": 0.0,
   "execution_mode": "LIVE_BROKER",
   "broker_connected": true,
-  "underlying_spot": 25377.3,
+  "underlying_spot": 25351.85,
   "underlying_symbol": "NIFTY",
-  "underlying_atm_strike": 25400,
-  "last_tick_time": "09:57:16",
+  "underlying_atm_strike": 25350,
+  "last_tick_time": "12:21:03",
   "logs": [
     {
       "timestamp": "09:14:08",

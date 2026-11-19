@@ -1911,12 +1911,24 @@ def _execute_safe_git_pull_operation():
                 # Preserve user live strategies and respect deleted tombstones
                 del_ids = set()
                 del_p = config.PROJECT_ROOT / "data" / "straddle_deleted_strategies.json"
-                if del_p.exists():
-                    try:
-                        with open(del_p, "r", encoding="utf-8") as f_del:
-                            del_ids = {str(x).strip().lower() for x in json.load(f_del) if x}
-                    except Exception:
-                        pass
+                persist_del_p = Path("/home/ubuntu/straddle_data_persist/straddle_deleted_strategies.json")
+                for df in [del_p, persist_del_p]:
+                    if df.exists():
+                        try:
+                            with open(df, "r", encoding="utf-8") as f_del:
+                                for x in json.load(f_del):
+                                    if x: del_ids.add(str(x).strip().lower())
+                        except Exception:
+                            pass
+                preset_blacklist = {
+                    'straddle_nifty_920', 'test_strat_update', 'test_strat_001',
+                    'strat_preset_iron_condor_1791454639', 'strat_preset_custom_1791454643',
+                    'strat_preset_short_straddle_1791454683', 'strat_preset_short_straddle_1791454643',
+                    'nifty 9:20 short straddle (45% tgt / 66% sl)', 'test strategy',
+                    'nifty test 9:20 straddle', 'iron condor monday', 'blank custom strategy',
+                    'live nifty test strategy', 'straddle mon 244'
+                }
+                del_ids.update(preset_blacklist)
 
                 snap_strats = None
                 try:
