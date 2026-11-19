@@ -29,6 +29,9 @@ import concurrent.futures
 _ORDER_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=16, thread_name_prefix="KotakFastOrder")
 _TAG_SEQ = 0
 _TAG_LOCK = threading.Lock()
+_ORDER_DISPATCH_LOCK = threading.Lock()
+_LAST_ORDER_DISPATCH_TIME = 0.0
+_MIN_ORDER_SPACING_SEC = 0.08  # 80ms minimum spacing between order dispatches to Kotak Neo to prevent core RMS lock collisions
 
 logger = logging.getLogger("kotak_broker_adapter")
 logger.setLevel(logging.INFO)
@@ -494,18 +497,26 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
         t_order_call_start = time.perf_counter()
         try:
-            res = client.place_order(
-                exchange_segment=segment,
-                product=clean_prod,
-                price=clean_price,
-                order_type=clean_ot,
-                quantity=clean_qty,
-                validity="DAY",
-                trading_symbol=canonical_symbol,
-                transaction_type=clean_tt,
-                trigger_price=clean_trig,
-                tag=unique_tag
-            )
+            with _ORDER_DISPATCH_LOCK:
+                global _LAST_ORDER_DISPATCH_TIME
+                now_t = time.perf_counter()
+                elapsed = now_t - _LAST_ORDER_DISPATCH_TIME
+                if elapsed < _MIN_ORDER_SPACING_SEC:
+                    time.sleep(_MIN_ORDER_SPACING_SEC - elapsed)
+                _LAST_ORDER_DISPATCH_TIME = time.perf_counter()
+
+                res = client.place_order(
+                    exchange_segment=segment,
+                    product=clean_prod,
+                    price=clean_price,
+                    order_type=clean_ot,
+                    quantity=clean_qty,
+                    validity="DAY",
+                    trading_symbol=canonical_symbol,
+                    transaction_type=clean_tt,
+                    trigger_price=clean_trig,
+                    tag=unique_tag
+                )
             order_call_ack_ms = round((time.perf_counter() - t_order_call_start) * 1000.0, 1)
             logger.info(f"[Kotak Neo] Order slice ({clean_qty} qty) response: {res}")
 
@@ -522,7 +533,17 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 # Extract detailed error message across all Kotak Neo JSON schemas
                 err_msg = ""
                 if isinstance(res, dict):
-                    err_msg = res.get("errMsg") or res.get("message")
+                    err_msg = (
+                        res.get("errMsg")
+                        or res.get("emsg")
+                        or res.get("message")
+                        or res.get("Error Message")
+                        or res.get("Error")
+                        or res.get("rejectionReason")
+                        or res.get("rejRsn")
+                        or res.get("desc")
+                        or ""
+                    )
                     if not err_msg and "error" in res:
                         err_items = res.get("error")
                         if isinstance(err_items, list):
@@ -530,24 +551,31 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         else:
                             err_msg = str(err_items)
                     if not err_msg and "fault" in res:
-                        err_msg = str(res.get("fault"))
+                        f_item = res.get("fault")
+                        if isinstance(f_item, dict):
+                            err_msg = f_item.get("message") or str(f_item)
+                        else:
+                            err_msg = str(f_item)
+                    if not err_msg and isinstance(res.get("data"), dict):
+                        d = res["data"]
+                        err_msg = d.get("errMsg") or d.get("emsg") or d.get("message") or ""
                     if not err_msg and st_code:
                         err_msg = f"Broker rejected with code {st_code}"
                     if not err_msg and stat == "not_ok":
-                        err_msg = "error from core"
+                        err_msg = "Order rejected by broker OMS (not_ok)"
                     if not err_msg:
                         err_msg = str(res)
                 else:
                     err_msg = str(res)
 
-                # 1. Specialized Auto-Re-Authentication on Session Expiry or Core Rejection:
-                is_auth_core_err = any(k in err_msg.lower() for k in (
-                    "error from core", "from core", "unauthorized", "session expired",
-                    "token expired", "invalid token", "jwt expired", "100008", "session invalid"
+                # 1. Specialized Auto-Re-Authentication ONLY on Genuine Session Expiry (NEVER on core/transient errors):
+                is_auth_err = any(k in err_msg.lower() for k in (
+                    "unauthorized", "session expired", "token expired",
+                    "invalid token", "jwt expired", "100008", "session invalid", "session not found"
                 ))
-                if is_auth_core_err and retry_depth < 2:
+                if is_auth_err and retry_depth < 2:
                     logger.warning(
-                        f"[Kotak Neo] Broker reported session/core error: '{err_msg}'. "
+                        f"[Kotak Neo] Broker reported session auth error: '{err_msg}'. "
                         f"Auto-invalidating session and re-authenticating with fresh TOTP..."
                     )
                     kotak_auth.invalidate_session()
@@ -570,6 +598,35 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             symbol=symbol,
                             instrument_key=instrument_key
                         )
+
+                # 2. Specialized Transient Core / RMS Concurrency Lock Auto-Retry (keeps existing session intact):
+                is_transient_core = any(k in err_msg.lower() for k in (
+                    "error from core", "from core", "try again", "lock", "concurrency",
+                    "gateway timeout", "internal server error", "503", "504"
+                ))
+                if is_transient_core and retry_depth < 3:
+                    backoff = 0.15 * (retry_depth + 1)
+                    logger.warning(
+                        f"[Kotak Neo] Transient broker core error: '{err_msg}'. "
+                        f"Pausing {backoff:.2f}s and auto-retrying order slice with active session (attempt {retry_depth + 1}/3)..."
+                    )
+                    time.sleep(backoff)
+                    return self._place_single_order(
+                        client=client,
+                        canonical_symbol=canonical_symbol,
+                        transaction_type=transaction_type,
+                        quantity=quantity,
+                        product=product,
+                        order_type=order_type,
+                        price=price,
+                        trigger_price=trigger_price,
+                        tag=tag,
+                        segment=segment,
+                        tick_size=tick_size,
+                        retry_depth=retry_depth + 1,
+                        symbol=symbol,
+                        instrument_key=instrument_key
+                    )
 
                 # 2. Specialized LPP (Limit Price Protection / Circuit Limit) auto-clamp & instant retry:
                 high_lpp_m = re.search(r"HIGH\s+LPP\s*:\s*(\d+(?:\.\d+)?)", err_msg, re.IGNORECASE)
@@ -683,12 +740,11 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         except Exception as e:
             err_str = str(e)
             logger.error(f"[Kotak Neo] Exception placing order slice: {err_str}")
-            is_auth_core_err = any(k in err_str.lower() for k in (
-                "error from core", "from core", "unauthorized", "session expired",
-                "token expired", "invalid token", "jwt expired", "100008"
+            is_auth_err = any(k in err_str.lower() for k in (
+                "unauthorized", "session expired", "token expired", "invalid token", "jwt expired", "100008"
             ))
-            if is_auth_core_err and retry_depth < 2:
-                logger.warning(f"[Kotak Neo] Exception indicates session/core error. Auto-reauthenticating and retrying...")
+            if is_auth_err and retry_depth < 2:
+                logger.warning(f"[Kotak Neo] Exception indicates session auth error. Auto-reauthenticating and retrying...")
                 kotak_auth.invalidate_session()
                 fresh_client = kotak_auth.get_authenticated_client(force=True)
                 if fresh_client is not None:
@@ -704,8 +760,28 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         tag=tag,
                         segment=segment,
                         tick_size=tick_size,
-                        retry_depth=retry_depth + 1
+                        retry_depth=retry_depth + 1,
+                        symbol=symbol,
+                        instrument_key=instrument_key
                     )
+            elif any(k in err_str.lower() for k in ("error from core", "from core", "timeout", "connection reset", "broken pipe")) and retry_depth < 3:
+                time.sleep(0.15 * (retry_depth + 1))
+                return self._place_single_order(
+                    client=client,
+                    canonical_symbol=canonical_symbol,
+                    transaction_type=transaction_type,
+                    quantity=quantity,
+                    product=product,
+                    order_type=order_type,
+                    price=price,
+                    trigger_price=trigger_price,
+                    tag=tag,
+                    segment=segment,
+                    tick_size=tick_size,
+                    retry_depth=retry_depth + 1,
+                    symbol=symbol,
+                    instrument_key=instrument_key
+                )
             return {"success": False, "error": err_str}
 
     def place_order(
@@ -930,6 +1006,10 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 validity="DAY",
                 trigger_price=clean_trig
             )
+            st = str(res.get("stat", "")).lower() if isinstance(res, dict) else ""
+            if st in ("not_ok", "error", "failed"):
+                e_msg = res.get("errMsg") or res.get("emsg") or res.get("message") or "Order modification rejected by broker"
+                return {"success": False, "order_id": str(order_id), "error": str(e_msg), "data": res}
             return {"success": True, "order_id": str(order_id), "data": res}
         except Exception as e:
             logger.error(f"[Kotak Neo] Exception modifying order {order_id}: {e}")
@@ -972,6 +1052,10 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             self._positions_cache = None
             self._positions_cache_ts = 0.0
             res = client.cancel_order(order_id=str(order_id))
+            st = str(res.get("stat", "")).lower() if isinstance(res, dict) else ""
+            if st in ("not_ok", "error", "failed"):
+                e_msg = res.get("errMsg") or res.get("emsg") or res.get("message") or "Order cancellation rejected by broker"
+                return {"success": False, "order_id": str(order_id), "error": str(e_msg), "data": res}
             return {"success": True, "order_id": str(order_id), "data": res}
         except Exception as e:
             logger.error(f"[Kotak Neo] Exception cancelling order {order_id}: {e}")

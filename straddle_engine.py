@@ -6475,7 +6475,11 @@ class StraddleManager:
             # Buy orders are ALWAYS filled first to secure exchange SPAN margin benefits and avoid RMS rejections.
             # If delay is 0s (or "None"), buffer time is 0: execute Sell legs immediately upon Buy fills!
             if buy_legs:
-                buy_results = list(_PERSISTENT_LEG_POOL.map(_place_single, buy_legs))
+                buy_results = []
+                for b_idx, b_item in enumerate(buy_legs):
+                    if b_idx > 0:
+                        time.sleep(0.06)
+                    buy_results.append(_place_single(b_item))
                 for pos in buy_results:
                     if pos:
                         new_positions.append(pos)
@@ -6574,7 +6578,11 @@ class StraddleManager:
                     except Exception as e_rf:
                         logger.debug(f"Fresh quote refresh before short sell legs notice: {e_rf}")
 
-                sell_results = list(_PERSISTENT_LEG_POOL.map(_place_single, sell_legs))
+                sell_results = []
+                for s_idx, s_item in enumerate(sell_legs):
+                    if s_idx > 0:
+                        time.sleep(0.06)
+                    sell_results.append(_place_single(s_item))
                 for pos in sell_results:
                     if pos:
                         new_positions.append(pos)
@@ -7134,6 +7142,12 @@ class StraddleManager:
                 "strategy_name": strategy.get("name") if strategy else leg_cfg.get("underlying", "NIFTY"),
                 "date": today_ist_str(),
                 "repair_needed": True,
+                "is_associated_hedge": bool(leg_cfg.get("is_associated_hedge", False)),
+                "parent_leg_id": leg_cfg.get("parent_leg_id"),
+                "hedge_parent_type": leg_cfg.get("hedge_parent_type"),
+                "has_associated_hedge": bool(leg_cfg.get("has_associated_hedge", False)),
+                "associated_hedge_id": leg_cfg.get("associated_hedge_id"),
+                "entry_reason": entry_reason or (f"HEDGE ({contract.get('option_type', leg_cfg.get('option_type'))})" if leg_cfg.get("is_associated_hedge") else f"Initial Entry [{side} {contract.get('option_type', leg_cfg.get('option_type'))}]"),
             }
 
         entry_price = float(order_res.get("price") or ltp)
@@ -7799,6 +7813,7 @@ class StraddleManager:
                                     f"[{strat.get('name')}] Hedge secured! Placing parent short leg '{p_contract['trading_symbol']}'...",
                                     level="INFO"
                                 )
+                                time.sleep(0.08)
                                 parent_leg_pos = self._place_leg_entry_order(
                                     parent_cfg, p_contract, mult, broker, adv,
                                     strategy=strat, entry_reason="Parent Short Entry (Hedge Secured)"
@@ -7813,6 +7828,45 @@ class StraddleManager:
                                         self._log_event(f"[{strat.get('name')}] Parent short leg placed successfully: {parent_leg_pos.get('symbol')}", level="SUCCESS")
                                     else:
                                         retried_failed.append((parent_leg_pos.get("symbol", "Short Leg"), parent_leg_pos.get("error", "Short entry failed")))
+
+                        # INVIOLABLE MULTI-LEG COMPLETION:
+                        # Also check if any OTHER sell legs in this strategy were waiting on prerequisite hedges
+                        for other_idx, other_pos in enumerate(positions):
+                            if other_pos.get("status") == "ERROR" and "prerequisite hedge" in str(other_pos.get("error_message", "")).lower():
+                                other_cfg = next((l for l in legs_cfg if l.get("id") == other_pos.get("id")), None)
+                                if not other_cfg and 0 <= other_idx < len(legs_cfg):
+                                    other_cfg = legs_cfg[other_idx]
+                                if other_cfg and str(other_cfg.get("side", "Sell")).upper() == "SELL":
+                                    o_opt = other_cfg.get("option_type", "CE")
+                                    o_h_open = any(
+                                        p.get("status") == "OPEN" and (
+                                            p.get("parent_leg_id") == other_cfg.get("id")
+                                            or (p.get("is_associated_hedge") and p.get("option_type") == o_opt)
+                                        )
+                                        for p in positions
+                                    )
+                                    if o_h_open:
+                                        o_contract = self.resolve_strike_and_contract(
+                                            underlying=und,
+                                            strike_selection=other_cfg.get("strike_selection", "ATM"),
+                                            option_type=o_opt,
+                                            expiry_type=other_cfg.get("expiry", "Weekly"),
+                                            multiple_strike_selection=other_cfg.get("multiple_strike_selection", "none")
+                                        )
+                                        if o_contract:
+                                            self._log_event(f"[{strat.get('name')}] Prerequisite hedge active for {other_pos.get('symbol')}! Placing short sell leg...", level="INFO")
+                                            time.sleep(0.08)
+                                            o_pos = self._place_leg_entry_order(
+                                                other_cfg, o_contract, mult, broker, adv,
+                                                strategy=strat, entry_reason="Short Entry (Prerequisite Hedge Secured)"
+                                            )
+                                            if o_pos:
+                                                positions[other_idx] = o_pos
+                                                if o_pos.get("status") == "OPEN":
+                                                    retried_success.append(f"{o_pos.get('symbol')} (Short)")
+                                                    self._log_event(f"[{strat.get('name')}] Short leg placed successfully: {o_pos.get('symbol')}", level="SUCCESS")
+                                                else:
+                                                    retried_failed.append((o_pos.get("symbol", "Short Leg"), o_pos.get("error", "Short entry failed")))
                     else:
                         err_text = new_h_pos.get("error") if new_h_pos else "Order placement failed"
                         if new_h_pos:
@@ -7928,7 +7982,20 @@ class StraddleManager:
                             self._log_event(f"[{strat.get('name')}] Buying prerequisite hedge ({h_contract['trading_symbol']}) before retrying sell leg...")
                             h_pos = self._place_leg_entry_order(h_leg_cfg, h_contract, mult, broker, adv, strategy=strat, entry_reason=f"HEDGE PREREQUISITE ({h_contract['trading_symbol']})")
                             if h_pos and h_pos.get("status") == "OPEN":
-                                positions.insert(0, h_pos)
+                                # Check if an existing error position for this hedge is already in positions
+                                existing_h_err_idx = next(
+                                    (i for i, p in enumerate(positions)
+                                     if p.get("status") == "ERROR" and (
+                                         p.get("parent_leg_id") == leg_cfg.get("id")
+                                         or (p.get("is_associated_hedge") and p.get("option_type") == h_opt_type)
+                                         or str(p.get("symbol", "")).upper() == str(h_contract["trading_symbol"]).upper()
+                                     )),
+                                    None
+                                )
+                                if existing_h_err_idx is not None:
+                                    positions[existing_h_err_idx] = h_pos
+                                else:
+                                    positions.insert(0, h_pos)
                                 if h_pos.get("order_id") and not str(h_pos["order_id"]).startswith("ORD_") and not str(h_pos["order_id"]).startswith("PAPER_"):
                                     broker.wait_for_order_fill(str(h_pos["order_id"]), 6.0, 0.05)
                                 leg_cfg["associated_hedge_id"] = h_pos.get("id")

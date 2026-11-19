@@ -73,6 +73,18 @@ window.escapeHtml = escapeHtml;
 // =========================================================================
 
 function showStraddleToast(message, type = 'info', duration = 2500) {
+    if (window.StraddleSound) {
+        if (type === 'error') {
+            StraddleSound.play('error');
+        } else if (type === 'warning') {
+            StraddleSound.play('warning');
+        } else if (type === 'success') {
+            const mLower = String(message).toLowerCase();
+            if (mLower.includes('fill') || mLower.includes('placed') || mLower.includes('started') || mLower.includes('retried') || mLower.includes('secured')) {
+                StraddleSound.play('order');
+            }
+        }
+    }
     let container = document.getElementById("straddleToastContainer");
     if (!container) {
         container = document.createElement("div");
@@ -148,6 +160,9 @@ function formatSymbolColorCoded(symStr) {
 window.formatSymbolColorCoded = formatSymbolColorCoded;
 
 function showStraddleRejectedToast(opts = {}) {
+    if (window.StraddleSound) {
+        StraddleSound.play('error');
+    }
     let container = document.getElementById("straddleToastContainer");
     if (!container) {
         container = document.createElement("div");
@@ -1110,6 +1125,38 @@ function renderStraddleOpenPositionsTable() {
     }
 
     const prevMap = window._straddleState.prevLtpMap || {};
+
+    // Sound alert transition detection across strategy positions (Target, Stoploss, Errors, Order Fills, Exits)
+    if (!window._soundPositionStates) window._soundPositionStates = new Map();
+    positions.forEach((pos, idx) => {
+        if (!pos) return;
+        const key = `${pos.id || idx}_${pos.symbol || ''}`;
+        const curStatus = String(pos.status || "").toUpperCase();
+        const prev = window._soundPositionStates.get(key);
+
+        if (prev && window.StraddleSound) {
+            // 1. Transition to ERROR
+            if (curStatus === "ERROR" && prev.status !== "ERROR") {
+                StraddleSound.play("error");
+            }
+            // 2. Transition to COMPLETE / CLOSED / EXITED (Check whether Target or Stoploss)
+            else if ((curStatus === "COMPLETE" || curStatus === "CLOSED" || curStatus === "EXITED") && prev.status === "OPEN") {
+                const r = String(pos.exit_reason || "").toUpperCase();
+                if (r.includes("TARGET") || r.includes("TGT")) {
+                    StraddleSound.play("target");
+                } else if (r.includes("STOPLOSS") || r.includes("SL")) {
+                    StraddleSound.play("stoploss");
+                } else {
+                    StraddleSound.play("exit");
+                }
+            }
+            // 3. Transition to OPEN (Fill confirmation on entry or retry)
+            else if ((curStatus === "OPEN" || curStatus === "LIVE OPEN") && prev.status !== "OPEN" && prev.status !== "LIVE OPEN") {
+                StraddleSound.play("order");
+            }
+        }
+        window._soundPositionStates.set(key, { status: curStatus, exit_reason: pos.exit_reason || "" });
+    });
 
     // In-place DOM update for Open Positions: prevents flickering & high CPU
     const existingPosRows = tbody.querySelectorAll("tr[data-pos-key]");
@@ -5523,6 +5570,38 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
     }
 
     const prevMap = window._straddleState.prevLtpMap || {};
+
+    // Sound alert transition detection across strategy positions (Target, Stoploss, Errors, Order Fills, Exits)
+    if (!window._soundPositionStates) window._soundPositionStates = new Map();
+    positions.forEach((pos, idx) => {
+        if (!pos) return;
+        const key = `${pos.id || idx}_${pos.symbol || ''}`;
+        const curStatus = String(pos.status || "").toUpperCase();
+        const prev = window._soundPositionStates.get(key);
+
+        if (prev && window.StraddleSound) {
+            // 1. Transition to ERROR
+            if (curStatus === "ERROR" && prev.status !== "ERROR") {
+                StraddleSound.play("error");
+            }
+            // 2. Transition to COMPLETE / CLOSED / EXITED (Check whether Target or Stoploss)
+            else if ((curStatus === "COMPLETE" || curStatus === "CLOSED" || curStatus === "EXITED") && prev.status === "OPEN") {
+                const r = String(pos.exit_reason || "").toUpperCase();
+                if (r.includes("TARGET") || r.includes("TGT")) {
+                    StraddleSound.play("target");
+                } else if (r.includes("STOPLOSS") || r.includes("SL")) {
+                    StraddleSound.play("stoploss");
+                } else {
+                    StraddleSound.play("exit");
+                }
+            }
+            // 3. Transition to OPEN (Fill confirmation on entry or retry)
+            else if ((curStatus === "OPEN" || curStatus === "LIVE OPEN") && prev.status !== "OPEN" && prev.status !== "LIVE OPEN") {
+                StraddleSound.play("order");
+            }
+        }
+        window._soundPositionStates.set(key, { status: curStatus, exit_reason: pos.exit_reason || "" });
+    });
 
     // Snapshot any active error banner inputs into persistent store so they never reset
     positions.forEach((pos, idx) => {
@@ -13713,6 +13792,28 @@ function renderStraddleAuditLogs(isSilent = false) {
             // Filter out any lingering underlying asset switch logs
             const cleanLogs = logs.filter(l => l && !String(l.message || "").toLowerCase().includes("focused underlying switched to"));
             window._cachedAuditLogsList = cleanLogs;
+
+            // Audio alert detection for freshly arriving audit log events
+            if (!window._soundSeenLogKeys) window._soundSeenLogKeys = new Set();
+            cleanLogs.forEach(l => {
+                if (!l) return;
+                const logKey = `${l.date || ''}_${l.timestamp || ''}_${l.message || ''}`;
+                if (!window._soundSeenLogKeys.has(logKey)) {
+                    window._soundSeenLogKeys.add(logKey);
+                    if (window._soundInitialLogLoadDone && window.StraddleSound) {
+                        const msgU = String(l.message || "").toUpperCase();
+                        if (msgU.includes("TARGET HIT") || msgU.includes("PROFIT TARGET")) {
+                            StraddleSound.play("target");
+                        } else if (msgU.includes("STOPLOSS HIT") || msgU.includes("SL HIT") || msgU.includes("STOP LOSS HIT")) {
+                            StraddleSound.play("stoploss");
+                        } else if (l.level === "ERROR" || msgU.includes("REJECTED") || msgU.includes("FAILED")) {
+                            StraddleSound.play("error");
+                        }
+                    }
+                }
+            });
+            window._soundInitialLogLoadDone = true;
+
             _populateAuditStrategyOptions();
             try {
                 container.innerHTML = _buildAuditLogsHtml(cleanLogs);

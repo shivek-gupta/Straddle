@@ -227,6 +227,16 @@
                 <span id="topbarMtmVal" style="color:#94a3b8;">₹0.00</span>
             </div>
 
+            <!-- Sound Alerts Toggle & Audio Modal Trigger -->
+            <div style="display:inline-flex; align-items:center; gap:2px; flex-shrink:0;">
+                <button type="button" id="topbarSoundBtn" onclick="toggleStraddleSound(event)" class="straddle-sys-btn" style="display:inline-flex; align-items:center; gap:4px; background:rgba(14,165,233,0.12); border:1px solid #0284c7; padding:4px 8px; border-radius:6px; font-family:var(--font-mono); font-size:11px; font-weight:800; cursor:pointer; color:#38bdf8; transition:all 0.15s ease; white-space:nowrap;" title="Toggle Sound Notifications (SL, Target, Errors)">
+                    <span>🔊</span> <span>Sound: ON</span>
+                </button>
+                <button type="button" onclick="openStraddleSoundModal(event)" style="display:inline-flex; align-items:center; justify-content:center; background:#0c0d12; border:1px solid #252836; padding:4px 6px; border-radius:6px; cursor:pointer; color:#94a3b8; font-size:11px; transition:all 0.15s ease;" title="Sound Settings & Test Preview" onmouseenter="this.style.color='#f8fafc'" onmouseleave="this.style.color='#94a3b8'">
+                    ⚙️
+                </button>
+            </div>
+
             <!-- Emergency Square-Off Kill Switch -->
             <button type="button" class="straddle-btn btn-danger" onclick="emergencySquareOffAllStraddles()" style="padding:4px 10px; font-size:11px; letter-spacing:0.02em; font-weight:800; flex-shrink:0; white-space:nowrap;">
                 <span>🛑</span> SQUARE OFF ALL
@@ -858,6 +868,8 @@
                     <span id="badgeOrderApi" class="straddle-running-badge">Order API: Running</span>
                     <span id="badgeLiveFeed" class="straddle-running-badge">Live Feed: Running</span>
                     <span id="badgeAlgoStatus" class="straddle-running-badge">Algo: Running</span>
+                    <button type="button" id="terminalSoundBtn" onclick="toggleStraddleSound(event)" class="straddle-running-badge" style="cursor:pointer; background:rgba(14,165,233,0.15); border-color:#0284c7; color:#38bdf8;" title="Click to mute/unmute notification sounds (Target, SL, Errors)">🔊 Sound</button>
+                    <button type="button" onclick="openStraddleSoundModal(event)" class="straddle-running-badge" style="cursor:pointer; padding:2px 6px; background:#0c0d12; border-color:#252836; color:#94a3b8;" title="Audio Settings & Sound Tests">⚙️</button>
                 </div>
             </div>
 
@@ -4221,7 +4233,8 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_engine_ui.js?v=20261118_opt_chain_no_algo_v9"></script>
+    <script src="/static/js/straddle_sound.js?v=20261119_v1"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261119_v1"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
@@ -4492,6 +4505,116 @@
             }, 1000);
         });
     </script>
+
+    <!-- ========================================================================= -->
+    <!-- MODAL: AUDIO & SOUND NOTIFICATION CONTROLS                                 -->
+    <!-- ========================================================================= -->
+    <div id="straddleSoundModal" class="straddle-modal-backdrop" style="display:none; z-index:210000;" onclick="if(event.target === this) closeStraddleSoundModal()">
+        <div class="straddle-modal-card" style="max-width:540px; width:92%; background:#090d16; border:1px solid #1e293b; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.9); overflow:hidden;">
+            <!-- Header -->
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 18px; background:#0c0d12; border-bottom:1px solid #1e293b;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:22px;">🔊</span>
+                    <div>
+                        <h3 style="margin:0; font-size:15px; font-weight:800; color:#f8fafc; letter-spacing:0.3px;">Sound Alerts & Audio Notifications</h3>
+                        <p style="margin:2px 0 0; font-size:11px; color:#94a3b8;">Instant Web Audio alerts for SL, Targets, Order Rejections & Fills</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeStraddleSoundModal()" style="font-size:16px; font-weight:800; color:#f8fafc; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); border-radius:6px; cursor:pointer; padding:3px 9px;" title="Close">✕</button>
+            </div>
+
+            <!-- Master Toggle & Volume Strip -->
+            <div style="padding:16px 18px; background:rgba(15,23,42,0.6); border-bottom:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:12px;">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:13px; font-weight:800; color:#f8fafc;">Master Audio Alerts:</span>
+                        <span style="font-size:11px; color:#94a3b8;">(Enable/Disable all platform sounds)</span>
+                    </div>
+                    <label class="straddle-toggle-switch" style="position:relative; display:inline-block; width:44px; height:22px; margin:0;">
+                        <input type="checkbox" id="soundModalMasterToggle" checked onchange="StraddleSound.toggleMute()">
+                        <span class="straddle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#334155; transition:.3s; border-radius:22px;"></span>
+                    </label>
+                </div>
+
+                <!-- Master Volume Slider -->
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; background:#080b12; padding:8px 12px; border-radius:6px; border:1px solid #1e293b;">
+                    <span style="font-size:12px; font-weight:700; color:#94a3b8; white-space:nowrap;">Volume:</span>
+                    <input type="range" id="soundModalVolumeSlider" min="0" max="100" value="75" style="flex:1; cursor:pointer; accent-color:#0284c7;" oninput="StraddleSound.setVolume(this.value / 100); document.getElementById('soundModalVolumeLabel').textContent = this.value + '%'">
+                    <span id="soundModalVolumeLabel" style="font-size:12px; font-weight:800; color:#38bdf8; font-family:var(--font-mono); width:40px; text-align:right;">75%</span>
+                </div>
+            </div>
+
+            <!-- Sound Categories & Test Buttons -->
+            <div style="padding:14px 18px; display:flex; flex-direction:column; gap:8px;">
+                <div style="font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Notification Events & Test Sounds</div>
+
+                <!-- 1. Target Hit -->
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#0c0f1a; border:1px solid #1e293b; border-radius:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                        <input type="checkbox" id="soundCat_target" checked onchange="StraddleSound.setCategoryEnabled('target', this.checked)">
+                        <div>
+                            <div style="font-size:12px; font-weight:800; color:#10b981;">🎯 Target Hit (Win Chime)</div>
+                            <div style="font-size:10.5px; color:#94a3b8;">Ascending melodic arpeggio when leg/MTM target hits</div>
+                        </div>
+                    </label>
+                    <button type="button" class="straddle-btn btn-outline" onclick="StraddleSound.play('target', true)" style="border-color:#10b981; color:#10b981; padding:2px 8px; font-size:11px; font-weight:700;">▶ Test</button>
+                </div>
+
+                <!-- 2. Stoploss Hit -->
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#0c0f1a; border:1px solid #1e293b; border-radius:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                        <input type="checkbox" id="soundCat_stoploss" checked onchange="StraddleSound.setCategoryEnabled('stoploss', this.checked)">
+                        <div>
+                            <div style="font-size:12px; font-weight:800; color:#f43f5e;">🛑 Stoploss Hit (Risk Alert)</div>
+                            <div style="font-size:10.5px; color:#94a3b8;">Distinctive downward warning alert on stop loss triggers</div>
+                        </div>
+                    </label>
+                    <button type="button" class="straddle-btn btn-outline" onclick="StraddleSound.play('stoploss', true)" style="border-color:#f43f5e; color:#f43f5e; padding:2px 8px; font-size:11px; font-weight:700;">▶ Test</button>
+                </div>
+
+                <!-- 3. Errors & Rejections -->
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#0c0f1a; border:1px solid #1e293b; border-radius:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                        <input type="checkbox" id="soundCat_error" checked onchange="StraddleSound.setCategoryEnabled('error', this.checked)">
+                        <div>
+                            <div style="font-size:12px; font-weight:800; color:#ef4444;">⚠️ Order Errors & Rejections</div>
+                            <div style="font-size:10.5px; color:#94a3b8;">Urgent double buzz on broker RMS rejections or network errors</div>
+                        </div>
+                    </label>
+                    <button type="button" class="straddle-btn btn-outline" onclick="StraddleSound.play('error', true)" style="border-color:#ef4444; color:#ef4444; padding:2px 8px; font-size:11px; font-weight:700;">▶ Test</button>
+                </div>
+
+                <!-- 4. Order Filled / Entry -->
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#0c0f1a; border:1px solid #1e293b; border-radius:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                        <input type="checkbox" id="soundCat_order" checked onchange="StraddleSound.setCategoryEnabled('order', this.checked)">
+                        <div>
+                            <div style="font-size:12px; font-weight:800; color:#38bdf8;">⚡ Order Placed & Filled</div>
+                            <div style="font-size:10.5px; color:#94a3b8;">Crisp high-tech affirmative ping when new orders fill</div>
+                        </div>
+                    </label>
+                    <button type="button" class="straddle-btn btn-outline" onclick="StraddleSound.play('order', true)" style="border-color:#38bdf8; color:#38bdf8; padding:2px 8px; font-size:11px; font-weight:700;">▶ Test</button>
+                </div>
+
+                <!-- 5. Position Exit / Square-Off -->
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#0c0f1a; border:1px solid #1e293b; border-radius:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                        <input type="checkbox" id="soundCat_exit" checked onchange="StraddleSound.setCategoryEnabled('exit', this.checked)">
+                        <div>
+                            <div style="font-size:12px; font-weight:800; color:#fb923c;">⏹️ Position Exit / Square-Off</div>
+                            <div style="font-size:10.5px; color:#94a3b8;">Smooth neutral chime when trades are manually exited</div>
+                        </div>
+                    </label>
+                    <button type="button" class="straddle-btn btn-outline" onclick="StraddleSound.play('exit', true)" style="border-color:#fb923c; color:#fb923c; padding:2px 8px; font-size:11px; font-weight:700;">▶ Test</button>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="display:flex; justify-content:flex-end; padding:12px 18px; background:#0c0d12; border-top:1px solid #1e293b;">
+                <button type="button" class="straddle-btn btn-primary" onclick="closeStraddleSoundModal()" style="font-weight:800; padding:4px 14px; font-size:12px;">Done</button>
+            </div>
+        </div>
+    </div>
 
     <!-- ========================================================================= -->
     <!-- MODAL: EXECUTION BENCHMARK (KOTAK NEO LIVE BROKER vs PARALLEL PAPER)      -->
