@@ -1342,8 +1342,7 @@ function getCurrentlyDisplayedStrategies() {
     if (!strategies.length) return [];
     const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
     const activeUnd = canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY");
-    const hasUnderlyingMatch = strategies.some(s => canonicalUnderlying(s.underlying || "NIFTY") === activeUnd);
-    let showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
+    let showAll = window._showAllUnderlyingsAlgos !== false;
 
     let filtered = strategies.filter(s => {
         if (searchVal) {
@@ -1352,6 +1351,8 @@ function getCurrentlyDisplayedStrategies() {
             const und = canonicalUnderlying(s.underlying || "NIFTY").toLowerCase();
             return name.includes(searchVal) || und.includes(searchVal) || status.includes(searchVal);
         }
+        if (showAll) return true;
+
         const hasActiveTrading = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "EXIT_PENDING" || p.status === "ERROR");
         if (hasActiveTrading) return true;
 
@@ -1635,9 +1636,8 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         const searchVal = (document.getElementById("straddleAlgosSearch")?.value || "").toLowerCase().trim();
 
         const activeUnd = canonicalUnderlying(window._activeGlobalUnderlying || "NIFTY");
-        const hasUnderlyingMatch = strategies.some(s => canonicalUnderlying(s.underlying || "NIFTY") === activeUnd);
-        // Intelligent fallback: if active focused asset has 0 algos, automatically show all assets so table is never blank!
-        let showAll = window._showAllUnderlyingsAlgos === true || (!hasUnderlyingMatch && strategies.length > 0);
+        // Quantiply Parity: By default, ALL user strategies across all underlyings are always visible!
+        let showAll = window._showAllUnderlyingsAlgos !== false;
 
         // Filter strategies focused on active underlying
         let filtered = strategies.filter(s => {
@@ -1663,6 +1663,8 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                        startTime.includes(searchVal) || 
                        days.includes(searchVal);
             }
+            if (showAll) return true;
+
             // CRITICAL SAFETY RULE: Never hide active, running, selected, or trading strategies!
             const isCurrentActive = (s.strategy_id && s.strategy_id === window._straddleState?.activeStrategyId) ||
                                    (s.name && window._straddleState?.activeStrategy?.name === s.name);
@@ -1672,8 +1674,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             if (isCurrentActive || isRunning || hasActiveTrading) return true;
 
             const und = canonicalUnderlying(s.underlying || "NIFTY");
-            if (!showAll && und !== activeUnd) return false;
-            return true;
+            return und === activeUnd;
         });
 
         // Guaranteed fallback: If filtered has 0 strategies but strategies exist in platform, automatically show all
@@ -2229,6 +2230,7 @@ async function toggleAlgoAdvanceSl(strategyId, isChecked) {
 window.toggleAlgoAdvanceSl = toggleAlgoAdvanceSl;
 
 function toggleShowAllUnderlyingsAlgos() {
+    if (window._showAllUnderlyingsAlgos === undefined) window._showAllUnderlyingsAlgos = true;
     window._showAllUnderlyingsAlgos = !window._showAllUnderlyingsAlgos;
     const btn = document.getElementById("btnToggleShowAllAlgos");
     if (btn) {
@@ -2437,11 +2439,21 @@ async function onChangeAlgoMultiplier(strategyId, val) {
 }
 window.onChangeAlgoMultiplier = onChangeAlgoMultiplier;
 
-function openStrategyInTerminal(strategyId) {
-    const strat = (window._straddleState.allStrategies || []).find(s => 
+function openStrategyInTerminal(strategyId, fallbackStrat = null) {
+    let strat = (window._straddleState.allStrategies || []).find(s => 
         (s.strategy_id && String(s.strategy_id).trim().toLowerCase() === String(strategyId).trim().toLowerCase()) ||
         (s.name && String(s.name).trim().toLowerCase() === String(strategyId).trim().toLowerCase())
     );
+    if (!strat && fallbackStrat) {
+        strat = fallbackStrat;
+        if (!window._straddleState.allStrategies) window._straddleState.allStrategies = [];
+        const exIdx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === strat.strategy_id || s.name === strat.name);
+        if (exIdx >= 0) {
+            window._straddleState.allStrategies[exIdx] = strat;
+        } else {
+            window._straddleState.allStrategies.push(strat);
+        }
+    }
     if (strat) {
         window._straddleState.activeStrategy = strat;
         window._straddleState.activeStrategyId = strat.strategy_id;
@@ -2449,16 +2461,12 @@ function openStrategyInTerminal(strategyId) {
         if (undBadge) {
             undBadge.textContent = canonicalUnderlying(strat.underlying || "NIFTY");
         }
+        populateStraddleSettingsForm(strat);
+        renderStraddlePositions(strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
     }
 
     // Switch view to terminal / algo detail
     switchStraddleSubView("terminal");
-
-    // Populate the strategy settings builder form
-    if (strat) {
-        populateStraddleSettingsForm(strat);
-        renderStraddlePositions(strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
-    }
 
     // Asynchronously notify backend of active strategy
     onStraddleStrategySelect(strategyId);
@@ -2470,6 +2478,7 @@ function openStrategyInTerminal(strategyId) {
 async function saveStraddleStrategyAndGoBack() {
     await saveStraddleStrategySettings();
     switchStraddleSubView("algos");
+    renderStraddleAlgosTable(true);
 }
 
 async function startStraddleAlgoDirect(strategyId) {
@@ -2795,18 +2804,30 @@ async function submitCreateNewStraddleAlgo() {
         const res = await resp.json();
         if (res.success && res.strategy) {
             closeAddStraddleAlgoModal();
+            if (!window._straddleState) window._straddleState = {};
+            if (!window._straddleState.allStrategies) window._straddleState.allStrategies = [];
+            const exIdx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === res.strategy.strategy_id || s.name === res.strategy.name);
+            if (exIdx >= 0) {
+                window._straddleState.allStrategies[exIdx] = res.strategy;
+            } else {
+                window._straddleState.allStrategies.push(res.strategy);
+            }
+            window._straddleState.activeStrategy = res.strategy;
+            window._straddleState.activeStrategyId = res.strategy.strategy_id;
+
+            if (typeof openStrategyInTerminal === "function") {
+                openStrategyInTerminal(res.strategy.strategy_id, res.strategy);
+            }
+            if (typeof toggleStraddleSettingsPanel === "function") {
+                toggleStraddleSettingsPanel(true);
+            }
+            renderStraddleAlgosTable(true);
+            showStraddleToast(`Strategy "${res.strategy.name}" created successfully!`, "success", 3000);
             try {
                 await fetchStraddleState();
             } catch (e) {
                 console.warn("fetchStraddleState post-create warning:", e);
             }
-            if (typeof openStrategyInTerminal === "function") {
-                openStrategyInTerminal(res.strategy.strategy_id);
-            }
-            if (typeof toggleStraddleSettingsPanel === "function") {
-                toggleStraddleSettingsPanel(true);
-            }
-            showStraddleToast(`Strategy "${res.strategy.name}" created successfully!`, "success", 3000);
         } else {
             showStraddleToast("Error creating algo: " + (res.error || "Failed"), "error", 4000);
         }
@@ -10302,25 +10323,44 @@ async function saveStraddleStrategySettings() {
     showStraddleToast(`💾 Saving strategy '${strat.name}'...`, "info", 1500);
 
     // Optimistically update local state for instant responsiveness
-    if (window._straddleState && window._straddleState.allStrategies) {
+    if (window._straddleState) {
+        if (!window._straddleState.allStrategies) {
+            window._straddleState.allStrategies = [];
+        }
         const idx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === strat.strategy_id || s.name === strat.name);
         if (idx >= 0) {
             const existing = window._straddleState.allStrategies[idx];
             strat.strategy_id = existing.strategy_id;
             strat.positions = existing.positions || [];
             strat.closed_positions = existing.closed_positions || [];
-            strat.status = existing.status || strat.status;
+            strat.status = existing.status || strat.status || "READY";
             strat.mtm = existing.mtm || 0.0;
             strat.group_mtm = existing.group_mtm || 0.0;
             strat.re_execution_counts = existing.re_execution_counts || strat.re_execution_counts;
+            strat.broker_margin_per_lot = existing.broker_margin_per_lot || strat.broker_margin_per_lot;
+            strat.effective_multiplier = existing.effective_multiplier || strat.effective_multiplier;
             window._straddleState.allStrategies[idx] = strat;
-        } else if (window._straddleState.activeStrategy) {
-            strat.positions = window._straddleState.activeStrategy.positions || [];
-            strat.closed_positions = window._straddleState.activeStrategy.closed_positions || [];
-            strat.status = window._straddleState.activeStrategy.status || strat.status;
-            strat.mtm = window._straddleState.activeStrategy.mtm || 0.0;
+        } else {
+            // New strategy or renamed strategy: ensure it's added to allStrategies array immediately!
+            if (window._straddleState.activeStrategy && (window._straddleState.activeStrategy.strategy_id === strat.strategy_id || window._straddleState.activeStrategy.name === strat.name)) {
+                strat.positions = window._straddleState.activeStrategy.positions || [];
+                strat.closed_positions = window._straddleState.activeStrategy.closed_positions || [];
+                strat.status = window._straddleState.activeStrategy.status || strat.status || "READY";
+                strat.mtm = window._straddleState.activeStrategy.mtm || 0.0;
+                strat.group_mtm = window._straddleState.activeStrategy.group_mtm || 0.0;
+                strat.re_execution_counts = window._straddleState.activeStrategy.re_execution_counts || strat.re_execution_counts;
+                strat.broker_margin_per_lot = window._straddleState.activeStrategy.broker_margin_per_lot;
+                strat.effective_multiplier = window._straddleState.activeStrategy.effective_multiplier;
+            } else {
+                if (!strat.positions) strat.positions = [];
+                if (!strat.closed_positions) strat.closed_positions = [];
+                if (!strat.status) strat.status = "READY";
+                if (strat.mtm === undefined) strat.mtm = 0.0;
+            }
+            window._straddleState.allStrategies.push(strat);
         }
         window._straddleState.activeStrategy = strat;
+        window._straddleState.activeStrategyId = strat.strategy_id;
         renderStraddleAlgosTable(true);
     }
 
@@ -10334,10 +10374,22 @@ async function saveStraddleStrategySettings() {
         if (res.success) {
             showStraddleToast(`💾 Strategy '${strat.name}' saved successfully!`, "success", 2000);
             if (res.strategy) {
-                if (window._straddleState) window._straddleState.activeStrategy = res.strategy;
-                if (res.strategy.broker_margin_per_lot) {
-                    window._formSimulatedMarginPerLot = res.strategy.broker_margin_per_lot;
-                    updateFormAutoMultiplierPreview(res.strategy.broker_margin_per_lot);
+                const saved = res.strategy;
+                if (window._straddleState) {
+                    window._straddleState.activeStrategy = saved;
+                    window._straddleState.activeStrategyId = saved.strategy_id;
+                    if (window._straddleState.allStrategies) {
+                        const sIdx = window._straddleState.allStrategies.findIndex(s => s.strategy_id === saved.strategy_id || s.name === saved.name);
+                        if (sIdx >= 0) {
+                            window._straddleState.allStrategies[sIdx] = saved;
+                        } else {
+                            window._straddleState.allStrategies.push(saved);
+                        }
+                    }
+                }
+                if (saved.broker_margin_per_lot) {
+                    window._formSimulatedMarginPerLot = saved.broker_margin_per_lot;
+                    updateFormAutoMultiplierPreview(saved.broker_margin_per_lot);
                 }
             }
             await fetchStraddleState();

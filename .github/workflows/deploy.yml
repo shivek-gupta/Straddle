@@ -53,6 +53,7 @@ jobs:
                     if x: del_ids.add(str(x).strip().lower()); \
                 except: pass; \
             preset_blacklist = {'straddle_nifty_920', 'test_strat_update', 'test_strat_001', 'strat_preset_iron_condor_1791454639', 'strat_preset_custom_1791454643', 'strat_preset_short_straddle_1791454683', 'nifty 9:20 short straddle (45% tgt / 66% sl)', 'test strategy', 'nifty test 9:20 straddle', 'iron condor monday', 'blank custom strategy', 'live nifty test strategy'}; \
+            del_ids = {x for x in del_ids if not ((x.startswith('strat_preset_') or x.startswith('strat_')) and any(c.isdigit() for c in x)) or x in preset_blacklist}; \
             del_ids.update(preset_blacklist); \
             persist_strats = json.load(open(persist_f)) if os.path.exists(persist_f) else []; \
             disk_strats = json.load(open(disk_f)) if os.path.exists(disk_f) else []; \
@@ -70,7 +71,7 @@ jobs:
             final_list = list(merged_map.values()); \
             json.dump(final_list, open(disk_f, 'w'), indent=2); \
             json.dump(final_list, open(persist_f, 'w'), indent=2); \
-            safe_del = sorted(list(del_ids - {'nifty', 'banknifty', 'finnifty', 'sensex'})); \
+            safe_del = sorted(list((del_ids & preset_blacklist) - {'nifty', 'banknifty', 'finnifty', 'sensex', 'xyz'})); \
             json.dump(safe_del, open(del_f, 'w'), indent=2); \
             json.dump(safe_del, open(disk_del_f, 'w'), indent=2);" 2>/dev/null || true
 

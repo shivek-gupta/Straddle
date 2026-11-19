@@ -729,9 +729,17 @@ class StraddleManager:
                                         self._deleted_strategy_ids.add(str(item).strip().lower())
                     except Exception as e:
                         logger.warning(f"Error loading deleted strategies from {fpath}: {e}")
-            # Strictly sanitize tombstones so asset names are never blacklisted
+            # Strictly sanitize tombstones so asset names and timestamped strategy IDs are never blacklisted
             common_words = {"nifty", "banknifty", "finnifty", "sensex", "bankex", "midcpnifty", "crudeoil", "gold", "silver"}
-            self._deleted_strategy_ids = {x for x in self._deleted_strategy_ids if x not in common_words}
+            cleaned_tombstones = set()
+            for x in self._deleted_strategy_ids:
+                if x in common_words:
+                    continue
+                # If it's a dynamic timestamped ID like strat_preset_... or strat_17..., skip it
+                if (x.startswith("strat_preset_") or x.startswith("strat_")) and any(c.isdigit() for c in x):
+                    continue
+                cleaned_tombstones.add(x)
+            self._deleted_strategy_ids = cleaned_tombstones
             self._save_deleted_strategies()
 
     def _save_deleted_strategies(self):
@@ -3853,17 +3861,17 @@ class StraddleManager:
             sid = strat_dict.get("strategy_id")
             sname = strat_dict.get("name")
 
-            # If sid is not provided or generic, but name matches an existing strategy, reuse that strategy_id
-            if sname:
-                for existing_strat in self._strategies:
-                    if existing_strat.get("name", "").strip().lower() == sname.strip().lower():
-                        if not sid or sid.startswith("strat_"):
-                            sid = existing_strat.get("strategy_id")
-                            strat_dict["strategy_id"] = sid
-                        break
+            # If sid matches an existing strategy, retain that exact sid.
+            # If sid is not provided or unknown, but name matches an existing strategy, reuse that strategy_id
+            matched_by_id = next((s for s in self._strategies if s.get("strategy_id") == sid), None) if sid else None
+            if not matched_by_id and sname:
+                matched_by_name = next((s for s in self._strategies if str(s.get("name", "")).strip().lower() == str(sname).strip().lower()), None)
+                if matched_by_name:
+                    sid = matched_by_name.get("strategy_id")
+                    strat_dict["strategy_id"] = sid
 
             if not sid:
-                sid = f"strat_{int(time.time())}"
+                sid = f"strat_{int(time.time()*1000)}"
                 strat_dict["strategy_id"] = sid
 
             if sid:
@@ -4111,9 +4119,10 @@ class StraddleManager:
             strat_dict["broker_margin_per_lot"] = broker_margin
             strat_dict["effective_multiplier"] = eff_mult
 
-            if self._active_strategy_id and str(self._active_strategy_id).strip() == str(sid).strip():
-                self._state["active_strategy"] = strat_dict
-                self._state["positions"] = list(strat_dict.get("positions", []))
+            self._active_strategy_id = sid
+            self._state["active_strategy_id"] = sid
+            self._state["active_strategy"] = strat_dict
+            self._state["positions"] = list(strat_dict.get("positions", []))
 
             self._save_strategies()
             self._save_state()
@@ -10055,8 +10064,14 @@ class StraddleManager:
             )
             return {"success": True, "message": "Margin auto-exit countdown cancelled. Positions kept open."}
 
-    def _cancel_leg_broker_orders(self, pos: Dict[str, Any], broker: Optional[BaseBrokerAdapter] = None) -> None:
-        """Robustly cancels both pending SL and Target broker orders for a leg and sweeps broker orderbook."""
+    def _cancel_leg_broker_orders(
+        self,
+        pos: Dict[str, Any],
+        broker: Optional[BaseBrokerAdapter] = None,
+        cancel_sl: bool = True,
+        cancel_target: bool = True
+    ) -> None:
+        """Robustly cancels pending SL and/or Target broker orders for a leg and sweeps broker orderbook."""
         if not pos:
             return
         if not broker:
@@ -10064,28 +10079,48 @@ class StraddleManager:
             broker = get_broker_adapter(mode)
 
         # 1. Cancel registered broker SL order
-        adv_sl_oid = pos.get("sl_broker_order_id")
-        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
-            try:
-                broker.cancel_order(str(adv_sl_oid))
-                self._log_event(f"Cancelled broker SL order #{adv_sl_oid} for {pos.get('symbol')}", level="INFO")
-            except Exception as e_sl:
-                logger.warning(f"Error cancelling broker SL order {adv_sl_oid}: {e_sl}")
-            finally:
-                pos["last_sl_broker_order_id"] = str(adv_sl_oid)
-                pos["sl_broker_order_id"] = None
+        if cancel_sl:
+            adv_sl_oid = pos.get("sl_broker_order_id")
+            if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                try:
+                    broker.cancel_order(str(adv_sl_oid))
+                    self._log_event(
+                        f"Cancelled broker SL order #{adv_sl_oid} for {pos.get('symbol')}",
+                        level="INFO",
+                        strategy=pos.get("strategy_name"),
+                        underlying=pos.get("underlying"),
+                        role="MAIN",
+                        side=pos.get("side"),
+                        option_type=pos.get("option_type"),
+                        trigger="STOPLOSS"
+                    )
+                except Exception as e_sl:
+                    logger.warning(f"Error cancelling broker SL order {adv_sl_oid}: {e_sl}")
+                finally:
+                    pos["last_sl_broker_order_id"] = str(adv_sl_oid)
+                    pos["sl_broker_order_id"] = None
 
         # 2. Cancel registered broker Target order
-        adv_tgt_oid = pos.get("target_broker_order_id")
-        if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
-            try:
-                broker.cancel_order(str(adv_tgt_oid))
-                self._log_event(f"Cancelled broker Target order #{adv_tgt_oid} for {pos.get('symbol')}", level="INFO")
-            except Exception as e_tgt:
-                logger.warning(f"Error cancelling broker Target order {adv_tgt_oid}: {e_tgt}")
-            finally:
-                pos["last_target_broker_order_id"] = str(adv_tgt_oid)
-                pos["target_broker_order_id"] = None
+        if cancel_target:
+            adv_tgt_oid = pos.get("target_broker_order_id")
+            if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                try:
+                    broker.cancel_order(str(adv_tgt_oid))
+                    self._log_event(
+                        f"Cancelled broker Target order #{adv_tgt_oid} for {pos.get('symbol')}",
+                        level="INFO",
+                        strategy=pos.get("strategy_name"),
+                        underlying=pos.get("underlying"),
+                        role="MAIN",
+                        side=pos.get("side"),
+                        option_type=pos.get("option_type"),
+                        trigger="TARGET"
+                    )
+                except Exception as e_tgt:
+                    logger.warning(f"Error cancelling broker Target order {adv_tgt_oid}: {e_tgt}")
+                finally:
+                    pos["last_target_broker_order_id"] = str(adv_tgt_oid)
+                    pos["target_broker_order_id"] = None
 
         # 3. Sweep broker orderbook for any pending trigger/limit orders for this exact symbol/token
         try:
@@ -14569,7 +14604,16 @@ class StraddleManager:
                                     reason = f"CLOSED AT COST (₹{exit_price:.2f}) (Broker Exit)"
                                     trigger = "MANUAL"
 
-                                self._log_event(f"Detected broker closed position for {p.get('symbol')} ({reason}). P&L: ₹{pnl:.2f}", level="INFO")
+                                self._log_event(
+                                    f"Detected broker closed position for {p.get('symbol')} ({reason}). P&L: ₹{pnl:.2f}",
+                                    level="INFO",
+                                    strategy=s.get("name"),
+                                    underlying=s.get("underlying"),
+                                    role="HEDGE" if is_pos_hedge else "MAIN",
+                                    side=p.get("side"),
+                                    option_type=p.get("option_type"),
+                                    trigger=trigger
+                                )
                                 p["status"] = "COMPLETE"
                                 p["avg_exit_price"] = exit_price
                                 p["exit_time"] = now_ist_str()
@@ -14578,12 +14622,23 @@ class StraddleManager:
                                 p["_exit_in_progress"] = False
                                 changes_made = True
 
-                                # Cancel any resting broker SL / Target orders for this closed position
-                                self._cancel_leg_broker_orders(p, broker)
+                                # Selective cancellation & exit order ID preservation:
+                                # When Target filled: cancel resting SL order only (do NOT cancel target order).
+                                # When Stoploss filled: cancel resting Target order only (do NOT cancel SL order).
+                                if trigger == "TARGET":
+                                    exit_oid_to_pass = exit_oid or p.get("target_broker_order_id") or p.get("exit_order_id")
+                                    p["exit_order_id"] = str(exit_oid_to_pass) if exit_oid_to_pass else None
+                                    self._cancel_leg_broker_orders(p, broker, cancel_sl=True, cancel_target=False)
+                                elif trigger == "STOPLOSS":
+                                    exit_oid_to_pass = exit_oid or p.get("sl_broker_order_id") or p.get("exit_order_id")
+                                    p["exit_order_id"] = str(exit_oid_to_pass) if exit_oid_to_pass else None
+                                    self._cancel_leg_broker_orders(p, broker, cancel_sl=False, cancel_target=True)
+                                else:
+                                    exit_oid_to_pass = exit_oid or p.get("exit_order_id")
+                                    self._cancel_leg_broker_orders(p, broker, cancel_sl=True, cancel_target=True)
 
                                 # Re-entries ONLY apply to trade legs (not associated hedges)!
                                 if not is_pos_hedge:
-                                    exit_oid_to_pass = exit_oid or p.get("exit_order_id") or (p.get("sl_broker_order_id") if trigger == "STOPLOSS" else p.get("target_broker_order_id"))
                                     self._handle_leg_re_entry(s, p, trigger=trigger, exit_order_id=str(exit_oid_to_pass) if exit_oid_to_pass else None)
 
             if changes_made:
