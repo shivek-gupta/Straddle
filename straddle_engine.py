@@ -1595,6 +1595,9 @@ class StraddleManager:
                                     self._deleted_strategy_ids.add(str(item).strip().lower())
                 except Exception as e:
                     logger.warning(f"Error loading deleted strategies: {e}")
+            # Strictly sanitize tombstones so asset names and common keywords are never blacklisted
+            common_words = {"nifty", "banknifty", "finnifty", "sensex", "bankex", "midcpnifty", "crudeoil", "gold", "silver", "test", "algo", "straddle"}
+            self._deleted_strategy_ids = {x for x in self._deleted_strategy_ids if x not in common_words}
             self._save_deleted_strategies()
 
     def _save_deleted_strategies(self):
@@ -1892,13 +1895,12 @@ class StraddleManager:
                     except Exception as e_pm:
                         logger.warning(f"Error merging persistent strategies: {e_pm}")
 
-            # Purge any user-deleted custom strategies permanently
+            # Purge any user-deleted custom strategies permanently (strictly by strategy_id, NEVER by name)
             if self._deleted_strategy_ids and self._strategies:
                 purged = [
                     s for s in self._strategies
                     if isinstance(s, dict)
                     and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
-                    and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
                 ]
                 if purged:
                     self._strategies = purged
@@ -5162,6 +5164,12 @@ class StraddleManager:
             old_name = strat.get("name")
             strat["name"] = clean_name
 
+            # Un-tombstone new name and strategy ID in case previously deleted
+            if self._deleted_strategy_ids:
+                self._deleted_strategy_ids.discard(clean_name.lower())
+                self._deleted_strategy_ids.discard(str(strategy_id).strip().lower())
+                self._save_deleted_strategies()
+
             # Cascade name to all open/held positions of this strategy
             for p in strat.get("positions", []):
                 p["strategy_name"] = clean_name
@@ -5310,7 +5318,7 @@ class StraddleManager:
         with _ENGINE_LOCK:
             id_set = {str(i).strip().lower() for i in strategy_ids if i}
 
-            # Record in persistent tombstone
+            # Record in persistent tombstone (strictly strategy_id, NEVER strategy names!)
             for i in strategy_ids:
                 if i:
                     self._deleted_strategy_ids.add(str(i).strip().lower())
@@ -5319,7 +5327,6 @@ class StraddleManager:
                 sname_str = str(s.get("name", "")).strip().lower()
                 if sid_str in id_set or sname_str in id_set:
                     self._deleted_strategy_ids.add(sid_str)
-                    self._deleted_strategy_ids.add(sname_str)
             self._save_deleted_strategies()
 
             # Filter out permanently
@@ -5328,7 +5335,6 @@ class StraddleManager:
                 if str(s.get("strategy_id", "")).strip().lower() not in id_set
                 and str(s.get("name", "")).strip().lower() not in id_set
                 and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
-                and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
             ]
 
             if self._strategies:
@@ -8080,8 +8086,12 @@ class StraddleManager:
                 strategy_id=strat_id,
             )
 
+        cfg_id = str(leg_cfg.get("id") or "leg")
+        pos_uid = f"{cfg_id}_{order_id}" if order_id and not str(order_id).startswith("ORD_") and not str(order_id).startswith("PAPER_") else f"{cfg_id}_{int(time.time() * 1000)}"
         pos_record = {
-            "id": leg_cfg.get("id"),
+            "id": pos_uid,
+            "leg_id": cfg_id,
+            "config_leg_id": cfg_id,
             "status": "OPEN",
             "side": side,
             "product": prod,
@@ -11326,7 +11336,7 @@ class StraddleManager:
             authoritative_strat = self._state.get("active_strategy") or strat
 
         legs_cfg = authoritative_strat.get("legs") or authoritative_strat.get("strategy", {}).get("legs") or strat.get("legs") or strat.get("strategy", {}).get("legs") or []
-        leg_cfg = next((l for l in legs_cfg if l.get("id") and l.get("id") == pos.get("id")), None)
+        leg_cfg = next((l for l in legs_cfg if l.get("id") and l.get("id") in (pos.get("leg_id"), pos.get("id"), pos.get("config_leg_id"))), None)
         if not leg_cfg:
             pos_opt = (pos.get("option_type") or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")).upper()
             pos_side = str(pos.get("side", "SELL")).upper()
@@ -11980,13 +11990,15 @@ class StraddleManager:
                 finally:
                     if unblocked_items:
                         def _restore_unblocked_orders():
-                            time.sleep(0.08)
+                            # Generous buffer for broker RMS to credit margin from re-entry short fill
+                            time.sleep(0.8)
                             self._log_event(
                                 f"[Margin Auto-Release] Re-entry dispatched. Re-placing advance SL & Target orders on broker for all legs and all slices ({len(unblocked_items)} position(s))...",
                                 level="INFO"
                             )
-                            # Retry up to 3 times to ensure 100% placement with broker across all slices (e.g. 100-150 lots)
-                            for attempt in range(1, 4):
+                            # Retry up to 5 times with progressive backoff to ensure 100% placement with broker across all slices
+                            backoffs = [0.8, 1.2, 1.8, 2.5, 3.5]
+                            for attempt, wait_s in enumerate(backoffs, 1):
                                 all_placed = True
                                 for item in unblocked_items:
                                     p_cand = item["pos"]
@@ -11996,13 +12008,14 @@ class StraddleManager:
                                             if not p_cand.get("sl_broker_order_id") or not p_cand.get("sl_all_slices_placed", True):
                                                 all_placed = False
                                         if item.get("tgt_order_id") and (not p_cand.get("target_broker_order_id") or not p_cand.get("target_all_slices_placed", True)):
-                                            time.sleep(0.10)
+                                            time.sleep(0.12)
                                             self._place_advance_target_order(broker, p_cand, delay_sec=0, force=True)
                                             if not p_cand.get("target_broker_order_id") or not p_cand.get("target_all_slices_placed", True):
                                                 all_placed = False
                                 if all_placed:
+                                    self._log_event(f"[Margin Auto-Release] ✅ All advance SL & Target orders successfully restored on broker.", level="SUCCESS")
                                     break
-                                time.sleep(0.15 * attempt)
+                                time.sleep(wait_s)
 
                             for item in unblocked_items:
                                 item["pos"]["_margin_relief_in_progress"] = False
@@ -12040,17 +12053,32 @@ class StraddleManager:
                             # Prevent duplicate entries for the same order/symbol execution
                             is_dup = any(
                                 (new_pos.get("order_id") and p.get("order_id") == new_pos.get("order_id"))
-                                or (p.get("symbol") == new_pos.get("symbol") and p.get("status") == "OPEN" and p.get("re_execute_trigger") == clean_trig and (p.get("sl_re_count" if clean_trig == "STOPLOSS" else "target_re_count") == new_count))
+                                or (p.get("id") == new_pos.get("id"))
                                 for p in strat_pos_list
                             )
                             if not is_dup:
                                 strat_pos_list.append(new_pos)
                                 if strat is not auth_strat:
                                     strat.setdefault("positions", []).append(new_pos)
+
+                            # Ensure parent pos status is COMPLETE and synced to closed_positions
+                            if pos.get("status") != "COMPLETE":
+                                pos["status"] = "COMPLETE"
+                            
+                            auth_closed = auth_strat.setdefault("closed_positions", [])
+                            if not any(cp.get("id") == pos.get("id") or (pos.get("order_id") and cp.get("order_id") == pos.get("order_id")) for cp in auth_closed):
+                                auth_closed.append(pos)
+                            if strat is not auth_strat:
+                                s_closed = strat.setdefault("closed_positions", [])
+                                if not any(cp.get("id") == pos.get("id") or (pos.get("order_id") and cp.get("order_id") == pos.get("order_id")) for cp in s_closed):
+                                    s_closed.append(pos)
+
                             self._state["positions"] = list(strat_pos_list)
+                            self._state["closed_positions"] = list(auth_closed)
+
                             # Sync exit reason on parent leg inside authoritative strategy
                             for p_in_s in strat_pos_list:
-                                if p_in_s.get("id") == pos.get("id"):
+                                if p_in_s.get("id") == pos.get("id") or (pos.get("order_id") and p_in_s.get("order_id") == pos.get("order_id")):
                                     if p_in_s.get("exit_reason") and "➔" not in str(p_in_s.get("exit_reason")):
                                         p_in_s["exit_reason"] = f"{p_in_s['exit_reason']} ➔ Triggered {clean_opt} {clean_trig.title()} Re-Execute #{new_count}"
                             auth_strat["status"] = "TRADE_ACTIVE"
@@ -15605,6 +15633,33 @@ class StraddleManager:
                 strat_positions = strat.get("positions", [])
                 strat_mtm = 0.0
 
+                # Advance Order Auto-Placement Watchdog:
+                # If an OPEN position requires broker advance orders ('Place in advance'),
+                # but resting SL or Target orders were cancelled during margin relief or rejected,
+                # automatically re-place them on the broker after a 3.0s settlement buffer (throttled to 5.0s per leg).
+                if mode == "LIVE_BROKER" and self.is_broker_connected() and strat_status == "TRADE_ACTIVE":
+                    now_w = time.time()
+                    for p_w in strat_positions:
+                        if p_w.get("status") == "OPEN" and not p_w.get("_exit_in_progress") and not p_w.get("_margin_relief_in_progress"):
+                            is_h = bool(p_w.get("is_associated_hedge") or "hedge" in str(p_w.get("id", "")).lower() or p_w.get("hedge_parent_type") or p_w.get("parent_leg_id"))
+                            if not is_h:
+                                ent_ep = float(p_w.get("_entry_epoch_ts") or 0.0)
+                                if ent_ep > 0 and (now_w - ent_ep) >= 3.0:
+                                    # SL Watchdog
+                                    sl_mode = p_w.get("sl_order_placement") or "Place in advance"
+                                    if sl_mode in ("Place in advance", "With Broker", "BROKER") and not p_w.get("sl_broker_order_id"):
+                                        last_sl_w = float(p_w.get("_last_adv_sl_retry_ts") or 0.0)
+                                        if (now_w - last_sl_w) >= 5.0:
+                                            p_w["_last_adv_sl_retry_ts"] = now_w
+                                            threading.Thread(target=self._place_advance_sl_order, args=(broker, p_w, 0, True), daemon=True).start()
+                                    # Target Watchdog
+                                    tgt_mode = p_w.get("target_order_placement") or "Place in advance"
+                                    if tgt_mode in ("Place in advance", "With Broker", "BROKER") and not p_w.get("target_broker_order_id"):
+                                        last_tgt_w = float(p_w.get("_last_adv_tgt_retry_ts") or 0.0)
+                                        if (now_w - last_tgt_w) >= 5.0:
+                                            p_w["_last_adv_tgt_retry_ts"] = now_w
+                                            threading.Thread(target=self._place_advance_target_order, args=(broker, p_w, 0, True), daemon=True).start()
+
                 # Periodic Broker Order Book Sync (once every 1.0s) for non-blocking reconciliation of resting SL & Target orders
                 has_active_adv_orders = any(
                     (p.get("sl_broker_order_id") or p.get("target_broker_order_id"))
@@ -16341,6 +16396,7 @@ class StraddleManager:
 
             active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else {})
             active_positions = active_strat.get("positions", []) if active_strat else []
+            active_closed = active_strat.get("closed_positions", []) if active_strat else []
 
             # Ensure all strategies have default schedule days and multiplier settings if not set
             for s in self._strategies:
@@ -16386,6 +16442,7 @@ class StraddleManager:
                 "active_strategy": active_strat,
                 "all_strategies": self._strategies,
                 "positions": active_positions,
+                "closed_positions": active_closed,
                 "re_execution_counts": reexec_counts,
                 "group_mtm": self._state.get("group_mtm", 0.0),
                 "total_mtm": self._state.get("total_mtm", 0.0),

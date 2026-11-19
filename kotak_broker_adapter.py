@@ -420,7 +420,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         tag: str = "straddle_algo",
         segment: str = "nse_fo",
         tick_size: float = 0.05,
-        retry_depth: int = 0
+        retry_depth: int = 0,
+        symbol: str = "",
+        instrument_key: str = ""
     ) -> Dict[str, Any]:
         """Places a single slice order with Kotak Neo API and confirms RMS status."""
         clean_tt = "B" if transaction_type.upper() in ("BUY", "B") else "S"
@@ -564,7 +566,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             tag=tag,
                             segment=segment,
                             tick_size=tick_size,
-                            retry_depth=retry_depth + 1
+                            retry_depth=retry_depth + 1,
+                            symbol=symbol,
+                            instrument_key=instrument_key
                         )
 
                 # 2. Specialized LPP (Limit Price Protection / Circuit Limit) auto-clamp & instant retry:
@@ -589,7 +593,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         tag=tag,
                         segment=segment,
                         tick_size=tick_size,
-                        retry_depth=retry_depth + 1
+                        retry_depth=retry_depth + 1,
+                        symbol=symbol,
+                        instrument_key=instrument_key
                     )
                 elif low_lpp_m and clean_tt == "S" and retry_depth < 2:
                     low_lpp = float(low_lpp_m.group(1))
@@ -610,7 +616,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         tag=tag,
                         segment=segment,
                         tick_size=tick_size,
-                        retry_depth=retry_depth + 1
+                        retry_depth=retry_depth + 1,
+                        symbol=symbol,
+                        instrument_key=instrument_key
                     )
 
                 # 3. General market order disallowance fallback (e.g. error from core on pure MKT):
@@ -637,7 +645,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         tag=tag,
                         segment=segment,
                         tick_size=tick_size,
-                        retry_depth=retry_depth + 1
+                        retry_depth=retry_depth + 1,
+                        symbol=symbol,
+                        instrument_key=instrument_key
                     )
 
                 logger.warning(f"[Kotak Neo] Order slice rejected: {err_msg} (res: {res})")
@@ -777,7 +787,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 trigger_price=trigger_price,
                 tag=slice_tag,
                 segment=segment,
-                tick_size=tick_size
+                tick_size=tick_size,
+                symbol=symbol,
+                instrument_key=instrument_key
             )
 
         # Execute multiple slices concurrently at sub-millisecond speed using pre-warmed worker pool

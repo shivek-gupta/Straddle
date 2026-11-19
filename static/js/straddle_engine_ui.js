@@ -533,18 +533,44 @@ async function fetchStraddleState() {
             }
             window._straddleState.activeStrategy = active;
             window._straddleState.activeStrategyId = active ? active.strategy_id : null;
+            if (s.closed_positions && Array.isArray(s.closed_positions)) {
+                window._straddleState.closed_positions = s.closed_positions;
+            }
             let activePositions = [];
             if (active) {
-                const combined = [...(active.positions || []), ...(active.closed_positions || [])];
+                const openList = (active.positions || []).filter(p => p && (String(p.status).toUpperCase() === "OPEN" || String(p.status).toUpperCase() === "LIVE OPEN" || String(p.status).toUpperCase() === "EXIT_PENDING"));
+                const otherPos = (active.positions || []).filter(p => p && String(p.status).toUpperCase() !== "OPEN" && String(p.status).toUpperCase() !== "LIVE OPEN" && String(p.status).toUpperCase() !== "EXIT_PENDING");
+                const closedList = [
+                    ...(active.closed_positions || []),
+                    ...(s.closed_positions || [])
+                ];
+                const combined = [...openList, ...otherPos, ...closedList];
                 const seenKeys = new Set();
                 activePositions = combined.filter(p => {
-                    const k = p.id || (p.symbol + "_" + (p.order_id || p.entry_time || ""));
+                    if (!p) return false;
+                    const oid = String(p.order_id || p.broker_order_id || "").trim();
+                    const isRealOid = oid && !oid.startsWith("ORD_") && !oid.startsWith("PAPER_");
+                    const k = isRealOid
+                        ? `${p.symbol || ""}_${oid}_${p.exit_order_id || ""}`
+                        : `${p.id || p.symbol || "leg"}_${p.order_id || ""}_${p.entry_time || ""}_${p.exit_time || ""}_${p.avg_ent_price || ""}_${p.re_execute_count || 0}_${p.status || ""}`;
                     if (seenKeys.has(k)) return false;
                     seenKeys.add(k);
                     return true;
                 });
             } else {
-                activePositions = s.positions || [];
+                const combined = [...(s.positions || []), ...(s.closed_positions || [])];
+                const seenKeys = new Set();
+                activePositions = combined.filter(p => {
+                    if (!p) return false;
+                    const oid = String(p.order_id || p.broker_order_id || "").trim();
+                    const isRealOid = oid && !oid.startsWith("ORD_") && !oid.startsWith("PAPER_");
+                    const k = isRealOid
+                        ? `${p.symbol || ""}_${oid}_${p.exit_order_id || ""}`
+                        : `${p.id || p.symbol || "leg"}_${p.order_id || ""}_${p.entry_time || ""}_${p.exit_time || ""}_${p.avg_ent_price || ""}_${p.re_execute_count || 0}_${p.status || ""}`;
+                    if (seenKeys.has(k)) return false;
+                    seenKeys.add(k);
+                    return true;
+                });
             }
             window._straddleState.positions = activePositions;
 
@@ -1633,9 +1659,13 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                        startTime.includes(searchVal) || 
                        days.includes(searchVal);
             }
-            // CRITICAL SAFETY RULE: Never hide strategies with OPEN positions, active trades, or errors!
-            const hasActiveTrading = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "EXIT_PENDING" || p.status === "ERROR");
-            if (hasActiveTrading) return true;
+            // CRITICAL SAFETY RULE: Never hide active, running, selected, or trading strategies!
+            const isCurrentActive = (s.strategy_id && s.strategy_id === window._straddleState?.activeStrategyId) ||
+                                   (s.name && window._straddleState?.activeStrategy?.name === s.name);
+            const isRunning = (s.status === "TRADE_ACTIVE" || s.status === "RUNNING");
+            const hasActiveTrading = (Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN" || p.status === "EXIT_PENDING" || p.status === "ERROR")) ||
+                                     (Array.isArray(s.closed_positions) && s.closed_positions.length > 0);
+            if (isCurrentActive || isRunning || hasActiveTrading) return true;
 
             const und = canonicalUnderlying(s.underlying || "NIFTY");
             if (!showAll && und !== activeUnd) return false;
@@ -5185,11 +5215,37 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
     const tbody = document.getElementById("straddlePositionsTableBody");
     if (!tbody) return;
 
+    const strat = window._straddleState?.activeStrategy;
+    let effectivePositions = (positions && Array.isArray(positions) && positions.length > 0)
+        ? positions
+        : (window._straddleState?.positions || strat?.positions || []);
+
+    const closedFromStrat = (strat && Array.isArray(strat.closed_positions)) ? strat.closed_positions : [];
+    const closedFromState = (window._straddleState && Array.isArray(window._straddleState.closed_positions)) ? window._straddleState.closed_positions : [];
+    const allClosed = [...closedFromStrat, ...closedFromState];
+
+    if (allClosed.length > 0) {
+        const seenKeys = new Set();
+        const combined = [...effectivePositions, ...allClosed];
+        effectivePositions = combined.filter(p => {
+            if (!p) return false;
+            const oid = String(p.order_id || p.broker_order_id || "").trim();
+            const isRealOid = oid && !oid.startsWith("ORD_") && !oid.startsWith("PAPER_");
+            const k = isRealOid
+                ? `${p.symbol || ""}_${oid}_${p.exit_order_id || ""}`
+                : `${p.id || p.symbol || "leg"}_${p.order_id || ""}_${p.entry_time || ""}_${p.exit_time || ""}_${p.avg_ent_price || ""}_${p.re_execute_count || 0}_${p.status || ""}`;
+            if (seenKeys.has(k)) return false;
+            seenKeys.add(k);
+            return true;
+        });
+    }
+    positions = effectivePositions;
+
     // Update Algo Trades Toolbar Counts & Toggle State
     const allCount = (positions || []).length;
     const openCount = (positions || []).filter(p => {
         const s = String(p.status || "OPEN").toUpperCase();
-        return s === "OPEN" || s === "LIVE OPEN";
+        return s === "OPEN" || s === "LIVE OPEN" || s === "EXIT_PENDING";
     }).length;
     const closedCount = (positions || []).filter(p => {
         const s = String(p.status || "OPEN").toUpperCase();
@@ -5471,6 +5527,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const rowStatus = row.getAttribute("data-status");
             const rowReason = row.getAttribute("data-exit-reason");
             const rowSym = row.getAttribute("data-symbol");
+            const rowOid = row.getAttribute("data-order-id") || "";
+            const rowLegId = row.getAttribute("data-leg-id") || "";
             const rowSlOid = row.getAttribute("data-sl-broker-oid") || "";
             const rowTgtOid = row.getAttribute("data-tgt-broker-oid") || "";
             const rowSlCanc = row.getAttribute("data-sl-cancelled") === "true";
@@ -5483,6 +5541,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const posStatus = String(pos.status || "OPEN").toUpperCase();
             const posReason = String(pos.exit_reason || "");
             const sym = pos.symbol || pos.trading_symbol || '';
+            const posOid = String(pos.order_id || pos.broker_order_id || "");
+            const posLegId = String(pos.id || "");
             const posSlOid = String(pos.sl_broker_order_id || "");
             const posTgtOid = String(pos.target_broker_order_id || "");
             const posSlCanc = !!pos.sl_cancelled_unexpectedly;
@@ -5493,6 +5553,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const posEntryR = String(pos.entry_reason || "");
 
             if (rowStatus !== posStatus || rowReason !== posReason || rowSym !== sym ||
+                rowOid !== posOid || rowLegId !== posLegId ||
                 rowSlOid !== posSlOid || rowTgtOid !== posTgtOid ||
                 rowSlCanc !== posSlCanc || rowTgtCanc !== posTgtCanc ||
                 rowRefP !== posRefP || rowSlP !== posSlP || rowTgtP !== posTgtP ||
@@ -6229,7 +6290,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             const isChecked = window._straddleSelectedLegIndices.has(idx) || (pos.id && window._straddleSelectedLegIds.has(pos.id));
 
             html += `
-                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${rawStatus}" data-entry-reason="${pos.entry_reason || ''}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}" data-ref-price="${pos.reference_price || ''}" data-sl-price="${pos.sl_price || ''}" data-tgt-price="${pos.target_price || ''}">
+                    <tr class="${rowClass}" data-leg-index="${idx}" data-leg-id="${pos.id || ''}" data-order-id="${pos.order_id || pos.broker_order_id || ''}" data-status="${rawStatus}" data-entry-reason="${pos.entry_reason || ''}" data-exit-reason="${pos.exit_reason || ''}" data-symbol="${sym}" data-sl-broker-oid="${pos.sl_broker_order_id || ''}" data-tgt-broker-oid="${pos.target_broker_order_id || ''}" data-sl-cancelled="${!!pos.sl_cancelled_unexpectedly}" data-tgt-cancelled="${!!pos.target_cancelled_unexpectedly}" data-ref-price="${pos.reference_price || ''}" data-sl-price="${pos.sl_price || ''}" data-tgt-price="${pos.target_price || ''}">
                         <td class="pos-col-select" style="text-align:center;">
                             <input type="checkbox" class="straddle-checkbox straddle-leg-checkbox" data-index="${idx}" data-leg-id="${pos.id || ''}" data-status="${isError ? 'ERROR' : (isOpen ? 'OPEN' : 'CLOSED')}" ${isChecked ? 'checked' : ''} ${isClosed ? 'disabled style="opacity:0.25; cursor:not-allowed;" title="Position is already closed"' : ''} onchange="onStraddlePositionCheckboxChange(this, ${idx}, '${pos.id || ''}')">
                         </td>
@@ -6406,66 +6467,83 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
  * adjacent to MTM Target in the lower summary strip.
  */
 function updateStraddleReexecBadges(positions) {
-    const elCeSl = document.getElementById("reexecCountCeSl");
-    const elCeTgt = document.getElementById("reexecCountCeTgt");
-    const elPeSl = document.getElementById("reexecCountPeSl");
-    const elPeTgt = document.getElementById("reexecCountPeTgt");
+    const elCeSl = document.getElementById("reexecCountCeSl") || document.getElementById("reExecCountCeSl");
+    const elCeTgt = document.getElementById("reexecCountCeTgt") || document.getElementById("reExecCountCeTgt") || document.getElementById("reexecCountCeTarget") || document.getElementById("reExecCountCeTarget");
+    const elPeSl = document.getElementById("reexecCountPeSl") || document.getElementById("reExecCountPeSl");
+    const elPeTgt = document.getElementById("reexecCountPeTgt") || document.getElementById("reExecCountPeTgt") || document.getElementById("reexecCountPeTarget") || document.getElementById("reExecCountPeTarget");
     if (!elCeSl && !elCeTgt && !elPeSl && !elPeTgt) return;
 
-    let ceSl = 0, ceTgt = 0, peSl = 0, peTgt = 0;
     const strat = window._straddleState?.activeStrategy;
+    const topState = window._straddleState || {};
 
-    const posList = (Array.isArray(positions))
-        ? positions
-        : (strat && Array.isArray(strat.positions) ? strat.positions : []);
+    let ceSl = 0, ceTgt = 0, peSl = 0, peTgt = 0;
 
-    // If strategy has no positions or is in clean READY state, counts are strictly 0!
-    if (posList.length === 0 || (strat && strat.status === "READY" && (!strat.positions || strat.positions.length === 0))) {
-        if (elCeSl) elCeSl.textContent = 0;
-        if (elCeTgt) elCeTgt.textContent = 0;
-        if (elPeSl) elPeSl.textContent = 0;
-        if (elPeTgt) elPeTgt.textContent = 0;
-        if (strat) {
-            strat.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
+    // Check strategy-level counts
+    if (strat && strat.re_execution_counts) {
+        ceSl = Math.max(ceSl, Number(strat.re_execution_counts.ce_sl || 0));
+        ceTgt = Math.max(ceTgt, Number(strat.re_execution_counts.ce_target || 0));
+        peSl = Math.max(peSl, Number(strat.re_execution_counts.pe_sl || 0));
+        peTgt = Math.max(peTgt, Number(strat.re_execution_counts.pe_target || 0));
+    }
+    // Check top-level engine counts
+    if (topState.re_execution_counts) {
+        ceSl = Math.max(ceSl, Number(topState.re_execution_counts.ce_sl || 0));
+        ceTgt = Math.max(ceTgt, Number(topState.re_execution_counts.ce_target || 0));
+        peSl = Math.max(peSl, Number(topState.re_execution_counts.pe_sl || 0));
+        peTgt = Math.max(peTgt, Number(topState.re_execution_counts.pe_target || 0));
+    }
+
+    // Direct scan across all available position collections
+    const combinedPositions = [
+        ...(Array.isArray(positions) ? positions : []),
+        ...(strat && Array.isArray(strat.positions) ? strat.positions : []),
+        ...(strat && Array.isArray(strat.closed_positions) ? strat.closed_positions : []),
+        ...(topState.positions || []),
+        ...(topState.closed_positions || [])
+    ];
+
+    const seenReexecPos = new Set();
+    let scanCeSl = 0, scanCeTgt = 0, scanPeSl = 0, scanPeTgt = 0;
+
+    combinedPositions.forEach(pos => {
+        if (!pos) return;
+        const pUid = String(pos.order_id || pos.id || `${pos.symbol}_${pos.entry_time}`);
+        if (seenReexecPos.has(pUid)) return;
+        seenReexecPos.add(pUid);
+
+        const isRe = !!(pos.is_re_entry || (pos.re_execute_count || 0) > 0 || 
+                        (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("re-execute")));
+        if (!isRe) return;
+
+        let legType = String(pos.re_execute_leg_type || "").toUpperCase();
+        if (!legType) {
+            const sym = String(pos.symbol || pos.trading_symbol || "");
+            const eStr = String(pos.entry_reason || "");
+            if (sym.includes(" CE ") || sym.includes("CE") || eStr.includes(" CE ")) legType = "CE";
+            else if (sym.includes(" PE ") || sym.includes("PE") || eStr.includes(" PE ")) legType = "PE";
+            else legType = String(pos.option_type || "").toUpperCase();
         }
-        return;
-    }
 
-    if (strat && strat.re_execution_counts && posList.length > 0 && strat.status !== "READY") {
-        ceSl = Number(strat.re_execution_counts.ce_sl || 0);
-        ceTgt = Number(strat.re_execution_counts.ce_target || 0);
-        peSl = Number(strat.re_execution_counts.pe_sl || 0);
-        peTgt = Number(strat.re_execution_counts.pe_target || 0);
-    } else {
-        posList.forEach(pos => {
-            const isRe = !!(pos.is_re_entry || (pos.re_execute_count || 0) > 0 || (pos.entry_reason && String(pos.entry_reason).toLowerCase().includes("re-execute")));
-            if (!isRe) return;
+        let trigger = String(pos.re_execute_trigger || "").toUpperCase();
+        if (!trigger) {
+            const eStr = String(pos.entry_reason || "").toUpperCase();
+            if (eStr.includes("STOPLOSS") || eStr.includes(" SL ") || eStr.includes("SL HIT")) trigger = "STOPLOSS";
+            else if (eStr.includes("TARGET") || eStr.includes(" TGT ") || eStr.includes("TARGET HIT")) trigger = "TARGET";
+        }
 
-            let legType = String(pos.re_execute_leg_type || "").toUpperCase();
-            if (!legType) {
-                const sym = String(pos.symbol || pos.trading_symbol || "");
-                const eStr = String(pos.entry_reason || "");
-                if (sym.includes(" CE ") || sym.includes("CE") || eStr.includes(" CE ")) legType = "CE";
-                else if (sym.includes(" PE ") || sym.includes("PE") || eStr.includes(" PE ")) legType = "PE";
-                else legType = String(pos.option_type || "").toUpperCase();
-            }
+        if (legType === "CE") {
+            if (trigger === "STOPLOSS") scanCeSl++;
+            else if (trigger === "TARGET") scanCeTgt++;
+        } else if (legType === "PE") {
+            if (trigger === "STOPLOSS") scanPeSl++;
+            else if (trigger === "TARGET") scanPeTgt++;
+        }
+    });
 
-            let trigger = String(pos.re_execute_trigger || "").toUpperCase();
-            if (!trigger) {
-                const eStr = String(pos.entry_reason || "").toUpperCase();
-                if (eStr.includes("STOPLOSS") || eStr.includes(" SL ") || eStr.includes("SL HIT")) trigger = "STOPLOSS";
-                else if (eStr.includes("TARGET") || eStr.includes(" TGT ") || eStr.includes("TARGET HIT")) trigger = "TARGET";
-            }
-
-            if (legType === "CE") {
-                if (trigger === "STOPLOSS") ceSl++;
-                else if (trigger === "TARGET") ceTgt++;
-            } else if (legType === "PE") {
-                if (trigger === "STOPLOSS") peSl++;
-                else if (trigger === "TARGET") peTgt++;
-            }
-        });
-    }
+    ceSl = Math.max(ceSl, scanCeSl);
+    ceTgt = Math.max(ceTgt, scanCeTgt);
+    peSl = Math.max(peSl, scanPeSl);
+    peTgt = Math.max(peTgt, scanPeTgt);
 
     if (elCeSl) elCeSl.textContent = ceSl;
     if (elCeTgt) elCeTgt.textContent = ceTgt;
@@ -6481,7 +6559,7 @@ function toggleAlgoClosedTrades() {
     window._straddleAlgoShowClosed = !window._straddleAlgoShowClosed;
     const strat = window._straddleState?.activeStrategy;
     if (strat) {
-        renderStraddlePositions(strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
+        renderStraddlePositions(window._straddleState?.positions || strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
     }
 }
 
@@ -6556,7 +6634,7 @@ function setAlgoTradeFilter(filter) {
     });
     const strat = window._straddleState?.activeStrategy;
     if (strat) {
-        renderStraddlePositions(strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
+        renderStraddlePositions(window._straddleState?.positions || strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
     }
 }
 
@@ -6564,7 +6642,7 @@ function onAlgoPositionsSortChange(sortVal) {
     window._straddleAlgoSortOrder = sortVal;
     const strat = window._straddleState?.activeStrategy;
     if (strat) {
-        renderStraddlePositions(strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
+        renderStraddlePositions(window._straddleState?.positions || strat.positions || [], strat.group_mtm || 0.0, strat.mtm || 0.0);
     }
 }
 
