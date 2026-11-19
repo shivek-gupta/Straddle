@@ -16963,6 +16963,24 @@ function onChartAssetChange(newUnd) {
     if (!newUnd) return;
     window._activeChartUnderlying = newUnd;
 
+    // Reset and abort previous in-flight AI requests immediately
+    if (window._kronosAbortController) {
+        try { window._kronosAbortController.abort(); } catch (e) {}
+        window._kronosAbortController = null;
+    }
+    if (window._strategistAbortController) {
+        try { window._strategistAbortController.abort(); } catch (e) {}
+        window._strategistAbortController = null;
+    }
+    window._kronosForecastData = null;
+    window._aiStrategistData = null;
+    if (typeof resetKronosForecastUI === "function") {
+        resetKronosForecastUI();
+    }
+    if (typeof resetAIStrategistUI === "function") {
+        resetAIStrategistUI();
+    }
+
     if (typeof selectGlobalUnderlying === "function") {
         selectGlobalUnderlying(newUnd);
     }
@@ -17203,6 +17221,17 @@ function switchChartTimeframe(tf) {
     document.querySelectorAll(".chart-timeframe-btn").forEach(btn => {
         btn.classList.toggle("active", btn.getAttribute("data-tf") === tf);
     });
+
+    // Cleanly cancel previous in-flight AI requests for old timeframe
+    if (window._kronosAbortController) {
+        try { window._kronosAbortController.abort(); } catch (e) {}
+        window._kronosAbortController = null;
+    }
+    window._kronosForecastData = null;
+    if (typeof resetKronosForecastUI === "function") {
+        resetKronosForecastUI();
+    }
+
     loadAndRenderCandleChart(window._activeChartUnderlying, tf);
 }
 window.switchChartTimeframe = switchChartTimeframe;
@@ -17294,9 +17323,62 @@ window._kronosForecastActive = false;
 window._kronosForecastHorizon = 24;
 window._kronosForecastData = null;
 window._kronosForecastLoading = false;
+window._kronosAbortController = null;
+window._kronosRequestId = 0;
 window._activeDerivativesIntelligence = null;
 window._aiStrategistActive = false;
 window._aiStrategistData = null;
+window._aiStrategistLoading = false;
+window._strategistAbortController = null;
+window._strategistRequestId = 0;
+
+function resetKronosForecastUI() {
+    const dirBadge = document.getElementById("kronosDirectionBadge");
+    const chgPtsEl = document.getElementById("kronosChangePoints");
+    const highEl = document.getElementById("kronosProjectedHigh");
+    const lowEl = document.getElementById("kronosProjectedLow");
+    const spreadEl = document.getElementById("kronosProjectedSpread");
+    const edgeEl = document.getElementById("kronosStraddleEdgePill");
+    const statusText = document.getElementById("kronosStatusText");
+
+    if (statusText) statusText.textContent = `Horizon: ${window._kronosForecastHorizon || 24} candles • Ready`;
+    if (dirBadge) {
+        dirBadge.innerHTML = "<span>⚡</span> <span>CALCULATING...</span>";
+        dirBadge.style.color = "#38bdf8";
+        dirBadge.style.background = "rgba(56, 189, 248, 0.25)";
+        dirBadge.style.border = "1px solid #38bdf8";
+    }
+    if (chgPtsEl) chgPtsEl.textContent = "(+0.00 pts)";
+    if (highEl) highEl.textContent = "₹ --";
+    if (lowEl) lowEl.textContent = "₹ --";
+    if (spreadEl) spreadEl.textContent = "-- pts";
+    if (edgeEl) {
+        edgeEl.textContent = "THETA CORRIDOR EVALUATING...";
+        edgeEl.style.background = "rgba(56, 189, 248, 0.15)";
+        edgeEl.style.borderColor = "#38bdf8";
+        edgeEl.style.color = "#38bdf8";
+    }
+}
+window.resetKronosForecastUI = resetKronosForecastUI;
+
+function resetAIStrategistUI() {
+    const regimeEl = document.getElementById("aiStrategistRegime");
+    const biasEl = document.getElementById("aiStrategistBias");
+    const recEl = document.getElementById("aiStrategistRecommendation");
+    const b1 = document.getElementById("aiStrategistBullet1");
+    const b2 = document.getElementById("aiStrategistBullet2");
+    const b3 = document.getElementById("aiStrategistBullet3");
+    const srcBadge = document.getElementById("aiStrategistSourceBadge");
+
+    if (srcBadge) srcBadge.textContent = "Institutional Quant Synthesis Engine";
+    if (regimeEl) regimeEl.textContent = "Evaluating...";
+    if (biasEl) biasEl.textContent = "Analyzing Greeks...";
+    if (recEl) recEl.textContent = "Analyzing optimal structure...";
+    if (b1) b1.innerHTML = "• <b>1. Execution:</b> Calculating strike placements...";
+    if (b2) b2.innerHTML = "• <b>2. Risk / Stop:</b> Determining dynamic hedge boundary...";
+    if (b3) b3.innerHTML = "• <b>3. Target:</b> Projecting theta harvest horizon...";
+}
+window.resetAIStrategistUI = resetAIStrategistUI;
 
 function toggleKronosForecast() {
     window._kronosForecastActive = !window._kronosForecastActive;
@@ -17321,6 +17403,10 @@ function toggleKronosForecast() {
             badge.style.boxShadow = "none";
         }
         if (panel) panel.style.display = "none";
+        if (window._kronosAbortController) {
+            try { window._kronosAbortController.abort(); } catch (e) {}
+            window._kronosAbortController = null;
+        }
         window._kronosForecastData = null;
         renderCandlestickCanvas();
     }
@@ -17353,15 +17439,52 @@ async function triggerKronosForecast(force = false) {
     const tf = window._activeChartTimeframe || "5m";
     const horizon = window._kronosForecastHorizon || 24;
 
+    // Prevent duplicate simultaneous requests unless forced by user click
+    if (window._kronosForecastLoading && !force) {
+        return;
+    }
+
+    // Cancel any in-flight request
+    if (window._kronosAbortController) {
+        try { window._kronosAbortController.abort(); } catch (e) {}
+    }
+    window._kronosAbortController = new AbortController();
+    const currentSignal = window._kronosAbortController.signal;
+    const currentReqId = ++window._kronosRequestId;
+
     const statusBadge = document.getElementById("kronosStatusText");
     const dirBadge = document.getElementById("kronosDirectionBadge");
-    if (statusBadge) statusBadge.textContent = "Generating Autoregressive Forecast...";
-    if (dirBadge) dirBadge.innerHTML = "<span>⚡</span> <span>CALCULATING...</span>";
+    if (statusBadge) {
+        statusBadge.innerHTML = `<span class="live-tick-pulse" style="background:#a855f7; box-shadow:0 0 7px #a855f7;"></span> <span style="color:#d8b4fe;">Computing ${horizon}-Bar Path...</span>`;
+    }
+    if (dirBadge) {
+        dirBadge.innerHTML = "<span>⚡</span> <span>CALCULATING...</span>";
+        dirBadge.style.color = "#38bdf8";
+        dirBadge.style.background = "rgba(56, 189, 248, 0.25)";
+        dirBadge.style.border = "1px solid #38bdf8";
+    }
 
     window._kronosForecastLoading = true;
     try {
-        const resp = await fetch(`/api/straddle/kronos_forecast?underlying=${encodeURIComponent(und)}&timeframe=${encodeURIComponent(tf)}&horizon=${horizon}`);
+        const timeoutId = setTimeout(() => {
+            if (window._kronosAbortController && currentReqId === window._kronosRequestId) {
+                try { window._kronosAbortController.abort(); } catch (e) {}
+            }
+        }, 12000);
+
+        const url = `/api/straddle/kronos_forecast?underlying=${encodeURIComponent(und)}&timeframe=${encodeURIComponent(tf)}&horizon=${horizon}&force=${force ? '1' : '0'}&_t=${Date.now()}`;
+        const resp = await fetch(url, { signal: currentSignal });
+        clearTimeout(timeoutId);
+
+        if (currentReqId !== window._kronosRequestId) return;
+
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+        }
+
         const data = await resp.json();
+        if (currentReqId !== window._kronosRequestId) return;
+
         if (data && data.success && Array.isArray(data.candles)) {
             window._kronosForecastData = data;
             if (data.derivatives_intelligence) {
@@ -17371,16 +17494,45 @@ async function triggerKronosForecast(force = false) {
             updateKronosForecastUI(data);
             renderCandlestickCanvas();
         } else {
-            if (statusBadge) statusBadge.textContent = "Notice: " + (data.error || "Unable to forecast");
+            const err = (data && data.error) ? data.error : "Unable to generate forecast";
+            handleKronosForecastError(err);
         }
     } catch (e) {
-        console.error("Error fetching Kronos forecast:", e);
-        if (statusBadge) statusBadge.textContent = "Network Error";
+        if (e.name === "AbortError" && currentReqId !== window._kronosRequestId) {
+            return;
+        }
+        console.warn("Notice during Kronos forecast:", e);
+        handleKronosForecastError(e.name === "AbortError" ? "Request Timeout" : "Sync notice");
     } finally {
-        window._kronosForecastLoading = false;
+        if (currentReqId === window._kronosRequestId) {
+            window._kronosForecastLoading = false;
+        }
     }
 }
 window.triggerKronosForecast = triggerKronosForecast;
+
+function handleKronosForecastError(msg) {
+    const statusBadge = document.getElementById("kronosStatusText");
+    const dirBadge = document.getElementById("kronosDirectionBadge");
+
+    if (statusBadge) {
+        statusBadge.innerHTML = `<span style="color:#fb7185;">⚠️ ${msg || "Sync notice"} • <a href="javascript:void(0)" onclick="triggerKronosForecast(true)" style="color:#c084fc; font-weight:700; text-decoration:underline;">Retry</a></span>`;
+    }
+    if (dirBadge) {
+        if (window._kronosForecastData && window._kronosForecastData.summary && window._kronosForecastData.summary.direction) {
+            const dir = String(window._kronosForecastData.summary.direction).toUpperCase();
+            dirBadge.innerHTML = `<span>⚡</span> <span>${dir} (CACHED)</span>`;
+            dirBadge.style.color = "#fbbf24";
+            dirBadge.style.background = "rgba(251, 191, 36, 0.2)";
+            dirBadge.style.border = "1px solid #fbbf24";
+        } else {
+            dirBadge.innerHTML = `<span>⚠️</span> <span>PAUSED</span>`;
+            dirBadge.style.color = "#fb7185";
+            dirBadge.style.background = "rgba(244, 63, 94, 0.2)";
+            dirBadge.style.border = "1px solid #f43f5e";
+        }
+    }
+}
 
 function updateKronosForecastUI(data) {
     if (!data) return;
@@ -17580,7 +17732,7 @@ function toggleAIStrategist() {
             badge.style.boxShadow = "0 0 8px rgba(16, 185, 129, 0.8)";
         }
         if (panel) panel.style.display = "flex";
-        fetchAIStrategist();
+        fetchAIStrategist(true);
     } else {
         if (btn) btn.classList.remove("btn-ai-strategist-active");
         if (badge) {
@@ -17589,13 +17741,29 @@ function toggleAIStrategist() {
             badge.style.boxShadow = "none";
         }
         if (panel) panel.style.display = "none";
+        if (window._strategistAbortController) {
+            try { window._strategistAbortController.abort(); } catch (e) {}
+            window._strategistAbortController = null;
+        }
+        window._aiStrategistData = null;
     }
 }
 window.toggleAIStrategist = toggleAIStrategist;
 
-async function fetchAIStrategist() {
+async function fetchAIStrategist(force = false) {
     const und = window._activeChartUnderlying || "NIFTY";
     const tf = window._activeChartTimeframe || "5m";
+
+    if (window._aiStrategistLoading && !force) {
+        return;
+    }
+
+    if (window._strategistAbortController) {
+        try { window._strategistAbortController.abort(); } catch (e) {}
+    }
+    window._strategistAbortController = new AbortController();
+    const currentSignal = window._strategistAbortController.signal;
+    const currentReqId = ++window._strategistRequestId;
 
     const regimeEl = document.getElementById("aiStrategistRegime");
     const biasEl = document.getElementById("aiStrategistBias");
@@ -17603,17 +17771,37 @@ async function fetchAIStrategist() {
     const b1 = document.getElementById("aiStrategistBullet1");
     const b2 = document.getElementById("aiStrategistBullet2");
     const b3 = document.getElementById("aiStrategistBullet3");
+    const srcBadge = document.getElementById("aiStrategistSourceBadge");
 
     if (regimeEl) regimeEl.textContent = "Synthesizing Institutional Quant Playbook...";
-    if (biasEl) biasEl.textContent = "Analyzing Greeks...";
+    if (biasEl) biasEl.textContent = "Analyzing Greeks & Volatility...";
+    if (recEl) recEl.textContent = "Analyzing optimal structure...";
 
+    window._aiStrategistLoading = true;
     try {
-        const resp = await fetch(`/api/straddle/ai_strategist?underlying=${encodeURIComponent(und)}&timeframe=${encodeURIComponent(tf)}`);
+        const timeoutId = setTimeout(() => {
+            if (window._strategistAbortController && currentReqId === window._strategistRequestId) {
+                try { window._strategistAbortController.abort(); } catch (e) {}
+            }
+        }, 12000);
+
+        const url = `/api/straddle/ai_strategist?underlying=${encodeURIComponent(und)}&timeframe=${encodeURIComponent(tf)}&force=${force ? '1' : '0'}&_t=${Date.now()}`;
+        const resp = await fetch(url, { signal: currentSignal });
+        clearTimeout(timeoutId);
+
+        if (currentReqId !== window._strategistRequestId) return;
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
         const data = await resp.json();
+        if (currentReqId !== window._strategistRequestId) return;
+
         if (data && data.success && data.report) {
             const r = data.report;
             window._aiStrategistData = r;
 
+            if (srcBadge) {
+                srcBadge.textContent = r.source || "Institutional Quant Synthesis Engine";
+            }
             if (regimeEl) regimeEl.textContent = r.market_regime || "Normal Market Conditions";
             if (biasEl) biasEl.textContent = r.bias || "DELTA-NEUTRAL";
             if (recEl) recEl.textContent = r.strategy_recommendation || "Delta-Neutral Straddle / Strangle";
@@ -17629,14 +17817,32 @@ async function fetchAIStrategist() {
                 renderCandlestickCanvas();
             }
         } else {
-            if (recEl) recEl.textContent = "Notice: Unable to generate strategist report";
+            handleStrategistError((data && data.error) ? data.error : "Unable to generate playbook");
         }
     } catch (e) {
-        console.error("Error fetching AI Strategist report:", e);
-        if (recEl) recEl.textContent = "Strategist connection error";
+        if (e.name === "AbortError" && currentReqId !== window._strategistRequestId) {
+            return;
+        }
+        console.warn("Notice during AI Strategist synthesis:", e);
+        handleStrategistError(e.name === "AbortError" ? "Request Timeout" : "Sync notice");
+    } finally {
+        if (currentReqId === window._strategistRequestId) {
+            window._aiStrategistLoading = false;
+        }
     }
 }
 window.fetchAIStrategist = fetchAIStrategist;
+
+function handleStrategistError(msg) {
+    const regimeEl = document.getElementById("aiStrategistRegime");
+    const biasEl = document.getElementById("aiStrategistBias");
+    const recEl = document.getElementById("aiStrategistRecommendation");
+    if (regimeEl) regimeEl.textContent = "Tactical Market Assessment";
+    if (biasEl) biasEl.textContent = "DELTA-NEUTRAL";
+    if (recEl) {
+        recEl.innerHTML = `<span style="color:#fb7185;">Notice: ${msg || "Strategist paused"} • </span><a href="javascript:void(0)" onclick="fetchAIStrategist(true)" style="color:#6ee7b7; font-weight:700; text-decoration:underline;">Click to Re-Analyze</a>`;
+    }
+}
 
 // Safe numerical clamp helper
 function clamp(val, min, max) {
@@ -17651,9 +17857,23 @@ window._chartDragState = null;
 window._chartIsDragging = false;
 window._chartData = null;
 
+function getValidForecastCandles() {
+    if (!window._kronosForecastActive || !window._kronosForecastData || !Array.isArray(window._kronosForecastData.candles)) {
+        return [];
+    }
+    const curAsset = window._activeChartUnderlying || "NIFTY";
+    const curTf = window._activeChartTimeframe || "15m";
+    const fAsset = window._kronosForecastData.underlying;
+    const fTf = window._kronosForecastData.timeframe;
+    if (fAsset && fAsset !== curAsset) return [];
+    if (fTf && fTf !== curTf) return [];
+    return window._kronosForecastData.candles;
+}
+window.getValidForecastCandles = getValidForecastCandles;
+
 function chartZoomIn() {
-    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
-        ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+    const validForecast = getValidForecastCandles();
+    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + validForecast.length;
     if (totalBars <= 0) return;
     const currentZoom = window._chartZoomCount || 80;
     const newZoom = Math.max(15, Math.round(currentZoom * 0.75));
@@ -17673,8 +17893,8 @@ function chartZoomIn() {
 window.chartZoomIn = chartZoomIn;
 
 function chartZoomOut() {
-    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) +
-        ((window._kronosForecastActive && window._kronosForecastData && window._kronosForecastData.candles) ? window._kronosForecastData.candles.length : 0);
+    const validForecast = getValidForecastCandles();
+    const totalBars = (window._activeCandles ? window._activeCandles.length : 0) + validForecast.length;
     if (totalBars <= 0) return;
     const currentZoom = window._chartZoomCount || 80;
     const maxZoomAllowed = Math.min(Math.max(30, totalBars + 6), 450);
@@ -17739,7 +17959,7 @@ function renderCandlestickCanvas() {
     ctx.fillRect(0, 0, w, h);
 
     const baseCandles = window._activeCandles || [];
-    const forecastCandles = (window._kronosForecastActive && window._kronosForecastData && Array.isArray(window._kronosForecastData.candles)) ? window._kronosForecastData.candles : [];
+    const forecastCandles = getValidForecastCandles();
 
     // Combine base and forecast candles with explicit indexing
     const allCandles = [];
