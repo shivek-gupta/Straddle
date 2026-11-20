@@ -73,7 +73,7 @@
                 }
             }
             if (this.ctx && this.ctx.state === "suspended") {
-                this.ctx.resume().catch(() => {});
+                this.ctx.resume().catch(() => { });
             }
             return this.ctx;
         }
@@ -84,7 +84,7 @@
                 if (ctx && ctx.state !== "closed") {
                     ctx.resume().then(() => {
                         this.isUnlocked = true;
-                    }).catch(() => {});
+                    }).catch(() => { });
                 }
                 // Remove listeners once unlocked
                 ["click", "keydown", "touchstart", "pointerdown"].forEach(evt => {
@@ -145,7 +145,7 @@
             const ctx = this.getAudioContext();
             if (!ctx) return;
             if (ctx.state === "suspended") {
-                ctx.resume().catch(() => {});
+                ctx.resume().catch(() => { });
             }
 
             try {

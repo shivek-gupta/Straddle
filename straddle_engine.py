@@ -987,6 +987,24 @@ class StraddleManager:
             logger.warning(f"Note loading instruments on init: {e}")
         self._start_runner()
 
+        # Auto-heal partially executed strategies from persistent disk state on startup (e.g. on service restart)
+        def _startup_auto_heal():
+            time.sleep(3.0)  # Wait for broker connection, authentication, and live feeds to stabilize
+            try:
+                for s in self._strategies:
+                    sid = s.get("strategy_id")
+                    s_pos = s.get("positions", [])
+                    has_open = any(p.get("status") == "OPEN" and int(p.get("quantity", 0) or 0) > 0 for p in s_pos)
+                    has_err = any(p.get("status") == "ERROR" for p in s_pos)
+                    if has_open and has_err:
+                        logger.info(f"[Startup Auto-Heal] Strategy '{s.get('name')}' ({sid}) has partially executed positions (1+ open, 1+ error). Automatically recovering remaining legs...")
+                        self._log_event(f"[{s.get('name')}] 🛡️ [Startup Auto-Heal] Partially executed strategy detected (1+ open, 1+ error). Auto-recovering failed/held legs...", level="WARNING")
+                        self.retry_failed_legs(strategy_id=sid)
+            except Exception as e_sh:
+                logger.error(f"[Startup Auto-Heal] Exception during auto-recovery: {e_sh}")
+
+        threading.Thread(target=_startup_auto_heal, daemon=True).start()
+
     # ==========================================================
     # Storage & Persistence
     # ==========================================================
@@ -6755,8 +6773,16 @@ class StraddleManager:
                 buy_results = []
                 for b_idx, b_item in enumerate(buy_legs):
                     if b_idx > 0:
-                        time.sleep(0.06)
-                    buy_results.append(_place_single(b_item))
+                        time.sleep(0.20)
+                    res_p = _place_single(b_item)
+                    # If buy hedge failed with a transient error (e.g. error from core), AUTO-RETRY it immediately!
+                    if (not res_p or res_p.get("status") == "ERROR") and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
+                        err_txt = (res_p.get("error_message") or res_p.get("error") or "").lower()
+                        if any(k in err_txt for k in ("core", "try again", "lock", "concurrency", "timeout", "timed out")):
+                            self._log_event(f"[{strat.get('name')}] Transient broker error on hedge ({err_txt}). Pausing 0.5s and auto-retrying hedge placement...", level="WARNING")
+                            time.sleep(0.5)
+                            res_p = _place_single(b_item)
+                    buy_results.append(res_p)
                 for pos in buy_results:
                     if pos:
                         new_positions.append(pos)
@@ -6808,8 +6834,8 @@ class StraddleManager:
                 if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
                     all_buys_filled = True
                     unfilled_reasons = []
-                    # Ultra-low latency 10ms polling for instant confirmation of filled hedge orders
-                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 6.0, 0.01): oid for oid in buy_oids}
+                    # Safe 150ms polling for instant confirmation of filled hedge orders without hitting broker rate limit
+                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.15): oid for oid in buy_oids}
                     for fut in concurrent.futures.as_completed(v_futs):
                         res = fut.result()
                         if not res.get("filled"):
@@ -7201,9 +7227,9 @@ class StraddleManager:
         # Live Broker fill synchronization and hedge guard
         placed_oid = str(order_res.get("order_id") or "")
         if order_res.get("success") and exec_mode == "LIVE_BROKER" and placed_oid and not placed_oid.startswith("PAPER_") and not placed_oid.startswith("ORD_"):
-            # Generous timeout for live Kotak Neo fills: 5.0s for BUY hedges, 10.0s for main SELL legs
-            timeout_sec = 5.0 if is_buy_hedge else 10.0
-            fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.01)
+            # Generous timeout for live Kotak Neo fills: 8.0s for BUY hedges, 12.0s for main SELL legs
+            timeout_sec = 8.0 if is_buy_hedge else 12.0
+            fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.15)
 
             fill_err_lower = str(fill_res.get("error") or "").lower()
             is_timeout = (
@@ -7242,7 +7268,7 @@ class StraddleManager:
                     )
                     r_oid = str(retry_res.get("order_id") or "")
                     if retry_res.get("success") and r_oid and not r_oid.startswith("PAPER_") and not r_oid.startswith("ORD_"):
-                        r_fill = broker.wait_for_order_fill(r_oid, timeout_sec=timeout_sec, poll_interval_sec=0.01)
+                        r_fill = broker.wait_for_order_fill(r_oid, timeout_sec=timeout_sec, poll_interval_sec=0.15)
                         if r_fill.get("filled"):
                             order_res["order_id"] = r_oid
                             order_res["price"] = float(r_fill.get("price") or clamped_p)
@@ -7275,7 +7301,7 @@ class StraddleManager:
                     )
                     r_oid = str(retry_res.get("order_id") or "")
                     if retry_res.get("success") and r_oid and not r_oid.startswith("PAPER_") and not r_oid.startswith("ORD_"):
-                        r_fill = broker.wait_for_order_fill(r_oid, timeout_sec=timeout_sec, poll_interval_sec=0.01)
+                        r_fill = broker.wait_for_order_fill(r_oid, timeout_sec=timeout_sec, poll_interval_sec=0.15)
                         if r_fill.get("filled"):
                             order_res["order_id"] = r_oid
                             order_res["price"] = float(r_fill.get("price") or clamped_p)
@@ -8155,7 +8181,7 @@ class StraddleManager:
                                     f"[{strat.get('name')}] Hedge secured! Placing parent short leg '{p_contract['trading_symbol']}'...",
                                     level="INFO"
                                 )
-                                time.sleep(0.08)
+                                time.sleep(0.20)
                                 parent_leg_pos = self._place_leg_entry_order(
                                     parent_cfg, p_contract, mult, broker, adv,
                                     strategy=strat, entry_reason="Parent Short Entry (Hedge Secured)"
@@ -8183,7 +8209,14 @@ class StraddleManager:
                                     o_h_open = any(
                                         p.get("status") == "OPEN" and (
                                             p.get("parent_leg_id") == other_cfg.get("id")
-                                            or (p.get("is_associated_hedge") and p.get("option_type") == o_opt)
+                                            or (
+                                                (p.get("is_associated_hedge") or str(p.get("id", "")).startswith("hedge_"))
+                                                and (
+                                                    p.get("hedge_parent_type") == o_opt
+                                                    or p.get("option_type") == o_opt
+                                                    or o_opt in str(p.get("symbol", "")).upper()
+                                                )
+                                            )
                                         )
                                         for p in positions
                                     )
@@ -8197,7 +8230,7 @@ class StraddleManager:
                                         )
                                         if o_contract:
                                             self._log_event(f"[{strat.get('name')}] Prerequisite hedge active for {other_pos.get('symbol')}! Placing short sell leg...", level="INFO")
-                                            time.sleep(0.08)
+                                            time.sleep(0.20)
                                             o_pos = self._place_leg_entry_order(
                                                 other_cfg, o_contract, mult, broker, adv,
                                                 strategy=strat, entry_reason="Short Entry (Prerequisite Hedge Secured)"
@@ -15374,6 +15407,29 @@ class StraddleManager:
                 self._last_orphan_hedge_check_ts = now_ts
                 self._cleanup_orphan_hedges(broker)
 
+        # Auto-Heal Partially Executed Strategies (e.g. 1+ open legs with remaining error legs)
+        if mode == "LIVE_BROKER" and not self._stop_event.is_set():
+            for s in self._strategies:
+                s_pos = s.get("positions", [])
+                has_open_leg = any(p.get("status") == "OPEN" and int(p.get("quantity", 0) or 0) > 0 for p in s_pos)
+                has_err_leg = any(p.get("status") == "ERROR" for p in s_pos)
+                if has_open_leg and has_err_leg:
+                    sid = s.get("strategy_id")
+                    last_heal_t = getattr(self, f"_last_heal_ts_{sid}", 0.0)
+                    if (now_ts - last_heal_t) > 15.0:
+                        setattr(self, f"_last_heal_ts_{sid}", now_ts)
+                        self._log_event(
+                            f"[{s.get('name')}] 🛡️ [AUTO-HEAL] Strategy has 1+ OPEN legs but remaining legs in ERROR. Auto-recovering held legs in background...",
+                            level="WARNING"
+                        )
+                        def _run_bg_heal(target_sid):
+                            try:
+                                time.sleep(0.5)
+                                self.retry_failed_legs(strategy_id=target_sid)
+                            except Exception as e_h:
+                                logger.error(f"[Auto-Heal] Error recovering strategy {target_sid}: {e_h}")
+                        threading.Thread(target=_run_bg_heal, args=(sid,), daemon=True).start()
+
         all_active_keys = set()
         with _ENGINE_LOCK:
             active_strat = self.get_strategy(self._active_strategy_id)
@@ -15388,7 +15444,7 @@ class StraddleManager:
             self._state["last_tick_time"] = now_ist_str()
             
             is_terminated = (self._state.get("status") == "TERMINATED")
-            any_enabled = any(s.get("enabled", False) for s in self._strategies)
+            any_enabled = any(s.get("enabled", False) or any(p.get("status") == "OPEN" for p in s.get("positions", [])) for s in self._strategies)
             self._state["algo_running"] = (not is_terminated and any_enabled)
             self._state["live_feed_running"] = True
             self._state["order_api_running"] = True

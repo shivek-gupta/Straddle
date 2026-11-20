@@ -31,7 +31,7 @@ _TAG_SEQ = 0
 _TAG_LOCK = threading.Lock()
 _ORDER_DISPATCH_LOCK = threading.Lock()
 _LAST_ORDER_DISPATCH_TIME = 0.0
-_MIN_ORDER_SPACING_SEC = 0.08  # 80ms minimum spacing between order dispatches to Kotak Neo to prevent core RMS lock collisions
+_MIN_ORDER_SPACING_SEC = 0.20  # 200ms minimum spacing between order dispatches to Kotak Neo to prevent core RMS lock collisions
 
 logger = logging.getLogger("kotak_broker_adapter")
 logger.setLevel(logging.INFO)
@@ -452,17 +452,17 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     logger.debug(f"Note fetching live quote for MKT order conversion: {e_q}")
 
             if clean_tt == "B":
-                # Marketable Buy limit order: Generous buffer so order executes immediately without rejection
+                # Marketable Buy limit order: Scaled buffer so order executes immediately without rejection or LPP breach
                 if p_flt > 0:
-                    buf = max(2.0, min(15.0, p_flt * 0.03))
+                    buf = 0.30 if p_flt < 5.0 else (0.50 if p_flt < 20.0 else max(1.0, min(5.0, p_flt * 0.03)))
                     mkt_price = p_flt + buf
                 else:
-                    mkt_price = 100.0  # Safe non-zero fallback instead of 5.0
+                    mkt_price = 5.0  # Safe non-zero fallback instead of 100.0
                 clean_price = str(round_to_tick(max(0.05, mkt_price), tick_size=tick_size))
             else:
-                # Marketable Sell limit order: Generous buffer so order executes immediately without rejection
+                # Marketable Sell limit order: Scaled buffer so order executes immediately without rejection or LPP breach
                 if p_flt > 0:
-                    buf = max(2.0, min(15.0, p_flt * 0.03))
+                    buf = 0.30 if p_flt < 5.0 else (0.50 if p_flt < 20.0 else max(1.0, min(5.0, p_flt * 0.03)))
                     mkt_price = max(0.05, p_flt - buf)
                 else:
                     mkt_price = 0.05
@@ -480,7 +480,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     except Exception:
                         pass
                 if p_flt <= 0:
-                    p_flt = 100.0 if clean_tt == "B" else 0.05
+                    p_flt = 5.0 if clean_tt == "B" else 0.05
             clean_price = str(round_to_tick(max(0.05, p_flt), tick_size=tick_size))
         else:
             clean_price = "0"
@@ -488,12 +488,19 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         clean_trig = str(round_to_tick(trigger_price, tick_size=tick_size)) if trigger_price and trigger_price > 0 else "0"
         clean_qty = str(int(quantity))
 
-        global _TAG_SEQ
-        with _TAG_LOCK:
-            _TAG_SEQ = (_TAG_SEQ + 1) % 1000000
-            seq_val = _TAG_SEQ
-        tag_prefix = str(tag or 'std')[:6]
-        unique_tag = f"{tag_prefix}_{seq_val:06d}"
+        # Kotak Neo API Issue #30 & RMS Tag Uniqueness Protection:
+        # Kotak Neo's backend core validation strictly enforces that if a 'tag' (ig parameter) is passed,
+        # it must be globally unique across all orders. Hardcoded or sequential tags after restart collide
+        # and cause Kotak Neo RMS to reject subsequent legs with 'error from core' (stCode: 32).
+        # When tag is omitted or None, Kotak Neo completely bypasses tag validation.
+        # If tag is passed and retry_depth == 0, generate an epoch-unique alphanumeric tag.
+        # On ANY retry (retry_depth > 0) or error recovery, ALWAYS pass tag=None to guarantee 100% core acceptance!
+        if tag and retry_depth == 0:
+            clean_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(tag))[:6] or "algo"
+            epoch_sub = int(time.time() * 1000) % 1000000
+            unique_tag = f"{clean_prefix}{epoch_sub:06d}"
+        else:
+            unique_tag = None
 
         t_order_call_start = time.perf_counter()
         try:
@@ -605,14 +612,22 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     "gateway timeout", "internal server error", "503", "504"
                 ))
                 if is_transient_core and retry_depth < 3:
-                    backoff = 0.15 * (retry_depth + 1)
+                    backoff = 0.35 * (retry_depth + 1)
                     logger.warning(
                         f"[Kotak Neo] Transient broker core error: '{err_msg}'. "
-                        f"Pausing {backoff:.2f}s and auto-retrying order slice with active session (attempt {retry_depth + 1}/3)..."
+                        f"Pausing {backoff:.2f}s and auto-retrying order slice with tag=None (attempt {retry_depth + 1}/3)..."
                     )
                     time.sleep(backoff)
+                    retry_cli = client
+                    if retry_depth == 2:
+                        try:
+                            fresh_client = kotak_auth.get_authenticated_client(force=True)
+                            if fresh_client:
+                                retry_cli = fresh_client
+                        except Exception:
+                            pass
                     return self._place_single_order(
-                        client=client,
+                        client=retry_cli,
                         canonical_symbol=canonical_symbol,
                         transaction_type=transaction_type,
                         quantity=quantity,
@@ -620,7 +635,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         order_type=order_type,
                         price=price,
                         trigger_price=trigger_price,
-                        tag=tag,
+                        tag=None,  # Force tag=None on retry to guarantee bypassing Issue #30 tag conflict!
                         segment=segment,
                         tick_size=tick_size,
                         retry_depth=retry_depth + 1,
@@ -710,25 +725,6 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 logger.warning(f"[Kotak Neo] Order slice rejected: {err_msg} (res: {res})")
                 return {"success": False, "error": err_msg, "data": res}
 
-            # Ultra-low latency execution: Return immediately upon OMS order_id acknowledgment (~50-80ms)
-            # Background worker verifies asynchronous RMS status without stalling order dispatch
-            def _async_verify_rms(oid, cli):
-                try:
-                    time.sleep(0.15)
-                    hist = cli.order_history(order_id=str(oid))
-                    d = hist.get("data", {}) if isinstance(hist, dict) else {}
-                    items = d.get("data", []) if isinstance(d, dict) else (hist if isinstance(hist, list) else [])
-                    if items and isinstance(items, list):
-                        latest = items[0]
-                        st = str(latest.get("ordSt", "")).lower()
-                        if st in ("rejected", "cancelled"):
-                            rej_msg = latest.get("rejRsn") or latest.get("rejLongDesc") or latest.get("rejShortDesc") or "Order rejected by broker RMS"
-                            logger.warning(f"[Kotak Neo] Async RMS notice: Order {oid} rejected: {rej_msg}")
-                except Exception as e_bg:
-                    logger.debug(f"[Kotak Neo] Async RMS check note: {e_bg}")
-
-            threading.Thread(target=_async_verify_rms, args=(order_id, client), daemon=True).start()
-
             return {
                 "success": True,
                 "status": "OPEN",
@@ -757,7 +753,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         order_type=order_type,
                         price=price,
                         trigger_price=trigger_price,
-                        tag=tag,
+                        tag=None,
                         segment=segment,
                         tick_size=tick_size,
                         retry_depth=retry_depth + 1,
@@ -765,9 +761,18 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                         instrument_key=instrument_key
                     )
             elif any(k in err_str.lower() for k in ("error from core", "from core", "timeout", "connection reset", "broken pipe")) and retry_depth < 3:
-                time.sleep(0.15 * (retry_depth + 1))
+                backoff = 0.35 * (retry_depth + 1)
+                time.sleep(backoff)
+                retry_cli = client
+                if retry_depth == 2:
+                    try:
+                        fresh_client = kotak_auth.get_authenticated_client(force=True)
+                        if fresh_client:
+                            retry_cli = fresh_client
+                    except Exception:
+                        pass
                 return self._place_single_order(
-                    client=client,
+                    client=retry_cli,
                     canonical_symbol=canonical_symbol,
                     transaction_type=transaction_type,
                     quantity=quantity,
@@ -775,7 +780,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     order_type=order_type,
                     price=price,
                     trigger_price=trigger_price,
-                    tag=tag,
+                    tag=None,
                     segment=segment,
                     tick_size=tick_size,
                     retry_depth=retry_depth + 1,
@@ -1182,6 +1187,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             }
 
         start_t = time.time()
+        # Enforce minimum 150ms poll spacing to respect Kotak Neo rate limits and prevent socket exhaustion
+        poll_interval_sec = max(0.15, float(poll_interval_sec or 0.15))
         logger.debug(f"[Kotak Neo] Polling order {oid_str} until FILLED (timeout={timeout_sec}s, poll={poll_interval_sec}s)...")
 
         while time.time() - start_t < timeout_sec:
