@@ -12,7 +12,7 @@
     // Default Configuration
     const DEFAULT_CONFIG = {
         enabled: true,
-        volume: 0.75, // 0.0 to 1.0
+        volume: 0.85, // 0.0 to 1.0
         categories: {
             target: true,     // Target Hit / Win
             stoploss: true,   // Stop Loss Triggered
@@ -144,6 +144,9 @@
 
             const ctx = this.getAudioContext();
             if (!ctx) return;
+            if (ctx.state === "suspended") {
+                ctx.resume().catch(() => {});
+            }
 
             try {
                 switch (type) {

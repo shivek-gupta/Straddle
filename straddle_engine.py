@@ -638,6 +638,273 @@ PRESET_BLACKLIST: Set[str] = {
     'live nifty test strategy', 'straddle mon 244'
 }
 
+DEFAULT_USER_STRATEGIES: List[Dict[str, Any]] = [
+    {
+        "strategy_id": "strat_nifty",
+        "name": "nifty",
+        "enabled": False,
+        "execution_mode": "LIVE_BROKER",
+        "client_id": "Kotak Neo Live",
+        "schedule_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+        "underlying": "NIFTY",
+        "underlying_price_type": "Spot",
+        "trade_type": "Intraday",
+        "multiplier": 1,
+        "start_time": "09:15:56",
+        "end_time": "15:29:50",
+        "legs": [
+            {
+                "id": "leg_1",
+                "side": "Sell",
+                "product": "NRML",
+                "strike_selection": "ATM",
+                "option_type": "CE",
+                "lots": 1,
+                "target_type": "TGT: %",
+                "target_value": 45.0,
+                "target_re_execute_type": "RE EXECUTE",
+                "target_re_execute_count": 6,
+                "sl_type": "SL: %",
+                "sl_value": 66.0,
+                "tsl_type": "None",
+                "tsl_profit_pts": 0.0,
+                "tsl_trail_pts": 0.0,
+                "sl_re_execute_type": "RE EXECUTE",
+                "sl_re_execute_count": 1,
+                "action": "Square off leg",
+                "underlying": "NIFTY",
+                "expiry": "Weekly",
+                "associated_hedge": {
+                    "enabled": True,
+                    "initial_otm": 20,
+                    "max_distance_threshold": 22,
+                    "reset_otm": 20,
+                    "exit_with_parent": True
+                },
+                "journey": {},
+                "associated_hedge_id": "hedge_leg_1",
+                "has_associated_hedge": True
+            },
+            {
+                "id": "leg_2",
+                "side": "Sell",
+                "product": "NRML",
+                "strike_selection": "ATM",
+                "option_type": "PE",
+                "lots": 1,
+                "target_type": "TGT: %",
+                "target_value": 45.0,
+                "target_re_execute_type": "RE EXECUTE",
+                "target_re_execute_count": 6,
+                "sl_type": "SL: %",
+                "sl_value": 66.0,
+                "tsl_type": "None",
+                "tsl_profit_pts": 0.0,
+                "tsl_trail_pts": 0.0,
+                "sl_re_execute_type": "RE EXECUTE",
+                "sl_re_execute_count": 1,
+                "action": "Square off leg",
+                "underlying": "NIFTY",
+                "expiry": "Weekly",
+                "associated_hedge": {
+                    "enabled": True,
+                    "initial_otm": 20,
+                    "max_distance_threshold": 22,
+                    "reset_otm": 20,
+                    "exit_with_parent": True
+                },
+                "journey": {},
+                "associated_hedge_id": "hedge_leg_2",
+                "has_associated_hedge": True
+            }
+        ],
+        "toggles": {
+            "move_sl_to_cost": False,
+            "wait_and_trade": False,
+            "re_entry_active": True,
+            "range_breakout": False,
+            "dynamic_hedging": True
+        },
+        "mtm_target": {
+            "enabled": True,
+            "type": "Lock and Trail",
+            "profit_reaches": 100000.0,
+            "lock_profit": 80000.0,
+            "trail_step": 8000.0,
+            "trail_val": 5000.0,
+            "value": 10000.0,
+            "re_entry": "None",
+            "action": "Square off all positions"
+        },
+        "mtm_stoploss": {
+            "enabled": True,
+            "type": "None",
+            "value": -5000.0,
+            "action": "Square off all positions"
+        },
+        "premium_matching": {
+            "mode": "No matching of premiums",
+            "max_difference": 0.0,
+            "close_to": 0.0,
+            "range_min": 0.0,
+            "range_max": 0.0,
+            "combined_premium_type": "None",
+            "combined_premium_value": 0.0,
+            "condition_frequency": "LTP (Continuous Monitoring)"
+        },
+        "advanced": {
+            "sl_order_placement": "Place in advance",
+            "target_order_placement": "Place in advance"
+        },
+        "advanced_settings": {
+            "sl_order_placement": "Place in advance",
+            "target_order_placement": "Place in advance"
+        },
+        "status": "STOPPED",
+        "mtm": 0.0,
+        "entry_error": "-",
+        "exit_errors": "-",
+        "positions": [],
+        "multiplier_type": "MANUAL",
+        "cushion_margin": 15000.0,
+        "available_capital": 1400000.0,
+        "broker_margin_per_lot": 175369.87,
+        "effective_multiplier": 1
+    },
+    {
+        "strategy_id": "strat_jkl",
+        "name": "JKL",
+        "enabled": False,
+        "execution_mode": "LIVE_BROKER",
+        "client_id": "Kotak Neo Live",
+        "schedule_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+        "underlying": "NIFTY",
+        "underlying_price_type": "Spot",
+        "trade_type": "Intraday",
+        "multiplier": 1,
+        "start_time": "09:15:00",
+        "end_time": "15:29:50",
+        "legs": [
+            {
+                "id": "leg_1",
+                "side": "Sell",
+                "product": "NRML",
+                "strike_selection": "ATM",
+                "option_type": "CE",
+                "lots": 1,
+                "target_type": "TGT: %",
+                "target_value": 15.0,
+                "target_re_execute_type": "RE EXECUTE",
+                "target_re_execute_count": 6,
+                "sl_type": "SL: %",
+                "sl_value": 15.0,
+                "tsl_type": "None",
+                "tsl_profit_pts": 0.0,
+                "tsl_trail_pts": 0.0,
+                "sl_re_execute_type": "RE EXECUTE",
+                "sl_re_execute_count": 3,
+                "action": "Square off leg",
+                "underlying": "NIFTY",
+                "expiry": "Weekly",
+                "associated_hedge": {
+                    "enabled": True,
+                    "initial_otm": 20,
+                    "max_distance_threshold": 22,
+                    "reset_otm": 20,
+                    "exit_with_parent": True
+                },
+                "journey": {},
+                "associated_hedge_id": "hedge_leg_1",
+                "has_associated_hedge": True
+            },
+            {
+                "id": "leg_2",
+                "side": "Sell",
+                "product": "NRML",
+                "strike_selection": "ATM",
+                "option_type": "PE",
+                "lots": 1,
+                "target_type": "TGT: %",
+                "target_value": 15.0,
+                "target_re_execute_type": "RE EXECUTE",
+                "target_re_execute_count": 6,
+                "sl_type": "SL: %",
+                "sl_value": 15.0,
+                "tsl_type": "None",
+                "tsl_profit_pts": 0.0,
+                "tsl_trail_pts": 0.0,
+                "sl_re_execute_type": "RE EXECUTE",
+                "sl_re_execute_count": 3,
+                "action": "Square off leg",
+                "underlying": "NIFTY",
+                "expiry": "Weekly",
+                "associated_hedge": {
+                    "enabled": True,
+                    "initial_otm": 20,
+                    "max_distance_threshold": 22,
+                    "reset_otm": 20,
+                    "exit_with_parent": True
+                },
+                "journey": {},
+                "associated_hedge_id": "hedge_leg_2",
+                "has_associated_hedge": True
+            }
+        ],
+        "toggles": {
+            "move_sl_to_cost": False,
+            "wait_and_trade": False,
+            "re_entry_active": True,
+            "range_breakout": False,
+            "dynamic_hedging": True
+        },
+        "mtm_target": {
+            "enabled": True,
+            "type": "Lock and Trail",
+            "profit_reaches": 100000.0,
+            "lock_profit": 80000.0,
+            "trail_step": 8000.0,
+            "trail_val": 5000.0,
+            "value": 10000.0,
+            "re_entry": "None",
+            "action": "Square off all positions"
+        },
+        "mtm_stoploss": {
+            "enabled": True,
+            "type": "None",
+            "value": -5000.0,
+            "action": "Square off all positions"
+        },
+        "premium_matching": {
+            "mode": "No matching of premiums",
+            "max_difference": 0.0,
+            "close_to": 0.0,
+            "range_min": 0.0,
+            "range_max": 0.0,
+            "combined_premium_type": "None",
+            "combined_premium_value": 0.0,
+            "condition_frequency": "LTP (Continuous Monitoring)"
+        },
+        "advanced": {
+            "sl_order_placement": "Place in advance",
+            "target_order_placement": "Place in advance"
+        },
+        "advanced_settings": {
+            "sl_order_placement": "Place in advance",
+            "target_order_placement": "Place in advance"
+        },
+        "status": "READY",
+        "mtm": 0.0,
+        "entry_error": "-",
+        "exit_errors": "-",
+        "positions": [],
+        "multiplier_type": "MANUAL",
+        "cushion_margin": 15000.0,
+        "available_capital": 1400000.0,
+        "broker_margin_per_lot": 175369.87,
+        "effective_multiplier": 1
+    }
+]
+
 
 class StraddleManager:
     """
@@ -1032,7 +1299,19 @@ class StraddleManager:
                     and str(s.get("name", "")).strip().lower() not in PRESET_BLACKLIST
                 ]
 
-            # Save strategies cleanly without seeding unwanted default presets
+            # Infallible self-healing: Guarantee core user strategies (nifty and JKL) ALWAYS exist!
+            existing_ids = {str(s.get("strategy_id", "")).strip().lower() for s in self._strategies if isinstance(s, dict)}
+            existing_names = {str(s.get("name", "")).strip().lower() for s in self._strategies if isinstance(s, dict)}
+            for def_strat in DEFAULT_USER_STRATEGIES:
+                d_id = str(def_strat.get("strategy_id", "")).strip().lower()
+                d_name = str(def_strat.get("name", "")).strip().lower()
+                if d_id not in existing_ids and d_name not in existing_names:
+                    logger.info(f"Auto-restoring missing core user strategy: {def_strat.get('name')}")
+                    self._strategies.append(copy.deepcopy(def_strat))
+                    existing_ids.add(d_id)
+                    existing_names.add(d_name)
+
+            # Save strategies cleanly with core user strategies guaranteed
             self._save_strategies()
 
             # Ensure unique names and valid default timings across all strategies
@@ -11143,13 +11422,82 @@ class StraddleManager:
 
                 active_hedge = None
                 with _ENGINE_LOCK:
-                    active_hedge = next(
-                        (p for p in strat.get("positions", []) 
-                         if (p.get("parent_leg_id") == parent_id or p.get("id") == pos.get("associated_hedge_id"))
-                         and p.get("status") == "OPEN" 
-                         and p.get("is_associated_hedge")), 
-                        None
-                    )
+                    for p in strat.get("positions", []):
+                        if p.get("status") not in ("OPEN", "LIVE OPEN"):
+                            continue
+                        is_h = bool(
+                            p.get("is_associated_hedge")
+                            or "hedge" in str(p.get("id", "")).lower()
+                            or bool(p.get("hedge_parent_type"))
+                            or str(p.get("side", "")).upper() == "BUY"
+                        )
+                        if not is_h:
+                            continue
+                        p_opt = (p.get("hedge_parent_type") or p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper()
+                        if p_opt != opt_type.upper():
+                            continue
+                        active_hedge = p
+                        break
+
+                # If active hedge was not tracked in memory, check broker directly before placing any new order
+                if not active_hedge and hedge_enabled and mode == "LIVE_BROKER" and self.is_broker_connected():
+                    try:
+                        raw_b_pos = broker.get_positions(force=True) or []
+                        for bp in raw_b_pos:
+                            b_net = int(bp.get("net_qty") or bp.get("quantity") or 0)
+                            if b_net <= 0:
+                                continue
+                            bp_sym = bp.get("trading_symbol") or bp.get("symbol") or ""
+                            bp_opt = "PE" if (" PE" in bp_sym.upper() or bp_sym.upper().endswith("PE")) else ("CE" if (" CE" in bp_sym.upper() or bp_sym.upper().endswith("CE")) else "")
+                            if bp_opt == opt_type.upper() and und.upper() in bp_sym.upper():
+                                bp_stk = 0.0
+                                for part in bp_sym.split():
+                                    if part.isdigit() and len(part) >= 4:
+                                        bp_stk = float(part)
+                                        break
+                                active_hedge = {
+                                    "id": f"hedge_adopted_{int(time.time()*1000)}",
+                                    "leg_id": f"hedge_{leg_cfg.get('id', 'leg')}",
+                                    "status": "OPEN",
+                                    "side": "BUY",
+                                    "product": bp.get("product", "NRML"),
+                                    "symbol": format_trading_symbol_display(bp_sym),
+                                    "trading_symbol": bp_sym,
+                                    "instrument_key": bp.get("instrument_key", ""),
+                                    "strike_price": bp_stk,
+                                    "option_type": opt_type,
+                                    "lots": abs(b_net) // max(1, int(bp.get("lot_size", 65))),
+                                    "lot_size": int(bp.get("lot_size", 65)),
+                                    "quantity": abs(b_net),
+                                    "entry_qty": abs(b_net),
+                                    "avg_ent_price": float(bp.get("avg_price") or bp.get("buy_avg") or 0.0),
+                                    "ltp": float(bp.get("ltp") or bp.get("last_price") or 0.0),
+                                    "mtm": float(bp.get("pnl") or 0.0),
+                                    "entry_time": now_ist_str(),
+                                    "_entry_epoch_ts": time.time(),
+                                    "target_type": "None",
+                                    "target_value": 0.0,
+                                    "sl_type": "None",
+                                    "sl_value": 0.0,
+                                    "is_associated_hedge": True,
+                                    "parent_leg_id": parent_id,
+                                    "hedge_parent_type": opt_type,
+                                    "entry_reason": f"HEDGE ({opt_type}) [Adopted from Kotak Neo]",
+                                    "strategy_id": strat.get("strategy_id"),
+                                    "strategy_name": strat.get("name"),
+                                    "date": today_ist_str(),
+                                }
+                                with _ENGINE_LOCK:
+                                    strat.setdefault("positions", []).append(active_hedge)
+                                    if self._active_strategy_id == strat.get("strategy_id"):
+                                        self._state["positions"] = strat.get("positions", [])
+                                self._log_event(
+                                    f"[Hedge Reconciled] 🛡️ Found existing open broker hedge '{bp_sym}' on Kotak Neo. Linked to re-entry short leg.",
+                                    level="INFO"
+                                )
+                                break
+                    except Exception as e_bp_chk:
+                        logger.warning(f"Error checking broker for existing hedge: {e_bp_chk}")
 
                 if active_hedge and hedge_enabled:
                     step = STRIKE_STEPS.get(und, 50)
@@ -11166,8 +11514,8 @@ class StraddleManager:
                                 curr_hedge_strike = float(p_str)
                                 break
                     strike_dist = (abs(new_short_strike - curr_hedge_strike) / step) if curr_hedge_strike > 0 else 0.0
-                    max_thresh = int(h_cfg.get("max_distance_threshold", 22))
-                    reset_otm = int(h_cfg.get("reset_otm", 20))
+                    max_thresh = int(h_cfg.get("max_distance_threshold") or h_cfg.get("threshold_otm") or 22)
+                    reset_otm = int(h_cfg.get("reset_otm") or h_cfg.get("initial_otm") or 20)
 
                     if strike_dist <= max_thresh:
                         # Distance is within threshold: keep hedge as-is with 0ms latency!
@@ -11489,6 +11837,7 @@ class StraddleManager:
                         new_pos["has_associated_hedge"] = True
                         new_pos["associated_hedge_id"] = active_hedge.get("id")
                         new_pos["associated_hedge"] = h_cfg
+                        active_hedge["parent_leg_id"] = new_pos.get("id") or leg_cfg.get("id")
 
                     target_sid = strat.get("strategy_id") or strat.get("id") or self._active_strategy_id
                     auth_strat = self.get_strategy(target_sid) or self.get_strategy(strat.get("name")) or strat
@@ -14607,6 +14956,9 @@ class StraddleManager:
                         prior_reexecs = sum(1 for p in cand_strat.get("positions", []) if (p.get("option_type") or "").upper() == opt_type and (p.get("is_re_entry") or (p.get("re_execute_count") or 0) > 0))
                         re_num = prior_reexecs + 1
 
+                        is_hedge = (side == "BUY" and any(str(l.get("side", "")).upper() == "SELL" for l in cand_strat.get("legs", [])))
+                        matching_short = next((l for l in cand_strat.get("legs", []) if str(l.get("option_type", "")).upper() == opt_type and str(l.get("side", "")).upper() == "SELL"), None)
+
                         auto_pos = {
                             "id": f"leg_adopted_{int(time.time()*1000)}",
                             "status": "OPEN",
@@ -14625,16 +14977,16 @@ class StraddleManager:
                             "reference_price": real_ent,
                             "entry_time": now_ist_str(),
                             "_entry_epoch_ts": time.time(),
-                            "target_type": "TGT: %",
-                            "target_type_label": f"TGT: {tgt_val:.0f}%",
-                            "target_value": tgt_val,
-                            "target_price": calc_tgt,
-                            "sl_type": "SL: -%",
-                            "sl_type_label": f"SL: -{sl_val:.0f}%",
-                            "sl_value": sl_val,
-                            "sl_price": calc_sl,
-                            "original_sl_label": f"ORIGINAL SL: -{sl_val:.0f}%",
-                            "original_sl_price": calc_sl,
+                            "target_type": "None" if is_hedge else "TGT: %",
+                            "target_type_label": "-" if is_hedge else f"TGT: {tgt_val:.0f}%",
+                            "target_value": 0.0 if is_hedge else tgt_val,
+                            "target_price": 0.0 if is_hedge else calc_tgt,
+                            "sl_type": "None" if is_hedge else "SL: -%",
+                            "sl_type_label": "-" if is_hedge else f"SL: -{sl_val:.0f}%",
+                            "sl_value": 0.0 if is_hedge else sl_val,
+                            "sl_price": 0.0 if is_hedge else calc_sl,
+                            "original_sl_label": "-" if is_hedge else f"ORIGINAL SL: -{sl_val:.0f}%",
+                            "original_sl_price": 0.0 if is_hedge else calc_sl,
                             "ltp": ltp,
                             "mtm": leg_mtm,
                             "pnl_pct": pnl_pct,
@@ -14645,7 +14997,10 @@ class StraddleManager:
                             "re_execute_trigger": "",
                             "is_re_entry": False,
                             "is_adopted": True,
-                            "entry_reason": f"📥 Adopted from Kotak Neo ({opt_type}) [Broker Position]",
+                            "is_associated_hedge": is_hedge,
+                            "parent_leg_id": matching_short.get("id") if (is_hedge and matching_short) else "",
+                            "hedge_parent_type": opt_type if is_hedge else "",
+                            "entry_reason": f"HEDGE ({opt_type}) [Adopted from Kotak Neo]" if is_hedge else f"📥 Adopted from Kotak Neo ({opt_type}) [Broker Position]",
                             "strategy_id": cand_strat.get("strategy_id"),
                             "strategy_name": cand_strat.get("name"),
                             "date": today_ist_str(),
@@ -14653,6 +15008,11 @@ class StraddleManager:
 
                         with _ENGINE_LOCK:
                             cand_strat.setdefault("positions", []).append(auto_pos)
+                            if is_hedge:
+                                for sp in cand_strat.get("positions", []):
+                                    if sp.get("status") in ("OPEN", "LIVE OPEN") and (sp.get("option_type") or "").upper() == opt_type and str(sp.get("side", "")).upper() == "SELL":
+                                        sp["associated_hedge_id"] = auto_pos["id"]
+                                        sp["has_associated_hedge"] = True
                             if self._active_strategy_id == cand_strat.get("strategy_id"):
                                 self._state["positions"] = list(cand_strat.get("positions", []))
                             cand_strat["status"] = "TRADE_ACTIVE"
@@ -14660,8 +15020,9 @@ class StraddleManager:
                             self._save_strategies()
                             self._save_state(force=True)
 
+                        role_label = f"Associated Hedge ({opt_type})" if is_hedge else f"Live Trade Leg ({opt_type})"
                         self._log_event(
-                            f"[Auto-Reconciled Position] 🛡️ Recovered and adopted live open broker position '{bp_sym}' ({net_qty} Qty @ ₹{real_ent:.2f}) into strategy '{cand_strat.get('name')}'. SL: ₹{calc_sl:.2f}, Target: ₹{calc_tgt:.2f} active.",
+                            f"[Auto-Reconciled Position] 🛡️ Recovered and adopted live open broker position '{bp_sym}' ({net_qty} Qty @ ₹{real_ent:.2f}) as {role_label} into strategy '{cand_strat.get('name')}'.",
                             level="SUCCESS"
                         )
                         changes_made = True
@@ -14859,6 +15220,48 @@ class StraddleManager:
                                 if not is_pos_hedge:
                                     self._handle_leg_re_entry(s, p, trigger=trigger, exit_order_id=str(exit_oid_to_pass) if exit_oid_to_pass else None)
 
+            # Part 3: Auto-Deduplication of Extra / Stale Hedges on Broker
+            for s in self._strategies:
+                if not s.get("enabled", False) and s.get("status") not in ("TRADE_ACTIVE", "READY"):
+                    continue
+                s_und = s.get("underlying", "NIFTY")
+                step = STRIKE_STEPS.get(s_und.upper(), 50)
+                open_hedges_by_opt = {}
+                for p in s.get("positions", []):
+                    if p.get("status") in ("OPEN", "LIVE OPEN") and (p.get("is_associated_hedge") or str(p.get("side", "")).upper() == "BUY"):
+                        h_opt = (p.get("hedge_parent_type") or p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper()
+                        open_hedges_by_opt.setdefault(h_opt, []).append(p)
+
+                for h_opt, h_list in open_hedges_by_opt.items():
+                    if len(h_list) > 1:
+                        # Find open short position for this option type
+                        active_short = next(
+                            (p for p in s.get("positions", []) if p.get("status") in ("OPEN", "LIVE OPEN") and str(p.get("side", "")).upper() == "SELL" and (p.get("option_type") or "").upper() == h_opt),
+                            None
+                        )
+                        short_stk = float(active_short.get("strike_price") or 0.0) if active_short else 0.0
+
+                        def _dist_score(hp):
+                            hp_stk = float(hp.get("strike_price") or 0.0)
+                            if hp_stk <= 0:
+                                parts = str(hp.get("symbol", "")).split()
+                                for p_str in parts:
+                                    if p_str.isdigit() and len(p_str) >= 4:
+                                        hp_stk = float(p_str)
+                                        break
+                            dist = (abs(short_stk - hp_stk) / step) if (short_stk > 0 and hp_stk > 0) else 999.0
+                            return abs(dist - 20.0)
+
+                        h_list.sort(key=_dist_score)
+                        primary_hedge = h_list[0]
+                        for dup_h in h_list[1:]:
+                            self._log_event(
+                                f"[Hedge Deduplication] ⚡ Identified duplicate extra hedge '{dup_h.get('symbol')}' on Kotak Neo (Primary: '{primary_hedge.get('symbol')}'). Squaring off duplicate to restore 1:1 balance...",
+                                level="INFO"
+                            )
+                            self._square_off_single_position(dup_h, broker, reason="DUPLICATE HEDGE SQUARED OFF")
+                            changes_made = True
+
             if changes_made:
                 self._save_strategies()
                 self._save_state()
@@ -14947,7 +15350,7 @@ class StraddleManager:
 
     def _runner_loop(self):
         logger.info("Straddle Engine background evaluation loop started (ultra-low latency).")
-        cycle_interval = getattr(config, "EXECUTION_CYCLE_INTERVAL_SEC", 0.025)
+        cycle_interval = getattr(config, "EXECUTION_CYCLE_INTERVAL_SEC", 0.05)
         while not self._stop_event.is_set():
             try:
                 self._evaluate_cycle()
@@ -14956,22 +15359,23 @@ class StraddleManager:
             time.sleep(cycle_interval)
 
     def _evaluate_cycle(self):
+        mode = self._state.get("execution_mode", "LIVE_BROKER")
+        broker = get_broker_adapter(mode)
+
+        # Reconcile any open & closed positions from Kotak Neo broker with active strategies (throttled to 1s)
+        now_ts = time.time()
+        if mode == "LIVE_BROKER" and (now_ts - getattr(self, "_last_reconcile_ts", 0)) > 1.0:
+            self._last_reconcile_ts = now_ts
+            self._reconcile_broker_positions(broker)
+
+        # Periodic orphan hedge cleanup (every 2 seconds) - strictly only when algo is actively running
+        if self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED"):
+            if (now_ts - getattr(self, "_last_orphan_hedge_check_ts", 0)) > 2.0:
+                self._last_orphan_hedge_check_ts = now_ts
+                self._cleanup_orphan_hedges(broker)
+
+        all_active_keys = set()
         with _ENGINE_LOCK:
-            mode = self._state.get("execution_mode", "LIVE_BROKER")
-            broker = get_broker_adapter(mode)
-
-            # Reconcile any open & closed positions from Kotak Neo broker with active strategies (throttled to 1s)
-            now_ts = time.time()
-            if mode == "LIVE_BROKER" and (now_ts - getattr(self, "_last_reconcile_ts", 0)) > 1.0:
-                self._last_reconcile_ts = now_ts
-                self._reconcile_broker_positions(broker)
-
-            # Periodic orphan hedge cleanup (every 2 seconds) - strictly only when algo is actively running
-            if self._state.get("algo_running") and self._state.get("status") not in ("TERMINATED", "STOPPED"):
-                if (now_ts - getattr(self, "_last_orphan_hedge_check_ts", 0)) > 2.0:
-                    self._last_orphan_hedge_check_ts = now_ts
-                    self._cleanup_orphan_hedges(broker)
-
             active_strat = self.get_strategy(self._active_strategy_id)
             und = self.get_active_underlying()
             spot_price = self._get_underlying_spot_price(und)
@@ -14989,6 +15393,17 @@ class StraddleManager:
             self._state["live_feed_running"] = True
             self._state["order_api_running"] = True
 
+            # Collect all active & closed instrument keys across all strategies for real-time quote streaming
+            for strat in self._strategies:
+                for pos in strat.get("positions", []):
+                    ik = pos.get("instrument_key")
+                    if ik:
+                        all_active_keys.add(ik)
+
+        # Fetch live quotes OUTSIDE the engine lock so web requests (/api/straddle/state) are never starved or frozen!
+        live_p_map, live_q_map = self._fetch_live_quotes(list(all_active_keys)) if all_active_keys else ({}, {})
+
+        with _ENGINE_LOCK:
             ist_now_dt = now_ist()
             now_sec = ist_now_dt.hour * 3600 + ist_now_dt.minute * 60 + ist_now_dt.second
             now_t = ist_now_dt.strftime("%H:%M:%S")
@@ -15007,16 +15422,6 @@ class StraddleManager:
                 self._record_pnl_snapshot(ist_now_dt, spot_price)
                 self._save_state()
                 return
-
-            # Collect all active & closed instrument keys across all strategies for real-time quote streaming
-            all_active_keys = set()
-            for strat in self._strategies:
-                for pos in strat.get("positions", []):
-                    ik = pos.get("instrument_key")
-                    if ik:
-                        all_active_keys.add(ik)
-
-            live_p_map, live_q_map = self._fetch_live_quotes(list(all_active_keys)) if all_active_keys else ({}, {})
 
             total_portfolio_mtm = 0.0
 

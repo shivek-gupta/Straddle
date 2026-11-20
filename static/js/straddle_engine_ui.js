@@ -520,7 +520,7 @@ async function fetchStraddleState() {
         const data = await resp.json();
         if (data && data.success && data.state) {
             const s = data.state;
-            if (s.all_strategies && Array.isArray(s.all_strategies)) {
+            if (s.all_strategies && Array.isArray(s.all_strategies) && s.all_strategies.length > 0) {
                 s.all_strategies.forEach(serverStrat => {
                     const sid = String(serverStrat.strategy_id || "").trim();
                     const pending = window._pendingMultiplierModes?.[sid];
@@ -530,7 +530,7 @@ async function fetchStraddleState() {
                 });
                 window._straddleState.allStrategies = s.all_strategies;
             } else if (Array.isArray(window._straddleState.allStrategies) && window._straddleState.allStrategies.length > 0) {
-                // Retain active strategies cache if momentarily empty in transit
+                // Infallible guard: Retain active strategies cache if server momentarily returns empty []
             } else {
                 window._straddleState.allStrategies = s.all_strategies || [];
             }
@@ -593,6 +593,33 @@ async function fetchStraddleState() {
 
             if (s.logs && Array.isArray(s.logs)) {
                 window._straddleState.logs = s.logs;
+
+                // Real-time audio notification synthesizer for freshly arriving logs
+                if (!window._soundSeenLogKeys) window._soundSeenLogKeys = new Set();
+                s.logs.forEach(l => {
+                    if (!l) return;
+                    const logKey = `${l.date || ''}_${l.timestamp || ''}_${l.message || ''}`;
+                    if (!window._soundSeenLogKeys.has(logKey)) {
+                        window._soundSeenLogKeys.add(logKey);
+                        if (window._soundInitialStateLoadDone && window.StraddleSound) {
+                            const msgU = String(l.message || "").toUpperCase();
+                            if (msgU.includes("TARGET HIT") || msgU.includes("PROFIT TARGET")) {
+                                StraddleSound.play("target");
+                            } else if (msgU.includes("STOPLOSS HIT") || msgU.includes("SL HIT") || msgU.includes("STOP LOSS") || msgU.includes("STOPLOSS ORDER")) {
+                                StraddleSound.play("stoploss");
+                            } else if (msgU.includes("ORDER REJECTED") || msgU.includes("FAILED") || l.level === "ERROR") {
+                                StraddleSound.play("error");
+                            } else if (msgU.includes("TRIGGERING RE EXECUTE") || msgU.includes("TRIGGERING RE-EXECUTE") || msgU.includes("ENTERED SELL") || msgU.includes("ENTERED HEDGE") || msgU.includes("RE-ENTRY")) {
+                                StraddleSound.play("order");
+                            } else if (msgU.includes("HEDGE SHIFT") || msgU.includes("HEDGE AUTO SQUARE-OFF")) {
+                                StraddleSound.play("warning");
+                            } else if (msgU.includes("SQUARED OFF") || msgU.includes("EXITTED") || msgU.includes("EXIT")) {
+                                StraddleSound.play("exit");
+                            }
+                        }
+                    }
+                });
+                window._soundInitialStateLoadDone = true;
             }
 
             // Sync live broker margin from state
@@ -1136,29 +1163,39 @@ function renderStraddleOpenPositionsTable() {
         const curStatus = String(pos.status || "").toUpperCase();
         const prev = window._soundPositionStates.get(key);
 
-        if (prev && window.StraddleSound) {
-            // 1. Transition to ERROR
-            if (curStatus === "ERROR" && prev.status !== "ERROR") {
-                StraddleSound.play("error");
-            }
-            // 2. Transition to COMPLETE / CLOSED / EXITED (Check whether Target or Stoploss)
-            else if ((curStatus === "COMPLETE" || curStatus === "CLOSED" || curStatus === "EXITED") && prev.status === "OPEN") {
-                const r = String(pos.exit_reason || "").toUpperCase();
-                if (r.includes("TARGET") || r.includes("TGT")) {
-                    StraddleSound.play("target");
-                } else if (r.includes("STOPLOSS") || r.includes("SL")) {
-                    StraddleSound.play("stoploss");
-                } else {
-                    StraddleSound.play("exit");
+        if (window.StraddleSound) {
+            if (prev) {
+                // 1. Transition to ERROR
+                if (curStatus === "ERROR" && prev.status !== "ERROR") {
+                    StraddleSound.play("error");
                 }
-            }
-            // 3. Transition to OPEN (Fill confirmation on entry or retry)
-            else if ((curStatus === "OPEN" || curStatus === "LIVE OPEN") && prev.status !== "OPEN" && prev.status !== "LIVE OPEN") {
-                StraddleSound.play("order");
+                // 2. Transition to COMPLETE / CLOSED / EXITED (Check whether Target or Stoploss)
+                else if ((curStatus === "COMPLETE" || curStatus === "CLOSED" || curStatus === "EXITED") && (prev.status === "OPEN" || prev.status === "LIVE OPEN")) {
+                    const r = String(pos.exit_reason || "").toUpperCase();
+                    if (r.includes("TARGET") || r.includes("TGT") || r.includes("PROFIT")) {
+                        StraddleSound.play("target");
+                    } else if (r.includes("STOPLOSS") || r.includes("SL") || r.includes("STOP LOSS") || r.includes("LOSS")) {
+                        StraddleSound.play("stoploss");
+                    } else if (r.includes("HEDGE")) {
+                        StraddleSound.play("warning");
+                    } else {
+                        StraddleSound.play("exit");
+                    }
+                }
+                // 3. Transition to OPEN (Fill confirmation on retry)
+                else if ((curStatus === "OPEN" || curStatus === "LIVE OPEN") && prev.status !== "OPEN" && prev.status !== "LIVE OPEN") {
+                    StraddleSound.play("order");
+                }
+            } else if (window._soundPositionsInitialLoadDone) {
+                // Freshly filled position (e.g. re-execution entry or initial entry)
+                if (curStatus === "OPEN" || curStatus === "LIVE OPEN") {
+                    StraddleSound.play("order");
+                }
             }
         }
         window._soundPositionStates.set(key, { status: curStatus, exit_reason: pos.exit_reason || "" });
     });
+    window._soundPositionsInitialLoadDone = true;
 
     // In-place DOM update for Open Positions: prevents flickering & high CPU
     const existingPosRows = tbody.querySelectorAll("tr[data-pos-key]");
@@ -5585,29 +5622,39 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         const curStatus = String(pos.status || "").toUpperCase();
         const prev = window._soundPositionStates.get(key);
 
-        if (prev && window.StraddleSound) {
-            // 1. Transition to ERROR
-            if (curStatus === "ERROR" && prev.status !== "ERROR") {
-                StraddleSound.play("error");
-            }
-            // 2. Transition to COMPLETE / CLOSED / EXITED (Check whether Target or Stoploss)
-            else if ((curStatus === "COMPLETE" || curStatus === "CLOSED" || curStatus === "EXITED") && prev.status === "OPEN") {
-                const r = String(pos.exit_reason || "").toUpperCase();
-                if (r.includes("TARGET") || r.includes("TGT")) {
-                    StraddleSound.play("target");
-                } else if (r.includes("STOPLOSS") || r.includes("SL")) {
-                    StraddleSound.play("stoploss");
-                } else {
-                    StraddleSound.play("exit");
+        if (window.StraddleSound) {
+            if (prev) {
+                // 1. Transition to ERROR
+                if (curStatus === "ERROR" && prev.status !== "ERROR") {
+                    StraddleSound.play("error");
                 }
-            }
-            // 3. Transition to OPEN (Fill confirmation on entry or retry)
-            else if ((curStatus === "OPEN" || curStatus === "LIVE OPEN") && prev.status !== "OPEN" && prev.status !== "LIVE OPEN") {
-                StraddleSound.play("order");
+                // 2. Transition to COMPLETE / CLOSED / EXITED (Check whether Target or Stoploss)
+                else if ((curStatus === "COMPLETE" || curStatus === "CLOSED" || curStatus === "EXITED") && (prev.status === "OPEN" || prev.status === "LIVE OPEN")) {
+                    const r = String(pos.exit_reason || "").toUpperCase();
+                    if (r.includes("TARGET") || r.includes("TGT") || r.includes("PROFIT")) {
+                        StraddleSound.play("target");
+                    } else if (r.includes("STOPLOSS") || r.includes("SL") || r.includes("STOP LOSS") || r.includes("LOSS")) {
+                        StraddleSound.play("stoploss");
+                    } else if (r.includes("HEDGE")) {
+                        StraddleSound.play("warning");
+                    } else {
+                        StraddleSound.play("exit");
+                    }
+                }
+                // 3. Transition to OPEN (Fill confirmation on retry)
+                else if ((curStatus === "OPEN" || curStatus === "LIVE OPEN") && prev.status !== "OPEN" && prev.status !== "LIVE OPEN") {
+                    StraddleSound.play("order");
+                }
+            } else if (window._soundPositionsInitialLoadDone) {
+                // Freshly filled position (e.g. re-execution entry or initial entry)
+                if (curStatus === "OPEN" || curStatus === "LIVE OPEN") {
+                    StraddleSound.play("order");
+                }
             }
         }
         window._soundPositionStates.set(key, { status: curStatus, exit_reason: pos.exit_reason || "" });
     });
+    window._soundPositionsInitialLoadDone = true;
 
     // Snapshot any active error banner inputs into persistent store so they never reset
     positions.forEach((pos, idx) => {

@@ -46,6 +46,26 @@ app = Flask(
 app.config["SECRET_KEY"] = config.SECRET_KEY
 
 
+def _sanitize_persistence_files():
+    try:
+        p_dir = Path("/home/ubuntu/straddle_data_persist")
+        if p_dir.exists():
+            p_del = p_dir / "straddle_deleted_strategies.json"
+            if p_del.exists():
+                try:
+                    with open(p_del, "r", encoding="utf-8") as f:
+                        d = json.load(f)
+                    if isinstance(d, list):
+                        clean = [x for x in d if str(x).lower() not in ("strat_nifty", "nifty", "strat_jkl", "jkl")]
+                        with open(p_del, "w", encoding="utf-8") as f:
+                            json.dump(clean, f, indent=2)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+_sanitize_persistence_files()
+
 # ==========================================================
 # PAGE ROUTES
 # ==========================================================
@@ -154,6 +174,9 @@ def api_straddle_state():
     try:
         mgr = get_straddle_manager()
         state = mgr.get_full_state()
+        if not state.get("all_strategies"):
+            mgr._load_strategies()
+            state = mgr.get_full_state()
         return jsonify({"success": True, "state": state})
     except Exception as e:
         logger.error(f"Error in api_straddle_state: {e}")
