@@ -1261,6 +1261,14 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             "order_id": oid_str,
                             "error": o.get("status_message") or "Order rejected/cancelled",
                         }
+                    elif any(w in st for w in ("OPEN", "PEND", "TRIG", "TRIGGER", "VALID")):
+                        return {
+                            "filled": False,
+                            "status": "OPEN",
+                            "order_id": oid_str,
+                            "price": float(o.get("price") or 0.0),
+                            "error": "Order resting open on exchange",
+                        }
         except Exception:
             pass
 

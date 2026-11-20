@@ -529,6 +529,8 @@ async function fetchStraddleState() {
                     }
                 });
                 window._straddleState.allStrategies = s.all_strategies;
+            } else if (Array.isArray(window._straddleState.allStrategies) && window._straddleState.allStrategies.length > 0) {
+                // Retain active strategies cache if momentarily empty in transit
             } else {
                 window._straddleState.allStrategies = s.all_strategies || [];
             }
@@ -5333,6 +5335,10 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         const s = String(p.status || "OPEN").toUpperCase();
         return s === "COMPLETE" || s === "CLOSED" || s === "EXITED";
     }).length;
+
+    if (openCount === 0 && closedCount > 0 && typeof window._straddleAlgoShowClosed === "undefined") {
+        window._straddleAlgoShowClosed = true;
+    }
 
     const elAll = document.getElementById("algoCountAll");
     if (elAll) elAll.textContent = allCount;

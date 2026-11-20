@@ -2032,18 +2032,7 @@ def _execute_safe_git_pull_operation():
         dest_p = config.PROJECT_ROOT / rel
         try:
             if rel.endswith("straddle_strategies.json"):
-                # Preserve user live strategies and respect deleted tombstones
-                del_ids = set()
-                del_p = config.PROJECT_ROOT / "data" / "straddle_deleted_strategies.json"
-                persist_del_p = Path("/home/ubuntu/straddle_data_persist/straddle_deleted_strategies.json")
-                for df in [del_p, persist_del_p]:
-                    if df.exists():
-                        try:
-                            with open(df, "r", encoding="utf-8") as f_del:
-                                for x in json.load(f_del):
-                                    if x: del_ids.add(str(x).strip().lower())
-                        except Exception:
-                            pass
+                # Preset blacklist to prevent legacy git defaults from resurrecting
                 preset_blacklist = {
                     'straddle_nifty_920', 'test_strat_update', 'test_strat_001',
                     'strat_preset_iron_condor_1791454639', 'strat_preset_custom_1791454643',
@@ -2052,43 +2041,58 @@ def _execute_safe_git_pull_operation():
                     'nifty test 9:20 straddle', 'iron condor monday', 'blank custom strategy',
                     'live nifty test strategy', 'straddle mon 244'
                 }
-                del_ids.update(preset_blacklist)
+                del_ids = set(preset_blacklist)
 
-                snap_strats = None
+                snap_strats = []
                 try:
                     loaded = json.loads(b_data.decode("utf-8"))
                     if isinstance(loaded, list):
                         snap_strats = loaded
                 except Exception:
-                    snap_strats = None
+                    snap_strats = []
 
-                if snap_strats is not None:
-                    # Live snapshot exists - strictly prioritize live user configuration
-                    final_list = [
-                        s for s in snap_strats
-                        if isinstance(s, dict)
-                        and str(s.get("strategy_id", "")).strip().lower() not in del_ids
-                        and str(s.get("name", "")).strip().lower() not in del_ids
-                    ]
-                else:
-                    git_strats = []
-                    if dest_p.exists():
-                        try:
-                            with open(dest_p, "r", encoding="utf-8") as f_g:
-                                git_strats = json.load(f_g)
-                            if not isinstance(git_strats, list): git_strats = []
-                        except Exception:
-                            git_strats = []
-                    final_list = [
-                        s for s in git_strats
-                        if isinstance(s, dict)
-                        and str(s.get("strategy_id", "")).strip().lower() not in del_ids
-                        and str(s.get("name", "")).strip().lower() not in del_ids
-                    ]
+                persist_strats = []
+                persist_p = Path("/home/ubuntu/straddle_data_persist/straddle_strategies.json")
+                if persist_p.exists():
+                    try:
+                        with open(persist_p, "r", encoding="utf-8") as f_per:
+                            loaded_p = json.load(f_per)
+                            if isinstance(loaded_p, list):
+                                persist_strats = loaded_p
+                    except Exception:
+                        persist_strats = []
 
+                git_strats = []
+                if dest_p.exists():
+                    try:
+                        with open(dest_p, "r", encoding="utf-8") as f_g:
+                            git_strats = json.load(f_g)
+                        if not isinstance(git_strats, list): git_strats = []
+                    except Exception:
+                        git_strats = []
+
+                # Merge intelligently: snap_strats -> persist_strats -> git_strats
+                merged_map = {}
+                for s in snap_strats + persist_strats + git_strats:
+                    if not isinstance(s, dict): continue
+                    sid = str(s.get("strategy_id", "")).strip().lower()
+                    sname = str(s.get("name", "")).strip().lower()
+                    if not sid or sid in del_ids or sname in del_ids:
+                        continue
+                    if sid not in merged_map:
+                        merged_map[sid] = s
+
+                final_list = list(merged_map.values())
                 dest_p.parent.mkdir(parents=True, exist_ok=True)
                 with open(dest_p, "w", encoding="utf-8") as f_out:
                     json.dump(final_list, f_out, indent=2)
+
+                if persist_p.parent.exists():
+                    try:
+                        with open(persist_p, "w", encoding="utf-8") as f_per_out:
+                            json.dump(final_list, f_per_out, indent=2)
+                    except Exception:
+                        pass
             else:
                 dest_p.parent.mkdir(parents=True, exist_ok=True)
                 with open(dest_p, "wb") as f_out:

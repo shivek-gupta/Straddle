@@ -629,6 +629,16 @@ def _get_commodity_live_price(und: str) -> float:
 
 
 
+PRESET_BLACKLIST: Set[str] = {
+    'straddle_nifty_920', 'test_strat_update', 'test_strat_001',
+    'strat_preset_iron_condor_1791454639', 'strat_preset_custom_1791454643',
+    'strat_preset_short_straddle_1791454683', 'strat_preset_short_straddle_1791454643',
+    'nifty 9:20 short straddle (45% tgt / 66% sl)', 'test strategy',
+    'nifty test 9:20 straddle', 'iron condor monday', 'blank custom strategy',
+    'live nifty test strategy', 'straddle mon 244'
+}
+
+
 class StraddleManager:
     """
     Core Straddle & Strangle Strategy Management, Live Feed Subscription,
@@ -720,39 +730,18 @@ class StraddleManager:
 
     def _load_deleted_strategies(self):
         with _ENGINE_LOCK:
-            self._deleted_strategy_ids = set()
-            persist_dir = Path("/home/ubuntu/straddle_data_persist")
-            for fpath in [STRADDLE_DELETED_FILE, persist_dir / "straddle_deleted_strategies.json"]:
-                if fpath.exists():
-                    try:
-                        with open(fpath, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                            if isinstance(data, list):
-                                for item in data:
-                                    if item:
-                                        self._deleted_strategy_ids.add(str(item).strip().lower())
-                    except Exception as e:
-                        logger.warning(f"Error loading deleted strategies from {fpath}: {e}")
-            # Strictly sanitize tombstones so asset names and timestamped strategy IDs are never blacklisted
-            common_words = {"nifty", "banknifty", "finnifty", "sensex", "bankex", "midcpnifty", "crudeoil", "gold", "silver"}
-            cleaned_tombstones = set()
-            for x in self._deleted_strategy_ids:
-                if x in common_words:
-                    continue
-                # If it's a dynamic timestamped ID like strat_preset_... or strat_17..., skip it
-                if (x.startswith("strat_preset_") or x.startswith("strat_")) and any(c.isdigit() for c in x):
-                    continue
-                cleaned_tombstones.add(x)
-            self._deleted_strategy_ids = cleaned_tombstones
+            # Strictly limit tombstones to system preset blacklist; NEVER blacklist user custom strategies
+            self._deleted_strategy_ids = set(PRESET_BLACKLIST)
             self._save_deleted_strategies()
 
     def _save_deleted_strategies(self):
         try:
-            _safe_write_json(STRADDLE_DELETED_FILE, sorted(list(self._deleted_strategy_ids)))
+            safe_list = sorted(list(self._deleted_strategy_ids & PRESET_BLACKLIST))
+            _safe_write_json(STRADDLE_DELETED_FILE, safe_list)
             persist_dir = Path("/home/ubuntu/straddle_data_persist")
             if persist_dir.exists():
                 try:
-                    _safe_write_json(persist_dir / "straddle_deleted_strategies.json", sorted(list(self._deleted_strategy_ids)))
+                    _safe_write_json(persist_dir / "straddle_deleted_strategies.json", safe_list)
                 except Exception:
                     pass
         except Exception as e:
@@ -998,7 +987,7 @@ class StraddleManager:
                                         continue
                                     pid = str(p_strat.get("strategy_id", "")).strip().lower()
                                     pname = str(p_strat.get("name", "")).strip().lower()
-                                    if pid in self._deleted_strategy_ids or pname in self._deleted_strategy_ids:
+                                    if pid in PRESET_BLACKLIST or pname in PRESET_BLACKLIST:
                                         continue
                                     if pid not in existing_ids and pname not in existing_names:
                                         self._strategies.append(p_strat)
@@ -1034,13 +1023,13 @@ class StraddleManager:
                     except Exception as e_pm:
                         logger.warning(f"Error merging persistent strategies: {e_pm}")
 
-            # Purge any user-deleted custom strategies permanently
-            if self._deleted_strategy_ids and self._strategies:
+            # Purge only legacy system preset blacklist
+            if self._strategies:
                 self._strategies = [
                     s for s in self._strategies
                     if isinstance(s, dict)
-                    and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
-                    and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
+                    and str(s.get("strategy_id", "")).strip().lower() not in PRESET_BLACKLIST
+                    and str(s.get("name", "")).strip().lower() not in PRESET_BLACKLIST
                 ]
 
             # Save strategies cleanly without seeding unwanted default presets
@@ -4579,24 +4568,13 @@ class StraddleManager:
             return {"success": True, "strategy_id": strategy_id, "strategy": strat}
 
     def batch_delete_strategies(self, strategy_ids: List[str]) -> Dict[str, Any]:
-        """Delete multiple strategies permanently by ID or Name and persist to tombstone."""
+        """Delete multiple strategies permanently by ID or Name and persist."""
         with _ENGINE_LOCK:
             id_set = {str(i).strip().lower() for i in strategy_ids if i}
-            common_assets = {"nifty", "banknifty", "finnifty", "sensex", "bankex", "midcpnifty", "crudeoil", "gold", "silver"}
-
-            # Record in persistent tombstone
+            # Only record in tombstone if it was an official default preset blacklist
             for i in strategy_ids:
-                if i:
-                    istr = str(i).strip().lower()
-                    if istr not in common_assets:
-                        self._deleted_strategy_ids.add(istr)
-            for s in self._strategies:
-                sid_str = str(s.get("strategy_id", "")).strip().lower()
-                sname_str = str(s.get("name", "")).strip().lower()
-                if sid_str in id_set or sname_str in id_set:
-                    self._deleted_strategy_ids.add(sid_str)
-                    if sname_str not in common_assets:
-                        self._deleted_strategy_ids.add(sname_str)
+                if i and str(i).strip().lower() in PRESET_BLACKLIST:
+                    self._deleted_strategy_ids.add(str(i).strip().lower())
             self._save_deleted_strategies()
 
             # Filter out permanently
@@ -4604,8 +4582,6 @@ class StraddleManager:
                 s for s in self._strategies 
                 if str(s.get("strategy_id", "")).strip().lower() not in id_set
                 and str(s.get("name", "")).strip().lower() not in id_set
-                and str(s.get("strategy_id", "")).strip().lower() not in self._deleted_strategy_ids
-                and str(s.get("name", "")).strip().lower() not in self._deleted_strategy_ids
             ]
 
             if self._strategies:
@@ -6668,11 +6644,18 @@ class StraddleManager:
                         if err_pos:
                             strat["entry_error"] = err_pos.get("error_message") or err_pos.get("error") or "Order placement rejected"
                     else:
-                        strat["status"] = "ENTRY_FAILED"
-                        strat["enabled"] = False
+                        # Partial entry: at least one position opened successfully, but one or more had errors
+                        strat["status"] = "TRADE_ACTIVE"
+                        strat["enabled"] = True
+                        strat["_trade_active_ts"] = time.time()
                         err_pos = next((p for p in new_positions if p.get("status") == "ERROR"), None)
-                        if err_pos:
-                            strat["entry_error"] = err_pos.get("error_message") or err_pos.get("error") or "Partial order placement rejected"
+                        err_msg = err_pos.get("error_message") or err_pos.get("error") or "One or more legs failed" if err_pos else "Partial entry"
+                        strat["entry_error"] = f"Partial entry: {err_msg}"
+                        self._log_event(
+                            f"⚠️ [{strat.get('name')}] Partial entry: {len([p for p in new_positions if p.get('status') == 'OPEN'])} open, "
+                            f"{len([p for p in new_positions if p.get('status') == 'ERROR'])} failed. Strategy remains active to manage live open positions.",
+                            level="WARNING"
+                        )
 
                     if self._active_strategy_id == strat.get("strategy_id"):
                         self._state["positions"] = new_positions
@@ -6939,14 +6922,25 @@ class StraddleManager:
         # Live Broker fill synchronization and hedge guard
         placed_oid = str(order_res.get("order_id") or "")
         if order_res.get("success") and exec_mode == "LIVE_BROKER" and placed_oid and not placed_oid.startswith("PAPER_") and not placed_oid.startswith("ORD_"):
-            timeout_sec = 4.5 if is_buy_hedge else 2.5
+            # Generous timeout for live Kotak Neo fills: 5.0s for BUY hedges, 10.0s for main SELL legs
+            timeout_sec = 5.0 if is_buy_hedge else 10.0
             fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.01)
+
+            fill_err_lower = str(fill_res.get("error") or "").lower()
+            is_timeout = (
+                fill_res.get("status") == "TIMEOUT"
+                or "timed out" in fill_err_lower
+                or "timeout" in fill_err_lower
+                or "time out" in fill_err_lower
+            )
+
             if fill_res.get("filled"):
                 actual_traded_price = float(fill_res.get("price") or 0.0)
                 if actual_traded_price > 0:
                     order_res["price"] = actual_traded_price
                     order_res["status"] = "COMPLETE"
-            elif fill_res.get("status") in ("REJECTED", "CANCELLED") or (fill_res.get("error") and "timeout" not in str(fill_res.get("error")).lower()):
+            elif not is_timeout and (fill_res.get("status") in ("REJECTED", "CANCELLED") or fill_res.get("error")):
+                # Genuine broker rejection (not a timeout)
                 rej_err = fill_res.get("error") or f"Order {fill_res.get('status', 'rejected')}"
 
                 # Auto-recovery for exchange Limit Price Protection (LPP) breaches:
@@ -7025,17 +7019,64 @@ class StraddleManager:
                     order_res["error"] = f"[BROKER REJECTED] {rej_err}"
             elif is_buy_hedge:
                 # INVIOLABLE HEDGE PROTECTION:
-                # If a BUY hedge order rests unfilled on the book, cancel it immediately so short entries
-                # never proceed unprotected and squaring off never generates an inverted short trade!
-                logger.warning(f"[Hedge Fill Guard] Hedge order {placed_oid} for {contract['trading_symbol']} did not fill within {timeout_sec}s. Cancelling resting order to protect capital.")
+                # Check status one last time before cancelling
+                h_status = None
                 try:
-                    c_res = broker.cancel_order(placed_oid)
-                    logger.info(f"[Hedge Fill Guard] Cancelled resting hedge order {placed_oid}: {c_res}")
-                except Exception as e_c:
-                    logger.warning(f"[Hedge Fill Guard] Error cancelling resting hedge order: {e_c}")
-                order_res["success"] = False
-                order_res["status"] = "CANCELLED"
-                order_res["error"] = f"Hedge BUY order {placed_oid} for {contract['trading_symbol']} timed out without exchange fill. Cancelled to prevent inverted trade."
+                    h_stat_res = broker.get_order_status(placed_oid)
+                    if isinstance(h_stat_res, dict):
+                        h_status = str(h_stat_res.get("status", "")).upper()
+                        if h_stat_res.get("filled") or "COMP" in h_status or "TRAD" in h_status:
+                            actual_traded_price = float(h_stat_res.get("price") or h_stat_res.get("average_price") or 0.0)
+                            order_res["price"] = actual_traded_price if actual_traded_price > 0 else (limit_price or 0.0)
+                            order_res["status"] = "COMPLETE"
+                            order_res["success"] = True
+                            order_res.pop("error", None)
+                            fill_res = {"filled": True, "price": order_res["price"], "status": "COMPLETE"}
+                except Exception:
+                    pass
+                if not fill_res.get("filled"):
+                    logger.warning(f"[Hedge Fill Guard] Hedge order {placed_oid} for {contract['trading_symbol']} did not fill within {timeout_sec}s. Cancelling resting order to protect capital.")
+                    try:
+                        c_res = broker.cancel_order(placed_oid)
+                        logger.info(f"[Hedge Fill Guard] Cancelled resting hedge order {placed_oid}: {c_res}")
+                    except Exception as e_c:
+                        logger.warning(f"[Hedge Fill Guard] Error cancelling resting hedge order: {e_c}")
+                    order_res["success"] = False
+                    order_res["status"] = "CANCELLED"
+                    order_res["error"] = f"Hedge BUY order {placed_oid} for {contract['trading_symbol']} timed out without exchange fill. Cancelled to prevent inverted trade."
+            else:
+                # Main Leg timed out waiting for fill:
+                # The order was successfully ACCEPTED by the broker/exchange with ID placed_oid.
+                # Query broker order status / orderbook:
+                chk_st = None
+                chk_price = 0.0
+                try:
+                    st_obj = broker.get_order_status(placed_oid)
+                    if isinstance(st_obj, dict):
+                        chk_st = str(st_obj.get("status", "")).upper()
+                        chk_price = float(st_obj.get("price") or st_obj.get("average_price") or 0.0)
+                except Exception as e_chk:
+                    logger.warning(f"Note checking status for placed order {placed_oid}: {e_chk}")
+
+                if chk_st and ("COMP" in chk_st or "TRAD" in chk_st or chk_price > 0):
+                    order_res["price"] = chk_price if chk_price > 0 else (limit_price or 0.0)
+                    order_res["status"] = "COMPLETE"
+                    order_res["success"] = True
+                    order_res.pop("error", None)
+                    self._log_event(f"✅ Confirmed fill for {contract['trading_symbol']} on broker order book @ ₹{order_res['price']:.2f}")
+                elif chk_st and ("REJ" in chk_st or "CAN" in chk_st):
+                    order_res["success"] = False
+                    order_res["status"] = chk_st
+                    order_res["error"] = f"[BROKER REJECTED] Order {placed_oid} was rejected/cancelled on exchange"
+                else:
+                    # Order is resting / open / pending on broker exchange book
+                    self._log_event(f"ℹ️ Order {placed_oid} placed with broker for {contract['trading_symbol']} is pending execution on exchange (status: {chk_st or 'OPEN'}). Maintaining active leg tracking.", level="INFO")
+                    order_res["success"] = True
+                    order_res["status"] = "OPEN"
+                    order_res["pending_fill"] = True
+                    order_res.pop("error", None)
+                    if limit_price and limit_price > 0:
+                        order_res["price"] = limit_price
 
         entry_time = now_ist_str()
 
@@ -11017,6 +11058,8 @@ class StraddleManager:
                 pos["re_execution_target_time"] = target_dt.strftime("%H:%M:%S")
                 pos["re_execution_wait_sec"] = total_wait
                 strat["re_execution_pending"] = True
+                strat["status"] = "TRADE_ACTIVE"
+                strat["enabled"] = True
 
                 PRE_SHIFT_LEAD_SEC = 2.5
                 should_pre_shift = (total_wait > 3.0)
@@ -11026,7 +11069,10 @@ class StraddleManager:
                     while (time.time() - start_s) < secs:
                         if self._stop_event.is_set():
                             return False
-                        if strat.get("status") in ("STOPPED", "TERMINATED", "COMPLETED", "SQUARED_OFF") or not strat.get("enabled"):
+                        if strat.get("_manual_square_off") or strat.get("status") in ("TERMINATED", "SQUARED_OFF"):
+                            return False
+                        # Ensure strategy still exists in active strategies
+                        if not any(s.get("strategy_id") == strat.get("strategy_id") for s in self._strategies):
                             return False
                         time.sleep(min(0.20, max(0.01, secs - (time.time() - start_s))))
                     return True
@@ -15012,7 +15058,7 @@ class StraddleManager:
                 has_completed_positions = any(p.get("status") in ("COMPLETE", "CLOSED", "EXITED") for p in strat_positions)
 
                 # If all legs completed and no open positions, mark strategy as STOPPED for the day
-                if has_completed_positions and not has_open_positions and not strat.get("_re_entry_in_progress") and not strat.get("_manual_reset"):
+                if has_completed_positions and not has_open_positions and not strat.get("_re_entry_in_progress") and not strat.get("_manual_reset") and not strat.get("re_execution_pending") and not any(p.get("re_execution_pending") for p in strat_positions):
                     if strat.get("status") not in ("STOPPED", "TERMINATED"):
                         strat["status"] = "STOPPED"
                         strat["has_traded_today"] = True
@@ -15101,7 +15147,7 @@ class StraddleManager:
                         strat["entry_error"] = f"Trading hours ended ({et})"
                         if strat_status not in ("TERMINATED", "ENTRY_FAILED"):
                             strat["status"] = "TERMINATED"
-                elif has_completed_positions and not has_open_positions and not strat.get("_re_entry_in_progress") and not strat.get("_manual_reset"):
+                elif has_completed_positions and not has_open_positions and not strat.get("_re_entry_in_progress") and not strat.get("_manual_reset") and not strat.get("re_execution_pending") and not any(p.get("re_execution_pending") for p in strat_positions):
                     if strat_status not in ("STOPPED", "TERMINATED", "ENTRY_FAILED"):
                         strat["status"] = "STOPPED"
                     strat["entry_error"] = "All legs completed for today"
