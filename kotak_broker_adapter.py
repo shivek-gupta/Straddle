@@ -1793,6 +1793,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 seg = parts[0].lower()
                 tok = parts[1]
 
+            if not tok or tok in ("KEY", "CE", "PE") or seg == "opt" or not str(tok).strip().isdigit():
+                return []
+
             neosymbol = f"{seg}|{tok}"
             res = client.historical_data(
                 neosymbol=neosymbol,
@@ -1800,6 +1803,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 from_date=f_date,
                 to_date=t_date,
             )
+            if isinstance(res, dict) and res.get("status") == "ERROR":
+                return []
             if isinstance(res, dict):
                 data_block = res.get("data")
                 raw_candles = []

@@ -47,17 +47,16 @@ app.config["SECRET_KEY"] = config.SECRET_KEY
 
 
 def _sanitize_persistence_files():
+    PROTECTED = {"strat_nifty", "nifty", "strat_jkl", "jkl"}
     try:
-        p_dir = Path("/home/ubuntu/straddle_data_persist")
-        if p_dir.exists():
-            p_del = p_dir / "straddle_deleted_strategies.json"
-            if p_del.exists():
+        for p_f in [Path("/home/ubuntu/straddle_data_persist/straddle_deleted_strategies.json"), config.DATA_DIR / "straddle_deleted_strategies.json"]:
+            if p_f.exists():
                 try:
-                    with open(p_del, "r", encoding="utf-8") as f:
+                    with open(p_f, "r", encoding="utf-8") as f:
                         d = json.load(f)
                     if isinstance(d, list):
-                        clean = [x for x in d if str(x).lower() not in ("strat_nifty", "nifty", "strat_jkl", "jkl")]
-                        with open(p_del, "w", encoding="utf-8") as f:
+                        clean = [x for x in d if str(x).lower() not in PROTECTED and not any(p in str(x).lower() for p in ("nifty", "jkl"))]
+                        with open(p_f, "w", encoding="utf-8") as f:
                             json.dump(clean, f, indent=2)
                 except Exception:
                     pass
@@ -2056,15 +2055,14 @@ def _execute_safe_git_pull_operation():
         try:
             if rel.endswith("straddle_strategies.json"):
                 # Preset blacklist to prevent legacy git defaults from resurrecting
+                PROTECTED_STRAT_IDS = {"strat_nifty", "nifty", "strat_jkl", "jkl"}
                 preset_blacklist = {
-                    'straddle_nifty_920', 'test_strat_update', 'test_strat_001',
+                    'test_strat_update', 'test_strat_001',
                     'strat_preset_iron_condor_1791454639', 'strat_preset_custom_1791454643',
                     'strat_preset_short_straddle_1791454683', 'strat_preset_short_straddle_1791454643',
-                    'nifty 9:20 short straddle (45% tgt / 66% sl)', 'test strategy',
-                    'nifty test 9:20 straddle', 'iron condor monday', 'blank custom strategy',
-                    'live nifty test strategy', 'straddle mon 244'
+                    'test strategy', 'blank custom strategy'
                 }
-                del_ids = set(preset_blacklist)
+                del_ids = set(preset_blacklist) - PROTECTED_STRAT_IDS
 
                 snap_strats = []
                 try:
@@ -2100,7 +2098,9 @@ def _execute_safe_git_pull_operation():
                     if not isinstance(s, dict): continue
                     sid = str(s.get("strategy_id", "")).strip().lower()
                     sname = str(s.get("name", "")).strip().lower()
-                    if not sid or sid in del_ids or sname in del_ids:
+                    if sid in PROTECTED_STRAT_IDS or sname in PROTECTED_STRAT_IDS:
+                        pass
+                    elif not sid or sid in del_ids or sname in del_ids:
                         continue
                     if sid not in merged_map:
                         merged_map[sid] = s

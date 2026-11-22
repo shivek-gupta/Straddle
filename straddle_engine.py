@@ -630,12 +630,14 @@ def _get_commodity_live_price(und: str) -> float:
 
 
 PRESET_BLACKLIST: Set[str] = {
-    'straddle_nifty_920', 'test_strat_update', 'test_strat_001',
+    'test_strat_update', 'test_strat_001',
     'strat_preset_iron_condor_1791454639', 'strat_preset_custom_1791454643',
     'strat_preset_short_straddle_1791454683', 'strat_preset_short_straddle_1791454643',
-    'nifty 9:20 short straddle (45% tgt / 66% sl)', 'test strategy',
-    'nifty test 9:20 straddle', 'iron condor monday', 'blank custom strategy',
-    'live nifty test strategy', 'straddle mon 244'
+    'test strategy', 'blank custom strategy'
+}
+
+PROTECTED_STRAT_IDS: Set[str] = {
+    'strat_nifty', 'nifty', 'strat_jkl', 'jkl'
 }
 
 DEFAULT_USER_STRATEGIES: List[Dict[str, Any]] = [
@@ -1016,12 +1018,12 @@ class StraddleManager:
     def _load_deleted_strategies(self):
         with _ENGINE_LOCK:
             # Strictly limit tombstones to system preset blacklist; NEVER blacklist user custom strategies
-            self._deleted_strategy_ids = set(PRESET_BLACKLIST)
+            self._deleted_strategy_ids = set(PRESET_BLACKLIST) - PROTECTED_STRAT_IDS
             self._save_deleted_strategies()
 
     def _save_deleted_strategies(self):
         try:
-            safe_list = sorted(list(self._deleted_strategy_ids & PRESET_BLACKLIST))
+            safe_list = sorted(list((self._deleted_strategy_ids & PRESET_BLACKLIST) - PROTECTED_STRAT_IDS))
             _safe_write_json(STRADDLE_DELETED_FILE, safe_list)
             persist_dir = Path("/home/ubuntu/straddle_data_persist")
             if persist_dir.exists():
@@ -1272,7 +1274,7 @@ class StraddleManager:
                                         continue
                                     pid = str(p_strat.get("strategy_id", "")).strip().lower()
                                     pname = str(p_strat.get("name", "")).strip().lower()
-                                    if pid in PRESET_BLACKLIST or pname in PRESET_BLACKLIST:
+                                    if (pid not in PROTECTED_STRAT_IDS and pname not in PROTECTED_STRAT_IDS) and (pid in PRESET_BLACKLIST or pname in PRESET_BLACKLIST):
                                         continue
                                     if pid not in existing_ids and pname not in existing_names:
                                         self._strategies.append(p_strat)
@@ -1308,13 +1310,16 @@ class StraddleManager:
                     except Exception as e_pm:
                         logger.warning(f"Error merging persistent strategies: {e_pm}")
 
-            # Purge only legacy system preset blacklist
+            # Purge only legacy system preset blacklist (Never user or protected strategies)
             if self._strategies:
                 self._strategies = [
                     s for s in self._strategies
-                    if isinstance(s, dict)
-                    and str(s.get("strategy_id", "")).strip().lower() not in PRESET_BLACKLIST
-                    and str(s.get("name", "")).strip().lower() not in PRESET_BLACKLIST
+                    if isinstance(s, dict) and (
+                        str(s.get("strategy_id", "")).strip().lower() in PROTECTED_STRAT_IDS
+                        or str(s.get("name", "")).strip().lower() in PROTECTED_STRAT_IDS
+                        or (str(s.get("strategy_id", "")).strip().lower() not in PRESET_BLACKLIST
+                            and str(s.get("name", "")).strip().lower() not in PRESET_BLACKLIST)
+                    )
                 ]
 
             # Infallible self-healing: Guarantee core user strategies (nifty and JKL) ALWAYS exist!
@@ -7961,6 +7966,8 @@ class StraddleManager:
             strat = self.get_strategy(sid)
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
+            if sid:
+                setattr(self, f"_heal_attempts_{sid}", 0)
 
             positions = strat.get("positions", [])
             has_filter = bool(leg_ids and len(leg_ids) > 0) or (leg_indices is not None and len(leg_indices) > 0)
@@ -8506,6 +8513,8 @@ class StraddleManager:
             strat = self.get_strategy(sid)
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
+            if sid:
+                setattr(self, f"_heal_attempts_{sid}", 0)
 
             legs_cfg = strat.get("legs", [])
             target_cfg = None
@@ -9108,7 +9117,7 @@ class StraddleManager:
                 if len(qty_slices) > 1:
                     logger.info(f"[Advance SL Slicer] Slicing {qty} qty ({pos.get('lots', 0)} lots) of {sym} into {len(qty_slices)} orders ({qty_slices}) for exchange freeze compliance...")
                     def _fire_sl_slice(s_idx, s_qty):
-                        tag_str = f"adv_sl_{s_idx+1}"
+                        tag_str = None if force else f"sl{s_idx+1}_{int(time.time()*10)%10000:04d}"
                         res = broker.place_order(
                             symbol=sym,
                             instrument_key=pos.get("instrument_key", ""),
@@ -9130,7 +9139,7 @@ class StraddleManager:
                                 order_type="SL-M",
                                 price=0.0,
                                 trigger_price=sl_price,
-                                tag=tag_str
+                                tag=None
                             )
                         return (s_idx, s_qty, res)
 
@@ -9145,6 +9154,8 @@ class StraddleManager:
                         pos["sl_order_placement"] = "Place in advance"
                         pos["sl_cancelled_unexpectedly"] = False
                         pos["sl_all_slices_placed"] = (len(placed_oids) == len(qty_slices))
+                        pos["_adv_sl_retry_count"] = 0
+                        pos["_adv_sl_exhausted"] = False
                         pos.pop("sl_cancel_notice", None)
                         if len(placed_oids) == len(qty_slices):
                             pos.pop("sl_placement_error", None)
@@ -9156,12 +9167,19 @@ class StraddleManager:
                         self._save_state()
                         return
                     else:
+                        retries = int(pos.get("_adv_sl_retry_count") or 0) + 1
+                        pos["_adv_sl_retry_count"] = retries
                         pos["sl_all_slices_placed"] = False
-                        pos["sl_placement_error"] = "All SL freeze slices rejected by broker"
+                        pos["sl_placement_error"] = f"All SL freeze slices rejected by broker (attempt {retries}/3)"
+                        if retries >= 3:
+                            pos["_adv_sl_exhausted"] = True
+                            pos["sl_order_placement"] = "Keep with self"
+                            pos["sl_cancelled_unexpectedly"] = True
                         self._save_strategies()
                         self._save_state()
                         return
 
+                sl_tag = None if force else f"sl{int(time.time()*10)%100000:05d}"
                 res = broker.place_order(
                     symbol=sym,
                     instrument_key=pos.get("instrument_key", ""),
@@ -9171,7 +9189,7 @@ class StraddleManager:
                     order_type="SL",
                     price=limit_sl_p,
                     trigger_price=sl_price,
-                    tag="adv_sl"
+                    tag=sl_tag
                 )
                 # If broker rejects SL-Limit, fallback to SL-M (if supported)
                 if not res.get("success"):
@@ -9185,7 +9203,7 @@ class StraddleManager:
                         order_type="SL-M",
                         price=0.0,
                         trigger_price=sl_price,
-                        tag="adv_sl"
+                        tag=None
                     )
 
                 if res.get("success") and res.get("order_id"):
@@ -9194,6 +9212,8 @@ class StraddleManager:
                     pos["sl_order_placement"] = "Place in advance"
                     pos["sl_cancelled_unexpectedly"] = False
                     pos["sl_all_slices_placed"] = True
+                    pos["_adv_sl_retry_count"] = 0
+                    pos["_adv_sl_exhausted"] = False
                     pos.pop("sl_cancel_notice", None)
                     pos.pop("sl_placement_error", None)
                     logger.info(f"[Advance SL] Order placed with broker ID: {pos['sl_broker_order_id']}")
@@ -9201,13 +9221,25 @@ class StraddleManager:
                     self._save_state()
                 else:
                     err_msg = res.get("error") or "Order rejected by broker"
+                    retries = int(pos.get("_adv_sl_retry_count") or 0) + 1
+                    pos["_adv_sl_retry_count"] = retries
                     pos["sl_all_slices_placed"] = False
-                    pos["sl_placement_error"] = err_msg
-                    logger.warning(f"[Advance SL] Broker failed to place SL for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
-                    self._log_event(
-                        f"⚠️ [Broker SL Placement Notice] Failed to place Stoploss order with broker for {sym}: {err_msg}. Algo active protection: monitoring live price on platform to exit on SL trigger.",
-                        level="WARNING"
-                    )
+                    pos["sl_placement_error"] = f"{err_msg} (attempt {retries}/3)"
+                    if retries >= 3:
+                        pos["_adv_sl_exhausted"] = True
+                        pos["sl_order_placement"] = "Keep with self"
+                        pos["sl_cancelled_unexpectedly"] = True
+                        logger.warning(f"[Advance SL Circuit Breaker] 3 retries exhausted for {sym}. Permanently switched to Platform monitoring. Zero further orders will be punched.")
+                        self._log_event(
+                            f"🛑 [Advance SL Circuit Breaker] Stoploss placement failed 3 times with broker for {sym}: {err_msg}. Permanently switched to Platform Monitoring. Algorithmic active protection: monitoring live price on platform to exit on SL trigger.",
+                            level="WARNING"
+                        )
+                    else:
+                        logger.warning(f"[Advance SL] Broker failed to place SL for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
+                        self._log_event(
+                            f"⚠️ [Broker SL Placement Notice] Failed to place Stoploss order with broker for {sym}: {err_msg} (attempt {retries}/3). Algo active protection: monitoring live price on platform to exit on SL trigger.",
+                            level="WARNING"
+                        )
                     self._save_strategies()
                     self._save_state()
             except Exception as e:
@@ -9270,7 +9302,7 @@ class StraddleManager:
                 if len(qty_slices) > 1:
                     logger.info(f"[Advance Target Slicer] Slicing {qty} qty ({pos.get('lots', 0)} lots) of {sym} into {len(qty_slices)} orders ({qty_slices}) for exchange freeze compliance...")
                     def _fire_tgt_slice(s_idx, s_qty):
-                        tag_str = f"adv_tgt_{s_idx+1}"
+                        tag_str = None if force else f"tg{s_idx+1}_{int(time.time()*10)%10000:04d}"
                         res = broker.place_order(
                             symbol=sym,
                             instrument_key=pos.get("instrument_key", ""),
@@ -9295,6 +9327,8 @@ class StraddleManager:
                         pos["target_order_placement"] = "Place in advance"
                         pos["target_cancelled_unexpectedly"] = False
                         pos["target_all_slices_placed"] = (len(placed_oids) == len(qty_slices))
+                        pos["_adv_tgt_retry_count"] = 0
+                        pos["_adv_tgt_exhausted"] = False
                         pos.pop("target_cancel_notice", None)
                         if len(placed_oids) == len(qty_slices):
                             pos.pop("target_placement_error", None)
@@ -9306,12 +9340,19 @@ class StraddleManager:
                         self._save_state()
                         return
                     else:
+                        retries = int(pos.get("_adv_tgt_retry_count") or 0) + 1
+                        pos["_adv_tgt_retry_count"] = retries
                         pos["target_all_slices_placed"] = False
-                        pos["target_placement_error"] = "All Target freeze slices rejected by broker"
+                        pos["target_placement_error"] = f"All Target freeze slices rejected by broker (attempt {retries}/3)"
+                        if retries >= 3:
+                            pos["_adv_tgt_exhausted"] = True
+                            pos["target_order_placement"] = "Keep with self"
+                            pos["target_cancelled_unexpectedly"] = True
                         self._save_strategies()
                         self._save_state()
                         return
 
+                tgt_tag = None if force else f"tg{int(time.time()*10)%100000:05d}"
                 res = broker.place_order(
                     symbol=sym,
                     instrument_key=pos.get("instrument_key", ""),
@@ -9321,7 +9362,7 @@ class StraddleManager:
                     order_type="LIMIT",
                     price=tgt_price,
                     trigger_price=0.0,
-                    tag="adv_tgt"
+                    tag=tgt_tag
                 )
                 if res.get("success") and res.get("order_id"):
                     pos["target_broker_order_id"] = str(res.get("order_id"))
@@ -9329,6 +9370,8 @@ class StraddleManager:
                     pos["target_order_placement"] = "Place in advance"
                     pos["target_cancelled_unexpectedly"] = False
                     pos["target_all_slices_placed"] = True
+                    pos["_adv_tgt_retry_count"] = 0
+                    pos["_adv_tgt_exhausted"] = False
                     pos.pop("target_cancel_notice", None)
                     pos.pop("target_placement_error", None)
                     logger.info(f"[Advance Target] Order placed with broker ID: {pos['target_broker_order_id']}")
@@ -9336,13 +9379,25 @@ class StraddleManager:
                     self._save_state()
                 else:
                     err_msg = res.get("error") or "Order rejected by broker"
+                    retries = int(pos.get("_adv_tgt_retry_count") or 0) + 1
+                    pos["_adv_tgt_retry_count"] = retries
                     pos["target_all_slices_placed"] = False
-                    pos["target_placement_error"] = err_msg
-                    logger.warning(f"[Advance Target] Broker failed to place Target for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
-                    self._log_event(
-                        f"⚠️ [Broker Target Placement Notice] Failed to place Target order with broker for {sym}: {err_msg}. Algo active protection: monitoring live price on platform to exit on Target trigger.",
-                        level="WARNING"
-                    )
+                    pos["target_placement_error"] = f"{err_msg} (attempt {retries}/3)"
+                    if retries >= 3:
+                        pos["_adv_tgt_exhausted"] = True
+                        pos["target_order_placement"] = "Keep with self"
+                        pos["target_cancelled_unexpectedly"] = True
+                        logger.warning(f"[Advance Target Circuit Breaker] 3 retries exhausted for {sym}. Permanently switched to Platform monitoring. Zero further orders will be punched.")
+                        self._log_event(
+                            f"🛑 [Advance Target Circuit Breaker] Target placement failed 3 times with broker for {sym}: {err_msg}. Permanently switched to Platform Monitoring. Algorithmic active protection: monitoring live price on platform to exit on Target trigger.",
+                            level="WARNING"
+                        )
+                    else:
+                        logger.warning(f"[Advance Target] Broker failed to place Target for {sym}: {err_msg}. Position remains actively protected by Platform monitoring.")
+                        self._log_event(
+                            f"⚠️ [Broker Target Placement Notice] Failed to place Target order with broker for {sym}: {err_msg} (attempt {retries}/3). Algo active protection: monitoring live price on platform to exit on Target trigger.",
+                            level="WARNING"
+                        )
                     self._save_strategies()
                     self._save_state()
             except Exception as e:
@@ -10441,6 +10496,8 @@ class StraddleManager:
             strat = self.get_strategy(sid)
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
+            if sid:
+                setattr(self, f"_heal_attempts_{sid}", 0)
 
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
@@ -10485,6 +10542,8 @@ class StraddleManager:
             strat = self.get_strategy(sid)
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
+            if sid:
+                setattr(self, f"_heal_attempts_{sid}", 0)
 
             strat["_margin_auto_exit_pending"] = False
             strat["margin_exit_countdown"] = 0
@@ -15140,21 +15199,39 @@ class StraddleManager:
                             try:
                                 ob = broker.get_order_book() or []
                                 side_needed = "BUY" if (p.get("side") or "SELL").upper() == "SELL" else "SELL"
+                                p_ent_oid = str(p.get("order_id") or "")
+                                p_sl_oid = str(p.get("sl_broker_order_id") or "")
+                                p_tgt_oid = str(p.get("target_broker_order_id") or "")
+                                p_exit_oid = str(p.get("exit_order_id") or "")
                                 for o in ob:
+                                    o_id = str(o.get("order_id", ""))
+                                    if not o_id or o_id == p_ent_oid:
+                                        continue  # Never treat the entry order as the exit order!
                                     o_sym = o.get("trading_symbol") or o.get("symbol") or ""
                                     o_st = str(o.get("status", "")).upper()
                                     o_side = str(o.get("transaction_type", "")).upper()
-                                    if _is_same_instrument(o_sym, o.get("instrument_key"), p.get("symbol"), p.get("instrument_key")) and o_side == side_needed and ("COMP" in o_st or "TRAD" in o_st):
+                                    is_known_exit_oid = bool((p_sl_oid and o_id in p_sl_oid.split(",")) or 
+                                                             (p_tgt_oid and o_id in p_tgt_oid.split(",")) or 
+                                                             (p_exit_oid and o_id in p_exit_oid.split(",")))
+                                    is_match_sym = _is_same_instrument(o_sym, o.get("instrument_key"), p.get("symbol"), p.get("instrument_key"))
+                                    if (is_known_exit_oid or is_match_sym) and o_side == side_needed and ("COMP" in o_st or "TRAD" in o_st):
                                         f_p = float(o.get("average_price") or o.get("price") or 0.0)
-                                        matched_bp = {
-                                            "net_qty": 0,
-                                            "avg_price": f_p,
-                                            "buy_avg": f_p if side_needed == "BUY" else 0.0,
-                                            "sell_avg": f_p if side_needed == "SELL" else 0.0,
-                                        }
-                                        if not p.get("exit_order_id"):
-                                            p["exit_order_id"] = str(o.get("order_id", ""))
-                                        break
+                                        if f_p > 0:
+                                            # If not an explicitly matched advance order, verify it was filled after entry
+                                            if not is_known_exit_oid and entry_epoch > 0:
+                                                o_time_str = str(o.get("order_timestamp") or o.get("timestamp") or "")
+                                                # Ensure buffer of at least 5s after entry so stale pre-trade orders are rejected
+                                                if (time.time() - entry_epoch) < 5.0:
+                                                    continue
+                                            matched_bp = {
+                                                "net_qty": 0,
+                                                "avg_price": f_p,
+                                                "buy_avg": f_p if side_needed == "BUY" else 0.0,
+                                                "sell_avg": f_p if side_needed == "SELL" else 0.0,
+                                            }
+                                            if not p.get("exit_order_id"):
+                                                p["exit_order_id"] = o_id
+                                            break
                             except Exception as e_ob_chk:
                                 logger.debug(f"Order book check fallback error: {e_ob_chk}")
 
@@ -15415,11 +15492,15 @@ class StraddleManager:
                 has_err_leg = any(p.get("status") == "ERROR" for p in s_pos)
                 if has_open_leg and has_err_leg:
                     sid = s.get("strategy_id")
+                    heal_attempts = getattr(self, f"_heal_attempts_{sid}", 0)
+                    if heal_attempts >= 2:
+                        continue  # Circuit breaker: already attempted twice; wait for manual user retry
                     last_heal_t = getattr(self, f"_last_heal_ts_{sid}", 0.0)
                     if (now_ts - last_heal_t) > 15.0:
                         setattr(self, f"_last_heal_ts_{sid}", now_ts)
+                        setattr(self, f"_heal_attempts_{sid}", heal_attempts + 1)
                         self._log_event(
-                            f"[{s.get('name')}] 🛡️ [AUTO-HEAL] Strategy has 1+ OPEN legs but remaining legs in ERROR. Auto-recovering held legs in background...",
+                            f"[{s.get('name')}] 🛡️ [AUTO-HEAL] Strategy has 1+ OPEN legs but remaining legs in ERROR (attempt {heal_attempts + 1}/2). Auto-recovering held legs in background...",
                             level="WARNING"
                         )
                         def _run_bg_heal(target_sid):
@@ -15654,20 +15735,47 @@ class StraddleManager:
                             if not is_h:
                                 ent_ep = float(p_w.get("_entry_epoch_ts") or 0.0)
                                 if ent_ep > 0 and (now_w - ent_ep) >= 3.0:
-                                    # SL Watchdog
+                                    # SL Watchdog with Circuit Breaker (Max 3 attempts, then permanently fallback to Platform Monitoring)
                                     sl_mode = p_w.get("sl_order_placement") or "Place in advance"
-                                    if sl_mode in ("Place in advance", "With Broker", "BROKER") and not p_w.get("sl_broker_order_id"):
-                                        last_sl_w = float(p_w.get("_last_adv_sl_retry_ts") or 0.0)
-                                        if (now_w - last_sl_w) >= 5.0:
-                                            p_w["_last_adv_sl_retry_ts"] = now_w
-                                            threading.Thread(target=self._place_advance_sl_order, args=(broker, p_w, 0, True), daemon=True).start()
-                                    # Target Watchdog
+                                    if sl_mode in ("Place in advance", "With Broker", "BROKER") and not p_w.get("sl_broker_order_id") and not p_w.get("_adv_sl_exhausted"):
+                                        sl_attempts = int(p_w.get("_adv_sl_retry_count") or 0)
+                                        if sl_attempts >= 3:
+                                            p_w["_adv_sl_exhausted"] = True
+                                            p_w["sl_order_placement"] = "Keep with self"
+                                            p_w["sl_cancelled_unexpectedly"] = True
+                                            p_w["sl_placement_error"] = "Max advance SL broker retries (3) exhausted. Protected by Platform monitoring."
+                                            self._log_event(
+                                                f"⚠️ [{strat.get('name')}] [{p_w.get('symbol')}] Advance SL placement exceeded 3 attempts. Permanently switched to Platform monitoring. Zero further broker orders will be punched.",
+                                                level="WARNING"
+                                            )
+                                            self._save_strategies()
+                                            self._save_state()
+                                        else:
+                                            last_sl_w = float(p_w.get("_last_adv_sl_retry_ts") or 0.0)
+                                            if (now_w - last_sl_w) >= 5.0:
+                                                p_w["_last_adv_sl_retry_ts"] = now_w
+                                                threading.Thread(target=self._place_advance_sl_order, args=(broker, p_w, 0, True), daemon=True).start()
+
+                                    # Target Watchdog with Circuit Breaker (Max 3 attempts, then permanently fallback to Platform Monitoring)
                                     tgt_mode = p_w.get("target_order_placement") or "Place in advance"
-                                    if tgt_mode in ("Place in advance", "With Broker", "BROKER") and not p_w.get("target_broker_order_id"):
-                                        last_tgt_w = float(p_w.get("_last_adv_tgt_retry_ts") or 0.0)
-                                        if (now_w - last_tgt_w) >= 5.0:
-                                            p_w["_last_adv_tgt_retry_ts"] = now_w
-                                            threading.Thread(target=self._place_advance_target_order, args=(broker, p_w, 0, True), daemon=True).start()
+                                    if tgt_mode in ("Place in advance", "With Broker", "BROKER") and not p_w.get("target_broker_order_id") and not p_w.get("_adv_tgt_exhausted"):
+                                        tgt_attempts = int(p_w.get("_adv_tgt_retry_count") or 0)
+                                        if tgt_attempts >= 3:
+                                            p_w["_adv_tgt_exhausted"] = True
+                                            p_w["target_order_placement"] = "Keep with self"
+                                            p_w["target_cancelled_unexpectedly"] = True
+                                            p_w["target_placement_error"] = "Max advance Target broker retries (3) exhausted. Protected by Platform monitoring."
+                                            self._log_event(
+                                                f"⚠️ [{strat.get('name')}] [{p_w.get('symbol')}] Advance Target placement exceeded 3 attempts. Permanently switched to Platform monitoring. Zero further broker orders will be punched.",
+                                                level="WARNING"
+                                            )
+                                            self._save_strategies()
+                                            self._save_state()
+                                        else:
+                                            last_tgt_w = float(p_w.get("_last_adv_tgt_retry_ts") or 0.0)
+                                            if (now_w - last_tgt_w) >= 5.0:
+                                                p_w["_last_adv_tgt_retry_ts"] = now_w
+                                                threading.Thread(target=self._place_advance_target_order, args=(broker, p_w, 0, True), daemon=True).start()
 
                 # Periodic Broker Order Book Sync (once every 1.0s) for non-blocking reconciliation of resting SL & Target orders
                 has_active_adv_orders = any(

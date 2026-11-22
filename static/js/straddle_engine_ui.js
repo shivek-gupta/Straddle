@@ -537,10 +537,19 @@ async function fetchStraddleState() {
 
             // Determine active strategy strictly matching activeStrategyId or activeStrategy
             const prevActiveId = window._straddleState.activeStrategy ? window._straddleState.activeStrategy.strategy_id : null;
-            const curTargetId = window._straddleState.activeStrategyId;
+            let curTargetId = window._straddleState.activeStrategyId;
+            if (!curTargetId) {
+                try {
+                    curTargetId = localStorage.getItem("straddle_active_strategy_id");
+                } catch (_) { }
+            }
             let active = null;
             if (curTargetId) {
-                active = (s.all_strategies || []).find(x => x.strategy_id === curTargetId || x.name === curTargetId);
+                const targetLower = String(curTargetId).trim().toLowerCase();
+                active = (s.all_strategies || []).find(x => 
+                    String(x.strategy_id || "").trim().toLowerCase() === targetLower || 
+                    String(x.name || "").trim().toLowerCase() === targetLower
+                );
             }
             if (!active && s.active_strategy) {
                 active = s.active_strategy;
@@ -550,6 +559,11 @@ async function fetchStraddleState() {
             }
             window._straddleState.activeStrategy = active;
             window._straddleState.activeStrategyId = active ? active.strategy_id : null;
+            if (active && active.strategy_id) {
+                try {
+                    localStorage.setItem("straddle_active_strategy_id", active.strategy_id);
+                } catch (_) { }
+            }
             if (s.closed_positions && Array.isArray(s.closed_positions)) {
                 window._straddleState.closed_positions = s.closed_positions;
             }
@@ -1766,6 +1780,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         // Guaranteed fallback: If filtered has 0 strategies but strategies exist in platform, automatically show all
         if (filtered.length === 0 && strategies.length > 0 && !searchVal) {
             showAll = true;
+            window._showAllUnderlyingsAlgos = true;
             filtered = strategies;
         }
 
