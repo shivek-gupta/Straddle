@@ -73,7 +73,18 @@ _sanitize_persistence_files()
 def index():
     creds = config.get_kotak_credentials()
     auth_status = kotak_auth.get_auth_status()
-    return render_template("index.html", creds=creds, auth_status=auth_status)
+    initial_strats = []
+    try:
+        mgr = get_straddle_manager()
+        initial_strats = mgr.get_all_strategies()
+    except Exception as e:
+        logger.warning(f"Error fetching initial strategies for index template: {e}")
+    return render_template(
+        "index.html",
+        creds=creds,
+        auth_status=auth_status,
+        initial_strategies_json=json.dumps(initial_strats)
+    )
 
 
 @app.route("/manifest.json")

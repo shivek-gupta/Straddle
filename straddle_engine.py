@@ -4062,6 +4062,12 @@ class StraddleManager:
     # Strategy CRUD & Multi-Algo Management
     # ==========================================================
 
+    def get_all_strategies(self) -> List[Dict[str, Any]]:
+        with _ENGINE_LOCK:
+            if not self._strategies:
+                self._load_strategies()
+            return [dict(s) for s in self._strategies if isinstance(s, dict)]
+
     def get_strategy(self, strategy_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         if strategy_id:
             sid_clean = str(strategy_id).strip()
@@ -16515,6 +16521,7 @@ class StraddleManager:
             active_positions = active_strat.get("positions", []) if active_strat else []
             active_closed = active_strat.get("closed_positions", []) if active_strat else []
 
+            now_state_ts = time.time()
             # Ensure all strategies have default schedule days and multiplier settings if not set
             for s in self._strategies:
                 if not isinstance(s, dict):
@@ -16529,14 +16536,25 @@ class StraddleManager:
                     s["multiplier"] = 1
                 if "cushion_margin" not in s:
                     s["cushion_margin"] = 15000.0
-                try:
-                    s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(s)
-                except Exception:
-                    s["broker_margin_per_lot"] = 130750.0
-                try:
-                    s["effective_multiplier"] = self.get_effective_multiplier(s)
-                except Exception:
-                    s["effective_multiplier"] = s.get("multiplier", 1)
+
+                # High-speed margin caching: avoid repetitive broker calls on every 250ms UI poll tick
+                m_calc_ts = float(s.get("_margin_calc_ts") or 0.0)
+                if not s.get("broker_margin_per_lot") or (now_state_ts - m_calc_ts) > 60.0:
+                    try:
+                        s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(s)
+                        s["_margin_calc_ts"] = now_state_ts
+                    except Exception:
+                        s["broker_margin_per_lot"] = s.get("broker_margin_per_lot") or 130750.0
+
+                # Instant effective multiplier calculation without synchronous broker funds roundtrips
+                m_type = str(s.get("multiplier_type") or "MANUAL").upper()
+                if m_type != "AUTO":
+                    s["effective_multiplier"] = max(1, int(s.get("multiplier", 1) or 1))
+                else:
+                    try:
+                        s["effective_multiplier"] = self.get_effective_multiplier(s)
+                    except Exception:
+                        s["effective_multiplier"] = s.get("multiplier", 1)
                 try:
                     s["re_execution_counts"] = self.get_strategy_reexecution_counts(s)
                 except Exception:

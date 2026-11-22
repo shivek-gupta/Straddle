@@ -280,6 +280,43 @@ async function initStraddlePlatform() {
     window._activeGlobalUnderlying = savedActiveUnd;
     selectGlobalUnderlying(savedActiveUnd);
 
+    // =========================================================================
+    // 0ms INSTANT HYDRATION: Pre-hydrate strategies from Server Injection or LocalStorage Cache
+    // =========================================================================
+    let initialStrats = [];
+    if (window._straddleServerInitialStrategies && Array.isArray(window._straddleServerInitialStrategies) && window._straddleServerInitialStrategies.length > 0) {
+        initialStrats = window._straddleServerInitialStrategies;
+    } else {
+        try {
+            const rawCached = localStorage.getItem("straddle_cached_strategies");
+            if (rawCached) {
+                const parsed = JSON.parse(rawCached);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    initialStrats = parsed;
+                }
+            }
+        } catch (_) { }
+    }
+
+    if (initialStrats.length > 0) {
+        window._straddleState.allStrategies = initialStrats;
+        let curTargetId = window._straddleState.activeStrategyId || localStorage.getItem("straddle_active_strategy_id");
+        let active = null;
+        if (curTargetId) {
+            const targetLower = String(curTargetId).trim().toLowerCase();
+            active = initialStrats.find(x => 
+                String(x.strategy_id || "").trim().toLowerCase() === targetLower || 
+                String(x.name || "").trim().toLowerCase() === targetLower
+            );
+        }
+        if (!active) active = initialStrats[0];
+        window._straddleState.activeStrategy = active;
+        window._straddleState.activeStrategyId = active ? active.strategy_id : null;
+
+        // Render algos table IMMEDIATELY (0ms instant display upon refresh!)
+        renderStraddleAlgosTable(true);
+    }
+
     // Initialize local storage & fast ticker pollers immediately without blocking
     loadActiveBasketFromStorage();
     fetchLiveSpotTick();
@@ -289,16 +326,12 @@ async function initStraddlePlatform() {
     // Fetch initial state asynchronously without blocking spot tickers
     try {
         await fetchStraddleState();
-        if (window._straddleState.currentSubView === "algos" || isAlgosActive) {
-            renderStraddleAlgosTable(true);
-        }
+        renderStraddleAlgosTable(false);
         // If allStrategies is empty, retry once after 500ms in case server was still starting up or seeding
         if (!window._straddleState.allStrategies || window._straddleState.allStrategies.length === 0) {
             setTimeout(async () => {
                 await fetchStraddleState();
-                if (window._straddleState.currentSubView === "algos" || isAlgosActive) {
-                    renderStraddleAlgosTable(true);
-                }
+                renderStraddleAlgosTable(true);
             }, 500);
         }
     } catch (errState) {
@@ -529,10 +562,15 @@ async function fetchStraddleState() {
                     }
                 });
                 window._straddleState.allStrategies = s.all_strategies;
+                window._straddleStateLoadDone = true;
+                try {
+                    localStorage.setItem("straddle_cached_strategies", JSON.stringify(s.all_strategies));
+                } catch (_) { }
             } else if (Array.isArray(window._straddleState.allStrategies) && window._straddleState.allStrategies.length > 0) {
                 // Infallible guard: Retain active strategies cache if server momentarily returns empty []
             } else {
                 window._straddleState.allStrategies = s.all_strategies || [];
+                window._straddleStateLoadDone = true;
             }
 
             // Determine active strategy strictly matching activeStrategyId or activeStrategy
@@ -1833,6 +1871,17 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         updateBulkActionsBar();
 
         if (filtered.length === 0) {
+            if (!window._straddleStateLoadDone && (!window._straddleState.allStrategies || window._straddleState.allStrategies.length === 0)) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="12" style="text-align:center; padding:36px 14px; color:#94a3b8; font-size:13px;">
+                            <span class="straddle-spinner" style="display:inline-block; width:18px; height:18px; border:2px solid #38bdf8; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:middle; margin-right:8px;"></span>
+                            Loading algorithmic strategies...
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
             const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
             tbody.innerHTML = `
                 <tr>

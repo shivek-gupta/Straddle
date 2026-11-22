@@ -14,6 +14,9 @@
     <meta name="apple-mobile-web-app-title" content="StraddlePro">
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+    <script id="straddleServerInitialState">
+        window._straddleServerInitialStrategies = {{ initial_strategies_json|safe if initial_strategies_json else '[]' }};
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -826,11 +829,32 @@
                             </tr>
                         </thead>
                         <tbody id="straddleAlgosTableBody">
-                            <!-- Rendered dynamically via JS -->
+                            <tr id="straddleAlgosInitialLoadingRow">
+                                <td colspan="12" style="text-align:center; padding:32px 14px; color:#94a3b8; font-size:12.5px;">
+                                    <span class="straddle-spinner" style="display:inline-block; width:16px; height:16px; border:2px solid #38bdf8; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:middle; margin-right:8px;"></span>
+                                    Loading algorithmic strategies...
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
+            <script>
+                // 0ms Instant Cache Pre-Hydration: Hydrate table HTML synchronously from cache or server injection
+                (function() {
+                    try {
+                        var serverData = window._straddleServerInitialStrategies;
+                        var rawCached = localStorage.getItem("straddle_cached_strategies");
+                        var strats = (serverData && Array.isArray(serverData) && serverData.length > 0) ? serverData : (rawCached ? JSON.parse(rawCached) : null);
+                        if (Array.isArray(strats) && strats.length > 0) {
+                            if (!window._straddleState) window._straddleState = {};
+                            window._straddleState.allStrategies = strats;
+                            var savedUnd = localStorage.getItem("straddle_active_underlying") || "NIFTY";
+                            window._activeGlobalUnderlying = savedUnd;
+                        }
+                    } catch (_) {}
+                })();
+            </script>
         </div>
 
 
@@ -4233,8 +4257,8 @@
     </div>
 
     <!-- STRADDLE PLATFORM JAVASCRIPT BUNDLE -->
-    <script src="/static/js/straddle_sound.js?v=20261120_v3"></script>
-    <script src="/static/js/straddle_engine_ui.js?v=20261120_v3"></script>
+    <script src="/static/js/straddle_sound.js?v=20261122_instant_v1"></script>
+    <script src="/static/js/straddle_engine_ui.js?v=20261122_instant_v1"></script>
 
     <!-- STANDALONE SYSTEM & KOTAK CONTROLLER -->
     <script>
@@ -4470,12 +4494,12 @@
             if (typeof initStraddleTimeSteppers === "function") initStraddleTimeSteppers();
             if (typeof initCollapsibleAccordionHeaders === "function") initCollapsibleAccordionHeaders();
 
-            // Initialize Straddle Platform and render algos
+            // Initialize Straddle Platform and render algos immediately
+            if (typeof switchStraddleSubView === "function") {
+                switchStraddleSubView("algos");
+            }
             if (typeof initStraddlePlatform === "function") {
                 initStraddlePlatform().then(() => {
-                    if (typeof switchStraddleSubView === "function") {
-                        switchStraddleSubView("algos");
-                    }
                     if (typeof initCollapsibleAccordionHeaders === "function") {
                         initCollapsibleAccordionHeaders();
                     }
