@@ -989,7 +989,7 @@ class StraddleManager:
             logger.warning(f"Note loading instruments on init: {e}")
         self._start_runner()
 
-        # Auto-heal partially executed strategies from persistent disk state on startup (e.g. on service restart)
+        # Auto-heal partially executed strategies or 2FA-blocked strategies from persistent disk state on startup (e.g. on service restart)
         def _startup_auto_heal():
             time.sleep(3.0)  # Wait for broker connection, authentication, and live feeds to stabilize
             try:
@@ -1002,6 +1002,17 @@ class StraddleManager:
                         logger.info(f"[Startup Auto-Heal] Strategy '{s.get('name')}' ({sid}) has partially executed positions (1+ open, 1+ error). Automatically recovering remaining legs...")
                         self._log_event(f"[{s.get('name')}] 🛡️ [Startup Auto-Heal] Partially executed strategy detected (1+ open, 1+ error). Auto-recovering failed/held legs...", level="WARNING")
                         self.retry_failed_legs(strategy_id=sid)
+                    elif not has_open and has_err and s_pos:
+                        # Strategy whose entry orders previously failed purely due to 2FA / session auth before login was complete
+                        all_auth_err = all(
+                            any(k in str(p.get("error_message") or p.get("error") or "").lower() for k in ("2fa", "complete the 2fa", "session", "unauthorized", "token"))
+                            for p in s_pos
+                        )
+                        chk = self.get_strategy_schedule_status(s)
+                        if all_auth_err and chk.get("can_enter") and kotak_auth.is_client_trading_ready():
+                            logger.info(f"[Startup Auto-Heal] Strategy '{s.get('name')}' ({sid}) previously failed due to 2FA. Broker is now fully authenticated. Auto-recovering strategy entry...")
+                            self._log_event(f"[{s.get('name')}] ⚡ [Startup Auto-Heal] Kotak Neo 2FA established! Automatically placing pending strategy orders...", level="SUCCESS")
+                            self.retry_failed_legs(strategy_id=sid)
             except Exception as e_sh:
                 logger.error(f"[Startup Auto-Heal] Exception during auto-recovery: {e_sh}")
 
@@ -6571,12 +6582,12 @@ class StraddleManager:
                     self._save_strategies()
                     return
 
-                # Pre-flight check: ensure active, unexpired Kotak Neo session before dispatching orders
+                # Pre-flight check: ensure active, verified 2FA trading session before dispatching orders
                 cli = kotak_auth.get_authenticated_client(force=False)
-                if cli is None:
+                if cli is None or not kotak_auth.is_client_trading_ready(cli):
                     cli = kotak_auth.get_authenticated_client(force=True)
-                if cli is None:
-                    auth_err = kotak_auth.get_last_auth_error() or "Kotak Neo authentication failed. Please check credentials in Settings."
+                if cli is None or not kotak_auth.is_client_trading_ready(cli):
+                    auth_err = kotak_auth.get_last_auth_error() or "Kotak Neo authentication failed (2FA incomplete). Please check credentials in Settings."
                     self._log_event(f"[{strat.get('name')}] Strategy entry aborted: {auth_err}", level="ERROR")
                     strat["entry_error"] = auth_err
                     strat["status"] = "ENTRY_FAILED"
@@ -8014,11 +8025,16 @@ class StraddleManager:
             if mode == "LIVE_BROKER":
                 if not self.is_broker_connected():
                     return {"success": False, "error": "Kotak Neo is DISCONNECTED in Settings"}
-                cli = kotak_auth.get_authenticated_client(force=False)
-                if cli is None:
+                has_auth_fail = any(
+                    any(k in str(p.get("error_message") or p.get("error") or "").lower() for k in ("2fa", "complete the 2fa", "session", "unauthorized", "token"))
+                    for _, p in error_targets
+                )
+                force_login = has_auth_fail or not kotak_auth.is_client_trading_ready()
+                cli = kotak_auth.get_authenticated_client(force=force_login)
+                if cli is None or not kotak_auth.is_client_trading_ready(cli):
                     cli = kotak_auth.get_authenticated_client(force=True)
-                if cli is None:
-                    auth_err = kotak_auth.get_last_auth_error() or "Kotak Neo authentication failed. Please check credentials in Settings."
+                if cli is None or not kotak_auth.is_client_trading_ready(cli):
+                    auth_err = kotak_auth.get_last_auth_error() or "Kotak Neo authentication failed (2FA incomplete). Please check credentials in Settings."
                     return {"success": False, "error": auth_err}
 
             adv = {}

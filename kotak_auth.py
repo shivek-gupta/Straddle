@@ -161,20 +161,65 @@ def save_cached_session(data: Dict[str, Any]):
         logger.error(f"Failed to save session state: {e}")
 
 
+def is_client_trading_ready(client: Optional[NeoAPI] = None) -> bool:
+    """
+    Inviolable verification: check if the NeoAPI client instance has completed
+    both Step 1 (TOTP Login) and Step 2 (MPIN 2FA Validation) and possesses
+    active, valid trade authorization tokens ('edit_token' & 'edit_sid').
+    """
+    c = client or _ACTIVE_CLIENT
+    if c is None:
+        return False
+    cfg = getattr(c, "configuration", None)
+    if cfg is None:
+        return False
+    edit_token = getattr(cfg, "edit_token", None)
+    edit_sid = getattr(cfg, "edit_sid", None)
+    return bool(edit_token and edit_sid and str(edit_token).strip() and str(edit_sid).strip())
+
+
+def _extract_neo_error(res: Any) -> str:
+    """Extract human-readable error from any Kotak Neo response format."""
+    if not isinstance(res, dict):
+        return str(res) if res else ""
+    for k in ("error", "Error", "Error Message", "message", "errMsg", "emsg", "rejectionReason", "rejRsn", "desc"):
+        val = res.get(k)
+        if val:
+            if isinstance(val, list):
+                msgs = [e.get("message", str(e)) if isinstance(e, dict) else str(e) for e in val]
+                return "; ".join(msgs)
+            if isinstance(val, dict):
+                return val.get("message") or str(val)
+            return str(val)
+    if "fault" in res:
+        f = res.get("fault")
+        if isinstance(f, dict):
+            return f.get("message") or str(f)
+        return str(f)
+    if isinstance(res.get("data"), dict):
+        d = res["data"]
+        for dk in ("errMsg", "emsg", "message", "error"):
+            if d.get(dk):
+                return str(d[dk])
+    return ""
+
+
 def invalidate_session():
-    """Clear memory client and cached session state on 401 or token expiration."""
+    """Clear memory client and cached session state on 401, 2FA, or token expiration."""
     global _ACTIVE_CLIENT, _LAST_AUTH_ERROR
     with _AUTH_LOCK:
         _ACTIVE_CLIENT = None
-        _LAST_AUTH_ERROR = "Session expired or unauthorized"
+        _LAST_AUTH_ERROR = "Session expired or unauthorized (2FA required)"
         session = get_cached_session()
         session["is_authenticated"] = False
+        session["has_edit_token"] = False
+        session["has_edit_sid"] = False
         save_cached_session(session)
         logger.info("[Kotak Auth] Session invalidated. Ready for re-authentication.")
 
 
 def is_session_active_for_today() -> bool:
-    """Check if we already have an active verified session for today."""
+    """Check if we already have an active verified 2FA trading session for today."""
     session = get_cached_session()
     if not session.get("is_authenticated"):
         return False
@@ -182,26 +227,26 @@ def is_session_active_for_today() -> bool:
     if session_date != today_ist_str():
         return False
     global _ACTIVE_CLIENT
-    return _ACTIVE_CLIENT is not None
+    return is_client_trading_ready(_ACTIVE_CLIENT)
 
 
 def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
     """
-    Retrieve authenticated NeoAPI client instance.
-    If session is missing or expired, performs automated TOTP login.
+    Retrieve authenticated NeoAPI client instance with verified 2FA trading permissions.
+    If session is missing, unauthenticated, or missing trade tokens, performs automated TOTP login + MPIN validation.
     """
     global _ACTIVE_CLIENT, _LAST_LOGIN_ATTEMPT, _LAST_AUTH_ERROR
 
     # Fast path: Zero-lock atomic read for parallel sub-millisecond order dispatch
     if not force:
         cached = _ACTIVE_CLIENT
-        if cached is not None:
+        if cached is not None and is_client_trading_ready(cached):
             if not _WARMUP_THREAD_STARTED:
                 _start_connection_warmup_daemon()
             return cached
 
     with _AUTH_LOCK:
-        if not force and _ACTIVE_CLIENT is not None:
+        if not force and _ACTIVE_CLIENT is not None and is_client_trading_ready(_ACTIVE_CLIENT):
             return _ACTIVE_CLIENT
 
         creds = config.get_kotak_credentials()
@@ -237,11 +282,11 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
             logger.warning(f"[Kotak Auth] {_LAST_AUTH_ERROR}")
             return None
 
-        # Check cooldown to prevent hammering on repeated failures
+        # Check cooldown to prevent hammering on repeated failures (only if client is already valid or attempted < 3s ago)
         now_ts = time.time()
-        if (now_ts - _LAST_LOGIN_ATTEMPT) < _COOLDOWN_SECONDS and not force:
+        if (now_ts - _LAST_LOGIN_ATTEMPT) < 3.0 and not force:
             logger.info("[Kotak Auth] In cooldown period. Skipping login attempt.")
-            return _ACTIVE_CLIENT
+            return _ACTIVE_CLIENT if is_client_trading_ready(_ACTIVE_CLIENT) else None
 
         _LAST_LOGIN_ATTEMPT = now_ts
         _LAST_AUTH_ERROR = ""
@@ -263,7 +308,7 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
                 consumer_key=consumer_key,
                 environment=env,
                 http2=True,
-                timeout=httpx.Timeout(connect=1.5, read=3.5, write=2.0, pool=1.5),
+                timeout=httpx.Timeout(connect=2.0, read=5.0, write=3.0, pool=2.0),
                 limits=httpx.Limits(max_connections=100, max_keepalive_connections=50, keepalive_expiry=3600.0)
             )
 
@@ -275,7 +320,7 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
             synced_now = datetime.datetime.fromtimestamp(time.time() + drift, tz=datetime.timezone.utc)
             totp_code = pyotp.TOTP(totp_clean).at(synced_now)
 
-            # 3. Call totp_login
+            # 3. Call totp_login (Step 1: View Access)
             login_res = client.totp_login(
                 mobile_number=clean_mobile,
                 ucc=ucc,
@@ -283,19 +328,20 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
             )
             logger.info(f"[Kotak Auth] Step 1 totp_login response: {login_res}")
 
-            if isinstance(login_res, dict) and "error" in login_res:
-                err_items = login_res.get("error", [])
-                err_text = "; ".join([e.get("message", str(e)) for e in err_items]) if isinstance(err_items, list) else str(err_items)
-                raise RuntimeError(f"TOTP Login failed: {err_text}")
+            login_err = _extract_neo_error(login_res)
+            view_token = getattr(client.configuration, "view_token", None)
+            if login_err or not view_token:
+                raise RuntimeError(f"TOTP Login failed: {login_err or 'No view token received from Kotak Neo'}")
 
-            # 4. Call totp_validate with MPIN
+            # 4. Call totp_validate with MPIN (Step 2: Full Trading Access / 2FA Validation)
             val_res = client.totp_validate(mpin=mpin)
             logger.info(f"[Kotak Auth] Step 2 totp_validate response: {val_res}")
 
-            if isinstance(val_res, dict) and "error" in val_res:
-                err_items = val_res.get("error", [])
-                err_text = "; ".join([e.get("message", str(e)) for e in err_items]) if isinstance(err_items, list) else str(err_items)
-                raise RuntimeError(f"MPIN Validation failed: {err_text}")
+            val_err = _extract_neo_error(val_res)
+            edit_token = getattr(client.configuration, "edit_token", None)
+            edit_sid = getattr(client.configuration, "edit_sid", None)
+            if val_err or not edit_token or not edit_sid:
+                raise RuntimeError(f"MPIN 2FA Validation failed: {val_err or 'No trade authorization token received from Kotak Neo (2FA incomplete)'}")
 
             _ACTIVE_CLIENT = client
             _LAST_AUTH_ERROR = ""
@@ -303,6 +349,8 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
 
             session_data = {
                 "is_authenticated": True,
+                "has_edit_token": bool(edit_token),
+                "has_edit_sid": bool(edit_sid),
                 "date": today_ist_str(),
                 "time": now_ist().strftime("%H:%M:%S"),
                 "ucc": ucc,
@@ -314,7 +362,7 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
 
             msg = "Kotak Neo Auto-Login Successful\nUCC: " + str(ucc) + "\nTime: " + now_ist().strftime("%d-%b-%Y %H:%M:%S IST")
             send_telegram_notification(msg)
-            print(f"[{now_ist().strftime('%H:%M:%S')}] [KOTAK-AUTH] Login successful! Session established.")
+            print(f"[{now_ist().strftime('%H:%M:%S')}] [KOTAK-AUTH] Login successful! Session established with verified 2FA trading permissions.")
             return _ACTIVE_CLIENT
 
         except Exception as e:
@@ -330,17 +378,18 @@ def get_auth_status() -> Dict[str, Any]:
     creds = config.get_kotak_credentials()
     session = get_cached_session()
     has_creds = bool(creds.get("consumer_key") and creds.get("mobile_number") and creds.get("ucc") and creds.get("totp_key") and creds.get("mpin"))
-    is_active = (_ACTIVE_CLIENT is not None) or (session.get("is_authenticated") and session.get("date") == today_ist_str())
-    if not _ACTIVE_CLIENT and has_creds:
+    is_active = is_client_trading_ready(_ACTIVE_CLIENT)
+    if not is_active and has_creds:
         try:
-            get_authenticated_client(force=False)
-            is_active = (_ACTIVE_CLIENT is not None)
+            cli = get_authenticated_client(force=False)
+            is_active = is_client_trading_ready(cli)
         except Exception:
             pass
 
     return {
         "configured": has_creds,
         "is_authenticated": is_active,
+        "trading_ready": is_active,
         "date": session.get("date", "Not logged in today"),
         "time": session.get("time", "--"),
         "ucc": creds.get("ucc", session.get("ucc", "Not set")),
@@ -353,25 +402,31 @@ def get_auth_status() -> Dict[str, Any]:
 
 
 def start_morning_scheduler():
-    """Background daemon thread for daily 08:15 AM token refresh."""
+    """Background daemon thread for daily 08:15 AM token refresh and intraday session keeper."""
     def _loop():
-        logger.info("[Scheduler] Kotak Neo 08:15 AM morning auth scheduler started.")
+        logger.info("[Scheduler] Kotak Neo morning auth scheduler and session keeper started.")
         while True:
             try:
                 now = now_ist()
                 if now.weekday() < 5:  # Monday to Friday
-                    target_time = now.replace(hour=8, minute=15, second=0, microsecond=0)
-                    if now < target_time:
-                        sleep_seconds = (target_time - now).total_seconds()
-                    else:
+                    # Active market window: 08:15 to 15:35 IST
+                    start_window = now.replace(hour=8, minute=15, second=0, microsecond=0)
+                    end_window = now.replace(hour=15, minute=35, second=0, microsecond=0)
+
+                    if now < start_window:
+                        sleep_seconds = max(10, min((start_window - now).total_seconds(), 300))
+                    elif start_window <= now <= end_window:
+                        # Intraday market hours: Ensure valid 2FA trading session is perpetually active
                         if not is_session_active_for_today():
-                            logger.info("[Scheduler] Triggering daily 08:15 AM Kotak Neo automated login...")
+                            logger.info("[Scheduler] Intraday session check: Kotak Neo session missing or missing 2FA. Re-authenticating...")
                             get_authenticated_client(force=True)
+                        sleep_seconds = 180  # Check session health every 3 minutes during market hours
+                    else:
                         tomorrow = now + datetime.timedelta(days=1)
                         target_tomorrow = tomorrow.replace(hour=8, minute=15, second=0, microsecond=0)
-                        sleep_seconds = (target_tomorrow - now).total_seconds()
-                    
-                    time.sleep(min(sleep_seconds, 300))
+                        sleep_seconds = max(60, min((target_tomorrow - now).total_seconds(), 3600))
+
+                    time.sleep(sleep_seconds)
                 else:
                     time.sleep(3600)  # Weekend check every hour
             except Exception as e:

@@ -33,6 +33,30 @@ _ORDER_DISPATCH_LOCK = threading.Lock()
 _LAST_ORDER_DISPATCH_TIME = 0.0
 _MIN_ORDER_SPACING_SEC = 0.20  # 200ms minimum spacing between order dispatches to Kotak Neo to prevent core RMS lock collisions
 
+KOTAK_AUTH_ERROR_PATTERNS = (
+    "2fa",
+    "complete the 2fa",
+    "two factor",
+    "two-factor",
+    "accessing this application",
+    "unauthorized",
+    "session expired",
+    "token expired",
+    "invalid token",
+    "jwt expired",
+    "session invalid",
+    "session not found",
+    "100008",
+    "not authenticated",
+    "auth failed",
+    "authentication failed",
+    "please login",
+    "login again",
+    "view token",
+    "edit token",
+    "trade token",
+)
+
 logger = logging.getLogger("kotak_broker_adapter")
 logger.setLevel(logging.INFO)
 
@@ -395,19 +419,20 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
     def _get_client(self):
         c = kotak_auth.get_authenticated_client(force=False)
-        if c is None:
+        if c is None or not kotak_auth.is_client_trading_ready(c):
             c = kotak_auth.get_authenticated_client(force=True)
         return c
 
     def get_status(self) -> Dict[str, Any]:
         client = self._get_client()
         status_info = kotak_auth.get_auth_status()
+        is_ready = bool(client is not None and kotak_auth.is_client_trading_ready(client))
         return {
             "name": "Kotak Neo",
-            "connected": client is not None,
+            "connected": is_ready,
             "mode": "LIVE_BROKER",
             "ucc": status_info.get("ucc", "--"),
-            "authenticated": status_info.get("is_authenticated", False)
+            "authenticated": is_ready
         }
 
     def _place_single_order(
@@ -575,20 +600,17 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 else:
                     err_msg = str(res)
 
-                # 1. Specialized Auto-Re-Authentication ONLY on Genuine Session Expiry (NEVER on core/transient errors):
-                is_auth_err = any(k in err_msg.lower() for k in (
-                    "unauthorized", "session expired", "token expired",
-                    "invalid token", "jwt expired", "100008", "session invalid", "session not found"
-                ))
+                # 1. Specialized Auto-Re-Authentication on Session Expiry or 2FA Incompletion:
+                is_auth_err = any(k in err_msg.lower() for k in KOTAK_AUTH_ERROR_PATTERNS)
                 if is_auth_err and retry_depth < 2:
                     logger.warning(
-                        f"[Kotak Neo] Broker reported session auth error: '{err_msg}'. "
-                        f"Auto-invalidating session and re-authenticating with fresh TOTP..."
+                        f"[Kotak Neo] Broker reported session/2FA auth error: '{err_msg}'. "
+                        f"Auto-invalidating session and re-authenticating with fresh TOTP + MPIN (attempt {retry_depth + 1}/2)..."
                     )
                     kotak_auth.invalidate_session()
                     fresh_client = kotak_auth.get_authenticated_client(force=True)
-                    if fresh_client is not None:
-                        logger.info("[Kotak Neo] Fresh session verified. Re-attempting order slice dispatch immediately...")
+                    if fresh_client is not None and kotak_auth.is_client_trading_ready(fresh_client):
+                        logger.info("[Kotak Neo] Fresh verified 2FA trading session established. Re-attempting order slice dispatch immediately...")
                         return self._place_single_order(
                             client=fresh_client,
                             canonical_symbol=canonical_symbol,
@@ -736,14 +758,12 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         except Exception as e:
             err_str = str(e)
             logger.error(f"[Kotak Neo] Exception placing order slice: {err_str}")
-            is_auth_err = any(k in err_str.lower() for k in (
-                "unauthorized", "session expired", "token expired", "invalid token", "jwt expired", "100008"
-            ))
+            is_auth_err = any(k in err_str.lower() for k in KOTAK_AUTH_ERROR_PATTERNS)
             if is_auth_err and retry_depth < 2:
-                logger.warning(f"[Kotak Neo] Exception indicates session auth error. Auto-reauthenticating and retrying...")
+                logger.warning(f"[Kotak Neo] Exception indicates session/2FA auth error: '{err_str}'. Auto-reauthenticating and retrying...")
                 kotak_auth.invalidate_session()
                 fresh_client = kotak_auth.get_authenticated_client(force=True)
-                if fresh_client is not None:
+                if fresh_client is not None and kotak_auth.is_client_trading_ready(fresh_client):
                     return self._place_single_order(
                         client=fresh_client,
                         canonical_symbol=canonical_symbol,
@@ -814,10 +834,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             }
 
         client = self._get_client()
-        if client is None:
+        if client is None or not kotak_auth.is_client_trading_ready(client):
+            client = kotak_auth.get_authenticated_client(force=True)
+        if client is None or not kotak_auth.is_client_trading_ready(client):
+            auth_err = kotak_auth.get_last_auth_error() or "Kotak Neo not authenticated (2FA MPIN pending). Please check credentials in settings."
             return {
                 "success": False,
-                "error": "Kotak Neo not authenticated. Please check credentials in settings.",
+                "error": auth_err,
                 "status_code": 401
             }
 

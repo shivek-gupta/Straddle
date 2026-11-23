@@ -2267,8 +2267,8 @@ def init_services():
         def _bg_auth_check():
             try:
                 if not kotak_auth.is_session_active_for_today():
-                    logger.info("Attempting startup authentication with Kotak Neo...")
-                    kotak_auth.get_authenticated_client(force=False)
+                    logger.info("Attempting startup authentication with Kotak Neo (automated TOTP + 2FA MPIN)...")
+                    kotak_auth.get_authenticated_client(force=True)
             except Exception as ex:
                 logger.warning(f"Startup auth check notice: {ex}")
         Thread(target=_bg_auth_check, daemon=True, name="StartupAuthWorker").start()
