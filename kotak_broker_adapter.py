@@ -1306,15 +1306,24 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         return {"filled": False, "status": "TIMEOUT", "order_id": oid_str, "error": f"Timed out after {timeout_sec}s"}
 
     def get_order_book(self) -> List[Dict[str, Any]]:
+        now_ts = time.time()
+        if (now_ts - getattr(self, "_order_book_cache_ts", 0.0)) < 1.5:
+            return list(self._order_book_cache) if getattr(self, "_order_book_cache", None) else []
+
         client = self._get_client()
         if client is None:
             return []
 
+        self._order_book_cache_ts = now_ts
         try:
             res = client.order_report()
+            if isinstance(res, dict) and (res.get("stCode") == 100025 or "rate limit" in str(res).lower() or res.get("stat") == "too many request received"):
+                self._order_book_cache_ts = now_ts + 3.5
+                return list(self._order_book_cache) if getattr(self, "_order_book_cache", None) else []
+
             data = res.get("data") if isinstance(res, dict) else res
             if not isinstance(data, list):
-                return []
+                return list(self._order_book_cache) if getattr(self, "_order_book_cache", None) else []
 
             standardized = []
             for item in data:
@@ -1359,26 +1368,32 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     "client_id": item.get("actId") or "Kotak Neo",
                     "tag": str(item.get("guiOrdId") or item.get("tag") or item.get("remarks") or item.get("tok") or ""),
                 })
+            self._order_book_cache = standardized
             return standardized
 
         except Exception as e:
             logger.error(f"[Kotak Neo] Exception reading order report: {e}")
-            return []
+            return list(self._order_book_cache) if getattr(self, "_order_book_cache", None) else []
 
     def get_positions(self, force: bool = False) -> List[Dict[str, Any]]:
         now_ts = time.time()
-        if not force and self._positions_cache and (now_ts - self._positions_cache_ts) < 2.0:
-            return list(self._positions_cache)
+        if not force and (now_ts - getattr(self, "_positions_cache_ts", 0.0)) < 2.0:
+            return list(self._positions_cache) if self._positions_cache else []
 
         client = self._get_client()
         if client is None:
             return list(self._positions_cache) if self._positions_cache else []
 
+        self._positions_cache_ts = now_ts
         try:
             res = client.positions()
+            if isinstance(res, dict) and (res.get("stCode") == 100025 or "rate limit" in str(res).lower() or res.get("stat") == "too many request received"):
+                self._positions_cache_ts = now_ts + 3.5
+                return list(self._positions_cache) if self._positions_cache else []
+
             data = res.get("data") if isinstance(res, dict) else res
             if not isinstance(data, list):
-                return []
+                return list(self._positions_cache) if self._positions_cache else []
 
             standardized = []
             for item in data:
@@ -1502,15 +1517,20 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
 
     def get_funds(self) -> Dict[str, Any]:
         now_ts = time.time()
-        if self._funds_cache and (now_ts - self._funds_cache_ts) < 2.5:
-            return self._funds_cache
+        if (now_ts - getattr(self, "_funds_cache_ts", 0.0)) < 2.5:
+            return self._funds_cache if self._funds_cache else {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
 
         client = self._get_client()
         if client is None:
-            return {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
+            return self._funds_cache if self._funds_cache else {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
 
+        self._funds_cache_ts = now_ts
         try:
             res = client.limits()
+            if isinstance(res, dict) and (res.get("stCode") == 100025 or "rate limit" in str(res).lower() or res.get("stat") == "too many request received"):
+                self._funds_cache_ts = now_ts + 3.5
+                return self._funds_cache if self._funds_cache else {"available_margin": 0.0, "used_margin": 0.0, "net_cash": 0.0}
+
             data = res.get("data") if (isinstance(res, dict) and "data" in res and isinstance(res["data"], dict)) else res
             if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
                 data = data[0]
