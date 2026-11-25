@@ -6048,7 +6048,7 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             if (pos.is_associated_hedge) {
                 const pType = pos.hedge_parent_type || "MAIN";
                 hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid #10b981; border-radius:4px; padding:1px 5px;">🛡️ HEDGE (${formatSymbolColorCoded(pType)})</span></div>`;
-            } else if (pos.has_associated_hedge || pos.associated_hedge_id || (side === "SELL" && !isAdopted)) {
+            } else if (pos.has_associated_hedge || pos.associated_hedge_id || side === "SELL" || pos.is_re_entry) {
                 hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9.5px; font-weight:900; color:#ef4444; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.45); border-radius:4px; padding:1px 5px;" title="Main Trading Leg">🎯 MAIN</span></div>`;
             } else if (isAdopted) {
                 hedgeTagHtml = `<div style="margin-top:3px;"><span style="display:inline-block; font-size:9px; font-weight:800; color:#c084fc; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); border-radius:4px; padding:1px 5px;" title="Adopted broker position">💼 ADOPTED</span></div>`;
@@ -6324,7 +6324,8 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             // Entry Reason (Tracking origin, parent leg, re-execute, hedge shift, adopted from Kotak Neo)
             let entryReasonHtml = `<span style="color:#64748b; font-size:11px;">-</span>`;
 
-            if (isAdopted) {
+            const isReEntryReason = pos.is_re_entry || (pos.entry_reason && (String(pos.entry_reason).toLowerCase().includes("re-execute") || String(pos.entry_reason).toLowerCase().includes("re-entry")));
+            if (isAdopted && !isReEntryReason) {
                 const sSide = String(pos.side || "SELL").toUpperCase();
                 const sType = String(pos.option_type || (String(pos.symbol || "").includes("CE") ? "CE" : "PE")).toUpperCase();
                 let adoptLabel = pos.entry_reason && String(pos.entry_reason).trim() !== "-" && !String(pos.entry_reason).startsWith("Initial")

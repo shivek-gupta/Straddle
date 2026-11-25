@@ -12155,7 +12155,26 @@ class StraddleManager:
         exit_counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
         for p in positions:
             exit_r = str(p.get("exit_reason", "")).upper()
-            if "TRIGGERED CE" in exit_r and ("RE-EXECUTE" in exit_r or "RE-ENTRY" in exit_r):
+            sym = str(p.get("symbol", "")).upper()
+            opt = p.get("re_execute_leg_type") or p.get("option_type") or ("CE" if "CE" in sym else ("PE" if "PE" in sym else ""))
+            is_hedge = bool(p.get("is_associated_hedge")) or (str(p.get("side", "")).upper() == "BUY" and ("HEDGE" in sym or float(p.get("avg_ent_price", 0) or 0) < 50.0))
+            if is_hedge:
+                continue
+
+            is_closed = p.get("status") in ("COMPLETE", "CLOSED") or p in strat.get("closed_positions", [])
+            if is_closed:
+                pnl = float(p.get("realised") or p.get("realised_pnl") or p.get("mtm") or 0.0)
+                if "TARGET" in exit_r or "TGT" in exit_r or pnl > 0:
+                    if opt == "CE":
+                        exit_counts["ce_target"] += 1
+                    elif opt == "PE":
+                        exit_counts["pe_target"] += 1
+                elif "STOPLOSS" in exit_r or "SL" in exit_r or pnl < 0:
+                    if opt == "CE":
+                        exit_counts["ce_sl"] += 1
+                    elif opt == "PE":
+                        exit_counts["pe_sl"] += 1
+            elif "TRIGGERED CE" in exit_r and ("RE-EXECUTE" in exit_r or "RE-ENTRY" in exit_r):
                 if "TARGET" in exit_r or "TGT" in exit_r:
                     exit_counts["ce_target"] += 1
                 else:
@@ -12167,7 +12186,8 @@ class StraddleManager:
                     exit_counts["pe_sl"] += 1
 
         for k in counts:
-            counts[k] = max(counts[k], exit_counts.get(k, 0))
+            existing = int(strat.get("re_execution_counts", {}).get(k, 0) or 0)
+            counts[k] = max(counts[k], exit_counts.get(k, 0), existing)
 
         return counts
 
@@ -15140,6 +15160,24 @@ class StraddleManager:
                         is_hedge = (side == "BUY" and any(str(l.get("side", "")).upper() == "SELL" for l in cand_strat.get("legs", [])))
                         matching_short = next((l for l in cand_strat.get("legs", []) if str(l.get("option_type", "")).upper() == opt_type and str(l.get("side", "")).upper() == "SELL"), None)
 
+                        closed_reexecs = sum(1 for cp in cand_strat.get("closed_positions", []) if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge"))
+                        is_re = False
+                        re_cnt = 0
+                        re_trig = ""
+                        if not is_hedge and (closed_reexecs > 0 or prior_reexecs > 0):
+                            is_re = True
+                            re_cnt = max(re_num, closed_reexecs)
+                            last_cp = next((cp for cp in reversed(cand_strat.get("closed_positions", [])) if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge")), None)
+                            if last_cp:
+                                exit_r = str(last_cp.get("exit_reason", "")).upper()
+                                pnl = float(last_cp.get("realised") or last_cp.get("realised_pnl") or last_cp.get("mtm") or 0.0)
+                                re_trig = "TARGET" if "TARGET" in exit_r or pnl > 0 else "STOPLOSS"
+                            else:
+                                re_trig = "STOPLOSS"
+                            entry_r = f"⚡ RE-EXECUTE #{re_cnt} [{opt_type}] ({re_trig} HIT)"
+                        else:
+                            entry_r = f"Initial Strategy Entry (Hedge {opt_type})" if is_hedge else "Initial Strategy Entry"
+
                         auto_pos = {
                             "id": f"leg_adopted_{int(time.time()*1000)}",
                             "status": "OPEN",
@@ -15173,15 +15211,15 @@ class StraddleManager:
                             "pnl_pct": pnl_pct,
                             "order_id": real_oid,
                             "child_order_ids": [real_oid] if real_oid else [],
-                            "re_execute_count": 0,
-                            "re_execute_leg_type": "",
-                            "re_execute_trigger": "",
-                            "is_re_entry": False,
-                            "is_adopted": True,
+                            "re_execute_count": re_cnt,
+                            "re_execute_leg_type": opt_type if is_re else "",
+                            "re_execute_trigger": re_trig if is_re else "",
+                            "is_re_entry": is_re,
+                            "is_adopted": False if is_re else (not is_hedge),
                             "is_associated_hedge": is_hedge,
                             "parent_leg_id": matching_short.get("id") if (is_hedge and matching_short) else "",
                             "hedge_parent_type": opt_type if is_hedge else "",
-                            "entry_reason": f"HEDGE ({opt_type}) [Adopted from Kotak Neo]" if is_hedge else f"📥 Adopted from Kotak Neo ({opt_type}) [Broker Position]",
+                            "entry_reason": entry_r,
                             "strategy_id": cand_strat.get("strategy_id"),
                             "strategy_name": cand_strat.get("name"),
                             "date": today_ist_str(),
@@ -15216,6 +15254,19 @@ class StraddleManager:
                     matched_leg_pos["status"] = "OPEN"
                     matched_leg_pos["quantity"] = abs(net_qty)
                     matched_leg_pos["entry_qty"] = abs(net_qty)
+
+                    if not matched_leg_pos.get("is_associated_hedge") and str(matched_leg_pos.get("side", "")).upper() == "SELL":
+                        closed_reexecs = sum(1 for cp in matched_strat.get("closed_positions", []) if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge"))
+                        if closed_reexecs > 0 and not matched_leg_pos.get("is_re_entry"):
+                            matched_leg_pos["is_re_entry"] = True
+                            matched_leg_pos["re_execute_count"] = closed_reexecs
+                            last_cp = next((cp for cp in reversed(matched_strat.get("closed_positions", [])) if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge")), None)
+                            trig = "TARGET" if last_cp and ("TARGET" in str(last_cp.get("exit_reason", "")).upper() or float(last_cp.get("mtm", 0) or 0) > 0) else "STOPLOSS"
+                            matched_leg_pos["re_execute_trigger"] = trig
+                            matched_leg_pos["re_execute_leg_type"] = opt_type
+                            matched_leg_pos["entry_reason"] = f"⚡ RE-EXECUTE #{closed_reexecs} [{opt_type}] ({trig} HIT)"
+                            matched_leg_pos["is_adopted"] = False
+                            changes_made = True
 
                     # PRESERVE AND AUTO-HEAL EXACT TRADE ENTRY PRICE:
                     # Kotak Neo's positions API (bp) reports cumulative whole-day average cost (Avg.cost).
@@ -15438,50 +15489,71 @@ class StraddleManager:
                     if s_und not in bp_sym.upper() and not bp_sym.upper().startswith(s_und):
                         continue
                     c_list = s.setdefault("closed_positions", [])
-                    if not any(_is_same_instrument(cp.get("symbol"), cp.get("instrument_key"), bp_sym, bp_ikey) for cp in c_list):
-                        buy_avg = float(bp.get("buy_avg") or bp.get("day_buy_price") or bp.get("buy_price") or 0.0)
-                        sell_avg = float(bp.get("sell_avg") or bp.get("day_sell_price") or bp.get("sell_price") or 0.0)
-                        r_pnl = float(bp.get("realised_pnl") or bp.get("pnl") or 0.0)
-                        is_hedge = (buy_avg < 50.0 and sell_avg < 50.0 and ("24" in bp_sym or "26" in bp_sym))
-                        ent_p = buy_avg if is_hedge else (sell_avg if sell_avg > 0 else buy_avg)
-                        exit_p = sell_avg if is_hedge else (buy_avg if buy_avg > 0 else sell_avg)
-                        if r_pnl > 0:
-                            reason = f"TARGET HIT (₹{exit_p:.2f}) [Broker Closed]"
-                        elif r_pnl < 0:
-                            reason = f"STOPLOSS HIT (₹{exit_p:.2f}) [Broker Closed]"
-                        else:
-                            reason = f"CLOSED (₹{exit_p:.2f}) [Broker Closed]"
+                    buy_avg = float(bp.get("buy_avg") or bp.get("day_buy_price") or bp.get("buy_price") or 0.0)
+                    sell_avg = float(bp.get("sell_avg") or bp.get("day_sell_price") or bp.get("sell_price") or 0.0)
+                    r_pnl = float(bp.get("realised") or bp.get("realised_pnl") or bp.get("rpnl") or bp.get("realized_pnl") or bp.get("pnl") or 0.0)
+                    is_hedge = (buy_avg < 50.0 and sell_avg < 50.0 and ("24" in bp_sym or "26" in bp_sym))
+                    ent_p = buy_avg if is_hedge else (sell_avg if sell_avg > 0 else buy_avg)
+                    exit_p = sell_avg if is_hedge else (buy_avg if buy_avg > 0 else sell_avg)
+                    qty = abs(int(bp.get("buy_qty") or bp.get("sell_qty") or 65))
+                    if r_pnl == 0.0 and buy_avg > 0 and sell_avg > 0:
+                        r_pnl = round((sell_avg - buy_avg) * qty, 2)
 
-                        opt_type = "PE" if " PE" in bp_sym.upper() or bp_sym.upper().endswith("PE") else ("CE" if " CE" in bp_sym.upper() or bp_sym.upper().endswith("CE") else "")
-                        stk_price = 0.0
-                        for part in bp_sym.split():
-                            if part.isdigit() and len(part) >= 4:
-                                stk_price = float(part)
-                                break
+                    if is_hedge:
+                        reason = f"HEDGE EXITED (₹{exit_p:.2f})"
+                    elif r_pnl > 0:
+                        reason = f"TARGET BOOKED (₹{exit_p:.2f})"
+                    elif r_pnl < 0:
+                        reason = f"SL BOOKED (₹{exit_p:.2f})"
+                    else:
+                        reason = f"SL/TARGET BOOKED (₹{exit_p:.2f})"
 
-                        synth_closed = {
-                            "id": f"closed_reconciled_{bp_ikey or int(time.time()*1000)}",
-                            "status": "COMPLETE",
-                            "side": "BUY" if is_hedge else "SELL",
-                            "symbol": format_trading_symbol_display(bp_sym),
-                            "trading_symbol": bp_sym,
-                            "instrument_key": bp_ikey,
-                            "strike_price": stk_price,
-                            "option_type": opt_type,
-                            "quantity": abs(int(bp.get("buy_qty") or bp.get("sell_qty") or 65)),
-                            "entry_qty": abs(int(bp.get("buy_qty") or bp.get("sell_qty") or 65)),
-                            "avg_ent_price": ent_p,
-                            "avg_exit_price": exit_p,
-                            "exit_reason": reason,
-                            "exit_time": now_ist_str(),
-                            "mtm": r_pnl,
-                            "realised_pnl": r_pnl,
-                            "is_re_entry": False,
-                            "is_associated_hedge": is_hedge,
-                            "strategy_id": s.get("strategy_id"),
-                        }
-                        c_list.append(synth_closed)
-                        changes_made = True
+                    existing_cp = next((cp for cp in c_list if _is_same_instrument(cp.get("symbol"), cp.get("instrument_key"), bp_sym, bp_ikey)), None)
+                    if existing_cp:
+                        if (float(existing_cp.get("mtm", 0.0) or 0.0) == 0.0 or "CLOSED (" in str(existing_cp.get("exit_reason", ""))) and r_pnl != 0.0:
+                            existing_cp["mtm"] = r_pnl
+                            existing_cp["realised_pnl"] = r_pnl
+                            existing_cp["exit_reason"] = reason
+                            changes_made = True
+                        continue
+
+                    opt_type = "PE" if " PE" in bp_sym.upper() or bp_sym.upper().endswith("PE") else ("CE" if " CE" in bp_sym.upper() or bp_sym.upper().endswith("CE") else "")
+                    stk_price = 0.0
+                    for part in bp_sym.split():
+                        if part.isdigit() and len(part) >= 4:
+                            stk_price = float(part)
+                            break
+
+                    synth_closed = {
+                        "id": f"closed_reconciled_{bp_ikey or int(time.time()*1000)}",
+                        "status": "COMPLETE",
+                        "side": "BUY" if is_hedge else "SELL",
+                        "symbol": format_trading_symbol_display(bp_sym),
+                        "trading_symbol": bp_sym,
+                        "instrument_key": bp_ikey,
+                        "strike_price": stk_price,
+                        "option_type": opt_type,
+                        "quantity": qty,
+                        "entry_qty": qty,
+                        "avg_ent_price": ent_p,
+                        "avg_exit_price": exit_p,
+                        "exit_reason": reason,
+                        "exit_time": now_ist_str(),
+                        "mtm": r_pnl,
+                        "realised_pnl": r_pnl,
+                        "is_re_entry": False,
+                        "is_associated_hedge": is_hedge,
+                        "strategy_id": s.get("strategy_id"),
+                    }
+                    c_list.append(synth_closed)
+                    changes_made = True
+
+            for s in self._strategies:
+                s["re_execution_counts"] = self.get_strategy_reexecution_counts(s)
+            if self._active_strategy_id:
+                act_s = next((s for s in self._strategies if s.get("strategy_id") == self._active_strategy_id), None)
+                if act_s:
+                    self._state["re_execution_counts"] = act_s.get("re_execution_counts", {})
 
             # Part 3: Auto-Deduplication of Extra / Stale Hedges on Broker
             for s in self._strategies:
