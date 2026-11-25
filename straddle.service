@@ -8,7 +8,7 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/Straddle
 Environment=PORT=5001
 Environment=WEB_HOST=0.0.0.0
-ExecStart=/usr/bin/python3 web_server.py
+ExecStart=/bin/bash -c 'if [ -f /home/ubuntu/Straddle/venv/bin/python ]; then exec /home/ubuntu/Straddle/venv/bin/python web_server.py; else exec /usr/bin/python3 web_server.py; fi'
 Restart=always
 RestartSec=5
 StandardOutput=journal

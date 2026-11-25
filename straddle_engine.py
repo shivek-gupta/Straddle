@@ -50,6 +50,7 @@ logger.setLevel(logging.INFO)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 _PERSISTENT_LEG_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="StraddleLegExec")
+_ORDER_SLICE_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="OrderSliceExec")
 
 
 def now_ist() -> datetime:
@@ -239,6 +240,7 @@ STRADDLE_ORDER_REGISTRY_FILE = STRADDLE_DIR / "straddle_order_registry.json"
 STRADDLE_BACKUPS_DIR = STRADDLE_DIR / "straddle_backups"
 
 _ENGINE_LOCK = threading.RLock()
+_BENCHMARK_LOCK = threading.Lock()
 _LOOKUP_LOCK = threading.Lock()
 _ADVANCE_ORDER_LOCK = threading.Lock()
 _LOGS_LOCK = threading.Lock()
@@ -1177,7 +1179,7 @@ class StraddleManager:
                 strat["shadow_benchmark"] = strat["shadow_benchmark"][-100:]
 
             # Append to platform benchmark history
-            with _ENGINE_LOCK:
+            with _BENCHMARK_LOCK:
                 if not hasattr(self, "_shadow_benchmarks"):
                     self._shadow_benchmarks = []
                 self._shadow_benchmarks.append(benchmark_entry)
@@ -1197,7 +1199,7 @@ class StraddleManager:
 
     def get_shadow_benchmark_summary(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
         """Returns aggregated latency and slippage KPIs comparing Broker execution vs Paper."""
-        with _ENGINE_LOCK:
+        with _BENCHMARK_LOCK:
             history = list(getattr(self, "_shadow_benchmarks", []))
             if strategy_id:
                 history = [b for b in history if b.get("strategy_id") == strategy_id]
@@ -1697,7 +1699,7 @@ class StraddleManager:
             if m_txt:
                 strategy_name = m_txt.group(1).strip()
         if not strategy_name:
-            active_s = self.get_strategy(getattr(self, "_active_strategy_id", None))
+            active_s = self._find_strategy_internal(getattr(self, "_active_strategy_id", None))
             if active_s:
                 strategy_name = active_s.get("name") or active_s.get("strategy_id") or "nifty"
             else:
@@ -1717,7 +1719,7 @@ class StraddleManager:
                     underlying = cand
                     break
         if not underlying:
-            active_s = self.get_strategy(getattr(self, "_active_strategy_id", None))
+            active_s = self._find_strategy_internal(getattr(self, "_active_strategy_id", None))
             underlying = (active_s.get("underlying") if active_s else None) or "NIFTY"
 
         # Auto-detect role & is_associated_hedge
@@ -1819,7 +1821,7 @@ class StraddleManager:
 
         # Instant Quantiply-style Telegram Error Alert Dispatch
         if level == "ERROR" or any(k in message.upper() for k in ("ORDER REJECTED", "EXECUTION FAILED", "SL PLACEMENT FAILED", "TARGET PLACEMENT FAILED", "FAILED TO PLACE", "TERMINATED DUE TO ERROR")):
-            strat_name = det.get("strategy_name") or det.get("algo_name") or (self.get_strategy(self._active_strategy_id) or {}).get("name")
+            strat_name = det.get("strategy_name") or det.get("algo_name") or (self._find_strategy_internal(getattr(self, "_active_strategy_id", None)) or {}).get("name")
             sym = det.get("symbol") or det.get("trading_symbol")
             err_code = det.get("error_code") or det.get("code")
             self.send_telegram_error_alert(
@@ -4073,11 +4075,30 @@ class StraddleManager:
     # Strategy CRUD & Multi-Algo Management
     # ==========================================================
 
+    def _find_strategy_internal(self, strategy_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Fast, non-blocking strategy lookup by ID or Name that never deadlocks."""
+        sid = str(strategy_id or getattr(self, "_active_strategy_id", "") or "").strip().lower()
+        if not sid:
+            strats = getattr(self, "_strategies", [])
+            return strats[0] if strats else None
+        strats = getattr(self, "_strategies", [])
+        for s in strats:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("strategy_id", "")).strip().lower() == sid or str(s.get("name", "")).strip().lower() == sid:
+                return s
+        return None
+
     def get_all_strategies(self) -> List[Dict[str, Any]]:
-        with _ENGINE_LOCK:
-            if not self._strategies:
-                self._load_strategies()
-            return [dict(s) for s in self._strategies if isinstance(s, dict)]
+        acquired = _ENGINE_LOCK.acquire(timeout=0.5)
+        if acquired:
+            try:
+                if not self._strategies:
+                    self._load_strategies()
+                return [dict(s) for s in self._strategies if isinstance(s, dict)]
+            finally:
+                _ENGINE_LOCK.release()
+        return [dict(s) for s in getattr(self, "_strategies", []) if isinstance(s, dict)]
 
     def get_strategy(self, strategy_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         if strategy_id:
@@ -4867,15 +4888,16 @@ class StraddleManager:
             strat = self.get_strategy(strategy_id)
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
+            if strat.get("_exit_in_progress"):
+                return {"success": True, "message": "Square-off already in progress", "strategy_id": strategy_id, "strategy": strat}
 
+            strat["_exit_in_progress"] = True
             mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
-            self._square_off_strategy_positions(strat, broker, reason="MANUAL SQUARE OFF")
 
             strat["status"] = "TERMINATED"
             strat["enabled"] = False
             strat["_manual_reset"] = True
-            strat["_entry_in_progress"] = False
 
             if self._active_strategy_id == strategy_id:
                 self._state["positions"] = strat.get("positions", [])
@@ -4883,8 +4905,14 @@ class StraddleManager:
 
             self._save_strategies()
             self._save_state()
-            self._log_event(f"Strategy '{strat.get('name')}' squared off and terminated.")
-            return {"success": True, "strategy_id": strategy_id, "strategy": strat}
+            self._log_event(f"Strategy '{strat.get('name')}' square off initiated.")
+
+        threading.Thread(
+            target=self._run_bg_square_off,
+            args=(strat, broker, "MANUAL SQUARE OFF"),
+            daemon=True
+        ).start()
+        return {"success": True, "strategy_id": strategy_id, "strategy": strat}
 
     def batch_delete_strategies(self, strategy_ids: List[str]) -> Dict[str, Any]:
         """Delete multiple strategies permanently by ID or Name and persist."""
@@ -6015,12 +6043,6 @@ class StraddleManager:
             sell_positions = [p for p in positions if p.get("status") == "OPEN" and p.get("side", "").upper() == "SELL"]
             buy_positions = [p for p in positions if p.get("status") == "OPEN" and p.get("side", "").upper() == "BUY"]
 
-            for pos in sell_positions:
-                self._square_off_single_position(pos, broker, reason="MANUAL SQUARE OFF ALL")
-
-            for pos in buy_positions:
-                self._square_off_single_position(pos, broker, reason="MANUAL SQUARE OFF ALL")
-
             self._state["algo_running"] = False
             self._state["status"] = "TERMINATED"
             for s in self._strategies:
@@ -6029,12 +6051,31 @@ class StraddleManager:
                 s["_entry_in_progress"] = False
             self._save_strategies()
             self._save_state()
-            return {"success": True, "message": "All positions squared off successfully and algorithm terminated."}
+
+        def _do_square_off_all():
+            for pos in sell_positions:
+                try:
+                    self._square_off_single_position(pos, broker, reason="MANUAL SQUARE OFF ALL")
+                except Exception as e_sq:
+                    logger.error(f"[SQUARE OFF ALL] Error squaring off sell pos {pos.get('symbol')}: {e_sq}")
+
+            for pos in buy_positions:
+                try:
+                    self._square_off_single_position(pos, broker, reason="MANUAL SQUARE OFF ALL")
+                except Exception as e_sq:
+                    logger.error(f"[SQUARE OFF ALL] Error squaring off buy pos {pos.get('symbol')}: {e_sq}")
+
+            with _ENGINE_LOCK:
+                self._save_strategies()
+                self._save_state()
+
+        threading.Thread(target=_do_square_off_all, daemon=True).start()
+        return {"success": True, "message": "All positions squared off successfully and algorithm terminated."}
 
     def square_off_leg(self, leg_index: int, strategy_id: Optional[str] = None) -> Dict[str, Any]:
         """Square off an individual selected leg position."""
         with _ENGINE_LOCK:
-            strat = self.get_strategy(strategy_id) if strategy_id else (self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else None))
+            strat = self._find_strategy_internal(strategy_id) if strategy_id else (self._find_strategy_internal(self._active_strategy_id) or (self._strategies[0] if self._strategies else None))
             positions = strat.get("positions", []) if (strat and strat.get("positions")) else self._state.get("positions", [])
             if leg_index < 0 or leg_index >= len(positions):
                 return {"success": False, "error": "Invalid leg index"}
@@ -6046,16 +6087,21 @@ class StraddleManager:
             mode = (strat.get("execution_mode") if strat else None) or self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
             pos["status"] = "OPEN"  # Allow square off attempt
-            self._square_off_single_position(pos, broker, reason="MANUAL LEG EXIT")
-            if strat and str(pos.get("side", "SELL")).upper() == "SELL":
-                self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Manual exit of {pos.get('symbol')}")
+
+        # Execute order operations outside _ENGINE_LOCK so network calls never freeze UI/HTTP threads
+        self._square_off_single_position(pos, broker, reason="MANUAL LEG EXIT", strat=strat)
+        if strat and str(pos.get("side", "SELL")).upper() == "SELL":
+            self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Manual exit of {pos.get('symbol')}")
+
+        with _ENGINE_LOCK:
             self._save_state()
             self._save_strategies()
-            if pos.get("status") in ("COMPLETE", "CLOSED"):
-                return {"success": True, "position": pos}
-            else:
-                err = pos.get("error_message") or pos.get("error") or "Exit order rejected by broker"
-                return {"success": False, "error": err, "position": pos}
+
+        if pos.get("status") in ("COMPLETE", "CLOSED"):
+            return {"success": True, "position": pos}
+        else:
+            err = pos.get("error_message") or pos.get("error") or "Exit order rejected by broker"
+            return {"success": False, "error": err, "position": pos}
 
     def toggle_execution_mode(self, mode: str = "LIVE_BROKER") -> Dict[str, Any]:
         """Toggles execution mode between LIVE_BROKER and PAPER_TRADING."""
@@ -10727,6 +10773,7 @@ class StraddleManager:
         pos: Dict[str, Any],
         broker: BaseBrokerAdapter,
         reason: str = "TARGET HIT",
+        strat: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if pos.get("status") not in ("OPEN", "EXIT_PENDING", "ERROR") or int(pos.get("quantity") or 0) <= 0:
             return {"success": False, "error": "Position is not OPEN"}
@@ -10840,10 +10887,9 @@ class StraddleManager:
         # Ensure any active advance SL / Target orders are cleared
         self._cancel_leg_broker_orders(pos, broker)
 
-        strat = None
-        if strat_id:
+        if strat is None and strat_id:
             try:
-                strat = self.get_strategy(strat_id)
+                strat = self._find_strategy_internal(strat_id)
             except Exception:
                 strat = None
         adv = (strat.get("advanced_settings") or strat.get("advanced") or {}) if strat else {}
@@ -10912,7 +10958,7 @@ class StraddleManager:
                 except Exception as ex:
                     return {"slice_qty": s_qty, "res": {"success": False, "error": str(ex)}}
 
-            futures = [_PERSISTENT_LEG_POOL.submit(_place_exit_slice, i, sq) for i, sq in enumerate(qty_slices)]
+            futures = [_ORDER_SLICE_POOL.submit(_place_exit_slice, i, sq) for i, sq in enumerate(qty_slices)]
             for fut in concurrent.futures.as_completed(futures):
                 child_results.append(fut.result())
 
@@ -15634,14 +15680,14 @@ class StraddleManager:
                 if has_open_positions and is_after_end:
                     if not strat.get("_exit_in_progress"):
                         strat["_exit_in_progress"] = True
-                        try:
-                            strat["entry_error"] = f"Trading hours ended ({et})"
-                            self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off all open positions immediately.")
-                            self._save_strategies()
-                            self._square_off_strategy_positions(strat, broker, reason=f"AUTO END TIME ({et})")
-                        finally:
-                            strat["_exit_in_progress"] = False
-                            self._save_strategies()
+                        strat["entry_error"] = f"Trading hours ended ({et})"
+                        self._log_event(f"End Time ({et}) reached for '{strat.get('name')}'. Auto squaring off all open positions immediately.")
+                        self._save_strategies()
+                        threading.Thread(
+                            target=self._run_bg_square_off,
+                            args=(strat, broker, f"AUTO END TIME ({et})"),
+                            daemon=True
+                        ).start()
                     continue
 
                 # Check Margin Auto-Exit Grace Countdown (Quantiply: 15s buffer before squaring off all open positions)
@@ -16340,27 +16386,33 @@ class StraddleManager:
                                     f"[{strat.get('name')}] 🎯 Lock & Trail Profit Triggered! Current MTM ₹{strat_mtm:.2f} fell to/below locked floor ₹{cur_locked_profit:.2f}. "
                                     f"Securing profit and squaring off all positions!"
                                 )
-                                self._square_off_strategy_positions(strat, broker, reason=f"LOCK & TRAIL HIT (Floor ₹{cur_locked_profit:.2f})")
                                 action = mtm_tgt.get("action", "Square off all positions")
+                                strat["status"] = "TERMINATED"
                                 if "terminate" in str(action).lower():
-                                    strat["status"] = "TERMINATED"
                                     strat["enabled"] = False
-                                else:
-                                    strat["status"] = "TERMINATED"
+                                strat["_exit_in_progress"] = True
                                 self._save_strategies()
+                                threading.Thread(
+                                    target=self._run_bg_square_off,
+                                    args=(strat, broker, f"LOCK & TRAIL HIT (Floor ₹{cur_locked_profit:.2f})", action),
+                                    daemon=True
+                                ).start()
 
                     elif tgt_type in ("MTM in total amount", "Fixed Amount", "Fixed Target (Amount)", "Fixed Target"):
                         tgt_val = abs(float(mtm_tgt.get("value", 0.0))) * strat_lots
                         if tgt_val > 0 and strat_mtm >= tgt_val and strat.get("status") == "TRADE_ACTIVE":
                             self._log_event(f"MTM Target reached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f} >= ₹{tgt_val:.2f}. Squaring off.")
-                            self._square_off_strategy_positions(strat, broker, reason="MTM TARGET HIT")
                             action = mtm_tgt.get("action", "Square off all positions")
+                            strat["status"] = "TERMINATED"
                             if "terminate" in str(action).lower():
-                                strat["status"] = "TERMINATED"
                                 strat["enabled"] = False
-                            else:
-                                strat["status"] = "TERMINATED"
+                            strat["_exit_in_progress"] = True
                             self._save_strategies()
+                            threading.Thread(
+                                target=self._run_bg_square_off,
+                                args=(strat, broker, "MTM TARGET HIT", action),
+                                daemon=True
+                            ).start()
 
                 # Check Strategy-level MTM Stoploss
                 mtm_sl = strat.get("mtm_stoploss") or strat.get("mtm_sl") or {}
@@ -16377,14 +16429,17 @@ class StraddleManager:
 
                         if sl_val > 0 and strat_mtm <= -sl_val and strat.get("status") == "TRADE_ACTIVE" and not delay_active:
                             self._log_event(f"MTM Stoploss breached for '{strat.get('name')}'. Current MTM: ₹{strat_mtm:.2f} <= -₹{sl_val:.2f}. Squaring off.")
-                            self._square_off_strategy_positions(strat, broker, reason="MTM STOPLOSS BREACHED")
                             action = mtm_sl.get("action", "Square off all positions")
+                            strat["status"] = "TERMINATED"
                             if "terminate" in str(action).lower():
-                                strat["status"] = "TERMINATED"
                                 strat["enabled"] = False
-                            else:
-                                strat["status"] = "TERMINATED"
+                            strat["_exit_in_progress"] = True
                             self._save_strategies()
+                            threading.Thread(
+                                target=self._run_bg_square_off,
+                                args=(strat, broker, "MTM STOPLOSS BREACHED", action),
+                                daemon=True
+                            ).start()
 
             self._state["group_mtm"] = round(total_portfolio_mtm, 2)
             self._state["total_mtm"] = round(total_portfolio_mtm, 2)
@@ -16412,74 +16467,10 @@ class StraddleManager:
             is_eod_time = (now_sec_sweep >= (15 * 3600 + 29 * 60 + 50))
             if mode_sweep == "LIVE_BROKER" and is_eod_time and self.is_broker_connected():
                 last_sweep_ts = getattr(self, "_last_eod_sweep_ts", 0.0)
-                # Run fail-safe sweep every 3 seconds during market close window
+                # Run fail-safe sweep every 3 seconds during market close window in dedicated thread
                 if time.time() - last_sweep_ts >= 3.0:
                     self._last_eod_sweep_ts = time.time()
-                    try:
-                        broker_sweep = get_broker_adapter("LIVE_BROKER")
-                        raw_b_pos = broker_sweep.get_positions(force=True) or []
-                        open_b_pos = [
-                            bp for bp in raw_b_pos
-                            if int(bp.get("net_qty") or bp.get("quantity") or 0) != 0
-                            and not any(c in str(bp.get("symbol", "") or bp.get("trading_symbol", "")).upper() for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
-                        ]
-                        if open_b_pos:
-                            self._log_event(
-                                f"⚠️ [FAIL-SAFE END-TIME SWEEP] Detected {len(open_b_pos)} open position(s) on Kotak Neo at {now_dt_sweep.strftime('%H:%M:%S')}. Initiating emergency square-off to guarantee ZERO overnight risk!",
-                                level="WARNING"
-                            )
-                            # Phase 1: Short SELL positions first
-                            short_sells = [bp for bp in open_b_pos if int(bp.get("net_qty") or bp.get("quantity") or 0) < 0]
-                            for bp in short_sells:
-                                sym_b = bp.get("symbol") or bp.get("trading_symbol") or ""
-                                ikey_b = bp.get("instrument_key") or bp.get("instrument_token") or ""
-                                sq_qty = abs(int(bp.get("net_qty") or bp.get("quantity") or 0))
-                                prod_b = bp.get("product", "NRML")
-                                self._log_event(f"🛡️ [FAIL-SAFE SWEEP] Exiting residual short leg '{sym_b}' (Qty: {sq_qty}) with MARKET order...")
-                                try:
-                                    broker_sweep.place_order(
-                                        symbol=sym_b,
-                                        instrument_key=ikey_b,
-                                        transaction_type="BUY",
-                                        quantity=sq_qty,
-                                        product=prod_b,
-                                        order_type="MARKET",
-                                        price=0.0,
-                                        tag="eod_sweep_sell",
-                                    )
-                                except Exception as e_sq:
-                                    logger.error(f"[FAIL-SAFE SWEEP ERROR] Failed squaring off short position {sym_b}: {e_sq}")
-                            
-                            # Wait 1.5s for sell fills before closing hedges
-                            if short_sells:
-                                time.sleep(1.5)
-                            
-                            # Phase 2: Long BUY hedges
-                            long_buys = [bp for bp in open_b_pos if int(bp.get("net_qty") or bp.get("quantity") or 0) > 0]
-                            for bp in long_buys:
-                                sym_b = bp.get("symbol") or bp.get("trading_symbol") or ""
-                                ikey_b = bp.get("instrument_key") or bp.get("instrument_token") or ""
-                                sq_qty = abs(int(bp.get("net_qty") or bp.get("quantity") or 0))
-                                prod_b = bp.get("product", "NRML")
-                                self._log_event(f"🛡️ [FAIL-SAFE SWEEP] Exiting residual hedge leg '{sym_b}' (Qty: {sq_qty}) with MARKET order...")
-                                try:
-                                    broker_sweep.place_order(
-                                        symbol=sym_b,
-                                        instrument_key=ikey_b,
-                                        transaction_type="SELL",
-                                        quantity=sq_qty,
-                                        product=prod_b,
-                                        order_type="MARKET",
-                                        price=0.0,
-                                        tag="eod_sweep_hedge",
-                                    )
-                                except Exception as e_sq:
-                                    logger.error(f"[FAIL-SAFE SWEEP ERROR] Failed squaring off hedge position {sym_b}: {e_sq}")
-                            
-                            # Trigger position reconciliation immediately after sweep
-                            self._reconcile_broker_positions(broker_sweep)
-                    except Exception as e_sweep:
-                        logger.error(f"[FAIL-SAFE SWEEP EXCEPTION] Error in end-of-day broker sweep: {e_sweep}")
+                    threading.Thread(target=self._run_bg_fail_safe_sweep, daemon=True).start()
 
     def _square_off_strategy_positions(self, strat: Dict[str, Any], broker: BaseBrokerAdapter, reason: str = "AUTO SQUARE OFF"):
         """Square off all open positions belonging to a single strategy respecting exit delay sequencing."""
@@ -16496,7 +16487,7 @@ class StraddleManager:
         # If exit_delay_sec == 0s (or "None"), buffer time is 0: exit Buy hedge legs immediately upon Sell exits!
         is_urgent = any(k in reason.upper() for k in ("MANUAL", "SQUARE OFF", "EMERGENCY", "END TIME", "TIME EXIT", "AUTO END"))
         if sells:
-            sell_res = list(_PERSISTENT_LEG_POOL.map(lambda p: self._square_off_single_position(p, broker, reason=reason), sells))
+            sell_res = list(_PERSISTENT_LEG_POOL.map(lambda p: self._square_off_single_position(p, broker, reason=reason, strat=strat), sells))
 
             # Confirm sell exits without blocking user UI
             sell_exit_oids = [str(p.get("exit_order_id")) for p in sells if p.get("exit_order_id") and not str(p.get("exit_order_id")).startswith("ORD_") and not str(p.get("exit_order_id")).startswith("PAPER_")]
@@ -16513,7 +16504,7 @@ class StraddleManager:
 
         # Phase 2: Square off Long Buy (Hedge) positions ONLY after Short Sell positions are completely exited!
         if buys:
-            _ = list(_PERSISTENT_LEG_POOL.map(lambda p: self._square_off_single_position(p, broker, reason=reason), buys))
+            _ = list(_PERSISTENT_LEG_POOL.map(lambda p: self._square_off_single_position(p, broker, reason=reason, strat=strat), buys))
 
         strat_open = [p for p in strat.get("positions", []) if p.get("status") in ("OPEN", "EXIT_PENDING", "ERROR") and int(p.get("quantity") or 0) > 0]
         if not strat_open:
@@ -16524,18 +16515,103 @@ class StraddleManager:
             strat["exit_error"] = f"{len(strat_open)} position(s) failed to square off cleanly. Retrying next cycle..."
         self._save_strategies()
 
+    def _run_bg_square_off(self, strat: Dict[str, Any], broker: BaseBrokerAdapter, reason: str = "AUTO SQUARE OFF", post_action: str = ""):
+        """Execute strategy square-off in a dedicated background worker to guarantee zero lock contention and no UI freezing."""
+        try:
+            self._square_off_strategy_positions(strat, broker, reason=reason)
+            if post_action:
+                with _ENGINE_LOCK:
+                    if "terminate" in str(post_action).lower():
+                        strat["status"] = "TERMINATED"
+                        strat["enabled"] = False
+                    else:
+                        strat["status"] = "TERMINATED"
+                    self._save_strategies()
+        except Exception as e:
+            logger.error(f"[BgSquareOff] Error squaring off strategy '{strat.get('name')}': {e}", exc_info=True)
+        finally:
+            with _ENGINE_LOCK:
+                strat["_exit_in_progress"] = False
+                self._save_strategies()
+
+    def _run_bg_fail_safe_sweep(self):
+        """Execute end-of-day broker sweep in a non-blocking background thread outside _ENGINE_LOCK."""
+        try:
+            broker_sweep = get_broker_adapter("LIVE_BROKER")
+            raw_b_pos = broker_sweep.get_positions(force=True) or []
+            open_b_pos = [
+                bp for bp in raw_b_pos
+                if int(bp.get("net_qty") or bp.get("quantity") or 0) != 0
+                and not any(c in str(bp.get("symbol", "") or bp.get("trading_symbol", "")).upper() for c in ("CRUDE", "NATURAL", "NATGAS", "GOLD", "SILVER", "COPPER"))
+            ]
+            if open_b_pos:
+                now_str = now_ist().strftime('%H:%M:%S')
+                self._log_event(
+                    f"⚠️ [FAIL-SAFE END-TIME SWEEP] Detected {len(open_b_pos)} open position(s) on Kotak Neo at {now_str}. Initiating emergency square-off to guarantee ZERO overnight risk!",
+                    level="WARNING"
+                )
+                short_sells = [bp for bp in open_b_pos if int(bp.get("net_qty") or bp.get("quantity") or 0) < 0]
+                for bp in short_sells:
+                    sym_b = bp.get("symbol") or bp.get("trading_symbol") or ""
+                    ikey_b = bp.get("instrument_key") or bp.get("instrument_token") or ""
+                    sq_qty = abs(int(bp.get("net_qty") or bp.get("quantity") or 0))
+                    prod_b = bp.get("product", "NRML")
+                    self._log_event(f"🛡️ [FAIL-SAFE SWEEP] Exiting residual short leg '{sym_b}' (Qty: {sq_qty}) with MARKET order...")
+                    try:
+                        broker_sweep.place_order(
+                            symbol=sym_b,
+                            instrument_key=ikey_b,
+                            transaction_type="BUY",
+                            quantity=sq_qty,
+                            product=prod_b,
+                            order_type="MARKET",
+                            price=0.0,
+                            tag="eod_sweep_sell",
+                        )
+                    except Exception as e_sq:
+                        logger.error(f"[FAIL-SAFE SWEEP ERROR] Failed squaring off short position {sym_b}: {e_sq}")
+
+                if short_sells:
+                    time.sleep(1.5)
+
+                long_buys = [bp for bp in open_b_pos if int(bp.get("net_qty") or bp.get("quantity") or 0) > 0]
+                for bp in long_buys:
+                    sym_b = bp.get("symbol") or bp.get("trading_symbol") or ""
+                    ikey_b = bp.get("instrument_key") or bp.get("instrument_token") or ""
+                    sq_qty = abs(int(bp.get("net_qty") or bp.get("quantity") or 0))
+                    prod_b = bp.get("product", "NRML")
+                    self._log_event(f"🛡️ [FAIL-SAFE SWEEP] Exiting residual hedge leg '{sym_b}' (Qty: {sq_qty}) with MARKET order...")
+                    try:
+                        broker_sweep.place_order(
+                            symbol=sym_b,
+                            instrument_key=ikey_b,
+                            transaction_type="SELL",
+                            quantity=sq_qty,
+                            product=prod_b,
+                            order_type="MARKET",
+                            price=0.0,
+                            tag="eod_sweep_hedge",
+                        )
+                    except Exception as e_sq:
+                        logger.error(f"[FAIL-SAFE SWEEP ERROR] Failed squaring off hedge position {sym_b}: {e_sq}")
+
+                self._reconcile_broker_positions(broker_sweep)
+        except Exception as e_sweep:
+            logger.error(f"[FAIL-SAFE SWEEP EXCEPTION] Error in end-of-day broker sweep: {e_sweep}")
+
     # ==========================================================
     # State Inspection API
     # ==========================================================
 
     def get_full_state(self) -> Dict[str, Any]:
-        with _ENGINE_LOCK:
+        acquired = _ENGINE_LOCK.acquire(timeout=0.5)
+        try:
             if not self._strategies:
                 self._load_strategies()
 
-            active_strat = self.get_strategy(self._active_strategy_id) or (self._strategies[0] if self._strategies else {})
-            active_positions = active_strat.get("positions", []) if active_strat else []
-            active_closed = active_strat.get("closed_positions", []) if active_strat else []
+            active_strat = self._find_strategy_internal(self._active_strategy_id) or (self._strategies[0] if self._strategies else {})
+            active_positions = list(active_strat.get("positions", [])) if active_strat else []
+            active_closed = list(active_strat.get("closed_positions", [])) if active_strat else []
 
             now_state_ts = time.time()
             # Ensure all strategies have default schedule days and multiplier settings if not set
@@ -16591,7 +16667,7 @@ class StraddleManager:
                 "execution_mode": self._state.get("execution_mode", "LIVE_BROKER"),
                 "broker_connected": self.is_broker_connected(),
                 "active_strategy": active_strat,
-                "all_strategies": self._strategies,
+                "all_strategies": list(self._strategies),
                 "positions": active_positions,
                 "closed_positions": active_closed,
                 "re_execution_counts": reexec_counts,
@@ -16603,9 +16679,12 @@ class StraddleManager:
                 "underlying_symbol": self._state.get("underlying_symbol", "NIFTY"),
                 "underlying_atm_strike": self._state.get("underlying_atm_strike", 22450.0),
                 "last_tick_time": self._state.get("last_tick_time", now_ist_str()),
-                "logs": self._state.get("logs", [])[:50],
+                "logs": list(self._state.get("logs", []))[:50],
                 "margin": self.get_margin_overview(),
             }
+        finally:
+            if acquired:
+                _ENGINE_LOCK.release()
 
 
 # Singleton instance
