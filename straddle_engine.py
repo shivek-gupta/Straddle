@@ -5987,14 +5987,30 @@ class StraddleManager:
         with _ENGINE_LOCK:
             cleared_strat_legs = 0
             strats_to_clear = [s for s in self._strategies if s.get("strategy_id") == strategy_id or s.get("name") == strategy_id] if strategy_id else self._strategies
+            all_ignored = set()
             for strat in strats_to_clear:
-                open_legs = [p for p in strat.get("positions", []) if p.get("status") in ("OPEN", "LIVE OPEN")]
-                for p in strat.get("positions", []):
-                    if p.get("status") not in ("OPEN", "LIVE OPEN"):
-                        cleared_strat_legs += 1
-                        k = p.get("instrument_key") or p.get("symbol") or p.get("trading_symbol")
+                ignored_k = set(strat.get("_reset_ignored_keys", []))
+                for p in strat.get("closed_positions", []) + [pos for pos in strat.get("positions", []) if pos.get("status") not in ("OPEN", "LIVE OPEN")]:
+                    cleared_strat_legs += 1
+                    for k in (p.get("instrument_key"), p.get("symbol"), p.get("trading_symbol")):
                         if k:
+                            ignored_k.add(str(k))
+                            all_ignored.add(str(k))
                             self._cleared_closed_keys.add(str(k))
+                try:
+                    broker = get_broker_adapter(self._state.get("execution_mode", "LIVE_BROKER"))
+                    for bp in (broker.get_positions() or []):
+                        if int(bp.get("net_qty") or bp.get("quantity") or 0) == 0:
+                            for k in (bp.get("instrument_key"), bp.get("symbol"), bp.get("trading_symbol")):
+                                if k:
+                                    ignored_k.add(str(k))
+                                    all_ignored.add(str(k))
+                                    self._cleared_closed_keys.add(str(k))
+                except Exception:
+                    pass
+                strat["_reset_ignored_keys"] = list(ignored_k)
+                strat["closed_positions"] = []
+                open_legs = [p for p in strat.get("positions", []) if p.get("status") in ("OPEN", "LIVE OPEN")]
                 strat["positions"] = open_legs
                 if not open_legs:
                     strat["mtm"] = 0.0
@@ -6005,6 +6021,7 @@ class StraddleManager:
                 else:
                     strat["re_execution_counts"] = self.get_strategy_reexecution_counts(strat)
 
+            self._state["closed_positions"] = []
             if self._state.get("positions"):
                 for p in self._state["positions"]:
                     if p.get("status") not in ("OPEN", "LIVE OPEN"):
@@ -6012,6 +6029,7 @@ class StraddleManager:
                         if k:
                             self._cleared_closed_keys.add(str(k))
                 self._state["positions"] = [p for p in self._state["positions"] if p.get("status") in ("OPEN", "LIVE OPEN")]
+            self._cleared_closed_keys.update(all_ignored)
 
             # Invalidate cached response
             self._cached_open_positions_response = None
@@ -7021,6 +7039,15 @@ class StraddleManager:
                         strat["status"] = "TRADE_ACTIVE"
                         strat["_trade_active_ts"] = time.time()
                         strat["entry_error"] = "-"
+                        for p in new_positions:
+                            for k in (p.get("instrument_key"), p.get("symbol"), p.get("trading_symbol")):
+                                if k:
+                                    if str(k) in strat.get("_reset_ignored_keys", []):
+                                        try:
+                                            strat["_reset_ignored_keys"].remove(str(k))
+                                        except Exception:
+                                            pass
+                                    self._cleared_closed_keys.discard(str(k))
                     elif has_errors and not has_open:
                         strat["status"] = "ENTRY_FAILED"
                         strat["enabled"] = False
@@ -10367,6 +10394,22 @@ class StraddleManager:
                 strat_id = strat.get("strategy_id")
                 strat_name = strat.get("name")
 
+                # Record all past instrument keys into _reset_ignored_keys so they are never adopted back into a clean reset strategy
+                ignored_k = set(strat.get("_reset_ignored_keys", []))
+                for p in strat.get("positions", []) + strat.get("closed_positions", []):
+                    for k in (p.get("instrument_key"), p.get("symbol"), p.get("trading_symbol")):
+                        if k:
+                            ignored_k.add(str(k))
+                try:
+                    broker = get_broker_adapter(self._state.get("execution_mode", "LIVE_BROKER"))
+                    for bp in (broker.get_positions() or []):
+                        for k in (bp.get("instrument_key"), bp.get("symbol"), bp.get("trading_symbol")):
+                            if k:
+                                ignored_k.add(str(k))
+                except Exception:
+                    pass
+                strat["_reset_ignored_keys"] = list(ignored_k)
+
                 # Bump generation counter so any pending thread discards its stale results
                 strat["_reset_generation"] = strat.get("_reset_generation", 0) + 1
                 strat["positions"] = []
@@ -10455,6 +10498,10 @@ class StraddleManager:
 
             # Always clean active state if active matches any of the reset strategies or if reset_algo was called
             self._state["positions"] = []
+            self._state["closed_positions"] = []
+            for s in matched_strats:
+                for k in s.get("_reset_ignored_keys", []):
+                    self._cleared_closed_keys.add(str(k))
             self._state["status"] = "READY"
             self._state["entry_error"] = "-"
             self._state["exit_error"] = "-"
@@ -12032,6 +12079,14 @@ class StraddleManager:
                                 strat_pos_list.append(new_pos)
                                 if strat is not auth_strat:
                                     strat.setdefault("positions", []).append(new_pos)
+                                for k in (new_pos.get("instrument_key"), new_pos.get("symbol"), new_pos.get("trading_symbol")):
+                                    if k:
+                                        if str(k) in auth_strat.get("_reset_ignored_keys", []):
+                                            try:
+                                                auth_strat["_reset_ignored_keys"].remove(str(k))
+                                            except Exception:
+                                                pass
+                                        self._cleared_closed_keys.discard(str(k))
 
                             # Ensure parent pos status is COMPLETE and synced to closed_positions
                             if pos.get("status") != "COMPLETE":
@@ -15105,12 +15160,13 @@ class StraddleManager:
                         s_und = str(s.get("underlying") or "NIFTY").upper()
                         if s_und not in bp_sym.upper() and not bp_sym.upper().startswith(s_und):
                             continue
-                        if s.get("strategy_id") == self._active_strategy_id or s.get("enabled") or s.get("status") in ("TRADE_ACTIVE", "READY"):
+                        if s.get("_manual_reset") or s.get("status") in ("STOPPED", "READY", "TERMINATED") or not s.get("enabled"):
+                            continue
+                        if str(bp_ikey) in s.get("_reset_ignored_keys", []) or str(bp_sym) in s.get("_reset_ignored_keys", []):
+                            continue
+                        if s.get("strategy_id") == self._active_strategy_id or s.get("enabled") or s.get("status") in ("TRADE_ACTIVE", "RUNNING"):
                             cand_strat = s
                             break
-
-                    if not cand_strat:
-                        cand_strat = next((s for s in self._strategies if str(s.get("underlying") or "NIFTY").upper() in bp_sym.upper()), None)
 
                     if not cand_strat:
                         continue
@@ -15489,6 +15545,11 @@ class StraddleManager:
                 if not bp_sym and not bp_ikey:
                     continue
                 for s in self._strategies:
+                    # NEVER adopt broker closed positions into a stopped, ready, reset, or disabled strategy!
+                    if not s.get("enabled", False) or s.get("status") not in ("TRADE_ACTIVE", "RUNNING") or s.get("_manual_reset"):
+                        continue
+                    if str(bp_ikey) in s.get("_reset_ignored_keys", []) or str(bp_sym) in s.get("_reset_ignored_keys", []) or str(bp_ikey) in self._cleared_closed_keys or str(bp_sym) in self._cleared_closed_keys:
+                        continue
                     s_und = str(s.get("underlying") or "NIFTY").upper()
                     if s_und not in bp_sym.upper() and not bp_sym.upper().startswith(s_und):
                         continue

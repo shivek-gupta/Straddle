@@ -604,6 +604,8 @@ async function fetchStraddleState() {
             }
             if (s.closed_positions && Array.isArray(s.closed_positions)) {
                 window._straddleState.closed_positions = s.closed_positions;
+            } else {
+                window._straddleState.closed_positions = [];
             }
             let activePositions = [];
             if (active) {
@@ -2678,6 +2680,8 @@ async function straddleResetStrategyDirect(strategyId) {
     (window._straddleState.allStrategies || []).forEach(s => {
         if (s.strategy_id === targetSid || s.name === name || s.name === targetSid || s.strategy_id === strategyId) {
             s.positions = [];
+            s.closed_positions = [];
+            s.shadow_benchmark = [];
             s.mtm = 0.0;
             s.max_mtm = 0.0;
             s.min_mtm = 0.0;
@@ -2720,6 +2724,8 @@ async function straddleResetStrategyDirect(strategyId) {
     if (window._straddleState && (window._straddleState.activeStrategyId === targetSid || window._straddleState.activeStrategy?.strategy_id === targetSid || window._straddleState.activeStrategy?.name === name || window._straddleState.activeStrategyId === strategyId)) {
         if (window._straddleState.activeStrategy) {
             window._straddleState.activeStrategy.positions = [];
+            window._straddleState.activeStrategy.closed_positions = [];
+            window._straddleState.activeStrategy.shadow_benchmark = [];
             window._straddleState.activeStrategy.status = "READY";
             window._straddleState.activeStrategy.entry_error = "-";
             window._straddleState.activeStrategy.exit_error = "-";
@@ -2730,6 +2736,8 @@ async function straddleResetStrategyDirect(strategyId) {
             window._straddleState.activeStrategy.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
         }
         window._straddleState.positions = [];
+        window._straddleState.closed_positions = [];
+        window._straddleState.closedPositionsCache = [];
         window._straddleState.status = "READY";
         window._straddleState.entry_error = "-";
         window._straddleState.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
@@ -2771,8 +2779,11 @@ async function straddleResetStrategyDirect(strategyId) {
                 if (window._straddleState.activeStrategyId === updated.strategy_id || window._straddleState.activeStrategy?.name === updated.name) {
                     window._straddleState.activeStrategy = updated;
                     window._straddleState.positions = updated.positions || [];
+                    window._straddleState.closed_positions = updated.closed_positions || [];
                 }
             }
+            window._straddleState.closed_positions = [];
+            window._straddleState.closedPositionsCache = [];
             await fetchStraddleState();
             await loadStraddleOpenPositions();
             if (window._straddleState && (window._straddleState.activeStrategyId === targetSid || window._straddleState.activeStrategy?.strategy_id === targetSid)) {
@@ -7644,7 +7655,10 @@ async function resetCurrentStraddleAlgo() {
                 if (idx >= 0) window._straddleState.allStrategies[idx] = updated;
                 window._straddleState.activeStrategy = updated;
                 window._straddleState.positions = updated.positions || [];
+                window._straddleState.closed_positions = updated.closed_positions || [];
             }
+            window._straddleState.closed_positions = [];
+            window._straddleState.closedPositionsCache = [];
             await fetchStraddleState();
             await loadStraddleOpenPositions();
             renderStraddlePositions(window._straddleState.activeStrategy?.positions || [], 0.0, 0.0);
@@ -10847,6 +10861,7 @@ async function clearStraddleClosedAndExpiredPositions() {
         if (res.success) {
             showStraddleToast(`✅ Cleared ${res.cleared_count || 0} closed position(s).`, "success", 2000);
             if (window._straddleState?.activeStrategy) {
+                window._straddleState.activeStrategy.closed_positions = [];
                 const openLegs = (window._straddleState.activeStrategy.positions || []).filter(p => p.status === "OPEN" || p.status === "LIVE OPEN");
                 window._straddleState.activeStrategy.positions = openLegs;
                 if (openLegs.length === 0) {
@@ -10854,6 +10869,8 @@ async function clearStraddleClosedAndExpiredPositions() {
                     updateStraddleReexecBadges([]);
                 }
             }
+            window._straddleState.closed_positions = [];
+            window._straddleState.closedPositionsCache = [];
             await loadStraddleOpenPositions();
             await fetchStraddleState();
             updateStraddleReexecBadges(window._straddleState?.activeStrategy?.positions || []);
