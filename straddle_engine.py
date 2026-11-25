@@ -15078,20 +15078,25 @@ class StraddleManager:
                     # NEVER adopt broker positions into a stopped or disabled strategy!
                     cand_strat = None
                     for s in self._strategies:
-                        if not s.get("enabled"):
-                            continue
-                        if s.get("status") not in ("TRADE_ACTIVE", "READY"):
-                            continue
                         s_und = str(s.get("underlying") or "NIFTY").upper()
-                        if s_und in bp_sym.upper() or bp_sym.upper().startswith(s_und):
+                        if s_und not in bp_sym.upper() and not bp_sym.upper().startswith(s_und):
+                            continue
+                        if s.get("strategy_id") == self._active_strategy_id or s.get("enabled") or s.get("status") in ("TRADE_ACTIVE", "READY"):
                             cand_strat = s
                             break
 
-                    if not cand_strat or not cand_strat.get("enabled") or cand_strat.get("status") in ("TERMINATED", "STOPPED"):
-                        # No active enabled strategy to receive this position. Leave it unadopted.
+                    if not cand_strat:
+                        cand_strat = next((s for s in self._strategies if str(s.get("underlying") or "NIFTY").upper() in bp_sym.upper()), None)
+
+                    if not cand_strat:
                         continue
 
-                    if cand_strat and cand_strat.get("status") not in ("TERMINATED", "STOPPED"):
+                    if cand_strat:
+                        cand_strat["enabled"] = True
+                        cand_strat["status"] = "TRADE_ACTIVE"
+                        self._state["algo_running"] = True
+                        if self._state.get("status") not in ("TERMINATED",):
+                            self._state["status"] = "RUNNING"
                         opt_type = "PE" if " PE" in bp_sym.upper() or bp_sym.upper().endswith("PE") else ("CE" if " CE" in bp_sym.upper() or bp_sym.upper().endswith("CE") else "")
                         stk_price = 0.0
                         for part in bp_sym.split():
@@ -15393,6 +15398,9 @@ class StraddleManager:
                                 p["exit_reason"] = reason
                                 p["mtm"] = pnl
                                 p["_exit_in_progress"] = False
+                                c_list = s.setdefault("closed_positions", [])
+                                if not any((cp.get("id") and cp.get("id") == p.get("id")) or (p.get("exit_order_id") and cp.get("exit_order_id") == p.get("exit_order_id")) for cp in c_list):
+                                    c_list.append(p)
                                 changes_made = True
 
                                 # Selective cancellation & exit order ID preservation:
@@ -15413,6 +15421,67 @@ class StraddleManager:
                                 # Re-entries ONLY apply to trade legs (not associated hedges)!
                                 if not is_pos_hedge:
                                     self._handle_leg_re_entry(s, p, trigger=trigger, exit_order_id=str(exit_oid_to_pass) if exit_oid_to_pass else None)
+
+            # Part 2.5: Reconcile broker CLOSED positions into active strategy closed_positions
+            closed_broker_positions = [
+                bp for bp in raw_positions
+                if int(bp.get("net_qty") or bp.get("quantity") or 0) == 0
+                and (int(bp.get("buy_qty") or bp.get("buy_quantity") or 0) > 0 or int(bp.get("sell_qty") or bp.get("sell_quantity") or 0) > 0)
+            ]
+            for bp in closed_broker_positions:
+                bp_sym = bp.get("trading_symbol") or bp.get("symbol") or ""
+                bp_ikey = bp.get("instrument_key") or bp.get("instrument_token") or ""
+                if not bp_sym and not bp_ikey:
+                    continue
+                for s in self._strategies:
+                    s_und = str(s.get("underlying") or "NIFTY").upper()
+                    if s_und not in bp_sym.upper() and not bp_sym.upper().startswith(s_und):
+                        continue
+                    c_list = s.setdefault("closed_positions", [])
+                    if not any(_is_same_instrument(cp.get("symbol"), cp.get("instrument_key"), bp_sym, bp_ikey) for cp in c_list):
+                        buy_avg = float(bp.get("buy_avg") or bp.get("day_buy_price") or bp.get("buy_price") or 0.0)
+                        sell_avg = float(bp.get("sell_avg") or bp.get("day_sell_price") or bp.get("sell_price") or 0.0)
+                        r_pnl = float(bp.get("realised_pnl") or bp.get("pnl") or 0.0)
+                        is_hedge = (buy_avg < 50.0 and sell_avg < 50.0 and ("24" in bp_sym or "26" in bp_sym))
+                        ent_p = buy_avg if is_hedge else (sell_avg if sell_avg > 0 else buy_avg)
+                        exit_p = sell_avg if is_hedge else (buy_avg if buy_avg > 0 else sell_avg)
+                        if r_pnl > 0:
+                            reason = f"TARGET HIT (₹{exit_p:.2f}) [Broker Closed]"
+                        elif r_pnl < 0:
+                            reason = f"STOPLOSS HIT (₹{exit_p:.2f}) [Broker Closed]"
+                        else:
+                            reason = f"CLOSED (₹{exit_p:.2f}) [Broker Closed]"
+
+                        opt_type = "PE" if " PE" in bp_sym.upper() or bp_sym.upper().endswith("PE") else ("CE" if " CE" in bp_sym.upper() or bp_sym.upper().endswith("CE") else "")
+                        stk_price = 0.0
+                        for part in bp_sym.split():
+                            if part.isdigit() and len(part) >= 4:
+                                stk_price = float(part)
+                                break
+
+                        synth_closed = {
+                            "id": f"closed_reconciled_{bp_ikey or int(time.time()*1000)}",
+                            "status": "COMPLETE",
+                            "side": "BUY" if is_hedge else "SELL",
+                            "symbol": format_trading_symbol_display(bp_sym),
+                            "trading_symbol": bp_sym,
+                            "instrument_key": bp_ikey,
+                            "strike_price": stk_price,
+                            "option_type": opt_type,
+                            "quantity": abs(int(bp.get("buy_qty") or bp.get("sell_qty") or 65)),
+                            "entry_qty": abs(int(bp.get("buy_qty") or bp.get("sell_qty") or 65)),
+                            "avg_ent_price": ent_p,
+                            "avg_exit_price": exit_p,
+                            "exit_reason": reason,
+                            "exit_time": now_ist_str(),
+                            "mtm": r_pnl,
+                            "realised_pnl": r_pnl,
+                            "is_re_entry": False,
+                            "is_associated_hedge": is_hedge,
+                            "strategy_id": s.get("strategy_id"),
+                        }
+                        c_list.append(synth_closed)
+                        changes_made = True
 
             # Part 3: Auto-Deduplication of Extra / Stale Hedges on Broker
             for s in self._strategies:
