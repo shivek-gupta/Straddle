@@ -246,6 +246,16 @@ _ADVANCE_ORDER_LOCK = threading.Lock()
 _LOGS_LOCK = threading.Lock()
 
 
+def _json_default_serializer(obj):
+    if isinstance(obj, (set, frozenset, tuple)):
+        return list(obj)
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    return str(obj)
+
+
 def _safe_write_json(file_path: Path, data: Any, retries: int = 5):
     """Lossless atomic JSON write with unique temp filename and Windows file-lock retry backoff."""
     pid = os.getpid()
@@ -259,7 +269,7 @@ def _safe_write_json(file_path: Path, data: Any, retries: int = 5):
             except OSError:
                 pass
         with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, default=_json_default_serializer)
         
         for attempt in range(retries):
             try:
@@ -270,12 +280,12 @@ def _safe_write_json(file_path: Path, data: Any, retries: int = 5):
         
         # Fallback to direct write if replace is locked
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, default=_json_default_serializer)
     except Exception as e:
         logger.error(f"Failed to safe-write JSON to {file_path}: {e}")
         try:
             with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+                json.dump(data, f, indent=2, default=_json_default_serializer)
         except Exception:
             pass
     finally:
@@ -11347,7 +11357,11 @@ class StraddleManager:
         if is_re_enabled and cur_count < re_max:
             new_count = cur_count + 1
             pos["_re_entry_in_progress"] = True
-            strat.setdefault("_active_re_entries", set()).add(pos.get("id") or pos.get("symbol"))
+            p_key = str(pos.get("id") or pos.get("symbol"))
+            active_re = [str(x) for x in strat.get("_active_re_entries", []) if str(x).strip()]
+            if p_key not in active_re:
+                active_re.append(p_key)
+            strat["_active_re_entries"] = active_re
             strat["_re_entry_in_progress"] = True
             self._log_event(f"Triggering {re_type_u} #{new_count}/{re_max} for leg '{pos.get('symbol')}' ({trigger} hit)...")
 
@@ -12077,8 +12091,10 @@ class StraddleManager:
                     pos["_re_entry_in_progress"] = False
                     pos["re_execution_pending"] = False
                     strat["re_execution_pending"] = False
-                    strat.setdefault("_active_re_entries", set()).discard(pos.get("id") or pos.get("symbol"))
-                    strat["_re_entry_in_progress"] = bool(strat.get("_active_re_entries"))
+                    p_key = str(pos.get("id") or pos.get("symbol"))
+                    active_re = [str(x) for x in strat.get("_active_re_entries", []) if str(x) != p_key]
+                    strat["_active_re_entries"] = active_re
+                    strat["_re_entry_in_progress"] = bool(active_re)
 
             threading.Thread(target=_runner_wrapper, daemon=True).start()
         else:
@@ -16192,6 +16208,9 @@ class StraddleManager:
                         pos["exit_reason"] = "TARGET HIT (Broker OCO)"
                         pos["exit_order_id"] = str(adv_tgt_oid)
                         pos["exit_time"] = now_ist_str()
+                        c_list = strat.setdefault("closed_positions", [])
+                        if not any((cp.get("id") and cp.get("id") == pos.get("id")) or (pos.get("exit_order_id") and cp.get("exit_order_id") == pos.get("exit_order_id")) for cp in c_list):
+                            c_list.append(pos)
                         self._log_event(f"Target order {adv_tgt_oid} FILLED for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. SL cancelled.")
                         self._save_strategies()
                         self._save_state(force=True)
@@ -16210,6 +16229,9 @@ class StraddleManager:
                         pos["exit_reason"] = "STOPLOSS HIT (Broker OCO)"
                         pos["exit_order_id"] = str(adv_sl_oid)
                         pos["exit_time"] = now_ist_str()
+                        c_list = strat.setdefault("closed_positions", [])
+                        if not any((cp.get("id") and cp.get("id") == pos.get("id")) or (pos.get("exit_order_id") and cp.get("exit_order_id") == pos.get("exit_order_id")) for cp in c_list):
+                            c_list.append(pos)
                         self._log_event(f"Stoploss order {adv_sl_oid} FILLED for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. Target cancelled.")
                         self._save_strategies()
                         self._save_state(force=True)
@@ -16618,6 +16640,15 @@ class StraddleManager:
             for s in self._strategies:
                 if not isinstance(s, dict):
                     continue
+                # Sanitize _active_re_entries to list so it never contains non-serializable sets
+                if isinstance(s.get("_active_re_entries"), (set, tuple)):
+                    s["_active_re_entries"] = list(s["_active_re_entries"])
+                # Ensure closed_positions contains any COMPLETE positions that aren't yet recorded
+                c_list = s.setdefault("closed_positions", [])
+                for p in s.get("positions", []):
+                    if p.get("status") in ("COMPLETE", "CLOSED", "EXITED"):
+                        if not any((cp.get("id") and cp.get("id") == p.get("id")) or (p.get("exit_order_id") and cp.get("exit_order_id") == p.get("exit_order_id")) for cp in c_list):
+                            c_list.append(p)
                 if "schedule_days" not in s or s.get("schedule_days") is None:
                     s["schedule_days"] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
                 if "mtm" not in s:

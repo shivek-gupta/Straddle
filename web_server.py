@@ -187,9 +187,25 @@ def api_straddle_state():
         if not state.get("all_strategies"):
             mgr._load_strategies()
             state = mgr.get_full_state()
-        return jsonify({"success": True, "state": state})
+        
+        from flask import Response
+        def _json_default(o):
+            if isinstance(o, (set, frozenset, tuple)):
+                return list(o)
+            if hasattr(o, "isoformat"):
+                return o.isoformat()
+            if hasattr(o, "to_dict"):
+                return o.to_dict()
+            return str(o)
+        
+        body = json.dumps({"success": True, "state": state}, default=_json_default)
+        resp = Response(body, status=200, mimetype="application/json")
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
     except Exception as e:
-        logger.error(f"Error in api_straddle_state: {e}")
+        logger.error(f"Error in api_straddle_state: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
