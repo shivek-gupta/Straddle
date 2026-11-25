@@ -1664,7 +1664,11 @@ class StraddleManager:
         is_associated_hedge: Optional[bool] = None,
         role: Optional[str] = None,
         trigger: Optional[str] = None,
+        strategy: Optional[str] = None,
+        **kwargs,
     ):
+        if not strategy_name and strategy:
+            strategy_name = strategy
         det = details or {}
         msg_u = message.upper()
 
@@ -15436,11 +15440,11 @@ class StraddleManager:
                                 self._log_event(
                                     f"Detected broker closed position for {p.get('symbol')} ({reason}). P&L: ₹{pnl:.2f}",
                                     level="INFO",
-                                    strategy=s.get("name"),
+                                    strategy_name=s.get("name"),
+                                    strategy_id=s.get("strategy_id"),
                                     underlying=s.get("underlying"),
                                     role="HEDGE" if is_pos_hedge else "MAIN",
                                     side=p.get("side"),
-                                    option_type=p.get("option_type"),
                                     trigger=trigger
                                 )
                                 p["status"] = "COMPLETE"
