@@ -7636,22 +7636,33 @@ class StraddleManager:
         interim_mode = str(adv.get("benchmark_interim_mode") or "FILL_PRICE").upper()
         defer_advance_orders = False
 
+        ref_price = entry_price
+        ref_candle_time = None
+        bm_pending = False
+
         if is_re_entry:
             if bm_scope == "INITIAL_ONLY":
                 ref_mode = "ENTRY_PRICE"
             elif bm_scope == "INHERIT_INITIAL":
                 # Stockmock parity: re-entries inherit the exact reference price of the initial leg
-                for old_pos in strat.get("positions", []):
-                    if old_pos.get("leg_index") == leg_index and old_pos.get("reference_price"):
+                leg_id_match = leg_cfg.get("id")
+                leg_opt_match = str(leg_cfg.get("option_type") or contract.get("option_type") or "").upper()
+                leg_side_match = str(leg_cfg.get("side") or side or "SELL").upper()
+                strat_pos_list = (strategy.get("positions", []) if strategy else []) + (strategy.get("closed_positions", []) if strategy else [])
+                for old_pos in strat_pos_list:
+                    if old_pos.get("is_associated_hedge"):
+                        continue
+                    same_leg = (leg_id_match and old_pos.get("leg_id") == leg_id_match) or (
+                        str(old_pos.get("option_type") or "").upper() == leg_opt_match
+                        and str(old_pos.get("side") or "SELL").upper() == leg_side_match
+                    )
+                    if same_leg and old_pos.get("reference_price"):
                         ref_price = float(old_pos["reference_price"])
                         ref_candle_time = "Initial Ref"
                         bm_pending = False
                         ref_mode = "INHERITED"
                         break
 
-        ref_price = entry_price
-        ref_candle_time = None
-        bm_pending = False
         now_str = now_ist_str()
         ent_hm = entry_time[:5]
         inst_k = contract.get("instrument_key", "")
@@ -7794,6 +7805,8 @@ class StraddleManager:
             target_type_label = "-"
             sl_type_label = "-"
             orig_sl_label = ""
+            bm_pending = False
+            defer_advance_orders = False
         else:
             orig_sl_label = f"ORIGINAL SL: -{sl_val:.0f}%" if ("%" in sl_type or "SL: %" in sl_type) else (f"ORIGINAL SL: {sl_price:.2f}" if sl_price > 0 else "")
         order_id = str(order_res.get("order_id") or "")
@@ -7977,14 +7990,24 @@ class StraddleManager:
                     pos_record["avg_ent_price"] = fill_p
                     if pos_record.get("reference_price_mode", "ENTRY_PRICE") == "ENTRY_PRICE" and not pos_record.get("benchmark_pending"):
                         pos_record["reference_price"] = fill_p
-                        if "%" in tgt_type or "TGT: %" in tgt_type:
+                        if ("%" in tgt_type or "TGT: %" in tgt_type) and tgt_val > 0:
                             pos_record["target_price"] = round_to_tick(
                                 fill_p * (1.0 - tgt_val / 100.0) if side == "SELL" else fill_p * (1.0 + tgt_val / 100.0)
                             )
-                        if "%" in sl_type or "SL: %" in sl_type:
+                        elif "Pts" in tgt_type and tgt_val > 0:
+                            pos_record["target_price"] = round_to_tick(
+                                fill_p - tgt_val if side == "SELL" else fill_p + tgt_val
+                            )
+                        if ("%" in sl_type or "SL: %" in sl_type) and sl_val > 0:
                             pos_record["sl_price"] = round_to_tick(
                                 fill_p * (1.0 + sl_val / 100.0) if side == "SELL" else fill_p * (1.0 - sl_val / 100.0)
                             )
+                            pos_record["original_sl_price"] = pos_record["sl_price"]
+                        elif "Pts" in sl_type and sl_val > 0:
+                            pos_record["sl_price"] = round_to_tick(
+                                fill_p + sl_val if side == "SELL" else fill_p - sl_val
+                            )
+                            pos_record["original_sl_price"] = pos_record["sl_price"]
 
             sl_delay = int(adv.get("sl_placement_delay_sec", 0))
             if sl_delay > 0:
@@ -10755,23 +10778,38 @@ class StraddleManager:
         # 3. Sweep broker orderbook for any pending trigger/limit orders for this exact symbol/token
         try:
             sym = pos.get("symbol") or pos.get("trading_symbol")
-            tok = pos.get("instrument_key", "").split("|")[-1]
-            ob = broker.get_order_book()
-            orders = ob.get("data", []) if isinstance(ob, dict) else (ob if isinstance(ob, list) else [])
-            for ord_item in orders:
-                if not isinstance(ord_item, dict):
-                    continue
-                o_st = str(ord_item.get("status") or ord_item.get("ordSt") or "").upper()
-                if any(w in o_st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
-                    o_sym = str(ord_item.get("trading_symbol") or ord_item.get("trdSym") or ord_item.get("sym") or "").strip()
-                    o_tok = str(ord_item.get("instrument_token") or ord_item.get("tok") or "")
-                    o_id = str(ord_item.get("order_id") or ord_item.get("nOrdNo") or "")
-                    if o_id and ((sym and o_sym == sym) or (tok and o_tok == tok)):
-                        try:
-                            broker.cancel_order(o_id)
-                            self._log_event(f"Swept & cancelled pending broker order #{o_id} for {o_sym} ({o_st})", level="INFO")
-                        except Exception as e_sw:
-                            logger.warning(f"Failed to sweep cancel order {o_id}: {e_sw}")
+            ikey = pos.get("instrument_key", "")
+            tok = ikey.split("|")[-1] if ikey else ""
+            # Check if another OPEN leg in any strategy shares the same instrument
+            other_open_oids = set()
+            has_other_open_same_sym = False
+            for s_chk in self._strategies:
+                for p_chk in s_chk.get("positions", []):
+                    if p_chk is not pos and p_chk.get("status") in ("OPEN", "LIVE OPEN"):
+                        if _is_same_instrument(p_chk.get("symbol"), p_chk.get("instrument_key"), sym, ikey):
+                            has_other_open_same_sym = True
+                            for k_oid in (p_chk.get("sl_broker_order_id"), p_chk.get("target_broker_order_id"), p_chk.get("order_id")):
+                                if k_oid:
+                                    for sub_oid in str(k_oid).split(","):
+                                        if sub_oid.strip():
+                                            other_open_oids.add(sub_oid.strip())
+            if not has_other_open_same_sym:
+                ob = broker.get_order_book()
+                orders = ob.get("data", []) if isinstance(ob, dict) else (ob if isinstance(ob, list) else [])
+                for ord_item in orders:
+                    if not isinstance(ord_item, dict):
+                        continue
+                    o_st = str(ord_item.get("status") or ord_item.get("ordSt") or "").upper()
+                    if any(w in o_st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
+                        o_sym = str(ord_item.get("trading_symbol") or ord_item.get("trdSym") or ord_item.get("sym") or "").strip()
+                        o_tok = str(ord_item.get("instrument_token") or ord_item.get("tok") or "")
+                        o_id = str(ord_item.get("order_id") or ord_item.get("nOrdNo") or "")
+                        if o_id and o_id not in other_open_oids and (_is_same_instrument(o_sym, o_tok, sym, ikey) or (tok and o_tok == tok)):
+                            try:
+                                broker.cancel_order(o_id)
+                                self._log_event(f"Swept & cancelled pending broker order #{o_id} for {o_sym} ({o_st})", level="INFO")
+                            except Exception as e_sw:
+                                logger.warning(f"Failed to sweep cancel order {o_id}: {e_sw}")
         except Exception as e_ob:
             logger.debug(f"Error sweeping orderbook for leg orders: {e_ob}")
 
@@ -11065,15 +11103,18 @@ class StraddleManager:
         except Exception as e_bmk:
             logger.warning(f"Error recording exit benchmark: {e_bmk}")
 
-        # Format exit reason cleanly
+        # Format exit reason cleanly (check HEDGE before STOPLOSS/TARGET so hedge exits aren't mislabeled)
         r_clean = reason
-        if "TARGET" in reason.upper():
+        r_u = str(reason or "").upper()
+        if "HEDGE" in r_u:
+            r_clean = reason if len(str(reason)) <= 64 else "Hedge exit (Parent completed)"
+        elif "TARGET" in r_u:
             r_clean = "Target hit"
-        elif "STOPLOSS" in reason.upper() or "SL" in reason.upper():
+        elif "STOPLOSS" in r_u or "SL" in r_u:
             r_clean = "Stoploss hit"
-        elif "SQUARE OFF" in reason.upper():
+        elif "SQUARE OFF" in r_u:
             r_clean = "Square off"
-        elif "END TIME" in reason.upper():
+        elif "END TIME" in r_u:
             r_clean = "Time exit"
 
         if order_res.get("success", False) and str(order_res.get("status", "")).upper() not in ("REJECTED", "CANCELLED", "FAILED"):
@@ -11269,6 +11310,14 @@ class StraddleManager:
         if is_pos_hedge:
             logger.info(f"[Hedge Re-entry Guard] Position '{pos.get('symbol')}' is an associated hedge leg. Skipping re-entry attempt.")
             return
+
+        # Atomic idempotency guard: prevent duplicate re-entry evaluation/dispatch
+        # if both OCO monitor and broker position reconciliation detect the same leg closure
+        with _ENGINE_LOCK:
+            if pos.get("_re_entry_dispatched") or pos.get("_re_entry_in_progress"):
+                logger.info(f"[Re-Entry Guard] Re-entry already dispatched/in-progress for '{pos.get('symbol')}' ({pos.get('id')}). Skipping duplicate.")
+                return
+            pos["_re_entry_dispatched"] = True
         # Resolve authoritative strategy configuration
         strat_id = strat.get("strategy_id") or strat.get("id") or self._active_strategy_id
         authoritative_strat = self.get_strategy(strat_id) if strat_id else None
@@ -11502,9 +11551,11 @@ class StraddleManager:
                 clean_trig = str(trigger or "STOPLOSS").upper()
                 if re_filter == "STOPLOSS_ONLY" and ("TARGET" in clean_trig or "TGT" in clean_trig):
                     self._log_event(f"[{strat.get('name')}] Re-Execution skipped for {pos.get('symbol')}: Trigger filter is set to Stoploss Only.", level="INFO")
+                    self._auto_square_off_associated_hedge(strat, pos, broker, reason="Re-entry skipped (Trigger filter: Stoploss Only)")
                     return
                 if re_filter == "TARGET_ONLY" and ("SL" in clean_trig or "STOPLOSS" in clean_trig):
                     self._log_event(f"[{strat.get('name')}] Re-Execution skipped for {pos.get('symbol')}: Trigger filter is set to Target Only.", level="INFO")
+                    self._auto_square_off_associated_hedge(strat, pos, broker, reason="Re-entry skipped (Trigger filter: Target Only)")
                     return
 
                 now_dt = now_ist()
@@ -11636,6 +11687,7 @@ class StraddleManager:
                 )
                 if not contract:
                     self._log_event(f"Re-Execute contract resolution failed for {und} {opt_type}", level="ERROR")
+                    self._auto_square_off_associated_hedge(strat, pos, broker, reason=f"Re-entry contract resolution failed ({und} {opt_type})")
                     return
 
                 # -----------------------------------------------------------------
@@ -12147,13 +12199,17 @@ class StraddleManager:
                     logger.exception(f"[RE-ENTRY WORKER CRASH] Unexpected error in re-entry worker for {pos.get('symbol')}: {e_run}")
                     self._log_event(f"[RE-ENTRY WORKER ERROR] Failed executing re-entry for {pos.get('symbol')}: {e_run}", level="ERROR")
                 finally:
-                    pos["_re_entry_in_progress"] = False
-                    pos["re_execution_pending"] = False
-                    strat["re_execution_pending"] = False
-                    p_key = str(pos.get("id") or pos.get("symbol"))
-                    active_re = [str(x) for x in strat.get("_active_re_entries", []) if str(x) != p_key]
-                    strat["_active_re_entries"] = active_re
-                    strat["_re_entry_in_progress"] = bool(active_re)
+                    with _ENGINE_LOCK:
+                        pos["_re_entry_in_progress"] = False
+                        pos["re_execution_pending"] = False
+                        p_key = str(pos.get("id") or pos.get("symbol"))
+                        active_re = [str(x) for x in strat.get("_active_re_entries", []) if str(x) != p_key]
+                        strat["_active_re_entries"] = active_re
+                        strat["_re_entry_in_progress"] = bool(active_re)
+                        strat["re_execution_pending"] = bool(active_re)
+                        strat["re_execution_counts"] = self.get_strategy_reexecution_counts(strat)
+                        if self._active_strategy_id == strat.get("strategy_id"):
+                            self._state["re_execution_counts"] = strat["re_execution_counts"]
 
             threading.Thread(target=_runner_wrapper, daemon=True).start()
         else:
@@ -12165,25 +12221,53 @@ class StraddleManager:
 
     def get_strategy_reexecution_counts(self, strat: Dict[str, Any]) -> Dict[str, int]:
         """
-        Count re-executions for CE & PE for Stoploss and Target in this strategy.
+        Count actual re-executions taken for CE & PE for Stoploss and Target in this strategy.
         Returns: {'ce_sl': int, 'ce_target': int, 'pe_sl': int, 'pe_target': int}
         """
         counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
         if not isinstance(strat, dict):
             return counts
-        positions = list(strat.get("positions", []))
-        for cp in strat.get("closed_positions", []):
-            if cp not in positions:
-                positions.append(cp)
 
-        if not positions or (strat.get("status") == "READY" and not any(p.get("status") == "OPEN" for p in positions)):
+        raw_list = list(strat.get("positions", [])) + list(strat.get("closed_positions", []))
+        if not raw_list or (strat.get("status") == "READY" and not any(p.get("status") == "OPEN" for p in raw_list)):
             return counts
 
+        # Deduplicate across positions and closed_positions (dicts may differ after JSON reload or exit_reason update)
+        positions = []
+        seen_keys = set()
+        for p in raw_list:
+            if not isinstance(p, dict):
+                continue
+            p_id = str(p.get("id") or "").strip()
+            p_oid = str(p.get("order_id") or "").strip()
+            if p_id and p_oid:
+                dedup_k = f"id_oid:{p_id}:{p_oid}"
+            elif p_id:
+                dedup_k = f"id:{p_id}:{p.get('entry_time', '')}"
+            elif p_oid:
+                dedup_k = f"oid:{p_oid}"
+            else:
+                dedup_k = f"obj:{id(p)}"
+            if dedup_k in seen_keys:
+                continue
+            seen_keys.add(dedup_k)
+            positions.append(p)
+
+        exit_counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
         for p in positions:
+            is_hedge = bool(
+                p.get("is_associated_hedge")
+                or "hedge" in str(p.get("id", "")).lower()
+                or bool(p.get("hedge_parent_type"))
+                or bool(p.get("parent_leg_id"))
+            )
+            if is_hedge:
+                continue
+
             e_reason = str(p.get("entry_reason", "")).upper()
             sym = str(p.get("symbol", "")).upper()
-            opt = p.get("re_execute_leg_type") or p.get("option_type") or ("CE" if "CE" in sym else ("PE" if "PE" in sym else ""))
-            trig = p.get("re_execute_trigger") or ""
+            opt = str(p.get("re_execute_leg_type") or p.get("option_type") or ("CE" if "CE" in sym else ("PE" if "PE" in sym else ""))).upper()
+            trig = str(p.get("re_execute_trigger") or "").upper()
             if not trig:
                 if "TARGET" in e_reason or "TGT" in e_reason:
                     trig = "TARGET"
@@ -12202,7 +12286,7 @@ class StraddleManager:
                     elif trig == "STOPLOSS":
                         counts["pe_sl"] += 1
 
-            # Direct attribute counts
+            # Direct attribute counts preserved across cleared closed positions
             if opt == "CE":
                 counts["ce_target"] = max(counts["ce_target"], int(p.get("target_re_count", 0) or 0))
                 counts["ce_sl"] = max(counts["ce_sl"], int(p.get("sl_re_count", 0) or 0))
@@ -12210,30 +12294,9 @@ class StraddleManager:
                 counts["pe_target"] = max(counts["pe_target"], int(p.get("target_re_count", 0) or 0))
                 counts["pe_sl"] = max(counts["pe_sl"], int(p.get("sl_re_count", 0) or 0))
 
-        # Secondary cross-verification: also count triggers documented in completed leg exit reasons
-        exit_counts = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
-        for p in positions:
+            # Cross-verify ONLY against exit reasons that explicitly recorded a triggered re-execute
             exit_r = str(p.get("exit_reason", "")).upper()
-            sym = str(p.get("symbol", "")).upper()
-            opt = p.get("re_execute_leg_type") or p.get("option_type") or ("CE" if "CE" in sym else ("PE" if "PE" in sym else ""))
-            is_hedge = bool(p.get("is_associated_hedge")) or (str(p.get("side", "")).upper() == "BUY" and ("HEDGE" in sym or float(p.get("avg_ent_price", 0) or 0) < 50.0))
-            if is_hedge:
-                continue
-
-            is_closed = p.get("status") in ("COMPLETE", "CLOSED") or p in strat.get("closed_positions", [])
-            if is_closed:
-                pnl = float(p.get("realised") or p.get("realised_pnl") or p.get("mtm") or 0.0)
-                if "TARGET" in exit_r or "TGT" in exit_r or pnl > 0:
-                    if opt == "CE":
-                        exit_counts["ce_target"] += 1
-                    elif opt == "PE":
-                        exit_counts["pe_target"] += 1
-                elif "STOPLOSS" in exit_r or "SL" in exit_r or pnl < 0:
-                    if opt == "CE":
-                        exit_counts["ce_sl"] += 1
-                    elif opt == "PE":
-                        exit_counts["pe_sl"] += 1
-            elif "TRIGGERED CE" in exit_r and ("RE-EXECUTE" in exit_r or "RE-ENTRY" in exit_r):
+            if "TRIGGERED CE" in exit_r and ("RE-EXECUTE" in exit_r or "RE-ENTRY" in exit_r):
                 if "TARGET" in exit_r or "TGT" in exit_r:
                     exit_counts["ce_target"] += 1
                 else:
@@ -12245,8 +12308,7 @@ class StraddleManager:
                     exit_counts["pe_sl"] += 1
 
         for k in counts:
-            existing = int(strat.get("re_execution_counts", {}).get(k, 0) or 0)
-            counts[k] = max(counts[k], exit_counts.get(k, 0), existing)
+            counts[k] = max(counts[k], exit_counts.get(k, 0))
 
         return counts
 
@@ -12405,51 +12467,43 @@ class StraddleManager:
                     ]
 
                     # Check pending re-entry strictly for this hedge's parent / option type
-                    has_pending_re_entry = (
-                        bool(strat.get("_re_entry_in_progress"))
-                        or any(
-                            p.get("_re_entry_in_progress")
-                            for p in strat_positions
-                            if (
-                                (h_parent_id and (str(p.get("id", "")) == h_parent_id or str(p.get("leg_id", "")) == h_parent_id))
-                                or (h_opt and (str(p.get("option_type", "")).upper() == h_opt or h_opt in str(p.get("symbol", "")).upper()))
-                            )
+                    has_pending_re_entry = any(
+                        (p.get("_re_entry_in_progress") or p.get("re_execution_pending"))
+                        for p in strat_positions
+                        if (
+                            (h_parent_id and (str(p.get("id", "")) == h_parent_id or str(p.get("leg_id", "")) == h_parent_id))
+                            or (h_opt and (str(p.get("option_type", "")).upper() == h_opt or h_opt in str(p.get("symbol", "")).upper()))
                         )
                     )
 
-                    # Check if any short leg of this option type still has remaining re-entries
+                    # Check if the latest closed short leg of this option type is still awaiting re-entry evaluation
                     has_remaining_re_entries = False
                     strat_legs = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
                     chk_sched = self.get_strategy_schedule_status(strat)
-                    if chk_sched.get("can_enter") or (strat.get("status") == "TRADE_ACTIVE" and not chk_sched.get("is_after_end")):
-                        for p in strat_positions:
-                            p_opt = (p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper()
-                            if p_opt == h_opt and str(p.get("side", "SELL")).upper() == "SELL" and not p.get("is_associated_hedge"):
-                                c_t_cnt = int(p.get("target_re_count", 0))
-                                c_s_cnt = int(p.get("sl_re_count", 0))
-                                tgt_max = int(p.get("target_re_execute_count", 5))
-                                sl_max = int(p.get("sl_re_execute_count", 2))
-                                tgt_re = str(p.get("target_re_execute_type", "RE EXECUTE")).upper()
-                                sl_re = str(p.get("sl_re_execute_type", "RE EXECUTE")).upper()
-                                has_t = any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_t_cnt < tgt_max
-                                has_s = any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_s_cnt < sl_max
-                                if has_t or has_s:
-                                    has_remaining_re_entries = True
-                                    break
-                        if not has_remaining_re_entries:
+                    if not has_pending_re_entry and (chk_sched.get("can_enter") or (strat.get("status") == "TRADE_ACTIVE" and not chk_sched.get("is_after_end") and not chk_sched.get("is_after_reentry_cutoff"))):
+                        matching_closed_shorts = [
+                            p for p in strat_positions
+                            if (p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper() == h_opt
+                            and str(p.get("side", "SELL")).upper() == "SELL"
+                            and not p.get("is_associated_hedge")
+                        ]
+                        latest_short = matching_closed_shorts[-1] if matching_closed_shorts else None
+                        if latest_short and not latest_short.get("_re_entry_dispatched"):
+                            exit_r_u = str(latest_short.get("exit_reason", "")).upper()
                             strat_counts = self.get_strategy_reexecution_counts(strat)
-                            for l_cfg in strat_legs:
-                                l_opt = str(l_cfg.get("option_type", "")).upper()
-                                if l_opt == h_opt and str(l_cfg.get("side", "SELL")).upper() == "SELL":
-                                    tgt_re = str(l_cfg.get("target_re_execute_type", "RE EXECUTE")).upper()
-                                    sl_re = str(l_cfg.get("sl_re_execute_type", "RE EXECUTE")).upper()
-                                    tgt_max = int(l_cfg.get("target_re_execute_count", 5))
-                                    sl_max = int(l_cfg.get("sl_re_execute_count", 2))
-                                    has_t = any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and int(strat_counts.get(f"{h_opt.lower()}_target", 0)) < tgt_max
-                                    has_s = any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and int(strat_counts.get(f"{h_opt.lower()}_sl", 0)) < sl_max
-                                    if has_t or has_s:
-                                        has_remaining_re_entries = True
-                                        break
+                            l_cfg = next((l for l in strat_legs if str(l.get("option_type", "")).upper() == h_opt and str(l.get("side", "SELL")).upper() == "SELL"), {})
+                            if "TARGET" in exit_r_u or "TGT" in exit_r_u:
+                                c_t_cnt = max(int(strat_counts.get(f"{h_opt.lower()}_target", 0)), int(latest_short.get("target_re_count", 0)))
+                                tgt_max = int(l_cfg.get("target_re_execute_count") if l_cfg.get("target_re_execute_count") is not None else latest_short.get("target_re_execute_count", 6))
+                                tgt_re = str(l_cfg.get("target_re_execute_type") or latest_short.get("target_re_execute_type", "RE EXECUTE")).upper()
+                                if any(k in tgt_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_t_cnt < tgt_max:
+                                    has_remaining_re_entries = True
+                            elif "STOPLOSS" in exit_r_u or "SL" in exit_r_u:
+                                c_s_cnt = max(int(strat_counts.get(f"{h_opt.lower()}_sl", 0)), int(latest_short.get("sl_re_count", 0)))
+                                sl_max = int(l_cfg.get("sl_re_execute_count") if l_cfg.get("sl_re_execute_count") is not None else latest_short.get("sl_re_execute_count", 1))
+                                sl_re = str(l_cfg.get("sl_re_execute_type") or latest_short.get("sl_re_execute_type", "RE EXECUTE")).upper()
+                                if any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_s_cnt < sl_max:
+                                    has_remaining_re_entries = True
 
                     if not matching_open and not has_pending_re_entry and not has_remaining_re_entries:
                         self._log_event(
@@ -15160,7 +15214,7 @@ class StraddleManager:
                         s_und = str(s.get("underlying") or "NIFTY").upper()
                         if s_und not in bp_sym.upper() and not bp_sym.upper().startswith(s_und):
                             continue
-                        if s.get("_manual_reset") or s.get("status") in ("STOPPED", "READY", "TERMINATED") or not s.get("enabled"):
+                        if s.get("_manual_reset") or s.get("_entry_in_progress") or s.get("_re_entry_in_progress") or s.get("status") in ("STOPPED", "READY", "TERMINATED") or not s.get("enabled"):
                             continue
                         if str(bp_ikey) in s.get("_reset_ignored_keys", []) or str(bp_sym) in s.get("_reset_ignored_keys", []):
                             continue
@@ -15214,26 +15268,28 @@ class StraddleManager:
                         leg_mtm = round((ltp - real_ent) * abs(net_qty) if side == "BUY" else (real_ent - ltp) * abs(net_qty), 2)
                         pnl_pct = round(((ltp - real_ent) / real_ent) * 100.0, 2) if side == "BUY" else round(((real_ent - ltp) / real_ent) * 100.0, 2)
 
-                        prior_reexecs = sum(1 for p in cand_strat.get("positions", []) if (p.get("option_type") or "").upper() == opt_type and (p.get("is_re_entry") or (p.get("re_execute_count") or 0) > 0))
-                        re_num = prior_reexecs + 1
-
                         is_hedge = (side == "BUY" and any(str(l.get("side", "")).upper() == "SELL" for l in cand_strat.get("legs", [])))
                         matching_short = next((l for l in cand_strat.get("legs", []) if str(l.get("option_type", "")).upper() == opt_type and str(l.get("side", "")).upper() == "SELL"), None)
 
-                        closed_reexecs = sum(1 for cp in cand_strat.get("closed_positions", []) if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge"))
+                        cand_counts = self.get_strategy_reexecution_counts(cand_strat)
+                        closed_opt_legs = [
+                            cp for cp in cand_strat.get("closed_positions", [])
+                            if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge")
+                        ]
                         is_re = False
                         re_cnt = 0
                         re_trig = ""
-                        if not is_hedge and (closed_reexecs > 0 or prior_reexecs > 0):
-                            is_re = True
-                            re_cnt = max(re_num, closed_reexecs)
-                            last_cp = next((cp for cp in reversed(cand_strat.get("closed_positions", [])) if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge")), None)
-                            if last_cp:
-                                exit_r = str(last_cp.get("exit_reason", "")).upper()
-                                pnl = float(last_cp.get("realised") or last_cp.get("realised_pnl") or last_cp.get("mtm") or 0.0)
-                                re_trig = "TARGET" if "TARGET" in exit_r or pnl > 0 else "STOPLOSS"
+                        if not is_hedge and closed_opt_legs:
+                            last_cp = closed_opt_legs[-1]
+                            exit_r = str(last_cp.get("exit_reason", "")).upper()
+                            pnl = float(last_cp.get("realised") or last_cp.get("realised_pnl") or last_cp.get("mtm") or 0.0)
+                            if "TARGET" in exit_r or "TGT" in exit_r or (pnl > 0 and "STOPLOSS" not in exit_r and "SL" not in exit_r):
+                                re_trig = "TARGET"
+                                re_cnt = int(cand_counts.get(f"{opt_type.lower()}_target", 0)) + 1
                             else:
                                 re_trig = "STOPLOSS"
+                                re_cnt = int(cand_counts.get(f"{opt_type.lower()}_sl", 0)) + 1
+                            is_re = True
                             entry_r = f"⚡ RE-EXECUTE #{re_cnt} [{opt_type}] ({re_trig} HIT)"
                         else:
                             entry_r = f"Initial Strategy Entry (Hedge {opt_type})" if is_hedge else "Initial Strategy Entry"
@@ -15315,19 +15371,6 @@ class StraddleManager:
                     matched_leg_pos["quantity"] = abs(net_qty)
                     matched_leg_pos["entry_qty"] = abs(net_qty)
 
-                    if not matched_leg_pos.get("is_associated_hedge") and str(matched_leg_pos.get("side", "")).upper() == "SELL":
-                        closed_reexecs = sum(1 for cp in matched_strat.get("closed_positions", []) if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge"))
-                        if closed_reexecs > 0 and not matched_leg_pos.get("is_re_entry"):
-                            matched_leg_pos["is_re_entry"] = True
-                            matched_leg_pos["re_execute_count"] = closed_reexecs
-                            last_cp = next((cp for cp in reversed(matched_strat.get("closed_positions", [])) if (cp.get("option_type") or "").upper() == opt_type and not cp.get("is_associated_hedge")), None)
-                            trig = "TARGET" if last_cp and ("TARGET" in str(last_cp.get("exit_reason", "")).upper() or float(last_cp.get("mtm", 0) or 0) > 0) else "STOPLOSS"
-                            matched_leg_pos["re_execute_trigger"] = trig
-                            matched_leg_pos["re_execute_leg_type"] = opt_type
-                            matched_leg_pos["entry_reason"] = f"⚡ RE-EXECUTE #{closed_reexecs} [{opt_type}] ({trig} HIT)"
-                            matched_leg_pos["is_adopted"] = False
-                            changes_made = True
-
                     # PRESERVE AND AUTO-HEAL EXACT TRADE ENTRY PRICE:
                     # Kotak Neo's positions API (bp) reports cumulative whole-day average cost (Avg.cost).
                     # If this strike was traded multiple times today, bp_day_avg blends older trades into this one.
@@ -15376,13 +15419,21 @@ class StraddleManager:
                     changes_made = True
 
             # Part 2: CRITICAL - Reconcile positions that were OPEN in strategy but CLOSED on broker
+            ob_reconcile_cache = None
             for s in self._strategies:
-                for p in s.get("positions", []):
-                    if p.get("status") == "OPEN" and not p.get("_exit_in_progress"):
+                used_exit_oids = set()
+                for xp in list(s.get("closed_positions", [])) + list(s.get("positions", [])):
+                    if xp.get("status") in ("COMPLETE", "CLOSED", "EXITED"):
+                        for k_x in (xp.get("exit_order_id"), xp.get("order_id")):
+                            if k_x:
+                                for sub_x in str(k_x).split(","):
+                                    if sub_x.strip():
+                                        used_exit_oids.add(sub_x.strip())
+
+                for p in list(s.get("positions", [])):
+                    if p.get("status") == "OPEN" and not p.get("_exit_in_progress") and not p.get("_re_entry_dispatched"):
                         # INVIOLABLE SETTLEMENT GUARD:
                         # Never reconcile an open position as closed if entered less than 20 seconds ago.
-                        # This prevents instantaneous 1-second ghost exits caused by broker OMS position book settling
-                        # or stale pre-entry cache.
                         entry_epoch = float(p.get("_entry_epoch_ts") or 0.0)
                         if entry_epoch > 0 and (time.time() - entry_epoch) < 20.0:
                             continue
@@ -15394,59 +15445,89 @@ class StraddleManager:
                                 matched_bp = bp
                                 break
 
-                        # Fallback to Order Book: Kotak Neo positions() omits closed positions once settled!
-                        if matched_bp is None and broker:
+                        # Check orderbook for known SL/Target/Exit orders FIRST (and as fallback when positions() omits settled closed positions)
+                        if ob_reconcile_cache is None and broker:
                             try:
-                                ob = broker.get_order_book() or []
-                                side_needed = "BUY" if (p.get("side") or "SELL").upper() == "SELL" else "SELL"
-                                p_ent_oid = str(p.get("order_id") or "")
-                                p_sl_oid = str(p.get("sl_broker_order_id") or "")
-                                p_tgt_oid = str(p.get("target_broker_order_id") or "")
-                                p_exit_oid = str(p.get("exit_order_id") or "")
-                                for o in ob:
-                                    o_id = str(o.get("order_id", ""))
-                                    if not o_id or o_id == p_ent_oid:
-                                        continue  # Never treat the entry order as the exit order!
-                                    o_sym = o.get("trading_symbol") or o.get("symbol") or ""
-                                    o_st = str(o.get("status", "")).upper()
-                                    o_side = str(o.get("transaction_type", "")).upper()
-                                    is_known_exit_oid = bool((p_sl_oid and o_id in p_sl_oid.split(",")) or 
-                                                             (p_tgt_oid and o_id in p_tgt_oid.split(",")) or 
-                                                             (p_exit_oid and o_id in p_exit_oid.split(",")))
-                                    is_match_sym = _is_same_instrument(o_sym, o.get("instrument_key"), p.get("symbol"), p.get("instrument_key"))
-                                    if (is_known_exit_oid or is_match_sym) and o_side == side_needed and ("COMP" in o_st or "TRAD" in o_st):
-                                        f_p = float(o.get("average_price") or o.get("price") or 0.0)
-                                        if f_p > 0:
-                                            # If not an explicitly matched advance order, verify it was filled after entry
-                                            if not is_known_exit_oid and entry_epoch > 0:
-                                                o_time_str = str(o.get("order_timestamp") or o.get("timestamp") or "")
-                                                # Ensure buffer of at least 5s after entry so stale pre-trade orders are rejected
-                                                if (time.time() - entry_epoch) < 5.0:
-                                                    continue
-                                            matched_bp = {
-                                                "net_qty": 0,
-                                                "avg_price": f_p,
-                                                "buy_avg": f_p if side_needed == "BUY" else 0.0,
-                                                "sell_avg": f_p if side_needed == "SELL" else 0.0,
-                                            }
-                                            if not p.get("exit_order_id"):
-                                                p["exit_order_id"] = o_id
-                                            break
+                                ob_reconcile_cache = broker.get_order_book() or []
                             except Exception as e_ob_chk:
-                                logger.debug(f"Order book check fallback error: {e_ob_chk}")
+                                logger.debug(f"Order book check error in reconcile: {e_ob_chk}")
+                                ob_reconcile_cache = []
+                        ob = ob_reconcile_cache or []
+
+                        p_ent_oid = str(p.get("order_id") or "")
+                        p_sl_oids = {x.strip() for x in str(p.get("sl_broker_order_id") or "").split(",") if x.strip()}
+                        p_tgt_oids = {x.strip() for x in str(p.get("target_broker_order_id") or "").split(",") if x.strip()}
+                        p_exit_oids = {x.strip() for x in str(p.get("exit_order_id") or "").split(",") if x.strip()}
+                        side_needed = "BUY" if (p.get("side") or "SELL").upper() == "SELL" else "SELL"
+
+                        oco_matched_trigger = None
+                        oco_matched_oid = None
+                        oco_matched_price = 0.0
+                        fallback_ob_oid = None
+                        fallback_ob_price = 0.0
+
+                        for o in ob:
+                            o_id = str(o.get("order_id", "")).strip()
+                            if not o_id or o_id == p_ent_oid:
+                                continue
+                            o_st = str(o.get("status", "")).upper()
+                            if not ("COMP" in o_st or "TRAD" in o_st):
+                                continue
+                            f_p = float(o.get("average_price") or o.get("price") or 0.0)
+                            if o_id in p_tgt_oids:
+                                oco_matched_trigger = "TARGET"
+                                oco_matched_oid = str(p.get("target_broker_order_id"))
+                                oco_matched_price = f_p
+                                break
+                            if o_id in p_sl_oids:
+                                oco_matched_trigger = "STOPLOSS"
+                                oco_matched_oid = str(p.get("sl_broker_order_id"))
+                                oco_matched_price = f_p
+                                break
+                            if o_id in p_exit_oids:
+                                fallback_ob_oid = o_id
+                                fallback_ob_price = f_p
+                                break
+                            if fallback_ob_oid is None and o_id not in used_exit_oids:
+                                o_sym = o.get("trading_symbol") or o.get("symbol") or ""
+                                o_side = str(o.get("transaction_type", "")).upper()
+                                o_tok = o.get("instrument_token") or o.get("instrument_key")
+                                if o_side == side_needed and f_p > 0 and _is_same_instrument(o_sym, o_tok, p.get("symbol"), p.get("instrument_key")):
+                                    fallback_ob_oid = o_id
+                                    fallback_ob_price = f_p
+
+                        if matched_bp is None and (oco_matched_oid or fallback_ob_oid):
+                            p_val = oco_matched_price or fallback_ob_price
+                            matched_bp = {
+                                "net_qty": 0,
+                                "avg_price": p_val,
+                                "buy_avg": p_val if side_needed == "BUY" else 0.0,
+                                "sell_avg": p_val if side_needed == "SELL" else 0.0,
+                            }
+                            if not p.get("exit_order_id"):
+                                p["exit_order_id"] = oco_matched_oid or fallback_ob_oid
 
                         if matched_bp is not None:
                             net_qty = int(matched_bp.get("net_qty") or matched_bp.get("quantity") or 0)
                             if net_qty == 0:
+                                with _ENGINE_LOCK:
+                                    if p.get("status") != "OPEN" or p.get("_exit_in_progress") or p.get("_re_entry_dispatched"):
+                                        continue
+                                    p["_exit_in_progress"] = True
+
                                 side = (p.get("side") or "SELL").upper()
-                                
-                                # Resolve authentic exit price for THIS trade
+
+                                # Resolve authentic exit price for THIS trade (preferring exact OCO/orderbook fill over cumulative day avg)
                                 exit_price = float(p.get("avg_exit_price") or 0.0)
-                                exit_oid = str(p.get("exit_order_id") or "")
+                                if exit_price <= 0 and oco_matched_price > 0:
+                                    exit_price = oco_matched_price
+                                exit_oid = str(oco_matched_oid or p.get("exit_order_id") or fallback_ob_oid or "")
                                 if exit_price <= 0 and exit_oid:
                                     real_exit = self._lookup_order_fill_price(broker, exit_oid)
                                     if real_exit > 0:
                                         exit_price = real_exit
+                                if exit_price <= 0 and fallback_ob_price > 0:
+                                    exit_price = fallback_ob_price
 
                                 if exit_price <= 0:
                                     buy_avg = float(matched_bp.get("buy_avg") or matched_bp.get("day_buy_price") or matched_bp.get("buy_price") or 0.0)
@@ -15483,6 +15564,12 @@ class StraddleManager:
                                 if is_pos_hedge:
                                     reason = f"HEDGE EXITED (₹{exit_price:.2f}) (Broker Exit)"
                                     trigger = "MANUAL"
+                                elif oco_matched_trigger == "TARGET":
+                                    reason = f"TARGET HIT (Broker OCO @ ₹{exit_price:.2f})"
+                                    trigger = "TARGET"
+                                elif oco_matched_trigger == "STOPLOSS":
+                                    reason = f"STOPLOSS HIT (Broker OCO @ ₹{exit_price:.2f})"
+                                    trigger = "STOPLOSS"
                                 elif is_loss:
                                     reason = f"STOPLOSS HIT (₹{exit_price:.2f}) (Broker Exit)"
                                     trigger = "STOPLOSS"
@@ -15503,20 +15590,21 @@ class StraddleManager:
                                     side=p.get("side"),
                                     trigger=trigger
                                 )
-                                p["status"] = "COMPLETE"
-                                p["avg_exit_price"] = exit_price
-                                p["exit_time"] = now_ist_str()
-                                p["exit_reason"] = reason
-                                p["mtm"] = pnl
-                                p["_exit_in_progress"] = False
-                                c_list = s.setdefault("closed_positions", [])
-                                if not any((cp.get("id") and cp.get("id") == p.get("id")) or (p.get("exit_order_id") and cp.get("exit_order_id") == p.get("exit_order_id")) for cp in c_list):
-                                    c_list.append(p)
-                                changes_made = True
+                                with _ENGINE_LOCK:
+                                    p["status"] = "COMPLETE"
+                                    p["avg_exit_price"] = exit_price
+                                    p["exit_qty"] = qty_val
+                                    p["exit_time"] = now_ist_str()
+                                    p["exit_reason"] = reason
+                                    p["mtm"] = pnl
+                                    p["realised_pnl"] = pnl
+                                    p["_exit_in_progress"] = False
+                                    c_list = s.setdefault("closed_positions", [])
+                                    if not any((cp.get("id") and cp.get("id") == p.get("id")) or (p.get("exit_order_id") and cp.get("exit_order_id") == p.get("exit_order_id")) for cp in c_list):
+                                        c_list.append(p)
+                                    changes_made = True
 
                                 # Selective cancellation & exit order ID preservation:
-                                # When Target filled: cancel resting SL order only (do NOT cancel target order).
-                                # When Stoploss filled: cancel resting Target order only (do NOT cancel SL order).
                                 if trigger == "TARGET":
                                     exit_oid_to_pass = exit_oid or p.get("target_broker_order_id") or p.get("exit_order_id")
                                     p["exit_order_id"] = str(exit_oid_to_pass) if exit_oid_to_pass else None
@@ -15527,10 +15615,16 @@ class StraddleManager:
                                     self._cancel_leg_broker_orders(p, broker, cancel_sl=False, cancel_target=True)
                                 else:
                                     exit_oid_to_pass = exit_oid or p.get("exit_order_id")
+                                    p["exit_order_id"] = str(exit_oid_to_pass) if exit_oid_to_pass else None
                                     self._cancel_leg_broker_orders(p, broker, cancel_sl=True, cancel_target=True)
 
+                                if exit_oid_to_pass:
+                                    for sub_x in str(exit_oid_to_pass).split(","):
+                                        if sub_x.strip():
+                                            used_exit_oids.add(sub_x.strip())
+
                                 # Re-entries ONLY apply to trade legs (not associated hedges)!
-                                if not is_pos_hedge:
+                                if not is_pos_hedge and trigger in ("STOPLOSS", "TARGET"):
                                     self._handle_leg_re_entry(s, p, trigger=trigger, exit_order_id=str(exit_oid_to_pass) if exit_oid_to_pass else None)
 
             # Part 2.5: Reconcile broker CLOSED positions into active strategy closed_positions
@@ -15554,10 +15648,36 @@ class StraddleManager:
                     if s_und not in bp_sym.upper() and not bp_sym.upper().startswith(s_und):
                         continue
                     c_list = s.setdefault("closed_positions", [])
+                    all_tracked_for_sym = [
+                        tp for tp in (list(s.get("positions", [])) + list(c_list))
+                        if _is_same_instrument(tp.get("symbol"), tp.get("instrument_key"), bp_sym, bp_ikey)
+                    ]
+                    if all_tracked_for_sym:
+                        # Already tracked individually by engine (possibly across multiple re-entries on the same strike).
+                        # Only backfill placeholder reconciled rows that have 0.0 mtm; never clobber real leg records.
+                        if len(all_tracked_for_sym) == 1 and str(all_tracked_for_sym[0].get("id", "")).startswith("closed_reconciled_"):
+                            r_pnl_chk = float(bp.get("realised") or bp.get("realised_pnl") or bp.get("rpnl") or bp.get("realized_pnl") or bp.get("pnl") or 0.0)
+                            if float(all_tracked_for_sym[0].get("mtm", 0.0) or 0.0) == 0.0 and r_pnl_chk != 0.0:
+                                all_tracked_for_sym[0]["mtm"] = r_pnl_chk
+                                all_tracked_for_sym[0]["realised_pnl"] = r_pnl_chk
+                                changes_made = True
+                        continue
+
                     buy_avg = float(bp.get("buy_avg") or bp.get("day_buy_price") or bp.get("buy_price") or 0.0)
                     sell_avg = float(bp.get("sell_avg") or bp.get("day_sell_price") or bp.get("sell_price") or 0.0)
                     r_pnl = float(bp.get("realised") or bp.get("realised_pnl") or bp.get("rpnl") or bp.get("realized_pnl") or bp.get("pnl") or 0.0)
-                    is_hedge = (buy_avg < 50.0 and sell_avg < 50.0 and ("24" in bp_sym or "26" in bp_sym))
+                    # Determine hedge status from strategy config / strike distance rather than year substrings
+                    opt_type = "PE" if " PE" in bp_sym.upper() or bp_sym.upper().endswith("PE") else ("CE" if " CE" in bp_sym.upper() or bp_sym.upper().endswith("CE") else "")
+                    stk_price = 0.0
+                    for part in bp_sym.split():
+                        if part.isdigit() and len(part) >= 4:
+                            stk_price = float(part)
+                            break
+                    has_short_cfg = any(str(l.get("side", "")).upper() == "SELL" for l in s.get("legs", []))
+                    is_hedge = bool(has_short_cfg and buy_avg > 0 and buy_avg < 50.0 and sell_avg < 50.0 and not any(
+                        float(tp.get("strike_price") or 0) == stk_price and str(tp.get("side", "")).upper() == "SELL"
+                        for tp in s.get("positions", [])
+                    ))
                     ent_p = buy_avg if is_hedge else (sell_avg if sell_avg > 0 else buy_avg)
                     exit_p = sell_avg if is_hedge else (buy_avg if buy_avg > 0 else sell_avg)
                     qty = abs(int(bp.get("buy_qty") or bp.get("sell_qty") or 65))
@@ -15572,22 +15692,6 @@ class StraddleManager:
                         reason = f"SL BOOKED (₹{exit_p:.2f})"
                     else:
                         reason = f"SL/TARGET BOOKED (₹{exit_p:.2f})"
-
-                    existing_cp = next((cp for cp in c_list if _is_same_instrument(cp.get("symbol"), cp.get("instrument_key"), bp_sym, bp_ikey)), None)
-                    if existing_cp:
-                        if (float(existing_cp.get("mtm", 0.0) or 0.0) == 0.0 or "CLOSED (" in str(existing_cp.get("exit_reason", ""))) and r_pnl != 0.0:
-                            existing_cp["mtm"] = r_pnl
-                            existing_cp["realised_pnl"] = r_pnl
-                            existing_cp["exit_reason"] = reason
-                            changes_made = True
-                        continue
-
-                    opt_type = "PE" if " PE" in bp_sym.upper() or bp_sym.upper().endswith("PE") else ("CE" if " CE" in bp_sym.upper() or bp_sym.upper().endswith("CE") else "")
-                    stk_price = 0.0
-                    for part in bp_sym.split():
-                        if part.isdigit() and len(part) >= 4:
-                            stk_price = float(part)
-                            break
 
                     synth_closed = {
                         "id": f"closed_reconciled_{bp_ikey or int(time.time()*1000)}",
@@ -15757,6 +15861,30 @@ class StraddleManager:
             except Exception as e:
                 logger.error(f"Error in straddle evaluation cycle: {e}")
             time.sleep(cycle_interval)
+
+    def _resolve_ob_order_status(self, ob_lookup: Dict[str, Any], broker: BaseBrokerAdapter, oid_val: Any) -> Optional[Dict[str, Any]]:
+        """Resolve order status for single or comma-separated multi-slice broker order IDs."""
+        s_oid = str(oid_val or "").strip()
+        if not s_oid:
+            return None
+        ord_obj = ob_lookup.get(s_oid)
+        if not ord_obj and "," in s_oid:
+            slices = [ob_lookup.get(x.strip()) for x in s_oid.split(",") if x.strip()]
+            if slices and all(slices):
+                statuses = [str(x.get("status", "")).upper() for x in slices]
+                if all(any(w in st for w in ("TRAD", "COMP")) for st in statuses):
+                    prcs = [float(x.get("average_price") or x.get("price") or 0.0) for x in slices if float(x.get("average_price") or x.get("price") or 0.0) > 0]
+                    ord_obj = {"status": "COMPLETE", "average_price": round(sum(prcs) / len(prcs), 2) if prcs else 0.0}
+                elif any(any(w in st for w in ("CANC", "REJ")) for st in statuses):
+                    ord_obj = {"status": "CANCELLED"}
+                elif any(any(w in st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")) for st in statuses):
+                    ord_obj = {"status": "OPEN"}
+        if not ord_obj:
+            try:
+                ord_obj = broker.get_order_status(s_oid)
+            except Exception:
+                ord_obj = None
+        return ord_obj
 
     def _evaluate_cycle(self):
         mode = self._state.get("execution_mode", "LIVE_BROKER")
@@ -16193,12 +16321,7 @@ class StraddleManager:
                     ob_lookup = getattr(self, "_ob_cache", {})
 
                     if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and (mode == "PAPER_TRADING" or not str(adv_tgt_oid).startswith("PAPER_")):
-                        t_ord = ob_lookup.get(str(adv_tgt_oid))
-                        if not t_ord:
-                            try:
-                                t_ord = broker.get_order_status(str(adv_tgt_oid))
-                            except Exception:
-                                t_ord = None
+                        t_ord = self._resolve_ob_order_status(ob_lookup, broker, adv_tgt_oid)
 
                         if t_ord:
                             t_st = str(t_ord.get("status", "")).upper()
@@ -16296,6 +16419,17 @@ class StraddleManager:
 
                     if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and (mode == "PAPER_TRADING" or not str(adv_sl_oid).startswith("PAPER_")):
                         s_ord = ob_lookup.get(str(adv_sl_oid))
+                        if not s_ord and "," in str(adv_sl_oid):
+                            s_slices = [ob_lookup.get(x.strip()) for x in str(adv_sl_oid).split(",") if x.strip()]
+                            if all(s_slices):
+                                s_statuses = [str(x.get("status", "")).upper() for x in s_slices]
+                                if all(any(w in st for w in ("TRAD", "COMP")) for st in s_statuses):
+                                    s_prcs = [float(x.get("average_price") or x.get("price") or 0.0) for x in s_slices if float(x.get("average_price") or x.get("price") or 0.0) > 0]
+                                    s_ord = {"status": "COMPLETE", "average_price": round(sum(s_prcs) / len(s_prcs), 2) if s_prcs else 0.0}
+                                elif any(any(w in st for w in ("CANC", "REJ")) for st in s_statuses):
+                                    s_ord = {"status": "CANCELLED"}
+                                elif any(any(w in st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")) for st in s_statuses):
+                                    s_ord = {"status": "OPEN"}
                         if not s_ord:
                             try:
                                 s_ord = broker.get_order_status(str(adv_sl_oid))
@@ -16403,42 +16537,46 @@ class StraddleManager:
                                 pass
 
                     if tgt_filled:
-                        # Cancel SL order on broker (One Cancels Other)
-                        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
-                            try:
-                                broker.cancel_order(str(adv_sl_oid))
-                            except Exception as e_c:
-                                logger.warning(f"OCO: Error cancelling SL order {adv_sl_oid}: {e_c}")
+                        # Cancel SL order on broker (One Cancels Other - handles multi-slice IDs and sweeps orderbook)
+                        self._cancel_leg_broker_orders(pos, broker, cancel_sl=True, cancel_target=False)
+                        exit_p_oco = float(pos.get("avg_exit_price") or pos.get("target_price") or ltp or 0.0)
+                        oco_pnl = round((exit_p_oco - entry_price) * qty if side == "BUY" else (entry_price - exit_p_oco) * qty, 2) if entry_price > 0 and exit_p_oco > 0 else float(pos.get("mtm") or 0.0)
                         pos["status"] = "COMPLETE"
                         pos["_exit_in_progress"] = False
+                        pos["avg_exit_price"] = exit_p_oco
+                        pos["exit_qty"] = qty
+                        pos["mtm"] = oco_pnl
+                        pos["realised_pnl"] = oco_pnl
                         pos["exit_reason"] = "TARGET HIT (Broker OCO)"
                         pos["exit_order_id"] = str(adv_tgt_oid)
                         pos["exit_time"] = now_ist_str()
                         c_list = strat.setdefault("closed_positions", [])
                         if not any((cp.get("id") and cp.get("id") == pos.get("id")) or (pos.get("exit_order_id") and cp.get("exit_order_id") == pos.get("exit_order_id")) for cp in c_list):
                             c_list.append(pos)
-                        self._log_event(f"Target order {adv_tgt_oid} FILLED for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. SL cancelled.")
+                        self._log_event(f"Target order {adv_tgt_oid} FILLED for {pos['symbol']} @ ₹{exit_p_oco:.2f}. SL cancelled. P&L: ₹{oco_pnl:.2f}")
                         self._save_strategies()
                         self._save_state(force=True)
                         self._handle_leg_re_entry(strat, pos, trigger="TARGET", exit_order_id=str(adv_tgt_oid))
                         continue
 
                     if sl_filled:
-                        # Cancel Target order on broker (One Cancels Other)
-                        if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
-                            try:
-                                broker.cancel_order(str(adv_tgt_oid))
-                            except Exception as e_c:
-                                logger.warning(f"OCO: Error cancelling Target order {adv_tgt_oid}: {e_c}")
+                        # Cancel Target order on broker (One Cancels Other - handles multi-slice IDs and sweeps orderbook)
+                        self._cancel_leg_broker_orders(pos, broker, cancel_sl=False, cancel_target=True)
+                        exit_p_oco = float(pos.get("avg_exit_price") or pos.get("sl_price") or ltp or 0.0)
+                        oco_pnl = round((exit_p_oco - entry_price) * qty if side == "BUY" else (entry_price - exit_p_oco) * qty, 2) if entry_price > 0 and exit_p_oco > 0 else float(pos.get("mtm") or 0.0)
                         pos["status"] = "COMPLETE"
                         pos["_exit_in_progress"] = False
+                        pos["avg_exit_price"] = exit_p_oco
+                        pos["exit_qty"] = qty
+                        pos["mtm"] = oco_pnl
+                        pos["realised_pnl"] = oco_pnl
                         pos["exit_reason"] = "STOPLOSS HIT (Broker OCO)"
                         pos["exit_order_id"] = str(adv_sl_oid)
                         pos["exit_time"] = now_ist_str()
                         c_list = strat.setdefault("closed_positions", [])
                         if not any((cp.get("id") and cp.get("id") == pos.get("id")) or (pos.get("exit_order_id") and cp.get("exit_order_id") == pos.get("exit_order_id")) for cp in c_list):
                             c_list.append(pos)
-                        self._log_event(f"Stoploss order {adv_sl_oid} FILLED for {pos['symbol']} @ ₹{pos.get('avg_exit_price')}. Target cancelled.")
+                        self._log_event(f"Stoploss order {adv_sl_oid} FILLED for {pos['symbol']} @ ₹{exit_p_oco:.2f}. Target cancelled. P&L: ₹{oco_pnl:.2f}")
                         self._save_strategies()
                         self._save_state(force=True)
                         self._handle_leg_re_entry(strat, pos, trigger="STOPLOSS", exit_order_id=str(adv_sl_oid))

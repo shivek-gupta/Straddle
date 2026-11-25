@@ -1103,9 +1103,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             any_cancelled = any("CANCEL" in str(s.get("status", "")).upper() for s in statuses)
             any_rejected = any("REJECT" in str(s.get("status", "")).upper() for s in statuses)
             agg_st = "COMPLETE" if all_filled else ("CANCELLED" if any_cancelled else ("REJECTED" if any_rejected else "OPEN"))
+            filled_prices = [float(s.get("price") or 0.0) for s in statuses if float(s.get("price") or 0.0) > 0]
+            avg_slice_price = round(sum(filled_prices) / len(filled_prices), 2) if filled_prices else 0.0
             return {
                 "filled": all_filled,
                 "status": agg_st,
+                "price": avg_slice_price,
+                "average_price": avg_slice_price,
                 "order_id": oid_str,
                 "child_statuses": statuses
             }
@@ -1356,6 +1360,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 standardized.append({
                     "order_id": oid,
                     "trading_symbol": tsym,
+                    "instrument_token": str(item.get("tok") or item.get("instrument_token") or ""),
                     "transaction_type": tt,
                     "status": status,
                     "quantity": qty,

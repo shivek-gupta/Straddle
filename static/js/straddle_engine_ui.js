@@ -4769,19 +4769,23 @@ function syncStrategyLegChange(rowId) {
 
     // Target, SL & Re-execution fields
     legObj.target_type = tr.querySelector(".leg-tgt-type")?.value || "TGT: %";
-    legObj.target_value = parseFloat(tr.querySelector(".leg-tgt-val")?.value) || 25.0;
+    const parsedTgtVal = parseFloat(tr.querySelector(".leg-tgt-val")?.value);
+    legObj.target_value = !Number.isNaN(parsedTgtVal) ? parsedTgtVal : 25.0;
     legObj.target_order_placement = tr.querySelector(".leg-tgt-placement")?.value || "Place in advance";
     legObj.target_re_execute_type = tr.querySelector(".leg-tgt-re-type")?.value || "RE EXECUTE";
-    legObj.target_re_execute_count = parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value, 10) || 5;
+    const parsedTgtReCnt = parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value, 10);
+    legObj.target_re_execute_count = !Number.isNaN(parsedTgtReCnt) ? parsedTgtReCnt : 6;
 
     legObj.sl_type = tr.querySelector(".leg-sl-type")?.value || "SL: %";
-    legObj.sl_value = parseFloat(tr.querySelector(".leg-sl-val")?.value) || 25.0;
+    const parsedSlVal = parseFloat(tr.querySelector(".leg-sl-val")?.value);
+    legObj.sl_value = !Number.isNaN(parsedSlVal) ? parsedSlVal : 25.0;
     legObj.sl_order_placement = tr.querySelector(".leg-sl-placement")?.value || "Place in advance";
     legObj.tsl_type = tr.querySelector(".leg-tsl-type")?.value || "None";
     legObj.tsl_profit_pts = parseFloat(tr.querySelector(".leg-tsl-profit")?.value) || 0.0;
     legObj.tsl_trail_pts = parseFloat(tr.querySelector(".leg-tsl-trail")?.value) || 0.0;
     legObj.sl_re_execute_type = tr.querySelector(".leg-sl-re-type")?.value || "RE EXECUTE";
-    legObj.sl_re_execute_count = parseInt(tr.querySelector(".leg-sl-re-cnt")?.value, 10) || 2;
+    const parsedSlReCnt = parseInt(tr.querySelector(".leg-sl-re-cnt")?.value, 10);
+    legObj.sl_re_execute_count = !Number.isNaN(parsedSlReCnt) ? parsedSlReCnt : 1;
     legObj.action = tr.querySelector(".leg-action")?.value || "Square off leg";
 
     const hChk = tr.querySelector(".leg-hedge-enabled");
@@ -6312,17 +6316,17 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
             if (pos.exit_reason && pos.exit_reason !== "-") {
                 const rStr = String(pos.exit_reason).trim();
                 const rLower = rStr.toLowerCase();
-                if (rLower.includes("target")) {
+                if (rLower.includes("hedge shift") || rLower.includes("shift hedge") || rLower.includes("realigned to")) {
+                    exitReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${rStr}">🔄 ${rStr}</span>`;
+                } else if (rLower.includes("hedge")) {
+                    exitReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${rStr}">🛡️ ${rStr}</span>`;
+                } else if (rLower.includes("target")) {
                     exitReasonHtml = `<span class="exit-reason-tgt" title="${rStr}">🎯 ${rStr}</span>`;
                 } else if (rLower.includes("stoploss") || rLower.includes("sl")) {
                     exitReasonHtml = `<span class="exit-reason-sl" title="${rStr}">🛑 ${rStr}</span>`;
                 } else if (rLower.includes("square off") || rLower.includes("manual") || rLower.includes("exit all")) {
                     const exitLabel = (rLower === "square off" || rLower === "square off all") ? "Square Off (Broker Exit)" : rStr;
                     exitReasonHtml = `<span class="straddle-reason-pill exit-reason-squareoff" style="display:inline-block; font-size:9.5px; font-weight:800; color:#fbbf24; background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); border-radius:3px; padding:2px 6px; letter-spacing:0.3px;" title="${rStr}">🚨 ${exitLabel}</span>`;
-                } else if (rLower.includes("hedge shift") || rLower.includes("shift hedge") || rLower.includes("realigned to")) {
-                    exitReasonHtml = `<span class="straddle-reason-pill entry-shifted" title="${rStr}">🔄 ${rStr}</span>`;
-                } else if (rLower.includes("hedge")) {
-                    exitReasonHtml = `<span class="straddle-reason-pill entry-hedge" title="${rStr}">🛡️ ${rStr}</span>`;
                 } else if (rLower.includes("time") || rLower.includes("eod") || rLower.includes("market close")) {
                     exitReasonHtml = `<span class="straddle-reason-pill" style="display:inline-block; font-size:9.5px; font-weight:800; color:#c084fc; background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.4); border-radius:3px; padding:2px 6px;" title="${rStr}">⏰ ${rStr}</span>`;
                 } else if (rLower.includes("mtm")) {
