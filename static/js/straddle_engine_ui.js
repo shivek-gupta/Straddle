@@ -9671,9 +9671,6 @@ function onStrategyUnderlyingChange(newUnd) {
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
     }
-    if (typeof populateAutoSizingForm === "function") {
-        populateAutoSizingForm(s);
-    }
     if (typeof renderStrategyMarginEstimate === "function") {
         renderStrategyMarginEstimate();
     }
@@ -15945,8 +15942,8 @@ function setFormMultiplierMode(mode, syncToServer = true) {
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
     }
-    if (typeof populateAutoSizingForm === "function") {
-        populateAutoSizingForm(s);
+    if (typeof onAutoSizingFieldChange === "function") {
+        onAutoSizingFieldChange();
     }
 
     const activeStrat = window._straddleState?.activeStrategy;
@@ -16171,9 +16168,6 @@ function onFormCushionMarginChange(val) {
     updateFormAutoMultiplierPreview();
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
-    }
-    if (typeof populateAutoSizingForm === "function") {
-        populateAutoSizingForm(s);
     }
     const activeStrat = window._straddleState?.activeStrategy;
     if (activeStrat && activeStrat.strategy_id) {
