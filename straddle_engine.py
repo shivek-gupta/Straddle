@@ -9805,42 +9805,6 @@ class StraddleManager:
                             else min(max(0.05, pos["sl_price"] - 0.05), pos["sl_price"] * (1.0 - sl_buf_pct / 100.0)),
                             0.05
                         )
-                pos["target_price"] = round_to_tick(ref_price - 0.05, 0.05)
-
-        # Recalculate Stoploss Price
-        if sl_val > 0 and ref_price > 0:
-            if "%" in sl_type:
-                pos["sl_price"] = round_to_tick(ref_price * (1.0 + sl_val / 100.0) if side == "SELL" else ref_price * (1.0 - sl_val / 100.0), 0.05)
-            else:
-                pos["sl_price"] = round_to_tick(ref_price + sl_val if side == "SELL" else ref_price - sl_val, 0.05)
-
-            # Enforce minimum tick separation
-            if side == "BUY" and pos["sl_price"] >= ref_price:
-                pos["sl_price"] = round_to_tick(ref_price - 0.05, 0.05)
-            elif side == "SELL" and pos["sl_price"] <= ref_price:
-                pos["sl_price"] = round_to_tick(ref_price + 0.05, 0.05)
-            pos["original_sl_price"] = pos["sl_price"]
-
-        # Update or modify active broker orders on Kotak Neo matching engine
-        adv_cfg = (strat.get("advanced_settings") or strat.get("advanced") or {}) if strat else {}
-        broker_action = str(adv_cfg.get("benchmark_broker_action") or "AUTO_MODIFY").upper()
-
-        adv_sl_oid = pos.get("sl_broker_order_id")
-        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_") and pos.get("sl_price"):
-            def _handle_sl_broker_bg():
-                with _ADVANCE_ORDER_LOCK:
-                    try:
-                        time.sleep(0.12)
-                        sl_side = "BUY" if side == "SELL" else "SELL"
-                        sl_buf_pct = float(adv_cfg.get("exit_buffer_val") or adv_cfg.get("exit_buffer_value") or 5.0)
-                        if sl_buf_pct <= 0:
-                            sl_buf_pct = 5.0
-                        lim_p = round_to_tick(
-                            max(pos["sl_price"] + 0.05, pos["sl_price"] * (1.0 + sl_buf_pct / 100.0))
-                            if sl_side == "BUY"
-                            else min(max(0.05, pos["sl_price"] - 0.05), pos["sl_price"] * (1.0 - sl_buf_pct / 100.0)),
-                            0.05
-                        )
                         if broker_action == "CANCEL_REPLACE":
                             try:
                                 broker.cancel_order(str(adv_sl_oid))
