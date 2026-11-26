@@ -1305,30 +1305,12 @@ class StraddleManager:
                                         existing_names.add(pname)
                                         logger.info(f"Restored custom strategy from persistent storage: {p_strat.get('name')}")
                                     else:
-                                        # Synchronize active runtime settings from persistent copy
+                                        # Synchronize active runtime settings and full user configuration from persistent copy
                                         for cur_s in self._strategies:
                                             if (str(cur_s.get("strategy_id", "")).strip().lower() == pid or
                                                 str(cur_s.get("name", "")).strip().lower() == pname):
-                                                if p_strat.get("positions"):
-                                                    cur_s["positions"] = p_strat["positions"]
-                                                if p_strat.get("closed_positions"):
-                                                    cur_s["closed_positions"] = p_strat["closed_positions"]
-                                                if p_strat.get("last_trade_date"):
-                                                    cur_s["last_trade_date"] = p_strat["last_trade_date"]
-                                                if "enabled" in p_strat:
-                                                    cur_s["enabled"] = p_strat["enabled"]
-                                                if "status" in p_strat:
-                                                    cur_s["status"] = p_strat["status"]
-                                                if "mtm" in p_strat:
-                                                    cur_s["mtm"] = p_strat["mtm"]
-                                                if "group_mtm" in p_strat:
-                                                    cur_s["group_mtm"] = p_strat["group_mtm"]
-                                                if "re_execution_counts" in p_strat:
-                                                    cur_s["re_execution_counts"] = p_strat["re_execution_counts"]
-                                                if "schedule_days" in p_strat:
-                                                    cur_s["schedule_days"] = p_strat["schedule_days"]
-                                                if "multiplier" in p_strat:
-                                                    cur_s["multiplier"] = p_strat["multiplier"]
+                                                # Persistent storage is authoritative for user's configured settings and runtime states
+                                                cur_s.update(copy.deepcopy(p_strat))
                                                 break
                     except Exception as e_pm:
                         logger.warning(f"Error merging persistent strategies: {e_pm}")
@@ -1403,11 +1385,13 @@ class StraddleManager:
         with _ENGINE_LOCK:
             _safe_write_json(STRADDLE_STRATEGIES_FILE, self._strategies)
             persist_dir = Path("/home/ubuntu/straddle_data_persist")
-            if persist_dir.exists():
-                try:
+            try:
+                if Path("/home/ubuntu").exists() and not persist_dir.exists():
+                    persist_dir.mkdir(parents=True, exist_ok=True)
+                if persist_dir.exists():
                     _safe_write_json(persist_dir / "straddle_strategies.json", self._strategies)
-                except Exception as e_p:
-                    logger.warning(f"Note updating persist directory strategies: {e_p}")
+            except Exception as e_p:
+                logger.warning(f"Note updating persist directory strategies: {e_p}")
 
     def _load_state(self):
         with _ENGINE_LOCK:
@@ -1441,6 +1425,12 @@ class StraddleManager:
         self._last_state_save_ts = now
         with _ENGINE_LOCK:
             _safe_write_json(STRADDLE_STATE_FILE, self._state)
+            persist_dir = Path("/home/ubuntu/straddle_data_persist")
+            try:
+                if persist_dir.exists():
+                    _safe_write_json(persist_dir / "straddle_state.json", self._state)
+            except Exception:
+                pass
 
     def _load_logs(self):
         with _ENGINE_LOCK:

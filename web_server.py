@@ -2119,9 +2119,10 @@ def _execute_safe_git_pull_operation():
                     except Exception:
                         git_strats = []
 
-                # Merge intelligently: snap_strats -> persist_strats -> git_strats
+                # Merge intelligently: persist_strats takes absolute precedence, followed by snap_strats, then git_strats
                 merged_map = {}
-                for s in snap_strats + persist_strats + git_strats:
+                name_to_sid = {}
+                for s in persist_strats + snap_strats + git_strats:
                     if not isinstance(s, dict): continue
                     sid = str(s.get("strategy_id", "")).strip().lower()
                     sname = str(s.get("name", "")).strip().lower()
@@ -2129,8 +2130,15 @@ def _execute_safe_git_pull_operation():
                         pass
                     elif not sid or sid in del_ids or sname in del_ids:
                         continue
-                    if sid not in merged_map:
-                        merged_map[sid] = s
+                    # Retain user's custom strategy; never let git repo defaults overwrite configured user settings
+                    existing_by_name = name_to_sid.get(sname)
+                    if sid in merged_map:
+                        continue
+                    if existing_by_name and existing_by_name in merged_map:
+                        continue
+                    merged_map[sid] = s
+                    if sname:
+                        name_to_sid[sname] = sid
 
                 final_list = list(merged_map.values())
                 dest_p.parent.mkdir(parents=True, exist_ok=True)

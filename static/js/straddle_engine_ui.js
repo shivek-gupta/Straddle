@@ -315,6 +315,10 @@ async function initStraddlePlatform() {
 
         // Render algos table IMMEDIATELY (0ms instant display upon refresh!)
         renderStraddleAlgosTable(true);
+        // Pre-hydrate settings form immediately with active strategy so it never shows blank/default HTML
+        if (active && typeof populateStraddleSettingsForm === "function") {
+            populateStraddleSettingsForm(active);
+        }
     }
 
     // Initialize local storage & fast ticker pollers immediately without blocking
@@ -327,6 +331,9 @@ async function initStraddlePlatform() {
     try {
         await fetchStraddleState();
         renderStraddleAlgosTable(false);
+        if (window._straddleState.activeStrategy && typeof populateStraddleSettingsForm === "function") {
+            populateStraddleSettingsForm(window._straddleState.activeStrategy);
+        }
         // If allStrategies is empty, retry once after 500ms in case server was still starting up or seeding
         if (!window._straddleState.allStrategies || window._straddleState.allStrategies.length === 0) {
             setTimeout(async () => {
@@ -391,6 +398,34 @@ async function initStraddlePlatform() {
             closeStraddleOptionChainModal();
             if (typeof closeBasketOrderModal === "function") closeBasketOrderModal();
             if (typeof closeMarketDepthModal === "function") closeMarketDepthModal();
+        }
+    });
+
+    // Auto-save & cloud synchronization listener for strategy settings changes across devices
+    const settingsPanel = document.getElementById("straddleSettingsPanel");
+    if (settingsPanel && !settingsPanel._cloudSyncListenerAttached) {
+        settingsPanel._cloudSyncListenerAttached = true;
+        const onSettingsInputChanged = (e) => {
+            if (e && e.target && (e.target.id === "straddleAlgosSearch" || e.target.classList.contains("search-input"))) return;
+            window._straddleSettingsDirty = true;
+            if (window._straddleAutoSaveTimer) clearTimeout(window._straddleAutoSaveTimer);
+            window._straddleAutoSaveTimer = setTimeout(() => {
+                if (window._straddleSettingsDirty && typeof saveStraddleStrategySettings === "function") {
+                    saveStraddleStrategySettings({ silent: true });
+                }
+            }, 1200);
+        };
+        settingsPanel.addEventListener("input", onSettingsInputChanged);
+        settingsPanel.addEventListener("change", onSettingsInputChanged);
+    }
+
+    // Auto-save on page exit / unload so unsaved changes are never lost across devices
+    window.addEventListener("beforeunload", () => {
+        if (window._straddleSettingsDirty && typeof serializeCurrentStrategySettings === "function") {
+            try {
+                const strat = serializeCurrentStrategySettings();
+                navigator.sendBeacon("/api/straddle/strategy/save", new Blob([JSON.stringify({ strategy: strat })], { type: "application/json" }));
+            } catch (_) {}
         }
     });
 
@@ -691,14 +726,17 @@ async function fetchStraddleState() {
             renderStraddleHeader(s);
             updateStraddleStrategyDropdown(s.all_strategies || [], active);
 
-            // Update Terminal positions and re-populate settings if active strategy changed
-            if (window._straddleState.currentSubView === "terminal") {
-                renderStraddlePositions(activePositions, active ? (active.group_mtm || 0.0) : 0.0, active ? (active.mtm || 0.0) : 0.0);
+            // Update Terminal positions and synchronize settings form with latest cloud state
+            if (active) {
                 const settingsPanel = document.getElementById("straddleSettingsPanel");
-                const isSettingsOpen = settingsPanel && (settingsPanel.style.display === "block" || !settingsPanel.classList.contains("hidden"));
-                if (!isSettingsOpen && active && prevActiveId && prevActiveId !== active.strategy_id) {
+                const isUserTyping = settingsPanel && settingsPanel.contains(document.activeElement);
+                const needsPopulate = (!window._straddleFormPopulatedFor || window._straddleFormPopulatedFor !== active.strategy_id);
+                if (!isUserTyping && (needsPopulate || (!window._straddleSettingsDirty && window._straddleState.currentSubView === "terminal"))) {
                     populateStraddleSettingsForm(active);
                 }
+            }
+            if (window._straddleState.currentSubView === "terminal") {
+                renderStraddlePositions(activePositions, active ? (active.group_mtm || 0.0) : 0.0, active ? (active.mtm || 0.0) : 0.0);
             }
 
             // Render Margin Error 15s Countdown Alert Banner (Quantiply Parity)
@@ -839,6 +877,13 @@ function renderStraddleHeader(state) {
 function switchStraddleSubView(view) {
     if (view === "algo_detail") {
         view = "terminal";
+    }
+
+    // Auto-save pending settings changes if leaving terminal
+    if (window._straddleState.currentSubView === "terminal" && view !== "terminal" && window._straddleSettingsDirty) {
+        if (typeof saveStraddleStrategySettings === "function") {
+            saveStraddleStrategySettings({ silent: true });
+        }
     }
 
     const isOrderbook = (view === "orderbook");
@@ -1901,12 +1946,14 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         }
 
         // Check if we can do an in-place update without rebuilding the DOM
+        const curTableConfigSig = filtered.map(s => `${s.strategy_id}:${s.name}:${s.underlying}:${s.enabled}:${s.multiplier}:${s.multiplier_type}:${s.cushion_margin}:${(s.schedule_days||[]).join(',')}:${s.start_time}:${s.end_time}:${(s.legs||[]).length}`).join("||");
+        const hasTableConfigChanged = (curTableConfigSig !== window._lastAlgosTableConfigSig);
         const existingRows = tbody.querySelectorAll("tr[data-strategy-id]");
         const activeEl = document.activeElement;
         const isUserInteracting = activeEl && (tbody.contains(activeEl) || activeEl.id === "straddleAlgosSearch");
         const hasOpenDropdown = !!document.querySelector(".straddle-dropdown-menu.show");
 
-        if (!forceRebuild && existingRows.length === filtered.length) {
+        if (!forceRebuild && !hasTableConfigChanged && existingRows.length === filtered.length) {
             let allMatch = true;
             for (let i = 0; i < filtered.length; i++) {
                 if (existingRows[i].getAttribute("data-strategy-id") !== filtered[i].strategy_id) {
@@ -2208,6 +2255,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         });
 
         tbody.innerHTML = rowsHtml;
+        window._lastAlgosTableConfigSig = curTableConfigSig;
     } catch (err) {
         console.error("renderStraddleAlgosTable error:", err);
     }
@@ -2781,6 +2829,7 @@ async function straddleResetStrategyDirect(strategyId) {
                     window._straddleState.positions = updated.positions || [];
                     window._straddleState.closed_positions = updated.closed_positions || [];
                 }
+                populateStraddleSettingsForm(updated);
             }
             window._straddleState.closed_positions = [];
             window._straddleState.closedPositionsCache = [];
@@ -4743,6 +4792,60 @@ function stepLegLotsInput(rowId, dir) {
 }
 window.stepLegLotsInput = stepLegLotsInput;
 
+function getStrategyConfigSignature(strat) {
+    if (!strat) return "";
+    try {
+        return JSON.stringify({
+            id: strat.strategy_id,
+            name: strat.name,
+            und: strat.underlying,
+            st: strat.start_time,
+            et: strat.end_time,
+            mult: strat.multiplier,
+            multType: strat.multiplier_type,
+            cush: strat.cushion_margin,
+            days: strat.schedule_days,
+            tradeType: strat.trade_type,
+            undSrc: strat.underlying_price_source,
+            mtmMode: strat.mtm_calc_mode,
+            mtmTgt: strat.mtm_target,
+            mtmSl: strat.mtm_stoploss,
+            toggles: strat.toggles,
+            adv: strat.advanced_settings || strat.advanced,
+            pm: strat.premium_matching,
+            legs: (strat.legs || []).map(l => ({
+                side: l.side,
+                opt: l.option_type,
+                strike: l.strike_selection,
+                lots: l.lots,
+                tgt: l.target_value,
+                sl: l.sl_value,
+                tgtType: l.target_type,
+                slType: l.sl_type,
+                slPlace: l.sl_order_placement,
+                tgtPlace: l.target_order_placement,
+                hedge: l.associated_hedge
+            }))
+        });
+    } catch (_) {
+        return "";
+    }
+}
+window.getStrategyConfigSignature = getStrategyConfigSignature;
+
+function markStraddleSettingsDirty() {
+    window._straddleSettingsDirty = true;
+    if (window._straddleAutoSaveTimer) {
+        clearTimeout(window._straddleAutoSaveTimer);
+    }
+    window._straddleAutoSaveTimer = setTimeout(() => {
+        if (window._straddleSettingsDirty && typeof saveStraddleStrategySettings === "function") {
+            saveStraddleStrategySettings({ silent: true });
+        }
+    }, 1200);
+}
+window.markStraddleSettingsDirty = markStraddleSettingsDirty;
+
 function syncStrategyLegChange(rowId) {
     if (!window._straddleState?.activeStrategy) return;
     if (!Array.isArray(window._straddleState.activeStrategy.legs)) {
@@ -4800,6 +4903,9 @@ function syncStrategyLegChange(rowId) {
 
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
+    }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
     }
 }
 window.syncStrategyLegChange = syncStrategyLegChange;
@@ -7660,6 +7766,7 @@ async function resetCurrentStraddleAlgo() {
                 window._straddleState.activeStrategy = updated;
                 window._straddleState.positions = updated.positions || [];
                 window._straddleState.closed_positions = updated.closed_positions || [];
+                populateStraddleSettingsForm(updated);
             }
             window._straddleState.closed_positions = [];
             window._straddleState.closedPositionsCache = [];
@@ -7942,14 +8049,47 @@ function toggleStraddleSettingsPanel(forceState = null) {
         }
     }
 
-    if (nextState && window._straddleState.activeStrategy) {
-        populateStraddleSettingsForm(window._straddleState.activeStrategy);
+    if (nextState) {
+        const curStrat = window._straddleState?.activeStrategy || (window._straddleState?.allStrategies && window._straddleState.allStrategies[0]);
+        if (curStrat) {
+            window._straddleState.activeStrategy = curStrat;
+            window._straddleState.activeStrategyId = curStrat.strategy_id;
+            populateStraddleSettingsForm(curStrat);
+        }
+    } else {
+        if (window._straddleSettingsDirty && typeof saveStraddleStrategySettings === "function") {
+            saveStraddleStrategySettings({ silent: true });
+        }
     }
 }
 window.toggleStraddleSettingsPanel = toggleStraddleSettingsPanel;
 
 function populateStraddleSettingsForm(s) {
     if (!s) return;
+    window._straddleFormPopulatedFor = s.strategy_id;
+    window._straddleSettingsDirty = false;
+
+    // Attach dirty-tracking and debounced auto-save listener once to settings panel
+    const panel = document.getElementById("straddleSettingsPanel");
+    if (panel && !panel._dirtyListenersAttached) {
+        panel._dirtyListenersAttached = true;
+        const onSettingChanged = (e) => {
+            if (e && e.target && e.target.tagName === "BUTTON" && !e.target.classList.contains("day-pill-btn") && !e.target.classList.contains("time-step-btn")) {
+                return;
+            }
+            window._straddleSettingsDirty = true;
+            if (window._straddleAutoSaveTimer) {
+                clearTimeout(window._straddleAutoSaveTimer);
+            }
+            window._straddleAutoSaveTimer = setTimeout(() => {
+                if (window._straddleSettingsDirty && typeof saveStraddleStrategySettings === "function") {
+                    saveStraddleStrategySettings({ silent: true });
+                }
+            }, 1200);
+        };
+        panel.addEventListener("input", onSettingChanged);
+        panel.addEventListener("change", onSettingChanged);
+    }
     const errBanner = document.getElementById("stratSettingsErrorBanner");
     if (errBanner) {
         const hasPositions = s.positions && s.positions.length > 0;
@@ -8575,6 +8715,14 @@ function addStraddleLegRow(leg = null) {
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
     }
+    if (!leg) {
+        if (typeof syncStrategyLegChange === "function") {
+            syncStrategyLegChange(rowId);
+        }
+        if (typeof markStraddleSettingsDirty === "function") {
+            markStraddleSettingsDirty();
+        }
+    }
 }
 
 function removeStraddleLegRow(rowId) {
@@ -8597,6 +8745,9 @@ function removeStraddleLegRow(rowId) {
         }
         if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
             scheduleAutoMultiplierLiveRecalc();
+        }
+        if (typeof markStraddleSettingsDirty === "function") {
+            markStraddleSettingsDirty();
         }
     }
 }
@@ -8679,6 +8830,9 @@ function stepFormMultiplier(delta) {
     el.value = val;
     if (typeof onFormManualMultiplierChange === "function") {
         onFormManualMultiplierChange(val);
+    }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
     }
 }
 window.stepFormMultiplier = stepFormMultiplier;
@@ -8965,6 +9119,13 @@ function setMtmCalcMode(mode) {
     if (tgtValLbl) tgtValLbl.textContent = `Value ${isPerLot ? '(₹ / lot / %)' : '(₹ / %)'}:`;
     const slValLbl = document.getElementById("lblMtmSlVal");
     if (slValLbl) slValLbl.textContent = `Value ${isPerLot ? '(₹ / lot / %)' : '(₹ / %)'}:`;
+
+    if (window._straddleState?.activeStrategy) {
+        window._straddleState.activeStrategy.mtm_calc_mode = mode;
+    }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
+    }
 }
 window.setMtmCalcMode = setMtmCalcMode;
 
@@ -9491,6 +9652,9 @@ function setUnderlyingPriceSource(source) {
     if (typeof updateTimingsHeaderBadge === "function") {
         updateTimingsHeaderBadge();
     }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
+    }
 }
 window.setUnderlyingPriceSource = setUnderlyingPriceSource;
 
@@ -9502,6 +9666,9 @@ function setStraddleTradeType(type) {
     }
     if (typeof updateTimingsHeaderBadge === "function") {
         updateTimingsHeaderBadge();
+    }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
     }
 }
 window.setStraddleTradeType = setStraddleTradeType;
@@ -9549,6 +9716,9 @@ function onStrategyToggleChanged(key, isChecked) {
 
     if (typeof updateTimingsHeaderBadge === "function") {
         updateTimingsHeaderBadge();
+    }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
     }
 }
 window.onStrategyToggleChanged = onStrategyToggleChanged;
@@ -9612,6 +9782,9 @@ function setTimePreset(baseId, timeStr) {
     }
     if (typeof updateTimingsHeaderBadge === "function") {
         updateTimingsHeaderBadge();
+    }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
     }
 }
 window.setTimePreset = setTimePreset;
@@ -9685,6 +9858,9 @@ function syncScheduleDaysToActiveStrategy() {
     }
     if (typeof renderStraddleAlgosTable === "function") {
         renderStraddleAlgosTable(false);
+    }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
     }
 }
 window.syncScheduleDaysToActiveStrategy = syncScheduleDaysToActiveStrategy;
@@ -10166,6 +10342,9 @@ function stepStraddleTimePart(baseId, unit, delta) {
     if (typeof updateTimingsHeaderBadge === "function") {
         updateTimingsHeaderBadge();
     }
+    if (typeof markStraddleSettingsDirty === "function") {
+        markStraddleSettingsDirty();
+    }
 }
 window.stepStraddleTimePart = stepStraddleTimePart;
 
@@ -10473,69 +10652,76 @@ function serializeCurrentStrategySettings() {
     strategy.advanced = Object.assign({}, strategy.advanced_settings);
 
     const trs = document.querySelectorAll("#straddleLegsBuilderBody tr");
-    const dynHedgeChecked = document.getElementById("cfgToggleDynamicHedges") ? document.getElementById("cfgToggleDynamicHedges").checked : true;
-    trs.forEach(tr => {
-        const legSide = tr.querySelector(".leg-side")?.value || "Sell";
-        const isSellLeg = String(legSide).toUpperCase() === "SELL";
-        const hChk = tr.querySelector(".leg-hedge-enabled");
-        const isHedgeOn = isSellLeg && (dynHedgeChecked || (hChk ? hChk.checked : true));
-        const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
-        const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
-        const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
+    if (trs.length === 0 && Array.isArray(active.legs) && active.legs.length > 0) {
+        strategy.legs = JSON.parse(JSON.stringify(active.legs));
+    } else {
+        const dynHedgeChecked = document.getElementById("cfgToggleDynamicHedges") ? document.getElementById("cfgToggleDynamicHedges").checked : true;
+        trs.forEach(tr => {
+            const legSide = tr.querySelector(".leg-side")?.value || "Sell";
+            const isSellLeg = String(legSide).toUpperCase() === "SELL";
+            const hChk = tr.querySelector(".leg-hedge-enabled");
+            const isHedgeOn = isSellLeg && (dynHedgeChecked || (hChk ? hChk.checked : true));
+            const hInitVal = parseInt(tr.querySelector(".leg-hedge-initial-otm")?.value, 10) || 20;
+            const hThreshVal = parseInt(tr.querySelector(".leg-hedge-max-thresh")?.value, 10) || 22;
+            const hResetVal = parseInt(tr.querySelector(".leg-hedge-reset-otm")?.value, 10) || 20;
 
-        const effectiveTgtPlacement = tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Place in advance";
-        const effectiveSlPlacement = tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Place in advance";
+            const effectiveTgtPlacement = tr.querySelector(".leg-tgt-placement")?.value || strategy.advanced_settings.target_order_placement || "Place in advance";
+            const effectiveSlPlacement = tr.querySelector(".leg-sl-placement")?.value || strategy.advanced_settings.sl_order_placement || "Place in advance";
 
-        const tgtValParsed = parseFloat(tr.querySelector(".leg-tgt-val")?.value);
-        const tgtReCntParsed = parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value, 10);
-        const slValParsed = parseFloat(tr.querySelector(".leg-sl-val")?.value);
-        const slReCntParsed = parseInt(tr.querySelector(".leg-sl-re-cnt")?.value, 10);
-        const lotsParsed = parseInt(tr.querySelector(".leg-lots")?.value, 10);
+            const tgtValParsed = parseFloat(tr.querySelector(".leg-tgt-val")?.value);
+            const tgtReCntParsed = parseInt(tr.querySelector(".leg-tgt-re-cnt")?.value, 10);
+            const slValParsed = parseFloat(tr.querySelector(".leg-sl-val")?.value);
+            const slReCntParsed = parseInt(tr.querySelector(".leg-sl-re-cnt")?.value, 10);
+            const lotsParsed = parseInt(tr.querySelector(".leg-lots")?.value, 10);
 
-        const tslVal = tr.querySelector(".leg-tsl-type")?.value || "None";
-        const tslProfitVal = parseFloat(tr.querySelector(".leg-tsl-profit")?.value);
-        const tslTrailVal = parseFloat(tr.querySelector(".leg-tsl-trail")?.value);
+            const tslVal = tr.querySelector(".leg-tsl-type")?.value || "None";
+            const tslProfitVal = parseFloat(tr.querySelector(".leg-tsl-profit")?.value);
+            const tslTrailVal = parseFloat(tr.querySelector(".leg-tsl-trail")?.value);
 
-        strategy.legs.push({
-            id: tr.id,
-            side: legSide,
-            product: tr.querySelector(".leg-product")?.value,
-            strike_selection: tr.querySelector(".leg-strike")?.value,
-            multiple_strike_selection: tr.querySelector(".leg-multiple-strike")?.value || "None",
-            option_type: tr.querySelector(".leg-type")?.value,
-            lots: (!isNaN(lotsParsed) && lotsParsed > 0) ? lotsParsed : 1,
-            associated_hedge: {
-                enabled: isHedgeOn,
-                initial_otm: hInitVal,
-                max_distance_threshold: hThreshVal,
-                reset_otm: hResetVal,
-                exit_with_parent: true
-            },
-            target_type: tr.querySelector(".leg-tgt-type")?.value,
-            target_value: !isNaN(tgtValParsed) ? tgtValParsed : 45.0,
-            target_order_placement: effectiveTgtPlacement,
-            target_re_execute_type: tr.querySelector(".leg-tgt-re-type")?.value,
-            target_re_execute_count: !isNaN(tgtReCntParsed) ? tgtReCntParsed : 6,
-            sl_type: tr.querySelector(".leg-sl-type")?.value,
-            sl_value: !isNaN(slValParsed) ? slValParsed : 66.0,
-            sl_order_placement: effectiveSlPlacement,
-            tsl_type: tslVal,
-            tsl_profit_pts: !isNaN(tslProfitVal) ? tslProfitVal : 0.0,
-            tsl_trail_pts: !isNaN(tslTrailVal) ? tslTrailVal : 0.0,
-            sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
-            sl_re_execute_count: !isNaN(slReCntParsed) ? slReCntParsed : 1,
-            action: tr.querySelector(".leg-action")?.value,
-            underlying: stratUnd,
-            expiry: tr.querySelector(".leg-expiry")?.value
+            strategy.legs.push({
+                id: tr.id,
+                side: legSide,
+                product: tr.querySelector(".leg-product")?.value,
+                strike_selection: tr.querySelector(".leg-strike")?.value,
+                multiple_strike_selection: tr.querySelector(".leg-multiple-strike")?.value || "None",
+                option_type: tr.querySelector(".leg-type")?.value,
+                lots: (!isNaN(lotsParsed) && lotsParsed > 0) ? lotsParsed : 1,
+                associated_hedge: {
+                    enabled: isHedgeOn,
+                    initial_otm: hInitVal,
+                    max_distance_threshold: hThreshVal,
+                    reset_otm: hResetVal,
+                    exit_with_parent: true
+                },
+                target_type: tr.querySelector(".leg-tgt-type")?.value,
+                target_value: !isNaN(tgtValParsed) ? tgtValParsed : 45.0,
+                target_order_placement: effectiveTgtPlacement,
+                target_re_execute_type: tr.querySelector(".leg-tgt-re-type")?.value,
+                target_re_execute_count: !isNaN(tgtReCntParsed) ? tgtReCntParsed : 6,
+                sl_type: tr.querySelector(".leg-sl-type")?.value,
+                sl_value: !isNaN(slValParsed) ? slValParsed : 66.0,
+                sl_order_placement: effectiveSlPlacement,
+                tsl_type: tslVal,
+                tsl_profit_pts: !isNaN(tslProfitVal) ? tslProfitVal : 0.0,
+                tsl_trail_pts: !isNaN(tslTrailVal) ? tslTrailVal : 0.0,
+                sl_re_execute_type: tr.querySelector(".leg-sl-re-type")?.value,
+                sl_re_execute_count: !isNaN(slReCntParsed) ? slReCntParsed : 1,
+                action: tr.querySelector(".leg-action")?.value,
+                underlying: stratUnd,
+                expiry: tr.querySelector(".leg-expiry")?.value
+            });
         });
-    });
+    }
 
     return strategy;
 }
 
-async function saveStraddleStrategySettings() {
+async function saveStraddleStrategySettings(options = {}) {
+    const isSilent = !!(options && options.silent);
     const strat = serializeCurrentStrategySettings();
-    showStraddleToast(`💾 Saving strategy '${strat.name}'...`, "info", 1500);
+    if (!isSilent) {
+        showStraddleToast(`💾 Saving strategy '${strat.name}'...`, "info", 1500);
+    }
 
     // Optimistically update local state for instant responsiveness
     if (window._straddleState) {
@@ -10587,7 +10773,10 @@ async function saveStraddleStrategySettings() {
         });
         const res = await resp.json();
         if (res.success) {
-            showStraddleToast(`💾 Strategy '${strat.name}' saved successfully!`, "success", 2000);
+            window._straddleSettingsDirty = false;
+            if (!isSilent) {
+                showStraddleToast(`💾 Strategy '${strat.name}' saved successfully!`, "success", 2000);
+            }
             if (res.strategy) {
                 const saved = res.strategy;
                 if (window._straddleState) {
@@ -10602,6 +10791,10 @@ async function saveStraddleStrategySettings() {
                         }
                     }
                 }
+                try {
+                    localStorage.setItem("straddle_cached_strategies", JSON.stringify(window._straddleState.allStrategies));
+                    localStorage.setItem("straddle_active_strategy_id", saved.strategy_id);
+                } catch (_) {}
                 if (saved.broker_margin_per_lot) {
                     window._formSimulatedMarginPerLot = saved.broker_margin_per_lot;
                     updateFormAutoMultiplierPreview(saved.broker_margin_per_lot);
@@ -10613,10 +10806,14 @@ async function saveStraddleStrategySettings() {
                 renderStraddlePositions();
             }
         } else {
-            showStraddleToast("Error saving: " + (res.error || "Failed"), "error", 3500);
+            if (!isSilent) {
+                showStraddleToast("Error saving: " + (res.error || "Failed"), "error", 3500);
+            }
         }
     } catch (e) {
-        showStraddleToast("Network error: " + e.message, "error", 3500);
+        if (!isSilent) {
+            showStraddleToast("Network error: " + e.message, "error", 3500);
+        }
     }
 }
 
@@ -10725,6 +10922,13 @@ async function saveAndStartStraddleTrade() {
 async function onStraddleStrategySelect(stratId) {
     if (!stratId) return;
     try {
+        // Auto-save pending changes on previous strategy before switching
+        if (window._straddleSettingsDirty && typeof saveStraddleStrategySettings === "function") {
+            try {
+                await saveStraddleStrategySettings({ silent: true });
+            } catch (_) {}
+        }
+
         // 1. Immediately find target strategy in allStrategies
         let strat = (window._straddleState?.allStrategies || []).find(s => s.strategy_id === stratId || s.name === stratId);
 
