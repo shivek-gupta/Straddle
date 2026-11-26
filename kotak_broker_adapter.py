@@ -1929,7 +1929,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         price: float = 0.0,
         trigger_price: float = 0.0,
     ) -> Dict[str, Any]:
-        """Query Kotak Neo API for exact margin required for this order."""
+        """Query Kotak Neo API for exact margin required for this order (30s in-memory cache)."""
         client = self._get_client()
         if not client:
             return {"success": False, "margin_required": 0.0}
@@ -1941,6 +1941,16 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             ot = "MKT" if order_type.upper() in ("MARKET", "MKT") else "L"
             prc_str = str(price) if ot == "L" and price > 0 else "0"
             clean_prod = "NRML" if product.upper() in ("NRML", "NORMAL", "C") else "MIS"
+
+            cache_key = (str(tok or canonical_symbol), tt, int(quantity), clean_prod)
+            cache = getattr(self, "_margin_req_cache", None)
+            if cache is None:
+                cache = {}
+                self._margin_req_cache = cache
+            cached_entry = cache.get(cache_key)
+            if cached_entry and (time.time() - cached_entry[0]) < 30.0:
+                return cached_entry[1]
+
             res = client.margin_required(
                 exchange_segment=seg,
                 price=prc_str,
@@ -1955,8 +1965,13 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 stat = d.get("stat") or res.get("stat")
                 st_code = d.get("stCode") or res.get("stCode")
                 if stat == "Ok" or str(st_code) == "200":
-                    ord_mrgn = float(d.get("ordMrgn") or d.get("totMrgnUsd") or d.get("reqdMrgn") or 0.0)
-                    return {"success": True, "margin_required": ord_mrgn, "data": d}
+                    ord_mrgn = float(
+                        d.get("ordMrgn") or d.get("reqdMrgn") or d.get("totMrgnUsd") or d.get("rmMrgn") or 0.0
+                    )
+                    if ord_mrgn > 0:
+                        out = {"success": True, "margin_required": ord_mrgn, "data": d}
+                        cache[cache_key] = (time.time(), out)
+                        return out
         except Exception as e:
             logger.debug(f"[Kotak Neo] margin_required query note: {e}")
         return {"success": False, "margin_required": 0.0}

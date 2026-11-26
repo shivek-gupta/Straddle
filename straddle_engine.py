@@ -13426,12 +13426,25 @@ class StraddleManager:
             base_span_lot = float(getattr(config, "BASE_SPAN_PER_LOT", {}).get(u_und, 145282.80))
             base_exp_lot = float(getattr(config, "BASE_EXP_PER_LOT", {}).get(u_und, 60174.14))
 
+            # Dynamic Spot scaling for Exposure Margin when live Spot differs from 23,100 NIFTY baseline
+            try:
+                ref_spots = {"NIFTY": 23100.0, "BANKNIFTY": 49500.0, "FINNIFTY": 23500.0, "MIDCPNIFTY": 12000.0, "SENSEX": 76500.0, "BANKEX": 56500.0}
+                if u_und in ref_spots:
+                    sp = float(self._get_underlying_spot_price(u_und) or 0.0)
+                    if sp > 0:
+                        scale = max(0.70, min(1.50, sp / ref_spots[u_und]))
+                        base_exp_lot = round(base_exp_lot * scale, 2)
+            except Exception:
+                pass
+
             u_ce_shorts = []
             u_pe_shorts = []
             u_ce_longs = []
             u_pe_longs = []
+            u_fut_orders = []
             u_other_shorts = []
             u_buy_premiums = []
+            first_short_sample = None
 
             for o in u_orders:
                 lot_size = int(o.get("lot_size") or curr_lot_size)
@@ -13454,33 +13467,67 @@ class StraddleManager:
                     prc = 100.0  # sensible average option premium fallback so required margin is accurate
                 side = str(o.get("transaction_type") or o.get("side") or "BUY").upper()
                 opt_type = str(o.get("opt_type") or "").upper()
+                sym_upper = str(o.get("symbol") or o.get("trading_symbol") or "").upper()
                 if not opt_type:
-                    sym_upper = str(o.get("symbol") or o.get("trading_symbol") or "").upper()
-                    if " CE" in sym_upper or sym_upper.endswith("CE"):
+                    if "FUT" in sym_upper:
+                        opt_type = "FUT"
+                    elif " CE" in sym_upper or sym_upper.endswith("CE"):
                         opt_type = "CE"
                     elif " PE" in sym_upper or sym_upper.endswith("PE"):
                         opt_type = "PE"
 
                 strike = float(o.get("strike", 0.0))
-                if strike <= 0:
-                    sym_upper = str(o.get("symbol") or o.get("trading_symbol") or "")
+                if strike <= 0 and opt_type != "FUT":
                     stk_match = re.findall(r"\b(\d{2,6})\b", sym_upper)
                     if stk_match:
                         strike = float(stk_match[0])
 
-                if side.startswith("B"):
+                if opt_type == "FUT":
+                    u_fut_orders.append({"qty": qty, "lots": lots, "side": side, "price": prc})
+                    if first_short_sample is None:
+                        first_short_sample = (o, lot_size, side, prc)
+                elif side.startswith("B"):
                     u_buy_premiums.append(prc * qty)
                     if opt_type == "CE":
                         u_ce_longs.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
                     elif opt_type == "PE":
                         u_pe_longs.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
                 else:
+                    if first_short_sample is None:
+                        first_short_sample = (o, lot_size, side, prc)
                     if opt_type == "CE":
                         u_ce_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
                     elif opt_type == "PE":
                         u_pe_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
                     else:
                         u_other_shorts.append({"strike": strike, "qty": qty, "lots": lots, "price": prc})
+
+            # Live Kotak Neo margin_required calibration when connected (30s cached in adapter)
+            if first_short_sample is not None and self._state.get("execution_mode", "LIVE_BROKER") == "LIVE_BROKER":
+                try:
+                    s_o, s_ls, s_side, s_prc = first_short_sample
+                    s_ik = str(s_o.get("instrument_key") or s_o.get("token") or "")
+                    s_sym = str(s_o.get("symbol") or s_o.get("trading_symbol") or "")
+                    if s_ik and s_sym and self.is_broker_connected():
+                        adapter = get_broker_adapter("LIVE_BROKER")
+                        if hasattr(adapter, "get_margin_required"):
+                            mr = adapter.get_margin_required(
+                                symbol=s_sym,
+                                instrument_key=s_ik,
+                                transaction_type=s_side,
+                                quantity=s_ls,
+                                product=str(s_o.get("product") or "NRML"),
+                                order_type="LIMIT",
+                                price=s_prc,
+                            )
+                            if mr.get("success") and float(mr.get("margin_required") or 0.0) > 10000.0:
+                                live_lot_m = float(mr["margin_required"])
+                                ratio = live_lot_m / max(1.0, (base_span_lot + base_exp_lot))
+                                if 0.5 <= ratio <= 2.0:
+                                    base_span_lot = round(base_span_lot * ratio, 2)
+                                    base_exp_lot = round(base_exp_lot * ratio, 2)
+                except Exception:
+                    pass
 
             # 1. Evaluate CE Wing Risk (Call Credit Spreads)
             u_ce_wing_risk = 0.0
@@ -13522,73 +13569,79 @@ class StraddleManager:
 
             u_total_ce_short_lots = sum(s["lots"] for s in u_ce_shorts)
             u_total_pe_short_lots = sum(s["lots"] for s in u_pe_shorts)
+            u_total_fut_lots = sum(f["lots"] for f in u_fut_orders)
             u_total_other_short_lots = sum(s["lots"] for s in u_other_shorts)
-            u_total_short_lots = u_total_ce_short_lots + u_total_pe_short_lots + u_total_other_short_lots
+            u_total_short_lots = u_total_ce_short_lots + u_total_pe_short_lots + u_total_fut_lots + u_total_other_short_lots
 
             u_hedged_ce_lots = u_ce_hedged_qty // curr_lot_size
             u_hedged_pe_lots = u_pe_hedged_qty // curr_lot_size
             u_unhedged_ce_lots = u_total_ce_short_lots - u_hedged_ce_lots
             u_unhedged_pe_lots = u_total_pe_short_lots - u_hedged_pe_lots
 
-            u_naked_margin = u_total_short_lots * (base_span_lot + base_exp_lot)
+            base_naked_lot = base_span_lot + base_exp_lot
+            u_naked_margin = (u_total_short_lots * base_naked_lot)
             total_naked_margin += u_naked_margin
 
             u_req_margin = 0.0
             u_final_margin = 0.0
 
             if u_total_short_lots == 0:
-                # Buy-only basket for this underlying
+                # Buy-only option basket for this underlying
                 u_req_margin = sum(u_buy_premiums)
                 u_final_margin = sum(u_buy_premiums)
             else:
                 buy_prem_tot = sum(u_buy_premiums)
 
-                # Wing width in points (e.g. 1000 pts for 25250 / 24250)
+                def _spread_margin_for_wing(wing_pts: float) -> float:
+                    if wing_pts <= 100.0:
+                        r_pct = 0.75
+                    elif wing_pts >= 1000.0:
+                        r_pct = max(0.05, 0.107 - min(0.05, (wing_pts - 1000.0) / 2000.0))
+                    else:
+                        r_pct = 0.75 - ((wing_pts - 100.0) / 900.0) * (0.75 - 0.107)
+                    return max(30000.0, round(base_naked_lot * (1.0 - r_pct), 2))
+
                 ce_wing_pts = (u_ce_wing_risk / max(1, u_ce_hedged_qty)) if u_ce_hedged_qty > 0 else 0.0
                 pe_wing_pts = (u_pe_wing_risk / max(1, u_pe_hedged_qty)) if u_pe_hedged_qty > 0 else 0.0
-                max_wing_pts = max(ce_wing_pts, pe_wing_pts)
-
-                # Kotak Neo / SEBI Exchange SPAN Margining Curve for Credit Spreads:
-                # Tight wing (<=100 pts): 75% margin relief
-                # Wide wing (1000 pts): 10.7% margin relief (tail risk coverage)
-                # Single naked short baseline: base_span_lot + base_exp_lot (~1,45,492 for NIFTY)
-                base_naked_lot = base_span_lot + base_exp_lot
-                if max_wing_pts <= 100.0:
-                    relief_pct = 0.75
-                elif max_wing_pts >= 1000.0:
-                    relief_pct = max(0.05, 0.107 - min(0.05, (max_wing_pts - 1000.0) / 2000.0))
-                else:
-                    relief_pct = 0.75 - ((max_wing_pts - 100.0) / 900.0) * (0.75 - 0.107)
-
-                single_spread_margin_lot = round(base_naked_lot * (1.0 - relief_pct), 2)
-                # Ensure it never drops below minimum exchange spread floor (~30,000/lot)
-                single_spread_margin_lot = max(30000.0, single_spread_margin_lot)
+                ce_spread_lot = _spread_margin_for_wing(ce_wing_pts) if u_hedged_ce_lots > 0 else 0.0
+                pe_spread_lot = _spread_margin_for_wing(pe_wing_pts) if u_hedged_pe_lots > 0 else 0.0
 
                 # A. Iron Condor / Iron Butterfly Component (both CE and PE wings hedged)
                 condor_lots = min(u_hedged_ce_lots, u_hedged_pe_lots)
                 excess_ce_spread_lots = u_hedged_ce_lots - condor_lots
                 excess_pe_spread_lots = u_hedged_pe_lots - condor_lots
-                excess_spread_lots = excess_ce_spread_lots + excess_pe_spread_lots
 
+                # B. Naked Straddle / Strangle (1x worst-case SPAN + 2x Exposure per paired CE+PE)
                 unhedged_straddle_lots = min(u_unhedged_ce_lots, u_unhedged_pe_lots)
                 naked_single_ce_lots = u_unhedged_ce_lots - unhedged_straddle_lots
                 naked_single_pe_lots = u_unhedged_pe_lots - unhedged_straddle_lots
-                naked_rem_lots = naked_single_ce_lots + naked_single_pe_lots + u_total_other_short_lots
+                naked_rem_lots = naked_single_ce_lots + naked_single_pe_lots + u_total_fut_lots + u_total_other_short_lots
 
-                naked_lots_margin = (unhedged_straddle_lots * base_naked_lot) + (naked_rem_lots * (base_span_lot + base_exp_lot * 0.5))
+                straddle_lot_margin = base_span_lot + (2.0 * base_exp_lot)
+                naked_lots_margin = (unhedged_straddle_lots * straddle_lot_margin) + (naked_rem_lots * base_naked_lot)
 
-                if condor_lots > 0 or excess_spread_lots > 0:
+                if condor_lots > 0 or excess_ce_spread_lots > 0 or excess_pe_spread_lots > 0:
                     has_hedge_benefit = True
 
                 # 1. Required Margin (Upfront capital required to enter without broker rejection)
-                # Kotak Neo RMS checks the upfront dominant spread requirement + buy premiums
-                dominant_spread_lots = max(u_hedged_ce_lots, u_hedged_pe_lots)
-                u_req_margin = (single_spread_margin_lot * dominant_spread_lots) + naked_lots_margin + buy_prem_tot
+                dom_condor_lot = max(ce_spread_lot, pe_spread_lot)
+                u_req_margin = (
+                    (dom_condor_lot * condor_lots)
+                    + (ce_spread_lot * excess_ce_spread_lots)
+                    + (pe_spread_lot * excess_pe_spread_lots)
+                    + naked_lots_margin
+                    + buy_prem_tot
+                )
 
                 # 2. Final Margin (Post-execution hedged margin after exchange cross-margin netting)
-                # Opposite-side wings cancel directional risk: condor settled margin is ~76% of single spread
-                condor_settled_lot = round(single_spread_margin_lot * 0.76, 2)
-                u_final_margin = (condor_settled_lot * condor_lots) + (single_spread_margin_lot * excess_spread_lots) + naked_lots_margin + buy_prem_tot
+                condor_settled_lot = round(dom_condor_lot * 0.76, 2)
+                u_final_margin = (
+                    (condor_settled_lot * condor_lots)
+                    + (ce_spread_lot * excess_ce_spread_lots)
+                    + (pe_spread_lot * excess_pe_spread_lots)
+                    + naked_lots_margin
+                    + buy_prem_tot
+                )
 
             total_required_margin += max(0.0, u_req_margin)
             total_final_margin += max(0.0, u_final_margin)
