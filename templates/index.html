@@ -2248,6 +2248,113 @@
                     </div>
                 </div>
 
+                <!-- SECTION 8: AUTO SIZING, DAY-LOCK SYMMETRY & PRE-FLIGHT MARGIN (Collapsible) -->
+                <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_autosizing')">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="chevron_sec_builder_autosizing" class="chevron-icon">▶</span>
+                        <span class="algo-section-title">AUTO SIZING, DAY-LOCK SYMMETRY &amp; PRE-FLIGHT MARGIN</span>
+                    </div>
+                    <span class="algo-section-subtitle">Symmetric Re-Entries, Profit-Released Cushion &amp; T-10s Margin Sync</span>
+                </div>
+
+                <div id="sec_builder_autosizing" class="straddle-collapsible-body collapsed" style="display:none;">
+                    <div class="straddle-grid-3col" style="gap:14px;">
+
+                        <!-- Card 1: Day-Lock Symmetry -->
+                        <div style="background:#090a0e; border:1px solid rgba(56,189,248,0.22); border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-size:12px; font-weight:800; color:#38bdf8;">DAY-LOCK SYMMETRY</span>
+                                <span id="badgeDayLockStatus" style="font-size:9.5px; font-weight:800; color:#64748b; background:rgba(100,116,139,0.15); padding:2px 6px; border-radius:4px;">OFF</span>
+                            </div>
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="cfgToggleDayLockSymmetry" onchange="onAutoSizingFieldChange()">
+                                <div>
+                                    <div style="font-size:11.5px; font-weight:700; color:#f8fafc;">Lock Initial Auto Lots for Day</div>
+                                    <div style="font-size:10px; color:#94a3b8; margin-top:2px;">Calculates Auto lots at initial entry and locks that exact count for all CE/PE re-entries today.</div>
+                                </div>
+                            </label>
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="cfgToggleAutoTrimSymmetric" onchange="onAutoSizingFieldChange()">
+                                <div>
+                                    <div style="font-size:11.5px; font-weight:700; color:#f8fafc;">Auto-Trim Opposing Legs if Margin Drops</div>
+                                    <div style="font-size:10px; color:#94a3b8; margin-top:2px;">If intraday loss reduces margin below locked lots on re-entry, trims excess lots from running leg so both stay 1:1.</div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Card 2: Profit-Released Cushion -->
+                        <div style="background:#090a0e; border:1px solid rgba(16,185,129,0.22); border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-size:12px; font-weight:800; color:#10b981;">PROFIT-RELEASED CUSHION</span>
+                                <span id="badgeProfitCushionStatus" style="font-size:9.5px; font-weight:800; color:#64748b; background:rgba(100,116,139,0.15); padding:2px 6px; border-radius:4px;">OFF</span>
+                            </div>
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="cfgToggleProfitCushion" onchange="onAutoSizingFieldChange()">
+                                <div>
+                                    <div style="font-size:11.5px; font-weight:700; color:#f8fafc;">Enable Profit-Released Cushion</div>
+                                    <div style="font-size:10px; color:#94a3b8; margin-top:1px;">Drops Cushion/Lot once profit or safety trigger is met, freeing cash for extra lots.</div>
+                                </div>
+                            </label>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                                <div class="straddle-form-group" style="margin-bottom:0;">
+                                    <label style="font-size:10.5px;">Reduced Cushion (₹/lot):</label>
+                                    <input type="number" id="cfgReducedCushionMargin" class="straddle-input" value="3000" min="0" step="500" onchange="onAutoSizingFieldChange()">
+                                </div>
+                                <div class="straddle-form-group" style="margin-bottom:0;">
+                                    <label style="font-size:10.5px;">Release Trigger:</label>
+                                    <select id="cfgCushionReleaseTrigger" class="straddle-select" style="font-size:11px;" onchange="onAutoSizingFieldChange()">
+                                        <option value="MTM_THRESHOLD" selected>MTM Reaches +₹X</option>
+                                        <option value="MOVE_SL_TO_COST">Move SL to Cost</option>
+                                        <option value="BOTH_EITHER">Either MTM or SL-to-Cost</option>
+                                        <option value="TIME_AFTER">After Specific Time</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                                <div class="straddle-form-group" style="margin-bottom:0;">
+                                    <label style="font-size:10.5px;">MTM Threshold (₹):</label>
+                                    <input type="number" id="cfgCushionReleaseMtmThreshold" class="straddle-input" value="100000" min="0" step="10000" onchange="onAutoSizingFieldChange()">
+                                </div>
+                                <div class="straddle-form-group" style="margin-bottom:0;">
+                                    <label style="font-size:10.5px;">Release Time (IST):</label>
+                                    <input type="text" id="cfgCushionReleaseTime" class="straddle-input" value="12:30:00" placeholder="12:30:00" onchange="onAutoSizingFieldChange()">
+                                </div>
+                            </div>
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-top:2px;">
+                                <input type="checkbox" id="cfgToggleCushionReleaseLatch" checked onchange="onAutoSizingFieldChange()">
+                                <span style="font-size:10.5px; font-weight:700; color:#cbd5e1;">Latch reduced cushion for rest of day</span>
+                            </label>
+                        </div>
+
+                        <!-- Card 3: T-10s Pre-Flight Margin Sync -->
+                        <div style="background:#090a0e; border:1px solid rgba(245,158,11,0.22); border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-size:12px; font-weight:800; color:#f59e0b;">T-10S PRE-FLIGHT MARGIN SYNC</span>
+                                <span id="badgePreflightStatus" style="font-size:9.5px; font-weight:800; color:#64748b; background:rgba(100,116,139,0.15); padding:2px 6px; border-radius:4px;">OFF</span>
+                            </div>
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="cfgTogglePreflightMarginSync" onchange="onAutoSizingFieldChange()">
+                                <div>
+                                    <div style="font-size:11.5px; font-weight:700; color:#f8fafc;">Enable Pre-Flight Margin Sync</div>
+                                    <div style="font-size:10px; color:#94a3b8; margin-top:2px;">Calibrates live broker margin &amp; available funds seconds before Start Time so Auto lots are 100% exact.</div>
+                                </div>
+                            </label>
+                            <div class="straddle-form-group" style="margin-bottom:0;">
+                                <label style="font-size:10.5px;">Lead Time Before Start (seconds):</label>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <input type="number" id="cfgPreflightLeadSec" class="straddle-input" value="10" min="3" max="60" style="flex:1;" onchange="onAutoSizingFieldChange()">
+                                    <span style="font-size:11px; color:#94a3b8; font-weight:700;">secs</span>
+                                </div>
+                            </div>
+                            <label class="straddle-checkbox-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                <input type="checkbox" id="cfgTogglePreflightLiveQuotes" checked onchange="onAutoSizingFieldChange()">
+                                <span style="font-size:10.5px; font-weight:700; color:#cbd5e1;">Use live ATM/OTM quotes for margin sync</span>
+                            </label>
+                        </div>
+
+                    </div>
+                </div>
+
                 <!-- Action Save Bar -->
                 <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.1); padding-top:14px; margin-top:14px; flex-wrap:wrap; gap:10px;">
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -4758,6 +4865,7 @@
             });
         }
     </script>
-    <script src="/static/js/algo_tooltips.js?v=1"></script>
+    <script src="/static/js/auto_sizing_ui.js?v=1"></script>
+    <script src="/static/js/algo_tooltips.js?v=2"></script>
 </body>
 </html>

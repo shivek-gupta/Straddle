@@ -419,6 +419,63 @@
             title: "Auto Exit on Margin Error",
             desc: "If any leg fails due to RMS margin shortfall during entry or re-entry, triggers the grace countdown and automatically squares off all open positions to avoid naked exposure.",
             example: "Protects your account from holding an unhedged short leg if the hedge or opposing leg is rejected for margin."
+        },
+
+        // ==================== SECTION 8: AUTO SIZING & DAY-LOCK SYMMETRY ====================
+        "cfgToggleDayLockSymmetry": {
+            title: "Day-Lock Symmetry (Lock Initial Auto Lots)",
+            desc: "Computes Auto lots once at initial entry and locks that exact lot count for all subsequent CE/PE re-entries today, preventing asymmetric leg sizes after a loss.",
+            example: "If 09:16 entry calculates 142 lots, all CE and PE re-entries stay at 142 lots even if intraday margin fluctuates."
+        },
+        "cfgToggleAutoTrimSymmetric": {
+            title: "Auto-Trim Opposing Legs if Margin Drops",
+            desc: "If a re-entry occurs after a loss and available margin can only afford fewer lots than locked_day_lots, automatically trims excess lots from the opposing running leg first so both stay 1:1.",
+            example: "CE is running 142 lots and PE can only afford 138 lots: trims 4 lots from CE and re-enters PE at 138 lots (138 vs 138)."
+        },
+        "cfgToggleProfitCushion": {
+            title: "Profit-Released Cushion",
+            desc: "Starts the day with your full protective Cushion Margin/Lot, then automatically drops it to Reduced Cushion/Lot once your trigger condition is met — freeing cash for extra lots.",
+            example: "Base ₹10,000/lot cushion drops to ₹3,000/lot after +₹1,00,000 MTM, releasing ₹9.9L of cash for ~7 extra lots."
+        },
+        "cfgReducedCushionMargin": {
+            title: "Reduced Cushion Margin (₹/lot)",
+            desc: "The lower cushion per lot applied once the Profit-Released Cushion trigger fires.",
+            example: "Set 3000 so each lot only reserves ₹3,000 buffer instead of ₹10,000 once you are safely in profit."
+        },
+        "cfgCushionReleaseTrigger": {
+            title: "Cushion Release Trigger Condition",
+            desc: "Condition that unlocks the reduced cushion: MTM Reaches +₹X, Move SL to Cost triggers, Either MTM or SL-to-Cost, or After Specific IST Time.",
+            example: "Choose 'Either MTM or SL-to-Cost' so cushion releases as soon as risk is locked or profit target buffer is built."
+        },
+        "cfgCushionReleaseMtmThreshold": {
+            title: "MTM Profit Threshold (₹)",
+            desc: "Strategy MTM profit (in ₹) required to trigger Profit-Released Cushion when using MTM-based triggers.",
+            example: "Set 100000 so the cushion drops only after the strategy is +₹1,00,000 in profit."
+        },
+        "cfgCushionReleaseTime": {
+            title: "Cushion Release Time (IST)",
+            desc: "IST time (HH:MM:SS) after which cushion drops to the reduced value when 'After Specific Time' trigger is selected.",
+            example: "Set 12:30:00 to use full ₹10,000 cushion in the volatile morning and ₹3,000 in the afternoon."
+        },
+        "cfgToggleCushionReleaseLatch": {
+            title: "Latch Reduced Cushion for Rest of Day",
+            desc: "Keeps the reduced cushion active for the remainder of the trading day once triggered, rather than reverting if MTM dips slightly.",
+            example: "Enabled: once +₹1,00,000 triggers release at 11:00 AM, reduced cushion stays active until market close."
+        },
+        "cfgTogglePreflightMarginSync": {
+            title: "T-10s Pre-Flight Margin Sync",
+            desc: "Automatically refreshes live Kotak Neo basket margin and available capital N seconds before Start Time so Auto Multiplier uses exact same-day VIX/expiry margins.",
+            example: "At 09:15:50 (10s before 09:16:00), syncs exact live margin (e.g. ₹1,32,450/lot) and updates Auto lots before firing."
+        },
+        "cfgPreflightLeadSec": {
+            title: "Pre-Flight Lead Time (seconds)",
+            desc: "How many seconds before Start Time (3–60s) the Pre-Flight Margin Sync runs.",
+            example: "10 secs runs the live margin calibration at 09:15:50 for a 09:16:00 strategy."
+        },
+        "cfgTogglePreflightLiveQuotes": {
+            title: "Use Live Option Quotes for Margin Sync",
+            desc: "Uses live ATM/OTM option premiums during the Pre-Flight Margin Sync for maximum margin accuracy.",
+            example: "Enabled ensures expiry-day premium drops are reflected in the pre-flight margin calculation."
         }
     };
 
@@ -601,7 +658,12 @@
             ["cfgReExecuteOrderDelaySec", "cfgReExecuteOrderDelaySec"],
             ["cfgReExecuteTriggerFilter", "cfgReExecuteTriggerFilter"],
             ["cfgMarginExitGraceSec", "cfgMarginExitGraceSec"],
-            ["cfgReEntryPlacement", "cfgReEntryPlacement"]
+            ["cfgReEntryPlacement", "cfgReEntryPlacement"],
+            ["cfgReducedCushionMargin", "cfgReducedCushionMargin"],
+            ["cfgCushionReleaseTrigger", "cfgCushionReleaseTrigger"],
+            ["cfgCushionReleaseMtmThreshold", "cfgCushionReleaseMtmThreshold"],
+            ["cfgCushionReleaseTime", "cfgCushionReleaseTime"],
+            ["cfgPreflightLeadSec", "cfgPreflightLeadSec"]
         ];
         idMappings.forEach(([id, key]) => attachByInputId(id, key));
 
@@ -646,7 +708,13 @@
             ["cfgToggleCombinedPrem", "cfgToggleCombinedPrem"],
             ["cfgAutoReleaseMarginReEntry", "cfgAutoReleaseMarginReEntry"],
             ["cfgAutoHandlingSl", "cfgAutoHandlingSl"],
-            ["cfgAutoExitMargin", "cfgAutoExitMargin"]
+            ["cfgAutoExitMargin", "cfgAutoExitMargin"],
+            ["cfgToggleDayLockSymmetry", "cfgToggleDayLockSymmetry"],
+            ["cfgToggleAutoTrimSymmetric", "cfgToggleAutoTrimSymmetric"],
+            ["cfgToggleProfitCushion", "cfgToggleProfitCushion"],
+            ["cfgToggleCushionReleaseLatch", "cfgToggleCushionReleaseLatch"],
+            ["cfgTogglePreflightMarginSync", "cfgTogglePreflightMarginSync"],
+            ["cfgTogglePreflightLiveQuotes", "cfgTogglePreflightLiveQuotes"]
         ];
         toggleIds.forEach(([id, key]) => attachByToggleId(id, key));
 

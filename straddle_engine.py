@@ -4617,18 +4617,124 @@ class StraddleManager:
         req = float(res.get("required_margin") or fallback_margin)
         return max(req, 1000.0)
 
-    def get_effective_multiplier(self, strat: Dict[str, Any]) -> int:
+    def get_effective_cushion_margin(self, strat: Dict[str, Any]) -> float:
+        """
+        Returns the active cushion margin per lot (₹), factoring in Profit-Released Cushion rules.
+        """
+        base = max(0.0, float(strat.get("cushion_margin") if strat.get("cushion_margin") is not None else 15000.0))
+        adv = {}
+        if isinstance(strat.get("advanced"), dict):
+            adv.update(strat["advanced"])
+        if isinstance(strat.get("advanced_settings"), dict):
+            adv.update(strat["advanced_settings"])
+
+        if not adv.get("profit_released_cushion"):
+            strat["cushion_released_active"] = False
+            return base
+
+        reduced = max(0.0, float(adv.get("reduced_cushion_margin") if adv.get("reduced_cushion_margin") is not None else 3000.0))
+        latch = adv.get("cushion_release_latch", True)
+        today_s = today_ist_str()
+
+        if latch and strat.get("cushion_released_date") == today_s:
+            strat["cushion_released_active"] = True
+            return min(base, reduced)
+
+        trigger_mode = str(adv.get("cushion_release_trigger") or "MTM_THRESHOLD").upper()
+        mtm_thresh = float(adv.get("cushion_release_mtm_threshold") or 100000.0)
+        rel_time = normalize_time_str(adv.get("cushion_release_time") or "12:30:00", "12:30:00")
+
+        strat_mtm = float(strat.get("mtm") or 0.0)
+        sl_to_cost_hit = bool(strat.get("_sl_moved_to_cost_triggered")) or any(
+            bool(p.get("sl_moved_to_cost")) for p in strat.get("positions", [])
+        )
+        time_hit = (now_ist_str() >= rel_time)
+
+        triggered = False
+        if trigger_mode == "MTM_THRESHOLD":
+            triggered = strat_mtm >= mtm_thresh
+        elif trigger_mode == "MOVE_SL_TO_COST":
+            triggered = sl_to_cost_hit
+        elif trigger_mode == "BOTH_EITHER":
+            triggered = (strat_mtm >= mtm_thresh) or sl_to_cost_hit
+        elif trigger_mode == "TIME_AFTER":
+            triggered = time_hit
+
+        if triggered:
+            if latch:
+                strat["cushion_released_date"] = today_s
+            strat["cushion_released_active"] = True
+            return min(base, reduced)
+
+        strat["cushion_released_active"] = False
+        return base
+
+    def _trim_opposing_legs_to_lots(self, strat: Dict[str, Any], target_mult: int):
+        """
+        Symmetrically trims open opposing main legs down to `target_mult * leg_base_lots`
+        when Auto-Trim Symmetry is enabled and available margin drops below locked_day_lots.
+        """
+        try:
+            mode = strat.get("execution_mode") or self._state.get("execution_mode", "LIVE_BROKER")
+            broker = get_broker_adapter(mode)
+            legs_cfg = strat.get("legs") or strat.get("strategy", {}).get("legs", [])
+            for pos in list(strat.get("positions", [])):
+                if pos.get("status") not in ("OPEN", "LIVE OPEN"):
+                    continue
+                if pos.get("is_associated_hedge") or "hedge" in str(pos.get("id", "")).lower():
+                    continue
+                lot_size = int(pos.get("lot_size") or 65)
+                base_lots = 1
+                for lc in legs_cfg:
+                    if str(lc.get("id")) == str(pos.get("leg_id")) or str(lc.get("option_type", "")).upper() == str(pos.get("option_type", "")).upper():
+                        base_lots = max(1, int(lc.get("lots") or 1))
+                        break
+                target_qty = target_mult * base_lots * lot_size
+                curr_qty = int(pos.get("quantity") or 0)
+                if curr_qty > target_qty and target_qty > 0:
+                    excess_qty = curr_qty - target_qty
+                    trim_side = "BUY" if str(pos.get("side", "SELL")).upper() == "SELL" else "SELL"
+                    ltp = float(pos.get("ltp") or pos.get("avg_ent_price") or 100.0)
+                    buf_p = round_to_tick(ltp * 1.02 if trim_side == "BUY" else max(0.05, ltp * 0.98))
+                    res = broker.place_order(
+                        symbol=pos.get("symbol", ""),
+                        instrument_key=pos.get("instrument_key", ""),
+                        transaction_type=trim_side,
+                        quantity=excess_qty,
+                        product=pos.get("product", "NRML"),
+                        order_type="LIMIT",
+                        price=buf_p,
+                        tag="sym_trim"
+                    )
+                    if res.get("success"):
+                        pos["quantity"] = target_qty
+                        pos["lots"] = target_mult * base_lots
+                        self._log_event(
+                            f"[Auto-Trim Symmetry] Trimmed {excess_qty} qty of {pos.get('symbol')} to {target_qty} qty ({target_mult}x) to match re-entry.",
+                            level="WARNING"
+                        )
+        except Exception as e_trim:
+            logger.warning(f"[Auto-Trim Symmetry] Error trimming opposing legs: {e_trim}")
+
+    def get_effective_multiplier(self, strat: Dict[str, Any], is_re_entry: bool = False, lock_for_day: bool = False) -> int:
         """
         Determines the effective lot multiplier for a strategy:
         - If 'MANUAL': returns user-entered multiplier.
-        - If 'AUTO': calculates lots = floor(available_capital / (broker_margin_per_lot + cushion_margin)).
+        - If 'AUTO': calculates lots = floor(available_capital / (broker_margin_per_lot + effective_cushion)).
+        - Supports Day-Lock Symmetry (locks initial entry lots for all re-entries) and optional Auto-Trim.
         """
         mult_type = str(strat.get("multiplier_type") or "MANUAL").upper()
         if mult_type != "AUTO":
             strat["auto_insufficient_margin"] = False
             return max(1, int(strat.get("multiplier", 1) or 1))
 
-        cushion = max(0.0, float(strat.get("cushion_margin") if strat.get("cushion_margin") is not None else 15000.0))
+        adv = {}
+        if isinstance(strat.get("advanced"), dict):
+            adv.update(strat["advanced"])
+        if isinstance(strat.get("advanced_settings"), dict):
+            adv.update(strat["advanced_settings"])
+
+        cushion = self.get_effective_cushion_margin(strat)
         broker_margin_per_lot = self.calculate_strategy_margin_per_lot(strat)
         total_margin_per_lot = broker_margin_per_lot + cushion
 
@@ -4657,7 +4763,23 @@ class StraddleManager:
         auto_lots = int(math.floor(available_capital / total_margin_per_lot))
         strat["auto_lots_raw"] = auto_lots
         strat["auto_insufficient_margin"] = (auto_lots <= 0)
-        return max(1, auto_lots)
+        computed_mult = max(1, auto_lots)
+
+        # Day-Lock Symmetry handling
+        if adv.get("day_lock_symmetry"):
+            today_s = today_ist_str()
+            if is_re_entry and strat.get("locked_day_date") == today_s and int(strat.get("locked_day_lots") or 0) > 0:
+                locked = int(strat["locked_day_lots"])
+                if adv.get("auto_trim_symmetric") and 0 < auto_lots < locked:
+                    self._trim_opposing_legs_to_lots(strat, auto_lots)
+                    strat["locked_day_lots"] = auto_lots
+                    return auto_lots
+                return locked
+            elif lock_for_day:
+                strat["locked_day_lots"] = computed_mult
+                strat["locked_day_date"] = today_s
+
+        return computed_mult
 
     def get_strategy_lots(self, strat: Dict[str, Any]) -> int:
         """
@@ -6680,7 +6802,7 @@ class StraddleManager:
 
         try:
             self._log_event(f"Executing Strategy Entry for '{strat.get('name')}'...")
-            mult = self.get_effective_multiplier(strat)
+            mult = self.get_effective_multiplier(strat, is_re_entry=False, lock_for_day=True)
             und = strat.get("underlying", "NIFTY")
             adv = {}
             if isinstance(strat.get("advanced"), dict):
@@ -11681,7 +11803,7 @@ class StraddleManager:
                     return
 
                 und = strat.get("underlying", pos.get("underlying", "NIFTY"))
-                mult = self.get_effective_multiplier(strat)
+                mult = self.get_effective_multiplier(strat, is_re_entry=True)
                 opt_type = leg_cfg.get("option_type") or pos.get("option_type") or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")
 
                 # Strike selection: Prioritize newly configured strike selection (e.g. user changed ATM to OTM 1 in settings)
@@ -16223,8 +16345,29 @@ class StraddleManager:
                         strat["status"] = "READY"
                     strat["entry_error"] = f"Waiting for Start Time ({st})"
 
-                    # Pre-flight advance pre-warming: 0 to 30 seconds before start_time
+                    # Pre-flight advance pre-warming & live margin sync before start_time
                     time_until_start = st_sec - now_sec
+                    adv_pf = strat.get("advanced_settings") or strat.get("advanced") or {}
+                    pf_lead = max(3, min(60, int(adv_pf.get("preflight_lead_sec") or 10)))
+                    if adv_pf.get("preflight_margin_sync") and 0 < time_until_start <= pf_lead and is_enabled and not has_open_positions and not has_completed_positions:
+                        if strat.get("_preflight_done_date") != today_ist_str():
+                            strat["_preflight_done_date"] = today_ist_str()
+                            def _run_pf_sync(target_s):
+                                try:
+                                    target_s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(target_s)
+                                    target_s["_margin_calc_ts"] = time.time()
+                                    eff_m = self.get_effective_multiplier(target_s)
+                                    target_s["effective_multiplier"] = eff_m
+                                    funds = self.get_margin_overview()
+                                    avail_m = float(funds.get("available_margin") or funds.get("available_cash") or 0.0)
+                                    self._log_event(
+                                        f"[Pre-Flight Margin Sync] '{target_s.get('name')}': Live Margin ₹{target_s['broker_margin_per_lot']:,.0f}/lot | "
+                                        f"Cushion ₹{self.get_effective_cushion_margin(target_s):,.0f} | Available ₹{avail_m:,.0f} -> Auto Lots: {eff_m}x",
+                                        level="INFO"
+                                    )
+                                except Exception as e_pf:
+                                    logger.warning(f"[Pre-Flight Margin Sync] Error: {e_pf}")
+                            threading.Thread(target=_run_pf_sync, args=(strat,), daemon=True).start()
                     if 0 < time_until_start <= 30 and is_enabled and not has_open_positions and not has_completed_positions:
                         last_prewarm = float(strat.get("_last_prewarm_ts", 0.0))
                         if time.time() - last_prewarm >= 2.0:
@@ -17155,11 +17298,15 @@ class StraddleManager:
                 m_type = str(s.get("multiplier_type") or "MANUAL").upper()
                 if m_type != "AUTO":
                     s["effective_multiplier"] = max(1, int(s.get("multiplier", 1) or 1))
+                    s["effective_cushion_margin"] = float(s.get("cushion_margin") or 15000.0)
+                    s["cushion_released_active"] = False
                 else:
                     try:
                         s["effective_multiplier"] = self.get_effective_multiplier(s)
+                        s["effective_cushion_margin"] = self.get_effective_cushion_margin(s)
                     except Exception:
                         s["effective_multiplier"] = s.get("multiplier", 1)
+                        s["effective_cushion_margin"] = float(s.get("cushion_margin") or 15000.0)
                 try:
                     s["re_execution_counts"] = self.get_strategy_reexecution_counts(s)
                 except Exception:

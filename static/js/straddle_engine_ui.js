@@ -8168,6 +8168,9 @@ function populateStraddleSettingsForm(s) {
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
     }
+    if (typeof populateAutoSizingForm === "function") {
+        populateAutoSizingForm(s);
+    }
     const curUnd = (s.underlying || "NIFTY").toUpperCase();
     const isComm = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER"].includes(curUnd);
     const defaultSt = isComm ? "09:00:00" : "09:15:56";
@@ -9668,6 +9671,9 @@ function onStrategyUnderlyingChange(newUnd) {
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
     }
+    if (typeof populateAutoSizingForm === "function") {
+        populateAutoSizingForm(s);
+    }
     if (typeof renderStrategyMarginEstimate === "function") {
         renderStrategyMarginEstimate();
     }
@@ -10683,6 +10689,11 @@ function serializeCurrentStrategySettings() {
         advanced: null,
         legs: []
     };
+    strategy.advanced_settings = Object.assign(
+        {},
+        strategy.advanced_settings,
+        (typeof serializeAutoSizingSettings === "function") ? serializeAutoSizingSettings() : {}
+    );
     strategy.advanced = Object.assign({}, strategy.advanced_settings);
 
     const trs = document.querySelectorAll("#straddleLegsBuilderBody tr");
@@ -15934,6 +15945,9 @@ function setFormMultiplierMode(mode, syncToServer = true) {
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
     }
+    if (typeof populateAutoSizingForm === "function") {
+        populateAutoSizingForm(s);
+    }
 
     const activeStrat = window._straddleState?.activeStrategy;
     if (activeStrat) {
@@ -16157,6 +16171,9 @@ function onFormCushionMarginChange(val) {
     updateFormAutoMultiplierPreview();
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
         scheduleAutoMultiplierLiveRecalc();
+    }
+    if (typeof populateAutoSizingForm === "function") {
+        populateAutoSizingForm(s);
     }
     const activeStrat = window._straddleState?.activeStrategy;
     if (activeStrat && activeStrat.strategy_id) {
