@@ -4264,23 +4264,35 @@ class StraddleManager:
 
             idx = next((i for i, s in enumerate(self._strategies) if s.get("strategy_id") == sid), -1)
             if idx >= 0:
-                # Merge existing runtime properties (e.g. positions, status, mtm)
+                # Update existing strategy dict IN-PLACE so background threads holding a reference
+                # to `existing` never become detached, and NEVER overwrite engine-owned runtime state
+                # (positions, closed_positions, mtm, re_execution_counts, _* flags).
                 existing = self._strategies[idx]
-                if ("positions" not in strat_dict or not strat_dict["positions"]) and existing.get("positions"):
-                    strat_dict["positions"] = existing["positions"]
-                if ("closed_positions" not in strat_dict or not strat_dict["closed_positions"]) and existing.get("closed_positions"):
-                    strat_dict["closed_positions"] = existing["closed_positions"]
-                if "status" not in strat_dict and "status" in existing:
-                    strat_dict["status"] = existing["status"]
-                elif existing.get("status") in ("TRADE_ACTIVE", "ENTRY_PENDING"):
-                    # Preserve active running status if strategy is currently executing
-                    strat_dict["status"] = existing["status"]
-                if "mtm" not in strat_dict and "mtm" in existing:
-                    strat_dict["mtm"] = existing["mtm"]
-                elif existing.get("mtm", 0.0) != 0.0 and strat_dict.get("mtm", 0.0) == 0.0:
-                    strat_dict["mtm"] = existing["mtm"]
-                if "re_execution_counts" not in strat_dict and "re_execution_counts" in existing:
-                    strat_dict["re_execution_counts"] = existing["re_execution_counts"]
+                runtime_protected_keys = {
+                    "positions", "closed_positions", "mtm", "group_mtm",
+                    "re_execution_counts", "last_trade_date", "has_traded_today",
+                    "entry_error", "last_error", "repair_needed"
+                }
+                is_actively_trading = (
+                    existing.get("status") in ("TRADE_ACTIVE", "ENTRY_PENDING", "ENTERING", "EXIT_PENDING")
+                    or bool(existing.get("_entry_in_progress"))
+                    or bool(existing.get("_re_entry_in_progress"))
+                    or bool(existing.get("_exit_in_progress"))
+                    or any(p.get("status") in ("OPEN", "LIVE OPEN", "EXIT_PENDING") for p in existing.get("positions", []))
+                )
+                for k, v in strat_dict.items():
+                    if k in runtime_protected_keys or str(k).startswith("_"):
+                        continue
+                    if is_actively_trading and k in ("status", "enabled"):
+                        continue
+                    existing[k] = v
+
+                # Ensure strat_dict points to the authoritative in-place dict
+                strat_dict = existing
+                if "positions" not in strat_dict:
+                    strat_dict["positions"] = []
+                if "closed_positions" not in strat_dict:
+                    strat_dict["closed_positions"] = []
 
                 # -------------------------------------------------------------
                 # LIVE SETTINGS SYNCHRONIZATION FOR RUNNING POSITIONS:
@@ -4398,12 +4410,11 @@ class StraddleManager:
                     pos["target_order_placement"] = target_placement
                     pos["sl_order_placement"] = sl_placement
 
-                    if broker and (pos.get("sl_broker_order_id") or sl_placement in ("Place in advance", "With Broker", "BROKER")):
-                        if sl_changed or not pos.get("sl_broker_order_id"):
+                    if broker and not pos.get("_margin_relief_in_progress") and not pos.get("_exit_in_progress"):
+                        if (pos.get("sl_broker_order_id") and sl_changed) or (sl_placement in ("Place in advance", "With Broker", "BROKER") and not pos.get("sl_broker_order_id") and not pos.get("_adv_sl_exhausted")):
                             threading.Thread(target=self._place_advance_sl_order, args=(broker, pos, 0, True), daemon=True).start()
 
-                    if broker and (pos.get("target_broker_order_id") or target_placement in ("Place in advance", "With Broker", "BROKER")):
-                        if tgt_changed or not pos.get("target_broker_order_id"):
+                        if (pos.get("target_broker_order_id") and tgt_changed) or (target_placement in ("Place in advance", "With Broker", "BROKER") and not pos.get("target_broker_order_id") and not pos.get("_adv_tgt_exhausted")):
                             threading.Thread(target=self._place_advance_target_order, args=(broker, pos, 0, True), daemon=True).start()
 
                     # 6. Check Dynamic Hedging Realignment
@@ -4481,7 +4492,7 @@ class StraddleManager:
 
             self._save_strategies()
             self._save_state()
-            self._log_event(f"Strategy '{strat_dict.get('name', sid)}' ({und}) saved successfully.")
+            logger.debug(f"Strategy '{strat_dict.get('name', sid)}' ({und}) saved silently.")
             return {"success": True, "strategy_id": sid, "strategy": strat_dict}
 
     def calculate_strategy_margin_per_lot(self, strat: Dict[str, Any]) -> float:
@@ -9199,6 +9210,12 @@ class StraddleManager:
                 return
             if force and pos.get("sl_broker_order_id"):
                 old_oid = str(pos.get("sl_broker_order_id"))
+                ignored_list = pos.setdefault("_ignored_cancelled_oids", [])
+                for sub_o in old_oid.split(","):
+                    if sub_o.strip() and sub_o.strip() not in ignored_list:
+                        ignored_list.append(sub_o.strip())
+                if len(ignored_list) > 20:
+                    del ignored_list[:-20]
                 try:
                     broker.cancel_order(old_oid)
                 except Exception as e_old:
@@ -9397,6 +9414,12 @@ class StraddleManager:
                 return
             if force and pos.get("target_broker_order_id"):
                 old_tgt = str(pos.get("target_broker_order_id"))
+                ignored_list = pos.setdefault("_ignored_cancelled_oids", [])
+                for sub_o in old_tgt.split(","):
+                    if sub_o.strip() and sub_o.strip() not in ignored_list:
+                        ignored_list.append(sub_o.strip())
+                if len(ignored_list) > 20:
+                    del ignored_list[:-20]
                 try:
                     broker.cancel_order(old_tgt)
                 except Exception as e_old:
@@ -11980,16 +12003,23 @@ class StraddleManager:
                         total_tgt_slices = 0
                         for item in unblocked_items:
                             p_cand = item["pos"]
+                            ignored_list = p_cand.setdefault("_ignored_cancelled_oids", [])
                             if item["sl_order_id"]:
                                 s_oids = [o.strip() for o in str(item["sl_order_id"]).split(",") if o.strip()]
                                 total_sl_slices += len(s_oids)
                                 for s_oid in s_oids:
+                                    if s_oid not in ignored_list:
+                                        ignored_list.append(s_oid)
                                     cancel_futs.append((p_cand, "SL", s_oid, _PERSISTENT_LEG_POOL.submit(broker.cancel_order, s_oid)))
                             if item["tgt_order_id"]:
                                 t_oids = [o.strip() for o in str(item["tgt_order_id"]).split(",") if o.strip()]
                                 total_tgt_slices += len(t_oids)
                                 for t_oid in t_oids:
+                                    if t_oid not in ignored_list:
+                                        ignored_list.append(t_oid)
                                     cancel_futs.append((p_cand, "TARGET", t_oid, _PERSISTENT_LEG_POOL.submit(broker.cancel_order, t_oid)))
+                            if len(ignored_list) > 20:
+                                del ignored_list[:-20]
 
                         self._log_event(
                             f"[Margin Auto-Release] ⚡ Releasing broker margin for Re-entry by cancelling ALL resting advance orders across {len(unblocked_items)} open position(s) ({total_sl_slices} SL slices, {total_tgt_slices} Target slices)...",
@@ -12411,6 +12441,8 @@ class StraddleManager:
                     continue
                 if strat.get("_entry_in_progress") or strat.get("status") == "ENTERING":
                     continue
+                if (time.time() - float(strat.get("_trade_active_ts") or 0.0)) < 10.0:
+                    continue
                 strat_positions = strat.get("positions", [])
                 if not strat_positions:
                     continue
@@ -12495,7 +12527,15 @@ class StraddleManager:
                                 if any(k in sl_re for k in ("RE EXECUTE", "RE ENTRY", "RE COST", "RE-EXECUTE", "RE-ENTRY")) and c_s_cnt < sl_max:
                                     has_remaining_re_entries = True
 
-                    if not matching_open and not has_pending_re_entry and not has_remaining_re_entries:
+                    has_error_short = any(
+                        p.get("status") == "ERROR"
+                        and str(p.get("side", "SELL")).upper() == "SELL"
+                        and not p.get("is_associated_hedge")
+                        and (str(p.get("option_type", "")).upper() == h_opt or h_opt in str(p.get("symbol", "")).upper())
+                        for p in strat_positions
+                    )
+
+                    if not matching_open and not has_pending_re_entry and not has_remaining_re_entries and not has_error_short:
                         self._log_event(
                             f"[Orphan Hedge Cleanup] ⚡ Auto-exiting orphaned hedge '{h.get('symbol')}' (no open short leg of {h_opt} remains and re-entries exhausted in strategy '{strat.get('name')}')...",
                             level="INFO"
@@ -15204,7 +15244,7 @@ class StraddleManager:
                         s_und = str(s.get("underlying") or "NIFTY").upper()
                         if s_und not in bp_sym.upper() and not bp_sym.upper().startswith(s_und):
                             continue
-                        if s.get("_manual_reset") or s.get("_entry_in_progress") or s.get("_re_entry_in_progress") or s.get("status") in ("STOPPED", "READY", "TERMINATED") or not s.get("enabled"):
+                        if s.get("_manual_reset") or s.get("_entry_in_progress") or s.get("_re_entry_in_progress") or s.get("_exit_in_progress") or s.get("status") in ("STOPPED", "READY", "TERMINATED") or not s.get("enabled"):
                             continue
                         if str(bp_ikey) in s.get("_reset_ignored_keys", []) or str(bp_sym) in s.get("_reset_ignored_keys", []):
                             continue
@@ -15722,7 +15762,8 @@ class StraddleManager:
                 step = STRIKE_STEPS.get(s_und.upper(), 50)
                 open_hedges_by_opt = {}
                 for p in s.get("positions", []):
-                    if p.get("status") in ("OPEN", "LIVE OPEN") and (p.get("is_associated_hedge") or str(p.get("side", "")).upper() == "BUY"):
+                    is_p_hedge = bool(p.get("is_associated_hedge") or "hedge" in str(p.get("id", "")).lower() or p.get("hedge_parent_type") or p.get("parent_leg_id"))
+                    if p.get("status") in ("OPEN", "LIVE OPEN") and is_p_hedge:
                         h_opt = (p.get("hedge_parent_type") or p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper()
                         open_hedges_by_opt.setdefault(h_opt, []).append(p)
 
@@ -15899,6 +15940,23 @@ class StraddleManager:
                 has_open_leg = any(p.get("status") == "OPEN" and int(p.get("quantity", 0) or 0) > 0 for p in s_pos)
                 has_err_leg = any(p.get("status") == "ERROR" for p in s_pos)
                 if has_open_leg and has_err_leg:
+                    # First purge any stale ERROR leg if an OPEN leg already exists for the same option_type + side
+                    open_sigs = {
+                        (str(p.get("option_type") or "").upper(), str(p.get("side") or "").upper(), bool(p.get("is_associated_hedge")))
+                        for p in s_pos if p.get("status") == "OPEN" and int(p.get("quantity", 0) or 0) > 0
+                    }
+                    cleaned_err = False
+                    for ep in list(s_pos):
+                        if ep.get("status") == "ERROR":
+                            sig = (str(ep.get("option_type") or "").upper(), str(ep.get("side") or "").upper(), bool(ep.get("is_associated_hedge")))
+                            if sig in open_sigs:
+                                s_pos.remove(ep)
+                                cleaned_err = True
+                    if cleaned_err:
+                        self._save_strategies()
+                        has_err_leg = any(p.get("status") == "ERROR" for p in s_pos)
+                        if not has_err_leg:
+                            continue
                     sid = s.get("strategy_id")
                     heal_attempts = getattr(self, f"_heal_attempts_{sid}", 0)
                     if heal_attempts >= 2:
@@ -16339,6 +16397,11 @@ class StraddleManager:
                                     pos["target_order_placement"] = "Advance Broker Target"
                                     self._log_event(f"Broker Target order {adv_tgt_oid} for {pos.get('symbol')} confirmed active on broker ({t_st}). Active monitoring notice cleared.", level="INFO")
                             elif any(w in t_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN" and not pos.get("_margin_relief_in_progress"):
+                                ignored_oids = {str(x).strip() for x in pos.get("_ignored_cancelled_oids", []) if x}
+                                cur_tgt_oids = {x.strip() for x in str(adv_tgt_oid).split(",") if x.strip()}
+                                if cur_tgt_oids and cur_tgt_oids.issubset(ignored_oids):
+                                    pos["target_broker_order_id"] = None
+                                    continue
                                 # Broker Target order was unexpectedly cancelled!
                                 pos["target_broker_order_id"] = None
                                 pos["target_cancelled_unexpectedly"] = True
@@ -16452,6 +16515,11 @@ class StraddleManager:
                                     pos["sl_order_placement"] = "Advance Broker SL"
                                     self._log_event(f"Broker SL order {adv_sl_oid} for {pos.get('symbol')} confirmed active on broker ({s_st}). Active monitoring notice cleared.", level="INFO")
                             elif any(w in s_st for w in ("CANC", "REJ")) and pos.get("status") == "OPEN" and not pos.get("_margin_relief_in_progress"):
+                                ignored_oids = {str(x).strip() for x in pos.get("_ignored_cancelled_oids", []) if x}
+                                cur_sl_oids = {x.strip() for x in str(adv_sl_oid).split(",") if x.strip()}
+                                if cur_sl_oids and cur_sl_oids.issubset(ignored_oids):
+                                    pos["sl_broker_order_id"] = None
+                                    continue
                                 # Broker Stoploss order was unexpectedly cancelled!
                                 adv_cfg = strat.get("advanced") or strat.get("advanced_settings") or {}
                                 auto_handle = adv_cfg.get("auto_handling_sl_cancellation") is not False

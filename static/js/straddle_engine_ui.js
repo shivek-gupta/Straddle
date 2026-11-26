@@ -5724,13 +5724,35 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         return true;
     });
 
-    // Multi-Criteria Sorting (Open/Closed, CE/PE, Main/Hedges, MTM)
+    // Multi-Criteria Sorting (Execution Order, Open/Closed, CE/PE, Main/Hedges, MTM)
     const sortOrder = window._straddleAlgoSortOrder || "default";
     const sortSelect = document.getElementById("algoPositionsSortSelect");
     if (sortSelect && sortSelect.value !== sortOrder && document.activeElement !== sortSelect) {
         sortSelect.value = sortOrder;
     }
-    if (sortOrder !== "default") {
+    const _getPosExecEpoch = (p) => {
+        if (p._entry_epoch_ts && Number(p._entry_epoch_ts) > 0) return Number(p._entry_epoch_ts);
+        const tStr = String(p.entry_time || p.exit_time || "").trim();
+        const m = tStr.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+        if (m) {
+            return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+        }
+        const idStr = String(p.id || "");
+        const idM = idStr.match(/(\d{10,13})/);
+        if (idM) {
+            const rawTs = parseInt(idM[1], 10);
+            return rawTs > 1e12 ? rawTs / 1000 : rawTs;
+        }
+        return 0;
+    };
+    if (sortOrder === "default") {
+        displayPositions.sort((a, b) => {
+            const ta = _getPosExecEpoch(a);
+            const tb = _getPosExecEpoch(b);
+            if (ta !== tb) return ta - tb;
+            return a._origIdx - b._origIdx;
+        });
+    } else {
         displayPositions.sort((a, b) => {
             const rawA = String(a.status || "OPEN").toUpperCase();
             const rawB = String(b.status || "OPEN").toUpperCase();
@@ -10766,10 +10788,15 @@ async function saveStraddleStrategySettings(options = {}) {
     }
 
     try {
+        // Never send stale browser positions/closed_positions when saving settings;
+        // runtime positions are strictly owned by the backend engine.
+        const stratPayload = { ...strat };
+        delete stratPayload.positions;
+        delete stratPayload.closed_positions;
         const resp = await fetch("/api/straddle/strategy/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy: strat })
+            body: JSON.stringify({ strategy: stratPayload })
         });
         const res = await resp.json();
         if (res.success) {
@@ -10826,10 +10853,15 @@ async function saveAsNewStraddlePreset() {
     showStraddleToast(`📄 Creating preset '${name}'...`, "info", 1500);
 
     try {
+        // Never send stale browser positions/closed_positions when saving settings;
+        // runtime positions are strictly owned by the backend engine.
+        const stratPayload = { ...strat };
+        delete stratPayload.positions;
+        delete stratPayload.closed_positions;
         const resp = await fetch("/api/straddle/strategy/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy: strat })
+            body: JSON.stringify({ strategy: stratPayload })
         });
         const res = await resp.json();
         if (res.success) {
