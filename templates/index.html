@@ -1079,7 +1079,7 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_legs')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_legs" class="chevron-icon">▼</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">POSITIONS / LEGS</span>
+                        <span class="algo-section-title">POSITIONS / LEGS</span>
                         <span id="cfgLegsCountBadge" style="font-size:11px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); border-radius:12px; padding:1px 8px; margin-left:4px;">0 Legs</span>
                     </div>
                     <div style="display:flex; gap:8px; align-items:center;" onclick="event.stopPropagation()">
@@ -1185,7 +1185,7 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_timings')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_timings" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">TIMINGS, UNDERLYING &amp; STRATEGY TOGGLES</span>
+                        <span class="algo-section-title">TIMINGS, UNDERLYING &amp; STRATEGY TOGGLES</span>
                         <span id="badge_timings_summary" style="font-size:11px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); border-radius:12px; padding:1px 8px; margin-left:4px;">Spot • Intraday • 09:15 - 15:29</span>
                     </div>
                     <div style="display:flex; gap:8px; align-items:center;" onclick="event.stopPropagation()">
@@ -1423,7 +1423,7 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_mtm')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_mtm" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">MTM TARGET & MTM STOPLOSS</span>
+                        <span class="algo-section-title">MTM TARGET &amp; MTM STOPLOSS</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:10px;" onclick="event.stopPropagation()">
                         <span id="badge_mtm_section" class="section-status-badge badge-active">ENABLED</span>
@@ -1560,7 +1560,7 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_premium')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_premium" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">⚖️ PREMIUM MATCHING & RANGE (QUANTIPLY PARITY) 🔗</span>
+                        <span class="algo-section-title">PREMIUM MATCHING &amp; RANGE</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:10px;" onclick="event.stopPropagation()">
                         <span id="badge_prem_section" class="section-status-badge badge-disabled">DISABLED</span>
@@ -1759,8 +1759,9 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_execution')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_execution" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f8fafc;">EXECUTION ORDER PARAMETERS (LIMITS, BUFFERS & TIMEOUTS) 🔗</span>
+                        <span class="algo-section-title">EXECUTION ORDER PARAMETERS (LIMITS, BUFFERS &amp; TIMEOUTS)</span>
                     </div>
+                    <span class="algo-section-subtitle">Order Types, Price Buffers, Delays &amp; Broker OCO</span>
                 </div>
 
                 <div id="sec_builder_execution" class="straddle-collapsible-body collapsed" style="display:none;">
@@ -1899,9 +1900,9 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_parity')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_parity" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#38bdf8;">🎯 SL & TARGET PRICE BASIS (ALGOTEST BACKTEST PARITY) 🔗</span>
+                        <span class="algo-section-title">SL &amp; TARGET PRICE BASIS (BACKTEST PARITY)</span>
                     </div>
-                    <span style="font-size:11px; color:#64748b; font-weight:600;">Calibrate SL & Target % against 1-min Candle Close vs Traded Fill</span>
+                    <span class="algo-section-subtitle">Calibrate SL &amp; Target % against 1-min Candle Close vs Traded Fill</span>
                 </div>
 
                 <div id="sec_builder_parity" class="straddle-collapsible-body collapsed" style="display:none;">
@@ -2051,9 +2052,9 @@
                 <div class="straddle-collapsible-header" onclick="toggleAlgoBuilderSection('sec_builder_reentry')">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span id="chevron_sec_builder_reentry" class="chevron-icon">▶</span>
-                        <span style="font-weight:800; font-size:13px; letter-spacing:0.5px; color:#f59e0b;">⚡ RE-EXECUTION, RE-ENTRY & MARGIN SAFETY GUARDS 🔗</span>
+                        <span class="algo-section-title">RE-EXECUTION, RE-ENTRY &amp; MARGIN SAFETY GUARDS</span>
                     </div>
-                    <span style="font-size:11px; color:#64748b; font-weight:600;">Quantiply & Stockmock Parity with Zero-Delay Margin Unblocking</span>
+                    <span class="algo-section-subtitle">Re-Entry Timing, Margin Release &amp; SL Desync Guards</span>
                 </div>
 
                 <div id="sec_builder_reentry" class="straddle-collapsible-body collapsed" style="display:none;">
@@ -4757,5 +4758,6 @@
             });
         }
     </script>
+    <script src="/static/js/algo_tooltips.js?v=1"></script>
 </body>
 </html>
