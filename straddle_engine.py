@@ -4524,7 +4524,7 @@ class StraddleManager:
             logger.debug(f"Strategy '{strat_dict.get('name', sid)}' ({und}) saved silently.")
             return {"success": True, "strategy_id": sid, "strategy": strat_dict}
 
-    def calculate_strategy_margin_per_lot(self, strat: Dict[str, Any]) -> float:
+    def calculate_strategy_margin_per_lot(self, strat: Dict[str, Any], use_live_quotes: bool = False) -> float:
         """
         Calculates exact broker required margin per 1 lot of the strategy's configured legs.
         Applies SEBI/Exchange hedge-benefit spread reductions when long and short legs co-exist.
@@ -4586,6 +4586,21 @@ class StraddleManager:
                     strike = leg_atm
 
             est_price = 180.0 if abs(strike - leg_atm) <= leg_step else (50.0 if abs(strike - leg_atm) <= 5 * leg_step else 10.0)
+            if use_live_quotes:
+                try:
+                    c_obj = self.resolve_strike_and_contract(
+                        underlying=leg_und,
+                        strike_selection=stk_sel,
+                        option_type=opt_type,
+                        expiry_type=leg.get("expiry", "Weekly"),
+                    )
+                    if c_obj and c_obj.get("instrument_key"):
+                        pmap, _ = self._fetch_live_quotes([c_obj["instrument_key"]])
+                        q_p = float(pmap.get(c_obj["instrument_key"]) or 0.0)
+                        if q_p > 0:
+                            est_price = q_p
+                except Exception:
+                    pass
             sim_orders.append({
                 "underlying": leg_und,
                 "strike": strike,
@@ -4707,8 +4722,26 @@ class StraddleManager:
                         tag="sym_trim"
                     )
                     if res.get("success"):
+                        if res.get("order_id") and hasattr(broker, "wait_for_order_fill") and not str(res.get("order_id")).startswith("PAPER_"):
+                            try:
+                                broker.wait_for_order_fill(str(res["order_id"]), timeout_sec=3.0, poll_interval_sec=0.05)
+                            except Exception:
+                                pass
                         pos["quantity"] = target_qty
                         pos["lots"] = target_mult * base_lots
+                        # Sync any resting advance SL or Target order quantities to the new trimmed quantity
+                        sl_oid = pos.get("sl_broker_order_id")
+                        if sl_oid and not str(sl_oid).startswith("ORD_") and not str(sl_oid).startswith("PAPER_") and pos.get("sl_price"):
+                            try:
+                                broker.modify_order(order_id=str(sl_oid), quantity=target_qty, trigger_price=float(pos["sl_price"]), order_type="SL")
+                            except Exception:
+                                pass
+                        tgt_oid = pos.get("target_broker_order_id")
+                        if tgt_oid and not str(tgt_oid).startswith("ORD_") and not str(tgt_oid).startswith("PAPER_") and pos.get("target_price"):
+                            try:
+                                broker.modify_order(order_id=str(tgt_oid), quantity=target_qty, price=float(pos["target_price"]), order_type="LIMIT")
+                            except Exception:
+                                pass
                         self._log_event(
                             f"[Auto-Trim Symmetry] Trimmed {excess_qty} qty of {pos.get('symbol')} to {target_qty} qty ({target_mult}x) to match re-entry.",
                             level="WARNING"
@@ -9739,139 +9772,6 @@ class StraddleManager:
         hh_mm = now_t.strftime("%H:%M")
         if instrument_key not in self._minute_candles:
             self._minute_candles[instrument_key] = {}
-        bars = self._minute_candles[instrument_key]
-        if hh_mm not in bars:
-            bars[hh_mm] = {
-                "time": hh_mm,
-                "open": ltp,
-                "high": ltp,
-                "low": ltp,
-                "close": ltp,
-                "ts": time.time(),
-            }
-        else:
-            b = bars[hh_mm]
-            if ltp > b["high"]:
-                b["high"] = ltp
-            if ltp < b["low"]:
-                b["low"] = ltp
-            b["close"] = ltp
-            b["ts"] = time.time()
-
-    def get_minute_candle_close(
-        self,
-        instrument_key: str,
-        target_time_str: str,
-        contract_meta: Optional[Dict[str, Any]] = None,
-        require_closed: bool = True,
-    ) -> Optional[float]:
-        """
-        Resolves exact 1-minute candle close price for an option contract at target_time_str (HH:MM or HH:MM:SS).
-        If require_closed=True, strictly ensures the minute candle has finished trading (now_hm > hh_mm).
-        Checks:
-        1. In-memory live minute bar cache (0ms instant lookup)
-        2. Kotak Neo broker authentic 1-minute historical candle API
-        3. Upstox 1-minute candlestick pipeline
-        """
-        if not target_time_str or not instrument_key:
-            return None
-
-        hh_mm = target_time_str.strip()[:5]
-        now_hm = now_ist_str()[:5]
-
-        # Parity Integrity: A 1-minute candle (e.g. 09:16) only finalizes once 09:16:59 has elapsed (now_hm >= 09:17)
-        if require_closed and now_hm <= hh_mm:
-            return None
-
-        # 1. Check in-memory minute bar cache
-        if instrument_key in self._minute_candles:
-            bars = self._minute_candles[instrument_key]
-            if hh_mm in bars and bars[hh_mm].get("close"):
-                return round(float(bars[hh_mm]["close"]), 2)
-
-        # 2. Check Kotak Neo authentic broker historical candles
-        mode = self._state.get("execution_mode", "LIVE_BROKER")
-        broker = get_broker_adapter(mode)
-        if hasattr(broker, "get_historical_candles"):
-            try:
-                candles = broker.get_historical_candles(instrument_key=instrument_key, interval="1min")
-                for c in candles:
-                    c_time = str(c.get("time", ""))
-                    if ("T" in c_time and c_time.split("T")[1][:5] == hh_mm) or (hh_mm in c_time):
-                        close_p = float(c.get("close") or 0.0)
-                        if close_p > 0:
-                            if instrument_key not in self._minute_candles:
-                                self._minute_candles[instrument_key] = {}
-                            self._minute_candles[instrument_key][hh_mm] = {
-                                "time": hh_mm,
-                                "open": float(c.get("open") or close_p),
-                                "high": float(c.get("high") or close_p),
-                                "low": float(c.get("low") or close_p),
-                                "close": close_p,
-                                "ts": time.time(),
-                            }
-                            return round(close_p, 2)
-            except Exception as e_k:
-                logger.debug(f"[Kotak Candle Lookup] Note for {instrument_key} @ {hh_mm}: {e_k}")
-
-        # 3. Check Upstox authentic pipeline
-        try:
-            import requests
-            u_url = f"https://api.upstox.com/v2/historical-candle/intraday/{instrument_key}/1minute"
-            r_u = requests.get(u_url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"}, timeout=2.5)
-            if r_u.status_code == 200:
-                raw_u = r_u.json().get("data", {}).get("candles", []) or []
-                for c in raw_u:
-                    if len(c) >= 5 and "T" in str(c[0]) and str(c[0]).split("T")[1][:5] == hh_mm:
-                        close_p = float(c[4])
-                        if close_p > 0:
-                            return round(close_p, 2)
-        except Exception:
-            pass
-
-        return None
-
-    def get_minute_candle_open(
-        self,
-        instrument_key: str,
-        target_time_str: str,
-        contract_meta: Optional[Dict[str, Any]] = None,
-    ) -> Optional[float]:
-        """Resolves exact 1-minute candle open price for an option contract at target_time_str (HH:MM)."""
-        if not target_time_str or not instrument_key:
-            return None
-        hh_mm = target_time_str.strip()[:5]
-        if instrument_key in self._minute_candles:
-            bars = self._minute_candles[instrument_key]
-            if hh_mm in bars and bars[hh_mm].get("open"):
-                return round(float(bars[hh_mm]["open"]), 2)
-
-        mode = self._state.get("execution_mode", "LIVE_BROKER")
-        broker = get_broker_adapter(mode)
-        if hasattr(broker, "get_historical_candles"):
-            try:
-                candles = broker.get_historical_candles(instrument_key=instrument_key, interval="1min")
-                for c in candles:
-                    c_time = str(c.get("time", ""))
-                    if ("T" in c_time and c_time.split("T")[1][:5] == hh_mm) or (hh_mm in c_time):
-                        open_p = float(c.get("open") or 0.0)
-                        if open_p > 0:
-                            return round(open_p, 2)
-            except Exception:
-                pass
-        return None
-
-    def _get_underlying_minute_close(self, underlying: str, target_time_str: str) -> Optional[float]:
-        """Resolves underlying spot index close at target_time_str (HH:MM)."""
-        clean_und = self._clean_underlying_symbol(underlying)
-        hh_mm = target_time_str.strip()[:5]
-        if hasattr(self, "_spot_minute_candles") and clean_und in self._spot_minute_candles:
-            bars = self._spot_minute_candles[clean_und]
-            if hh_mm in bars and bars[hh_mm].get("close"):
-                return round(float(bars[hh_mm]["close"]), 2)
-        p = self.get_cached_spot_price(clean_und)
-        return round(float(p), 2) if p > 0 else None
-
     def _recalculate_pos_sl_target(self, strat: Dict[str, Any], pos: Dict[str, Any], broker: BaseBrokerAdapter, ref_price: float):
         """Recalculate SL and Target based on ref_price, update resting broker orders, and sync."""
         side = str(pos.get("side", "SELL")).upper()
@@ -10653,6 +10553,12 @@ class StraddleManager:
                 strat["_mtm_peak_profit"] = 0.0
                 strat.pop("mtm_locked_floor", None)
                 strat.pop("mtm_peak_profit", None)
+                strat.pop("locked_day_lots", None)
+                strat.pop("locked_day_date", None)
+                strat.pop("cushion_released_date", None)
+                strat["cushion_released_active"] = False
+                strat.pop("_preflight_done_date", None)
+                strat.pop("_sl_moved_to_cost_triggered", None)
 
                 # Reset nested strategy dict if present
                 if "strategy" in strat and isinstance(strat["strategy"], dict):
@@ -16354,7 +16260,8 @@ class StraddleManager:
                             strat["_preflight_done_date"] = today_ist_str()
                             def _run_pf_sync(target_s):
                                 try:
-                                    target_s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(target_s)
+                                    use_lq = bool(adv_pf.get("preflight_use_live_quotes", True))
+                                    target_s["broker_margin_per_lot"] = self.calculate_strategy_margin_per_lot(target_s, use_live_quotes=use_lq)
                                     target_s["_margin_calc_ts"] = time.time()
                                     eff_m = self.get_effective_multiplier(target_s)
                                     target_s["effective_multiplier"] = eff_m

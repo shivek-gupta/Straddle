@@ -1921,7 +1921,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             if (!window._straddleStateLoadDone && (!window._straddleState.allStrategies || window._straddleState.allStrategies.length === 0)) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="12" style="text-align:center; padding:36px 14px; color:#94a3b8; font-size:13px;">
+                        <td colspan="11" style="text-align:center; padding:36px 14px; color:#94a3b8; font-size:13px;">
                             <span class="straddle-spinner" style="display:inline-block; width:18px; height:18px; border:2px solid #38bdf8; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:middle; margin-right:8px;"></span>
                             Loading algorithmic strategies...
                         </td>
@@ -1932,7 +1932,7 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             const dispName = (typeof COMMODITY_DISPLAY_NAMES !== "undefined" && COMMODITY_DISPLAY_NAMES[activeUnd]) ? COMMODITY_DISPLAY_NAMES[activeUnd] : activeUnd;
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="12" style="text-align:center; padding:36px 14px; color:#64748b;">
+                    <td colspan="11" style="text-align:center; padding:36px 14px; color:#64748b;">
                         <div style="font-size:14px; font-weight:700; color:#cbd5e1; margin-bottom:4px;">No Algorithmic Strategies Found for ${dispName}</div>
                         <div style="font-size:12px; margin-bottom:12px;">Click <b>+ Add Algo</b> above to instantiate a strategy for ${dispName}, or click <b>Show All Assets</b> to view all algos.</div>
                         <div style="display:inline-flex; gap:8px;">
@@ -2200,29 +2200,6 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 </td>
                 <td class="algo-col-days">
                     ${daysHtml}
-                </td>
-                <td class="algo-col-mult" id="algo_mult_cell_${s.strategy_id}" style="text-align:center; min-width:125px; padding:6px 6px;">
-                    <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
-                        <div style="display:inline-flex; background:#0b1120; border:1px solid #334155; border-radius:4px; padding:1px;">
-                            <button type="button" onclick="setAlgoMultiplierMode('${safeJsSid}', 'MANUAL')" style="background:${isManual ? '#2563eb' : 'transparent'}; color:${isManual ? '#fff' : '#64748b'}; border:none; padding:1px 7px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Manual Lots Multiplier">Manual</button>
-                            <button type="button" onclick="setAlgoMultiplierMode('${safeJsSid}', 'AUTO')" style="background:${!isManual ? '#059669' : 'transparent'}; color:${!isManual ? '#fff' : '#64748b'}; border:none; padding:1px 7px; font-size:10px; font-weight:800; border-radius:3px; cursor:pointer;" title="Auto Multiplier based on Available Capital & Cushion Margin">Auto</button>
-                        </div>
-                        ${isManual ? `
-                            <div class="straddle-stepper-box" style="display:inline-flex; align-items:center; background:#0b1120; border:1px solid #334155; border-radius:4px; overflow:hidden;">
-                                <button type="button" onclick="stepAlgoMultiplier('${safeJsSid}', -1)" style="background:transparent; border:none; color:#94a3b8; width:22px; height:24px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; font-weight:bold; transition:all 0.15s;" onmouseover="this.style.color='#fff'; this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.color='#94a3b8'; this.style.background='transparent'">−</button>
-                                <input type="number" id="algo_mult_input_${s.strategy_id}" class="straddle-input" style="width:38px; height:24px; border:none; background:transparent; text-align:center; padding:0; font-family:var(--font-mono); font-weight:800; font-size:11.5px; color:#f8fafc;" value="${multiplier}" min="1" max="100" onchange="onChangeAlgoMultiplier('${safeJsSid}', this.value)" title="Manual Lots Multiplier">
-                                <button type="button" onclick="stepAlgoMultiplier('${safeJsSid}', 1)" style="background:transparent; border:none; color:#94a3b8; width:22px; height:24px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; font-weight:bold; transition:all 0.15s;" onmouseover="this.style.color='#fff'; this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.color='#94a3b8'; this.style.background='transparent'">+</button>
-                            </div>
-                        ` : `
-                            <div style="display:flex; align-items:center; gap:4px;" title="Auto Determined: ${effMult} Lots&#10;Available Capital: ₹${liveAvailCap.toLocaleString('en-IN', { maximumFractionDigits: 0 })}&#10;Broker Req: ₹${(brokerMargin / 100000).toFixed(2)}L + Cushion: ₹${(cushionMargin / 1000).toFixed(0)}k = ₹${(totalMarginPerLot / 100000).toFixed(2)}L per lot">
-                                <span style="font-size:11px; font-weight:800; color:${effMult > 0 ? '#10b981' : '#f87171'}; background:${effMult > 0 ? 'rgba(16,185,129,0.12)' : 'rgba(248,113,113,0.12)'}; border:1px solid ${effMult > 0 ? 'rgba(16,185,129,0.3)' : 'rgba(248,113,113,0.35)'}; padding:1px 5px; border-radius:3px; white-space:nowrap;">⚡ ${effMult}x</span>
-                                <div style="display:inline-flex; align-items:center; background:#0b1120; border:1px solid #334155; border-radius:4px; padding:0 4px;" title="Cushion Margin per lot (₹)">
-                                    <span style="font-size:10px; color:#64748b; font-weight:700; margin-right:2px;">₹</span>
-                                    <input type="number" class="straddle-input" style="width:52px; border:none; background:transparent; text-align:center; padding:1px 0; font-size:10.5px; font-weight:700; color:#f8fafc;" value="${cushionMargin}" step="1000" min="0" onchange="onChangeAlgoCushionMargin('${safeJsSid}', this.value)">
-                                </div>
-                            </div>
-                        `}
-                    </div>
                 </td>
                 <td class="algo-col-mtm" id="algo_mtm_${s.strategy_id}" style="text-align:right; font-family:var(--font-mono); font-weight:800; ${mtmClass}">
                     ${mtmFormatted}

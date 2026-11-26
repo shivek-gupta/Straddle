@@ -8,6 +8,7 @@
     "use strict";
 
     function onAutoSizingFieldChange() {
+        const isAutoMode = document.getElementById("grpAutoMultiplier")?.style.display !== "none";
         const dayLock = !!document.getElementById("cfgToggleDayLockSymmetry")?.checked;
         const autoTrim = document.getElementById("cfgToggleAutoTrimSymmetric");
         if (autoTrim) autoTrim.disabled = !dayLock;
@@ -16,7 +17,11 @@
         if (bDayLock) {
             const active = window._straddleState?.activeStrategy;
             const lockedLots = active?.locked_day_lots;
-            if (dayLock) {
+            if (!isAutoMode && dayLock) {
+                bDayLock.textContent = "AUTO MODE ONLY";
+                bDayLock.style.color = "#fbbf24";
+                bDayLock.style.background = "rgba(251,191,36,0.15)";
+            } else if (dayLock) {
                 bDayLock.textContent = lockedLots ? `LOCKED: ${lockedLots}x` : "ACTIVE";
                 bDayLock.style.color = "#38bdf8";
                 bDayLock.style.background = "rgba(56,189,248,0.15)";
@@ -44,7 +49,11 @@
         const bCush = document.getElementById("badgeProfitCushionStatus");
         if (bCush) {
             const active = window._straddleState?.activeStrategy;
-            if (profCush) {
+            if (!isAutoMode && profCush) {
+                bCush.textContent = "AUTO MODE ONLY";
+                bCush.style.color = "#fbbf24";
+                bCush.style.background = "rgba(251,191,36,0.15)";
+            } else if (profCush) {
                 if (active?.cushion_released_active) {
                     bCush.textContent = `RELEASED (₹${redEl?.value || 3000})`;
                     bCush.style.color = "#10b981";
@@ -59,6 +68,10 @@
                 bCush.style.color = "#64748b";
                 bCush.style.background = "rgba(100,116,139,0.15)";
             }
+        }
+
+        if (typeof updateFormAutoMultiplierPreview === "function") {
+            updateFormAutoMultiplierPreview();
         }
 
         const pfOn = !!document.getElementById("cfgTogglePreflightMarginSync")?.checked;
