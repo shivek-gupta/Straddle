@@ -1191,6 +1191,7 @@ class StraddleManager:
                 "paper_time": dispatch_time_str,
                 "paper_price": paper_price,
                 "broker_ack_ms": ack_latency_ms,
+                "broker_fill_time": now_ist_str(),
                 "broker_fill_time": exchange_filled_time if exchange_filled_time != "-" else now_ist_ms_str(),
                 "broker_price": broker_price,
                 "broker_latency_ms": ack_latency_ms,
@@ -4559,34 +4560,38 @@ class StraddleManager:
         strat_dyn_hedge = bool(strat.get("dynamic_hedging")) or bool(strat.get("toggles", {}).get("dynamic_hedging"))
 
         for idx, leg in enumerate(legs):
+            leg_und = str(leg.get("underlying") or und).upper()
+            leg_step = float(STRIKE_STEPS.get(leg_und, step))
+            leg_atm = round(spot / leg_step) * leg_step if leg_und == und else atm_strike
             side = str(leg.get("side") or "Sell").upper()
             opt_type = str(leg.get("option_type") or "CE").upper()
             stk_sel = str(leg.get("strike_selection") or "ATM").upper()
+            leg_lots = max(1, int(leg.get("lots") or 1))
 
-            strike = atm_strike
+            strike = leg_atm
             if stk_sel in ["ATM", "ATM STRIKE"]:
-                strike = atm_strike
+                strike = leg_atm
             elif "OTM" in stk_sel:
                 m = re.search(r"OTM\s*(\d+)", stk_sel)
                 offset = int(m.group(1)) if m else 1
-                strike = (atm_strike + offset * step) if opt_type == "CE" else (atm_strike - offset * step)
+                strike = (leg_atm + offset * leg_step) if opt_type == "CE" else (leg_atm - offset * leg_step)
             elif "ITM" in stk_sel:
                 m = re.search(r"ITM\s*(\d+)", stk_sel)
                 offset = int(m.group(1)) if m else 1
-                strike = (atm_strike - offset * step) if opt_type == "CE" else (atm_strike + offset * step)
+                strike = (leg_atm - offset * leg_step) if opt_type == "CE" else (leg_atm + offset * leg_step)
             else:
                 try:
                     strike = float(stk_sel)
                 except Exception:
-                    strike = atm_strike
+                    strike = leg_atm
 
-            est_price = 180.0 if abs(strike - atm_strike) <= step else (50.0 if abs(strike - atm_strike) <= 5 * step else 10.0)
+            est_price = 180.0 if abs(strike - leg_atm) <= leg_step else (50.0 if abs(strike - leg_atm) <= 5 * leg_step else 10.0)
             sim_orders.append({
-                "underlying": und,
+                "underlying": leg_und,
                 "strike": strike,
                 "opt_type": opt_type,
                 "side": side,
-                "lots": 1,
+                "lots": leg_lots,
                 "price": est_price
             })
 
@@ -4596,14 +4601,14 @@ class StraddleManager:
                 is_hedge_enabled = True if strat_dyn_hedge else bool(h_cfg.get("enabled", False))
                 if is_hedge_enabled:
                     init_otm = int(h_cfg.get("initial_otm") or 20)
-                    h_strike = (strike + init_otm * step) if opt_type == "CE" else (strike - init_otm * step)
+                    h_strike = (strike + init_otm * leg_step) if opt_type == "CE" else (strike - init_otm * leg_step)
                     h_est_price = 6.0
                     sim_orders.append({
-                        "underlying": und,
+                        "underlying": leg_und,
                         "strike": h_strike,
                         "opt_type": opt_type,
                         "side": "BUY",
-                        "lots": 1,
+                        "lots": leg_lots,
                         "price": h_est_price
                     })
 
@@ -4620,31 +4625,38 @@ class StraddleManager:
         """
         mult_type = str(strat.get("multiplier_type") or "MANUAL").upper()
         if mult_type != "AUTO":
+            strat["auto_insufficient_margin"] = False
             return max(1, int(strat.get("multiplier", 1) or 1))
 
-        cushion = float(strat.get("cushion_margin") if strat.get("cushion_margin") is not None else 15000.0)
+        cushion = max(0.0, float(strat.get("cushion_margin") if strat.get("cushion_margin") is not None else 15000.0))
         broker_margin_per_lot = self.calculate_strategy_margin_per_lot(strat)
         total_margin_per_lot = broker_margin_per_lot + cushion
 
         if total_margin_per_lot <= 0:
             return 1
 
+        # Always prioritize live broker/paper available margin over any stale saved capital field
         available_capital = 0.0
-        if strat.get("available_capital") is not None and float(strat.get("available_capital")) > 0:
-            available_capital = float(strat["available_capital"])
-        elif strat.get("capital") is not None and float(strat.get("capital")) > 0:
-            available_capital = float(strat["capital"])
-        else:
-            try:
-                funds = self.get_margin_overview()
-                available_capital = float(funds.get("available_margin") or funds.get("available_cash") or 0.0)
-            except Exception:
-                available_capital = 0.0
+        try:
+            funds = self.get_margin_overview()
+            available_capital = float(funds.get("available_margin") or funds.get("available_cash") or 0.0)
+        except Exception:
+            available_capital = 0.0
 
         if available_capital <= 0:
+            if strat.get("available_capital") is not None and float(strat.get("available_capital")) > 0:
+                available_capital = float(strat["available_capital"])
+            elif strat.get("capital") is not None and float(strat.get("capital")) > 0:
+                available_capital = float(strat["capital"])
+
+        if available_capital <= 0:
+            strat["auto_lots_raw"] = 0
+            strat["auto_insufficient_margin"] = True
             return max(1, int(strat.get("multiplier", 1) or 1))
 
         auto_lots = int(math.floor(available_capital / total_margin_per_lot))
+        strat["auto_lots_raw"] = auto_lots
+        strat["auto_insufficient_margin"] = (auto_lots <= 0)
         return max(1, auto_lots)
 
     def get_strategy_lots(self, strat: Dict[str, Any]) -> int:
@@ -6963,6 +6975,8 @@ class StraddleManager:
                 if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
                     all_buys_filled = True
                     unfilled_reasons = []
+                    # Safe 150ms polling for instant confirmation of filled hedge orders without hitting broker rate limit
+                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.15): oid for oid in buy_oids}
                     # Adaptive 25ms polling for ultra-fast confirmation of filled hedge orders
                     v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.025): oid for oid in buy_oids}
                     for fut in concurrent.futures.as_completed(v_futs):
@@ -7262,6 +7276,7 @@ class StraddleManager:
         total_lots = lots * multiplier
         sliced_lots = slice_lots_by_freeze(total_lots, und_name)
         t_entry_dispatch = time.perf_counter()
+        entry_dispatch_ist = now_ist_str()
         entry_dispatch_ist = now_ist_ms_str()
 
         if len(sliced_lots) > 1:
@@ -7377,6 +7392,7 @@ class StraddleManager:
         if order_res.get("success") and exec_mode == "LIVE_BROKER" and placed_oid and not placed_oid.startswith("PAPER_") and not placed_oid.startswith("ORD_"):
             # Generous timeout for live Kotak Neo fills: 8.0s for BUY hedges, 12.0s for main SELL legs
             timeout_sec = 8.0 if is_buy_hedge else 12.0
+            fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.15)
             fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.025)
             t_fill_perf = time.perf_counter()
 
@@ -9753,6 +9769,42 @@ class StraddleManager:
             if side == "BUY" and pos["target_price"] <= ref_price:
                 pos["target_price"] = round_to_tick(ref_price + 0.05, 0.05)
             elif side == "SELL" and pos["target_price"] >= ref_price:
+                pos["target_price"] = round_to_tick(ref_price - 0.05, 0.05)
+
+        # Recalculate Stoploss Price
+        if sl_val > 0 and ref_price > 0:
+            if "%" in sl_type:
+                pos["sl_price"] = round_to_tick(ref_price * (1.0 + sl_val / 100.0) if side == "SELL" else ref_price * (1.0 - sl_val / 100.0), 0.05)
+            else:
+                pos["sl_price"] = round_to_tick(ref_price + sl_val if side == "SELL" else ref_price - sl_val, 0.05)
+
+            # Enforce minimum tick separation
+            if side == "BUY" and pos["sl_price"] >= ref_price:
+                pos["sl_price"] = round_to_tick(ref_price - 0.05, 0.05)
+            elif side == "SELL" and pos["sl_price"] <= ref_price:
+                pos["sl_price"] = round_to_tick(ref_price + 0.05, 0.05)
+            pos["original_sl_price"] = pos["sl_price"]
+
+        # Update or modify active broker orders on Kotak Neo matching engine
+        adv_cfg = (strat.get("advanced_settings") or strat.get("advanced") or {}) if strat else {}
+        broker_action = str(adv_cfg.get("benchmark_broker_action") or "AUTO_MODIFY").upper()
+
+        adv_sl_oid = pos.get("sl_broker_order_id")
+        if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_") and pos.get("sl_price"):
+            def _handle_sl_broker_bg():
+                with _ADVANCE_ORDER_LOCK:
+                    try:
+                        time.sleep(0.12)
+                        sl_side = "BUY" if side == "SELL" else "SELL"
+                        sl_buf_pct = float(adv_cfg.get("exit_buffer_val") or adv_cfg.get("exit_buffer_value") or 5.0)
+                        if sl_buf_pct <= 0:
+                            sl_buf_pct = 5.0
+                        lim_p = round_to_tick(
+                            max(pos["sl_price"] + 0.05, pos["sl_price"] * (1.0 + sl_buf_pct / 100.0))
+                            if sl_side == "BUY"
+                            else min(max(0.05, pos["sl_price"] - 0.05), pos["sl_price"] * (1.0 - sl_buf_pct / 100.0)),
+                            0.05
+                        )
                 pos["target_price"] = round_to_tick(ref_price - 0.05, 0.05)
 
         # Recalculate Stoploss Price

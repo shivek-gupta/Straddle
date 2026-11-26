@@ -1946,7 +1946,8 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         }
 
         // Check if we can do an in-place update without rebuilding the DOM
-        const curTableConfigSig = filtered.map(s => `${s.strategy_id}:${s.name}:${s.underlying}:${s.enabled}:${s.multiplier}:${s.multiplier_type}:${s.cushion_margin}:${(s.schedule_days||[]).join(',')}:${s.start_time}:${s.end_time}:${(s.legs||[]).length}`).join("||");
+        const _availForSig = window._straddleState?.margin?.available_margin ?? window._straddleMargin?.available_margin ?? 0;
+        const curTableConfigSig = filtered.map(s => `${s.strategy_id}:${s.name}:${s.underlying}:${s.enabled}:${s.multiplier}:${s.multiplier_type}:${s.cushion_margin}:${s.auto_lots_raw ?? ''}:${Math.floor(Number(_availForSig)/1000)}:${(s.schedule_days||[]).join(',')}:${s.start_time}:${s.end_time}:${(s.legs||[]).length}`).join("||");
         const hasTableConfigChanged = (curTableConfigSig !== window._lastAlgosTableConfigSig);
         const existingRows = tbody.querySelectorAll("tr[data-strategy-id]");
         const activeEl = document.activeElement;
@@ -2124,9 +2125,9 @@ function renderStraddleAlgosTable(forceRebuild = false) {
 
             const multType = (s.multiplier_type || "MANUAL").toUpperCase();
             const isManual = (multType !== "AUTO");
-            const multiplier = s.multiplier || 1;
-            const cushionMargin = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? s.cushion_margin : 15000;
-            const brokerMargin = s.broker_margin_per_lot || 130750.0;
+            const multiplier = Math.max(1, parseInt(s.multiplier, 10) || 1);
+            const cushionMargin = (s.cushion_margin !== undefined && s.cushion_margin !== null) ? Number(s.cushion_margin) : 15000;
+            const brokerMargin = Number(s.broker_margin_per_lot) || 130750.0;
             const totalMarginPerLot = brokerMargin + cushionMargin;
             let liveAvailCap = 0.0;
             if (window._straddleState?.margin?.available_margin !== undefined && window._straddleState?.margin?.available_margin !== null) {
@@ -2136,8 +2137,11 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             } else if (window._straddleState?.margin?.available_cash !== undefined && window._straddleState?.margin?.available_cash !== null) {
                 liveAvailCap = parseFloat(window._straddleState.margin.available_cash);
             }
-            if (liveAvailCap <= 0) liveAvailCap = 200000.0;
-            const effMult = s.effective_multiplier || (isManual ? multiplier : Math.max(1, Math.floor(liveAvailCap / Math.max(1, totalMarginPerLot))));
+            const effMult = isManual
+                ? multiplier
+                : (liveAvailCap > 0
+                    ? Math.floor(liveAvailCap / Math.max(1, totalMarginPerLot))
+                    : (s.auto_lots_raw !== undefined ? Number(s.auto_lots_raw) : 0));
 
             const mtm = s.mtm || 0.0;
             const mtmClass = mtm >= 0 ? "color:#10b981;" : "color:#f43f5e;";
@@ -2210,9 +2214,12 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                                 <button type="button" onclick="stepAlgoMultiplier('${safeJsSid}', 1)" style="background:transparent; border:none; color:#94a3b8; width:22px; height:24px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; font-weight:bold; transition:all 0.15s;" onmouseover="this.style.color='#fff'; this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.color='#94a3b8'; this.style.background='transparent'">+</button>
                             </div>
                         ` : `
-                            <div style="display:flex; align-items:center; gap:4px;" title="Auto Determined: ${effMult} Lots&#10;Broker Req: ₹${(brokerMargin / 100000).toFixed(2)}L + Cushion: ₹${(cushionMargin / 1000).toFixed(0)}k = ₹${(totalMarginPerLot / 100000).toFixed(2)}L per lot">
-                                <span style="font-size:11px; font-weight:800; color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:1px 5px; border-radius:3px; white-space:nowrap;">⚡ ${effMult}x</span>
-                                <input type="number" class="straddle-input" style="width:58px; text-align:center; padding:1px 2px; font-size:10.5px; font-weight:700;" value="${cushionMargin}" step="1000" min="0" onchange="onChangeAlgoCushionMargin('${safeJsSid}', this.value)" title="Cushion Margin per lot (₹)">
+                            <div style="display:flex; align-items:center; gap:4px;" title="Auto Determined: ${effMult} Lots&#10;Available Capital: ₹${liveAvailCap.toLocaleString('en-IN', { maximumFractionDigits: 0 })}&#10;Broker Req: ₹${(brokerMargin / 100000).toFixed(2)}L + Cushion: ₹${(cushionMargin / 1000).toFixed(0)}k = ₹${(totalMarginPerLot / 100000).toFixed(2)}L per lot">
+                                <span style="font-size:11px; font-weight:800; color:${effMult > 0 ? '#10b981' : '#f87171'}; background:${effMult > 0 ? 'rgba(16,185,129,0.12)' : 'rgba(248,113,113,0.12)'}; border:1px solid ${effMult > 0 ? 'rgba(16,185,129,0.3)' : 'rgba(248,113,113,0.35)'}; padding:1px 5px; border-radius:3px; white-space:nowrap;">⚡ ${effMult}x</span>
+                                <div style="display:inline-flex; align-items:center; background:#0b1120; border:1px solid #334155; border-radius:4px; padding:0 4px;" title="Cushion Margin per lot (₹)">
+                                    <span style="font-size:10px; color:#64748b; font-weight:700; margin-right:2px;">₹</span>
+                                    <input type="number" class="straddle-input" style="width:52px; border:none; background:transparent; text-align:center; padding:1px 0; font-size:10.5px; font-weight:700; color:#f8fafc;" value="${cushionMargin}" step="1000" min="0" onchange="onChangeAlgoCushionMargin('${safeJsSid}', this.value)">
+                                </div>
                             </div>
                         `}
                     </div>
@@ -2542,9 +2549,11 @@ async function setAlgoMultiplierMode(strategyId, mode) {
 }
 window.setAlgoMultiplierMode = setAlgoMultiplierMode;
 
-async function onChangeAlgoCushionMargin(strategyId, val) {
+const _cushionSyncTimers = {};
+function onChangeAlgoCushionMargin(strategyId, val, immediate = false) {
     const sIdStr = String(strategyId).trim();
-    const cushion = Math.max(0, parseFloat(val) || 0);
+    const parsed = parseFloat(val);
+    const cushion = (!isNaN(parsed) && parsed >= 0) ? parsed : 0;
     const strat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
     if (!strat) return;
     strat.cushion_margin = cushion;
@@ -2564,26 +2573,29 @@ async function onChangeAlgoCushionMargin(strategyId, val) {
 
     renderStraddleAlgosTable(true);
 
-    try {
-        const resp = await fetch("/api/straddle/strategy/update_multiplier", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                strategy_id: strat.strategy_id || strategyId,
-                cushion_margin: cushion
-            })
-        });
-        const res = await resp.json();
-        if (res.success) {
-            const currentStrat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
-            if (currentStrat && res.strategy) {
-                Object.assign(currentStrat, res.strategy);
+    clearTimeout(_cushionSyncTimers[sIdStr]);
+    _cushionSyncTimers[sIdStr] = setTimeout(async () => {
+        try {
+            const resp = await fetch("/api/straddle/strategy/update_multiplier", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    strategy_id: strat.strategy_id || strategyId,
+                    cushion_margin: cushion
+                })
+            });
+            const res = await resp.json();
+            if (res.success) {
+                const currentStrat = (window._straddleState?.allStrategies || []).find(s => String(s.strategy_id || "").trim() === sIdStr || String(s.name || "").trim() === sIdStr);
+                if (currentStrat && res.strategy) {
+                    Object.assign(currentStrat, res.strategy);
+                }
+                renderStraddleAlgosTable(true);
             }
-            renderStraddleAlgosTable(true);
+        } catch (e) {
+            console.error("Error updating cushion margin:", e);
         }
-    } catch (e) {
-        console.error("Error updating cushion margin:", e);
-    }
+    }, immediate ? 0 : 350);
 }
 window.onChangeAlgoCushionMargin = onChangeAlgoCushionMargin;
 
@@ -15915,8 +15927,8 @@ function setFormMultiplierMode(mode, syncToServer = true) {
         btnAuto.style.background = !isManual ? "#059669" : "#1e293b";
         btnAuto.style.color = !isManual ? "#fff" : "#94a3b8";
     }
-    if (grpMan) grpMan.style.display = isManual ? "block" : "none";
-    if (grpAuto) grpAuto.style.display = !isManual ? "block" : "none";
+    if (grpMan) grpMan.style.display = isManual ? "" : "none";
+    if (grpAuto) grpAuto.style.display = !isManual ? "" : "none";
 
     updateFormAutoMultiplierPreview();
     if (typeof scheduleAutoMultiplierLiveRecalc === "function") {
@@ -15927,13 +15939,17 @@ function setFormMultiplierMode(mode, syncToServer = true) {
     if (activeStrat) {
         activeStrat.multiplier_type = mode;
         const sid = activeStrat.strategy_id;
+        if (sid && syncToServer) {
+            window._pendingMultiplierModes = window._pendingMultiplierModes || {};
+            window._pendingMultiplierModes[String(sid).trim()] = { mode: mode, timestamp: Date.now() };
+        }
         if (sid && Array.isArray(window._straddleState?.allStrategies)) {
             const found = window._straddleState.allStrategies.find(s => s.strategy_id === sid);
             if (found) {
                 found.multiplier_type = mode;
             }
         }
-        renderStraddleAlgosTable(false);
+        renderStraddleAlgosTable(true);
 
         if (syncToServer && activeStrat.strategy_id) {
             fetch("/api/straddle/strategy/update_multiplier", {
@@ -15944,6 +15960,7 @@ function setFormMultiplierMode(mode, syncToServer = true) {
                     multiplier_type: mode
                 })
             }).then(r => r.json()).then(res => {
+                if (window._pendingMultiplierModes) delete window._pendingMultiplierModes[String(activeStrat.strategy_id).trim()];
                 if (res.success && res.strategy) {
                     Object.assign(activeStrat, res.strategy);
                     renderStraddleAlgosTable(true);
@@ -16003,12 +16020,13 @@ function scheduleAutoMultiplierLiveRecalc() {
                 }
 
                 const estPrice = Math.abs(strike - atmStrike) <= step ? 180.0 : (Math.abs(strike - atmStrike) <= 5 * step ? 50.0 : 10.0);
+                const legLots = Math.max(1, parseInt(leg.lots, 10) || 1);
                 simOrders.push({
                     underlying: und,
                     strike: strike,
                     opt_type: optType,
                     side: side,
-                    lots: 1,
+                    lots: legLots,
                     price: estPrice,
                     selected: true
                 });
@@ -16024,7 +16042,7 @@ function scheduleAutoMultiplierLiveRecalc() {
                             strike: hStrike,
                             opt_type: optType,
                             side: "BUY",
-                            lots: 1,
+                            lots: legLots,
                             price: 6.0,
                             selected: true
                         });
