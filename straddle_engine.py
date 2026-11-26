@@ -3517,6 +3517,7 @@ class StraddleManager:
         expiry_type: str = "Weekly",
         custom_expiry_ms: Optional[int] = None,
         multiple_strike_selection: str = "none",
+        spot_override: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """Resolves the exact option contract matching strike, 500/100 multiple, and expiry."""
         clean_und = str(underlying or "NIFTY").upper().replace(" ", "").replace("(MCX)", "").replace("(NSE)", "").replace("(BSE)", "").strip()
@@ -3528,7 +3529,7 @@ class StraddleManager:
             clean_und = "NATURALGAS"
 
         step = STRIKE_STEPS.get(clean_und, 50)
-        spot_price = self._get_underlying_spot_price(clean_und)
+        spot_price = float(spot_override) if (spot_override is not None and float(spot_override) > 0) else self._get_underlying_spot_price(clean_und)
         atm_strike = round(spot_price / step) * step if spot_price > 0 else 0.0
 
         # Ultra-low latency memory cache (<0.01ms resolution without disk or network) with 60s TTL
@@ -6427,9 +6428,10 @@ class StraddleManager:
         now_sec = ist_now_dt.hour * 3600 + ist_now_dt.minute * 60 + ist_now_dt.second
         now_str = ist_now_dt.strftime("%H:%M:%S")
 
+        is_positional = (str(strat.get("trade_type") or "Intraday").strip().upper() == "POSITIONAL")
         is_before_start = (now_sec < st_sec)
-        is_after_end = (now_sec >= et_sec)
-        is_time_window = (st_sec <= now_sec < et_sec)
+        is_after_end = False if is_positional else (now_sec >= et_sec)
+        is_time_window = (now_sec >= st_sec) if is_positional else (st_sec <= now_sec < et_sec)
 
         # Check No Re-Entry After Cutoff (avoids taking entries / re-executions in last few minutes of algo)
         no_re_cfg = strat.get("no_reentry_after") or {}
@@ -6483,6 +6485,122 @@ class StraddleManager:
         chk = self.get_strategy_schedule_status(strat)
         return chk["is_time_window"]
 
+    def get_strategy_reference_price(self, strat: Dict[str, Any], underlying: Optional[str] = None) -> float:
+        """
+        Resolves the underlying reference price according to `underlying_price_source`:
+        - 'Spot': Cash Index Spot price
+        - 'Futures': Active Near-Month Futures LTP (falls back to Spot)
+        - 'Synthetic Futures': ATM_Strike + (ATM_CE_LTP - ATM_PE_LTP) via Put-Call Parity
+        """
+        und = str(underlying or strat.get("underlying") or "NIFTY").upper()
+        spot = self._get_underlying_spot_price(und)
+        src = str(strat.get("underlying_price_source") or "Spot").strip().lower()
+        if src == "spot" or spot <= 0:
+            return spot
+
+        if "synthetic" in src:
+            try:
+                step = STRIKE_STEPS.get(und, 50)
+                atm_k = round(spot / step) * step
+                ce_c = self.resolve_strike_and_contract(und, "ATM", "CE", spot_override=spot)
+                pe_c = self.resolve_strike_and_contract(und, "ATM", "PE", spot_override=spot)
+                if ce_c and pe_c and ce_c.get("instrument_key") and pe_c.get("instrument_key"):
+                    pmap, _ = self._fetch_live_quotes([ce_c["instrument_key"], pe_c["instrument_key"]])
+                    ce_p = float(pmap.get(ce_c["instrument_key"]) or 0.0)
+                    pe_p = float(pmap.get(pe_c["instrument_key"]) or 0.0)
+                    if ce_p > 0 and pe_p > 0:
+                        return round(atm_k + (ce_p - pe_p), 2)
+            except Exception:
+                pass
+            return spot
+
+        if "future" in src:
+            try:
+                fut_key = UNDERLYING_KEYS.get(und)
+                if fut_key and "FUT" in str(fut_key).upper():
+                    pmap, _ = self._fetch_live_quotes([fut_key])
+                    fp = float(pmap.get(fut_key) or 0.0)
+                    if fp > 0:
+                        return fp
+                # Fallback: search instruments.json.gz for nearest FUT contract
+                inst_path = getattr(config, "DATA_DIR", Path("data")) / "instruments.json.gz"
+                if inst_path.exists():
+                    now_ms = int(time.time() * 1000)
+                    cands = []
+                    with gzip.open(inst_path, "rt", encoding="utf-8") as f:
+                        for r in json.load(f):
+                            if str(r.get("name", "")).upper() == und and str(r.get("instrument_type", "")).upper() == "FUT" and int(r.get("expiry") or 0) >= now_ms:
+                                cands.append(r)
+                    if cands:
+                        cands.sort(key=lambda x: int(x.get("expiry") or 0))
+                        fk = cands[0].get("instrument_key")
+                        if fk:
+                            pmap, _ = self._fetch_live_quotes([fk])
+                            fp = float(pmap.get(fk) or 0.0)
+                            if fp > 0:
+                                return fp
+            except Exception:
+                pass
+            return spot
+
+        return spot
+
+    def check_entry_toggles_condition(self, strat: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Evaluates Wait & Trade (momentum confirmation) and Range Breakout (ORB) toggles
+        before initial strategy entry.
+        """
+        toggles = strat.get("toggles") or {}
+        wt_on = bool(toggles.get("wait_and_trade") or strat.get("wait_and_trade"))
+        orb_on = bool(toggles.get("range_breakout") or strat.get("range_breakout"))
+        if not wt_on and not orb_on:
+            return True, "OK"
+
+        und = str(strat.get("underlying") or "NIFTY").upper()
+        ref_p = self.get_strategy_reference_price(strat, und)
+        if ref_p <= 0:
+            return False, f"Waiting for {und} price"
+
+        today_s = today_ist_str()
+        if wt_on and (strat.get("_wt_date") != today_s or not strat.get("_wt_ref_price")):
+            strat["_wt_date"] = today_s
+            strat["_wt_ref_price"] = ref_p
+            strat["_wt_triggered"] = False
+
+        if orb_on:
+            if strat.get("_orb_date") != today_s:
+                strat["_orb_date"] = today_s
+                strat["_orb_high"] = ref_p
+                strat["_orb_low"] = ref_p
+                strat["_orb_broken"] = False
+                return False, f"Establishing Opening Range (ORB: {ref_p:.1f})"
+            prev_h = float(strat.get("_orb_high") or ref_p)
+            prev_l = float(strat.get("_orb_low") or ref_p)
+            if not strat.get("_orb_broken"):
+                if prev_h > prev_l and (ref_p > prev_h or ref_p < prev_l):
+                    strat["_orb_broken"] = True
+                else:
+                    strat["_orb_high"] = max(prev_h, ref_p)
+                    strat["_orb_low"] = min(prev_l, ref_p)
+                    return False, f"Waiting for Range Breakout (ORB: {strat['_orb_low']:.1f} - {strat['_orb_high']:.1f}, LTP: {ref_p:.1f})"
+
+        if wt_on:
+            if strat.get("_wt_date") != today_s or not strat.get("_wt_ref_price"):
+                strat["_wt_date"] = today_s
+                strat["_wt_ref_price"] = ref_p
+                strat["_wt_triggered"] = False
+            wt_ref = float(strat["_wt_ref_price"])
+            adv = strat.get("advanced_settings") or strat.get("advanced") or {}
+            wt_pct = max(0.05, float(adv.get("wait_and_trade_pct") or 0.15))
+            move_pct = abs(ref_p - wt_ref) / wt_ref * 100.0 if wt_ref > 0 else 0.0
+            if not strat.get("_wt_triggered"):
+                if move_pct >= wt_pct:
+                    strat["_wt_triggered"] = True
+                else:
+                    return False, f"Waiting for Wait & Trade momentum ({move_pct:.2f}% / {wt_pct:.2f}%)"
+
+        return True, "Entry toggles satisfied"
+
     def check_premium_matching_condition(self, strat: Dict[str, Any]) -> Tuple[bool, str]:
         """
         Evaluates whether the strategy's configured Premium Matching & Range condition is satisfied.
@@ -6534,8 +6652,8 @@ class StraddleManager:
         if len(eval_legs) < 2:
             return True, "Fewer than 2 legs configured"
 
-        # Fetch underlying spot price to resolve dynamic strikes
-        spot_price = self._get_underlying_spot_price(und)
+        # Fetch underlying reference price (Spot / Futures / Synthetic Futures) to resolve dynamic strikes
+        spot_price = self.get_strategy_reference_price(strat, und)
         if spot_price <= 0:
             res = (False, f"Waiting for {und} Spot price")
             strat["_last_prem_match_res"] = res[0]
@@ -6551,6 +6669,7 @@ class StraddleManager:
                 option_type=leg.get("option_type", "CE"),
                 expiry_type=leg.get("expiry", "Weekly"),
                 multiple_strike_selection=leg.get("multiple_strike_selection", "none"),
+                spot_override=spot_price,
             )
             if not c or not c.get("instrument_key"):
                 res = (False, f"Resolving {leg.get('option_type', 'CE')} contract")
@@ -6566,10 +6685,8 @@ class StraddleManager:
         p2 = float(cached_p.get(leg_keys[1]) or 0.0)
 
         if p1 <= 0.0 or p2 <= 0.0:
-            res = (False, "Waiting for live option quotes")
-            strat["_last_prem_match_res"] = res[0]
-            strat["_last_prem_match_reason"] = res[1]
-            return res
+            strat["_last_prem_match_ts"] = 0.0  # Do not throttle when quotes haven't arrived yet
+            return False, "Waiting for live option quotes"
 
         lbl1 = eval_legs[0].get("option_type", "CE")
         lbl2 = eval_legs[1].get("option_type", "PE")
@@ -16353,6 +16470,12 @@ class StraddleManager:
                         is_waiting_pm = "Waiting for Premium Matching" in err_str
                         cooldown_req = 0 if is_waiting_pm or last_attempt <= 0 else (60 if err_str and not err_str.startswith("Waiting for") else 0)
                         if not entry_in_prog and not strat.get("_manual_reset") and strat.get("last_trade_date") != today_s and (now_ts - last_attempt >= cooldown_req):
+                            # Evaluate Wait & Trade / Range Breakout toggles if enabled
+                            is_tog_ok, tog_reason = self.check_entry_toggles_condition(strat)
+                            if not is_tog_ok:
+                                strat["entry_error"] = tog_reason
+                                continue
+
                             # Evaluate Premium Matching & Range condition if enabled
                             is_pm_matched, pm_reason = self.check_premium_matching_condition(strat)
                             if not is_pm_matched:
@@ -16882,26 +17005,42 @@ class StraddleManager:
                                 self._log_event(f"Stoploss exit order failed for {pos.get('symbol')}. Re-entry aborted.", level="ERROR")
                             continue
 
-                # Move SL to Cost Check (Quantiply standard: when ANY leg hits target or SL and completes)
+                # Move SL to Cost Check (Quantiply standard: when ANY main leg hits target or SL and completes)
                 toggles = strat.get("toggles", {})
                 move_sl_active = bool(toggles.get("move_sl_to_cost") or strat.get("move_sl_to_cost"))
                 if move_sl_active:
-                    has_completed_leg = any(p.get("status") == "COMPLETE" for p in strat_positions)
+                    has_completed_leg = any(
+                        p.get("status") == "COMPLETE" and not p.get("is_associated_hedge")
+                        for p in strat_positions
+                    )
                     if has_completed_leg:
+                        adv_sl_cfg = strat.get("advanced_settings") or strat.get("advanced") or {}
+                        sl_buf_pct = float(adv_sl_cfg.get("exit_buffer_val") or adv_sl_cfg.get("exit_buffer_value") or 5.0)
+                        if sl_buf_pct <= 0:
+                            sl_buf_pct = 5.0
                         for other_p in strat_positions:
-                            if other_p.get("status") == "OPEN" and not other_p.get("_sl_moved_to_cost"):
+                            if other_p.get("status") == "OPEN" and not other_p.get("is_associated_hedge") and not other_p.get("_sl_moved_to_cost"):
                                 ent_p = float(other_p.get("avg_ent_price", 0.0))
                                 if ent_p > 0:
                                     old_sl = other_p.get("sl_price")
                                     other_p["sl_price"] = ent_p
                                     other_p["_sl_moved_to_cost"] = True
+                                    other_p["sl_moved_to_cost"] = True
+                                    strat["_sl_moved_to_cost_triggered"] = True
                                     self._log_event(f"[Move SL to Cost] SL for {other_p['symbol']} updated from ₹{old_sl} to Cost ₹{ent_p:.2f}")
-                                    # If this leg had an active broker advance SL order, update it to cost
+                                    # If this leg had an active broker advance SL order, update it to cost with proper limit buffer
                                     adv_sl_oid = other_p.get("sl_broker_order_id")
                                     if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
                                         try:
-                                            broker.modify_order(str(adv_sl_oid), price=ent_p, trigger_price=ent_p)
-                                            self._log_event(f"[Move SL to Cost] Broker SL order {adv_sl_oid} modified to cost ₹{ent_p:.2f}")
+                                            sl_side = "BUY" if str(other_p.get("side", "SELL")).upper() == "SELL" else "SELL"
+                                            lim_sl_p = round_to_tick(
+                                                max(ent_p + 0.05, ent_p * (1.0 + sl_buf_pct / 100.0))
+                                                if sl_side == "BUY"
+                                                else min(max(0.05, ent_p - 0.05), ent_p * (1.0 - sl_buf_pct / 100.0)),
+                                                0.05
+                                            )
+                                            broker.modify_order(str(adv_sl_oid), price=lim_sl_p, trigger_price=ent_p, order_type="SL", quantity=other_p.get("quantity"))
+                                            self._log_event(f"[Move SL to Cost] Broker SL order {adv_sl_oid} modified to trigger ₹{ent_p:.2f}, limit ₹{lim_sl_p:.2f}")
                                         except Exception as e_m:
                                             logger.warning(f"Error modifying broker SL order to cost: {e_m}")
 

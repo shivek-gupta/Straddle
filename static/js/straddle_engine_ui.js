@@ -8302,7 +8302,7 @@ function populateStraddleSettingsForm(s) {
         combToggle.checked = !!(pm.combined_premium_type && pm.combined_premium_type !== "None");
     }
     if (document.getElementById("cfgCombinedPremType")) {
-        document.getElementById("cfgCombinedPremType").value = pm.combined_premium_type || "Lower than";
+        document.getElementById("cfgCombinedPremType").value = (pm.combined_premium_type && pm.combined_premium_type !== "None") ? pm.combined_premium_type : "Lower than";
     }
     if (document.getElementById("cfgCombinedPremVal")) {
         document.getElementById("cfgCombinedPremVal").value = pm.combined_premium_value !== undefined ? pm.combined_premium_value : "";
