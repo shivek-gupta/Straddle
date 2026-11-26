@@ -3225,6 +3225,31 @@
 
                         <div id="sec_builder_autosizing" class="straddle-collapsible-body collapsed"
                             style="display:none;">
+                            <!-- Multiplier Mode & Base Cushion Control Bar (Synced with Section 1) -->
+                            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; background:#050608; border:1px solid rgba(56,189,248,0.22); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
+                                <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span style="font-size:11.5px; font-weight:700; color:#cbd5e1;">Multiplier Mode:</span>
+                                        <div style="display:inline-flex; background:#0b1120; border:1px solid #252836; border-radius:6px; overflow:hidden;">
+                                            <button type="button" id="sec8BtnMultManual" onclick="setFormMultiplierMode('MANUAL')" style="background:#2563eb; color:#fff; border:none; padding:4px 12px; font-size:11px; font-weight:800; cursor:pointer;">Manual</button>
+                                            <button type="button" id="sec8BtnMultAuto" onclick="setFormMultiplierMode('AUTO')" style="background:#161822; color:#94a3b8; border:none; padding:4px 12px; font-size:11px; font-weight:800; cursor:pointer;">Auto</button>
+                                        </div>
+                                    </div>
+
+                                    <div id="sec8GrpManualMult" style="display:flex; align-items:center; gap:8px;">
+                                        <span style="font-size:11.5px; font-weight:700; color:#94a3b8;">Lots Multiplier:</span>
+                                        <input type="number" id="sec8MultiplierInput" class="straddle-input" style="width:72px; text-align:center; font-weight:800;" value="1" min="1" max="100" oninput="syncSec8ManualMult(this.value)">
+                                    </div>
+
+                                    <div id="sec8GrpAutoCushion" style="display:none; align-items:center; gap:8px; flex-wrap:wrap;">
+                                        <span style="font-size:11.5px; font-weight:700; color:#94a3b8;">Base Buffer / Cushion per Lot (₹):</span>
+                                        <input type="number" id="sec8CushionMarginInput" class="straddle-input" style="width:105px; text-align:center; font-weight:800;" value="15000" min="0" step="1000" oninput="syncSec8CushionMargin(this.value)">
+                                        <span id="sec8AutoMultBadge" style="font-size:11.5px; color:#38bdf8; font-weight:800; padding:4px 8px; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); border-radius:4px; white-space:nowrap;">⚡ Auto: -- Lots</span>
+                                    </div>
+                                </div>
+                                <span style="font-size:10.5px; color:#64748b;">Synced with Positions / Legs Multiplier</span>
+                            </div>
+
                             <div class="straddle-grid-3col" style="gap:14px;">
 
                                 <!-- Card 1: Day-Lock Symmetry -->

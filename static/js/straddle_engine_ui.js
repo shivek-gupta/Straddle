@@ -16130,6 +16130,9 @@ function updateFormAutoMultiplierPreview(overrideMargin) {
         badge.style.background = "rgba(248, 113, 113, 0.1)";
         badge.title = `Live Available Capital (₹${avail.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) is less than Required Margin per lot (₹${totalPerLot.toLocaleString('en-IN', { maximumFractionDigits: 0 })}). Minimum ₹${totalPerLot.toLocaleString('en-IN', { maximumFractionDigits: 0 })} needed for 1 lot.`;
     }
+    if (typeof syncSec8MultiplierBar === "function") {
+        syncSec8MultiplierBar();
+    }
 }
 window.updateFormAutoMultiplierPreview = updateFormAutoMultiplierPreview;
 

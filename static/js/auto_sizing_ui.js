@@ -92,6 +92,67 @@
                 bPf.style.background = "rgba(100,116,139,0.15)";
             }
         }
+        syncSec8MultiplierBar();
+    }
+
+    function syncSec8MultiplierBar() {
+        const isAutoMode = document.getElementById("grpAutoMultiplier")?.style.display !== "none";
+        const btnMan = document.getElementById("sec8BtnMultManual");
+        const btnAuto = document.getElementById("sec8BtnMultAuto");
+        const grpMan = document.getElementById("sec8GrpManualMult");
+        const grpAuto = document.getElementById("sec8GrpAutoCushion");
+
+        if (btnMan) {
+            btnMan.style.background = !isAutoMode ? "#2563eb" : "#161822";
+            btnMan.style.color = !isAutoMode ? "#fff" : "#94a3b8";
+        }
+        if (btnAuto) {
+            btnAuto.style.background = isAutoMode ? "#059669" : "#161822";
+            btnAuto.style.color = isAutoMode ? "#fff" : "#94a3b8";
+        }
+        if (grpMan) grpMan.style.display = !isAutoMode ? "flex" : "none";
+        if (grpAuto) grpAuto.style.display = isAutoMode ? "flex" : "none";
+
+        const srcMult = document.getElementById("cfgMultiplier");
+        const dstMult = document.getElementById("sec8MultiplierInput");
+        if (srcMult && dstMult && document.activeElement !== dstMult) {
+            dstMult.value = srcMult.value || 1;
+        }
+
+        const srcCush = document.getElementById("cfgCushionMargin");
+        const dstCush = document.getElementById("sec8CushionMarginInput");
+        if (srcCush && dstCush && document.activeElement !== dstCush) {
+            dstCush.value = srcCush.value || 15000;
+        }
+
+        const srcBadge = document.getElementById("cfgAutoMultBadge");
+        const dstBadge = document.getElementById("sec8AutoMultBadge");
+        if (srcBadge && dstBadge) {
+            dstBadge.innerHTML = srcBadge.innerHTML;
+            dstBadge.style.color = srcBadge.style.color;
+            dstBadge.style.background = srcBadge.style.background;
+            dstBadge.title = srcBadge.title;
+        }
+    }
+
+    function syncSec8ManualMult(val) {
+        const num = Math.max(1, parseInt(val, 10) || 1);
+        const srcMult = document.getElementById("cfgMultiplier");
+        if (srcMult) srcMult.value = num;
+        if (typeof onFormManualMultiplierChange === "function") {
+            onFormManualMultiplierChange(num);
+        }
+        syncSec8MultiplierBar();
+    }
+
+    function syncSec8CushionMargin(val) {
+        const num = Math.max(0, parseFloat(val) || 0);
+        const srcCush = document.getElementById("cfgCushionMargin");
+        if (srcCush) srcCush.value = num;
+        if (typeof onFormCushionMarginChange === "function") {
+            onFormCushionMarginChange(num);
+        }
+        setTimeout(syncSec8MultiplierBar, 10);
     }
 
     function populateAutoSizingForm(s) {
@@ -145,4 +206,7 @@
     window.onAutoSizingFieldChange = onAutoSizingFieldChange;
     window.populateAutoSizingForm = populateAutoSizingForm;
     window.serializeAutoSizingSettings = serializeAutoSizingSettings;
+    window.syncSec8MultiplierBar = syncSec8MultiplierBar;
+    window.syncSec8ManualMult = syncSec8ManualMult;
+    window.syncSec8CushionMargin = syncSec8CushionMargin;
 })();
