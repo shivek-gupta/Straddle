@@ -61,6 +61,11 @@ def now_ist_str() -> str:
     return now_ist().strftime("%H:%M:%S")
 
 
+def now_ist_ms_str() -> str:
+    dt = now_ist()
+    return f"{dt.strftime('%H:%M:%S')}.{dt.microsecond // 1000:03d}"
+
+
 def today_ist_str() -> str:
     return now_ist().strftime("%Y-%m-%d")
 
@@ -1151,6 +1156,24 @@ class StraddleManager:
                 slippage_pts = round(broker_price - paper_price, 2)
             slippage_inr = round(slippage_pts * quantity, 2)
 
+            broker_sent_time = str(broker_order_res.get("broker_sent_time") or "")
+            broker_send_ms = broker_order_res.get("broker_send_ms")
+            if broker_send_ms is not None:
+                broker_send_ms = round(float(broker_send_ms), 1)
+            else:
+                broker_send_ms = ack_latency_ms
+            if not broker_sent_time:
+                broker_sent_time = dispatch_time_str
+
+            exchange_filled_time = str(broker_order_res.get("exchange_filled_time") or "")
+            exchange_fill_ms = broker_order_res.get("exchange_fill_ms")
+            if exchange_fill_ms is not None:
+                exchange_fill_ms = round(float(exchange_fill_ms), 1)
+            else:
+                exchange_fill_ms = 0.0
+            if not exchange_filled_time:
+                exchange_filled_time = now_ist_ms_str() if broker_success else "-"
+
             benchmark_entry = {
                 "id": f"bmk_{int(time.time()*1000)}_{random.randint(100, 999)}",
                 "strategy_id": (strat.get("strategy_id") or strat.get("id")) if strat else "",
@@ -1160,10 +1183,15 @@ class StraddleManager:
                 "action": action_type.upper(),
                 "quantity": quantity,
                 "dispatch_time": dispatch_time_str,
+                "signal_time": dispatch_time_str,
+                "broker_sent_time": broker_sent_time,
+                "broker_send_ms": broker_send_ms,
+                "exchange_filled_time": exchange_filled_time,
+                "exchange_fill_ms": exchange_fill_ms,
                 "paper_time": dispatch_time_str,
                 "paper_price": paper_price,
                 "broker_ack_ms": ack_latency_ms,
-                "broker_fill_time": now_ist_str(),
+                "broker_fill_time": exchange_filled_time if exchange_filled_time != "-" else now_ist_ms_str(),
                 "broker_price": broker_price,
                 "broker_latency_ms": ack_latency_ms,
                 "slippage_pts": slippage_pts,
@@ -6935,8 +6963,8 @@ class StraddleManager:
                 if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
                     all_buys_filled = True
                     unfilled_reasons = []
-                    # Safe 150ms polling for instant confirmation of filled hedge orders without hitting broker rate limit
-                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.15): oid for oid in buy_oids}
+                    # Adaptive 25ms polling for ultra-fast confirmation of filled hedge orders
+                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.025): oid for oid in buy_oids}
                     for fut in concurrent.futures.as_completed(v_futs):
                         res = fut.result()
                         if not res.get("filled"):
@@ -7234,7 +7262,7 @@ class StraddleManager:
         total_lots = lots * multiplier
         sliced_lots = slice_lots_by_freeze(total_lots, und_name)
         t_entry_dispatch = time.perf_counter()
-        entry_dispatch_ist = now_ist_str()
+        entry_dispatch_ist = now_ist_ms_str()
 
         if len(sliced_lots) > 1:
             self._log_event(
@@ -7333,13 +7361,24 @@ class StraddleManager:
             order_ack_ms = round((time.perf_counter() - t_order_send_start) * 1000.0, 1)
             if "ack_ms" not in order_res:
                 order_res["ack_ms"] = order_ack_ms
+            if "broker_sent_time" not in order_res:
+                order_res["broker_sent_time"] = now_ist_ms_str()
+            order_res["broker_send_ms"] = order_res.get("ack_ms", order_ack_ms)
+
+        t_broker_ack_perf = time.perf_counter()
+        if isinstance(order_res, dict):
+            if "broker_sent_time" not in order_res:
+                order_res["broker_sent_time"] = now_ist_ms_str()
+            if "broker_send_ms" not in order_res:
+                order_res["broker_send_ms"] = order_res.get("ack_ms") or round((t_broker_ack_perf - t_entry_dispatch) * 1000.0, 1)
 
         # Live Broker fill synchronization and hedge guard
         placed_oid = str(order_res.get("order_id") or "")
         if order_res.get("success") and exec_mode == "LIVE_BROKER" and placed_oid and not placed_oid.startswith("PAPER_") and not placed_oid.startswith("ORD_"):
             # Generous timeout for live Kotak Neo fills: 8.0s for BUY hedges, 12.0s for main SELL legs
             timeout_sec = 8.0 if is_buy_hedge else 12.0
-            fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.15)
+            fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.025)
+            t_fill_perf = time.perf_counter()
 
             fill_err_lower = str(fill_res.get("error") or "").lower()
             is_timeout = (
@@ -7354,6 +7393,8 @@ class StraddleManager:
                 if actual_traded_price > 0:
                     order_res["price"] = actual_traded_price
                     order_res["status"] = "COMPLETE"
+                order_res["exchange_filled_time"] = fill_res.get("exchange_filled_time") or now_ist_ms_str()
+                order_res["exchange_fill_ms"] = round((t_fill_perf - t_broker_ack_perf) * 1000.0, 1)
             elif not is_timeout and (fill_res.get("status") in ("REJECTED", "CANCELLED") or fill_res.get("error")):
                 # Genuine broker rejection (not a timeout)
                 rej_err = fill_res.get("error") or f"Order {fill_res.get('status', 'rejected')}"
@@ -11049,7 +11090,7 @@ class StraddleManager:
 
         qty_slices = slice_quantity_by_freeze(qty, lot_size, und)
         t_exit_dispatch = time.perf_counter()
-        exit_dispatch_ist = now_ist_str()
+        exit_dispatch_ist = now_ist_ms_str()
 
         if len(qty_slices) > 1:
             logger.info(f"[AUTO SLICING EXIT] Quantity {qty} exceeds {und} freeze limit. Auto-sliced into {len(qty_slices)} orders: {qty_slices}")
@@ -11079,7 +11120,9 @@ class StraddleManager:
                 total_filled_qty = sum(cr["slice_qty"] for cr in successful_slices)
                 order_ids = [str(cr["res"].get("order_id", "")) for cr in successful_slices if cr["res"].get("order_id")]
                 order_id = order_ids[0] if order_ids else ""
-                order_res = {"success": True, "order_id": order_id, "child_order_ids": order_ids, "sliced": True}
+                first_sent = next((cr["res"].get("broker_sent_time") for cr in successful_slices if cr["res"].get("broker_sent_time")), now_ist_ms_str())
+                fastest_ack = min((float(cr["res"].get("ack_ms")) for cr in successful_slices if cr["res"].get("ack_ms")), default=round((time.perf_counter() - t_exit_dispatch) * 1000.0, 1))
+                order_res = {"success": True, "order_id": order_id, "child_order_ids": order_ids, "sliced": True, "ack_ms": fastest_ack, "broker_sent_time": first_sent}
                 weighted_price_sum = sum(cr["slice_qty"] * float(cr["res"].get("price") or ltp) for cr in successful_slices)
                 order_res["price"] = round(weighted_price_sum / total_filled_qty, 2)
             else:
@@ -11100,21 +11143,42 @@ class StraddleManager:
                 logger.error(f"Exception placing broker exit order for {pos.get('symbol')}: {e}")
                 order_res = {"success": False, "error": str(e)}
 
-        # Record shadow paper benchmark comparison on exit
-        try:
-            self._record_shadow_benchmark(
-                strat=strat,
-                pos=pos,
-                symbol=pos.get("symbol", ""),
-                side=exit_side,
-                quantity=qty,
-                dispatch_perf_t=t_exit_dispatch,
-                dispatch_time_str=exit_dispatch_ist,
-                broker_order_res=order_res,
-                action_type="EXIT"
-            )
-        except Exception as e_bmk:
-            logger.warning(f"Error recording exit benchmark: {e_bmk}")
+        t_exit_broker_ack = time.perf_counter()
+        if isinstance(order_res, dict):
+            if "broker_sent_time" not in order_res:
+                order_res["broker_sent_time"] = now_ist_ms_str()
+            if "ack_ms" not in order_res:
+                order_res["ack_ms"] = round((t_exit_broker_ack - t_exit_dispatch) * 1000.0, 1)
+            order_res["broker_send_ms"] = order_res.get("ack_ms")
+
+        # Record shadow paper benchmark comparison asynchronously on exit (zero impact on exit latency)
+        order_res_snap = dict(order_res) if isinstance(order_res, dict) else {"success": False}
+        def _bg_exit_benchmark():
+            try:
+                exit_oid = str(order_res_snap.get("order_id") or "")
+                if order_res_snap.get("success") and exit_oid and not exit_oid.startswith("PAPER_") and not exit_oid.startswith("ORD_") and hasattr(broker, "wait_for_order_fill"):
+                    t_fill_start = time.perf_counter()
+                    f_res = broker.wait_for_order_fill(exit_oid, timeout_sec=4.0, poll_interval_sec=0.025)
+                    if f_res.get("filled"):
+                        fill_p = float(f_res.get("price") or 0.0)
+                        if fill_p > 0:
+                            order_res_snap["price"] = fill_p
+                        order_res_snap["exchange_filled_time"] = f_res.get("exchange_filled_time") or now_ist_ms_str()
+                        order_res_snap["exchange_fill_ms"] = round((time.perf_counter() - t_fill_start) * 1000.0, 1)
+                self._record_shadow_benchmark(
+                    strat=strat,
+                    pos=pos,
+                    symbol=pos.get("symbol", ""),
+                    side=exit_side,
+                    quantity=qty,
+                    dispatch_perf_t=t_exit_dispatch,
+                    dispatch_time_str=exit_dispatch_ist,
+                    broker_order_res=order_res_snap,
+                    action_type="EXIT"
+                )
+            except Exception as e_bmk:
+                logger.warning(f"Error recording exit benchmark: {e_bmk}")
+        threading.Thread(target=_bg_exit_benchmark, daemon=True).start()
 
         # Format exit reason cleanly (check HEDGE before STOPLOSS/TARGET so hedge exits aren't mislabeled)
         r_clean = reason

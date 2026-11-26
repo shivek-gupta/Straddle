@@ -29,9 +29,26 @@ import concurrent.futures
 _ORDER_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=16, thread_name_prefix="KotakFastOrder")
 _TAG_SEQ = 0
 _TAG_LOCK = threading.Lock()
-_ORDER_DISPATCH_LOCK = threading.Lock()
-_LAST_ORDER_DISPATCH_TIME = 0.0
-_MIN_ORDER_SPACING_SEC = 0.20  # 200ms minimum spacing between order dispatches to Kotak Neo to prevent core RMS lock collisions
+_IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30)) if hasattr(datetime, "timezone") else None
+
+
+def _now_ist_ms_str() -> str:
+    """Returns current IST timestamp with millisecond precision (HH:MM:SS.mmm)."""
+    from datetime import timezone, timedelta
+    ist = timezone(timedelta(hours=5, minutes=30))
+    dt = datetime.now(ist)
+    return f"{dt.strftime('%H:%M:%S')}.{dt.microsecond // 1000:03d}"
+
+
+def _next_unique_tag(tag_prefix: str) -> str:
+    """Thread-safe, lock-free-speed unique tag generator (<1us) to prevent Kotak Issue #30 collisions."""
+    global _TAG_SEQ
+    clean_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(tag_prefix))[:5] or "algo"
+    with _TAG_LOCK:
+        _TAG_SEQ = (_TAG_SEQ + 1) % 1000
+        seq = _TAG_SEQ
+    epoch_sub = int(time.time() * 1000) % 1000000
+    return f"{clean_prefix}{epoch_sub:06d}{seq:03d}"
 
 KOTAK_AUTH_ERROR_PATTERNS = (
     "2fa",
@@ -461,20 +478,40 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         # In NSE F&O (Options), pure Market ('MKT') orders are strictly blocked by Kotak Neo core RMS
         # and trigger 'error from core'. Always convert 'MKT' in 'nse_fo' into an instantaneous
         # Marketable Limit order with price protection ceiling/floor:
-        if segment == "nse_fo" and clean_ot == "MKT":
-            clean_ot = "L"
-            p_flt = float(price or 0.0)
-            if p_flt <= 0 and (instrument_key or symbol):
+        def _fast_ltp_lookup() -> float:
+            try:
+                from straddle_engine import get_straddle_manager
+                mgr = get_straddle_manager()
+                if mgr is not None:
+                    for k in (instrument_key, symbol, canonical_symbol):
+                        if not k:
+                            continue
+                        mc = getattr(mgr, "_minute_candles", {}).get(k)
+                        if mc:
+                            last_b = list(mc.values())[-1]
+                            v = float(last_b.get("close") or last_b.get("ltp") or 0.0)
+                            if v > 0:
+                                return v
+            except Exception:
+                pass
+            if instrument_key or symbol:
                 try:
                     q_res = self.get_live_quotes([instrument_key or symbol])
                     if q_res and isinstance(q_res, dict):
                         q_data = q_res.get(instrument_key) or q_res.get(symbol) or {}
                         if isinstance(q_data, dict):
-                            p_flt = float(q_data.get("ltp") or q_data.get("last_price") or 0.0)
+                            return float(q_data.get("ltp") or q_data.get("last_price") or 0.0)
                         elif isinstance(q_data, (int, float)):
-                            p_flt = float(q_data)
+                            return float(q_data)
                 except Exception as e_q:
                     logger.debug(f"Note fetching live quote for MKT order conversion: {e_q}")
+            return 0.0
+
+        if segment == "nse_fo" and clean_ot == "MKT":
+            clean_ot = "L"
+            p_flt = float(price or 0.0)
+            if p_flt <= 0:
+                p_flt = _fast_ltp_lookup()
 
             if clean_tt == "B":
                 # Marketable Buy limit order: Scaled buffer so order executes immediately without rejection or LPP breach
@@ -495,15 +532,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         elif clean_ot in ("L", "SL"):
             p_flt = float(price or 0.0)
             if p_flt <= 0:
-                if instrument_key or symbol:
-                    try:
-                        q_res = self.get_live_quotes([instrument_key or symbol])
-                        if q_res and isinstance(q_res, dict):
-                            q_data = q_res.get(instrument_key) or q_res.get(symbol) or {}
-                            if isinstance(q_data, dict):
-                                p_flt = float(q_data.get("ltp") or q_data.get("last_price") or 0.0)
-                    except Exception:
-                        pass
+                p_flt = _fast_ltp_lookup()
                 if p_flt <= 0:
                     p_flt = 5.0 if clean_tt == "B" else 0.05
             clean_price = str(round_to_tick(max(0.05, p_flt), tick_size=tick_size))
@@ -521,34 +550,26 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         # If tag is passed and retry_depth == 0, generate an epoch-unique alphanumeric tag.
         # On ANY retry (retry_depth > 0) or error recovery, ALWAYS pass tag=None to guarantee 100% core acceptance!
         if tag and retry_depth == 0:
-            clean_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(tag))[:6] or "algo"
-            epoch_sub = int(time.time() * 1000) % 1000000
-            unique_tag = f"{clean_prefix}{epoch_sub:06d}"
+            unique_tag = _next_unique_tag(tag)
         else:
             unique_tag = None
 
         t_order_call_start = time.perf_counter()
         try:
-            with _ORDER_DISPATCH_LOCK:
-                global _LAST_ORDER_DISPATCH_TIME
-                now_t = time.perf_counter()
-                elapsed = now_t - _LAST_ORDER_DISPATCH_TIME
-                if elapsed < _MIN_ORDER_SPACING_SEC:
-                    time.sleep(_MIN_ORDER_SPACING_SEC - elapsed)
-                _LAST_ORDER_DISPATCH_TIME = time.perf_counter()
-
-                res = client.place_order(
-                    exchange_segment=segment,
-                    product=clean_prod,
-                    price=clean_price,
-                    order_type=clean_ot,
-                    quantity=clean_qty,
-                    validity="DAY",
-                    trading_symbol=canonical_symbol,
-                    transaction_type=clean_tt,
-                    trigger_price=clean_trig,
-                    tag=unique_tag
-                )
+            # Fire concurrently over HTTP/2 (httpx.Client is thread-safe); no artificial 200ms serialization lock!
+            res = client.place_order(
+                exchange_segment=segment,
+                product=clean_prod,
+                price=clean_price,
+                order_type=clean_ot,
+                quantity=clean_qty,
+                validity="DAY",
+                trading_symbol=canonical_symbol,
+                transaction_type=clean_tt,
+                trigger_price=clean_trig,
+                tag=unique_tag
+            )
+            broker_sent_ist = _now_ist_ms_str()
             order_call_ack_ms = round((time.perf_counter() - t_order_call_start) * 1000.0, 1)
             logger.info(f"[Kotak Neo] Order slice ({clean_qty} qty) response: {res}")
 
@@ -754,6 +775,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 "data": res,
                 "quantity": int(quantity),
                 "ack_ms": order_call_ack_ms,
+                "broker_sent_time": broker_sent_ist,
             }
         except Exception as e:
             err_str = str(e)
@@ -937,6 +959,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     weighted_prc_sum += (q * p)
                     total_f_qty += q
             slice_avg_p = round(weighted_prc_sum / max(1, total_f_qty), 2) if total_f_qty > 0 else float(price or 0.0)
+            first_sent_time = next((r.get("broker_sent_time") for r in slice_results if r.get("broker_sent_time")), _now_ist_ms_str())
             return {
                 "success": all_succeeded,
                 "order_id": primary_id,
@@ -948,6 +971,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                 "remaining_qty": failed_qty,
                 "price": slice_avg_p,
                 "ack_ms": fastest_slice_ack_ms,
+                "broker_sent_time": first_sent_time,
                 "error": failed_error if not all_succeeded else None,
                 "data": slice_results[0].get("data") if slice_results else {}
             }
@@ -1214,11 +1238,12 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             }
 
         start_t = time.time()
-        # Enforce minimum 150ms poll spacing to respect Kotak Neo rate limits and prevent socket exhaustion
-        poll_interval_sec = max(0.15, float(poll_interval_sec or 0.15))
-        logger.debug(f"[Kotak Neo] Polling order {oid_str} until FILLED (timeout={timeout_sec}s, poll={poll_interval_sec}s)...")
+        base_poll = max(0.025, float(poll_interval_sec or 0.025))
+        poll_count = 0
+        logger.debug(f"[Kotak Neo] Polling order {oid_str} until FILLED (timeout={timeout_sec}s, base_poll={base_poll}s)...")
 
         while time.time() - start_t < timeout_sec:
+            poll_count += 1
             try:
                 hist = client.order_history(order_id=oid_str)
                 items = []
@@ -1242,6 +1267,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                     if traded_it:
                         avg_p = float(traded_it.get("avgPrc", traded_it.get("prc", 0.0)) or 0.0)
                         f_qty = int(traded_it.get("fldQty", traded_it.get("qty", 0)) or 0)
+                        fill_ist = _now_ist_ms_str()
                         logger.info(f"[Kotak Neo] Order {oid_str} confirmed FILLED: avg_price={avg_p}, qty={f_qty}")
                         return {
                             "filled": True,
@@ -1249,6 +1275,7 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
                             "order_id": oid_str,
                             "price": avg_p,
                             "filled_quantity": f_qty,
+                            "exchange_filled_time": fill_ist,
                             "data": traded_it,
                         }
                     # If any item is open or trigger pending, order is alive
@@ -1272,7 +1299,9 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
             except Exception as e:
                 logger.debug(f"[Kotak Neo] Exception checking order {oid_str} history: {e}")
 
-            time.sleep(poll_interval_sec)
+            # Adaptive polling: ultra-fast 25ms for first 3 checks, then 50ms, 100ms, 150ms
+            step_sleep = base_poll if poll_count <= 3 else (0.05 if poll_count <= 7 else (0.10 if poll_count <= 12 else 0.15))
+            time.sleep(max(base_poll, step_sleep))
 
         # Fallback check against active broker order report
         try:

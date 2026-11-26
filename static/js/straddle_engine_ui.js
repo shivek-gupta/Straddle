@@ -19653,9 +19653,11 @@ function renderExecutionBenchmarkData(bmk) {
     if (!tbody) return;
     const orders = bmk.orders || [];
     if (orders.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:28px; color:#64748b;">No benchmark executions recorded yet. Start live trading to observe parallel benchmark comparison.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:28px; color:#64748b;">No benchmark executions recorded yet. Start live trading to observe parallel benchmark comparison.</td></tr>';
         return;
     }
+
+    const _msColor = (msVal) => msVal <= 50 ? '#38bdf8' : (msVal <= 150 ? '#fbbf24' : '#f43f5e');
 
     let html = "";
     orders.slice().reverse().forEach(o => {
@@ -19666,15 +19668,28 @@ function renderExecutionBenchmarkData(bmk) {
         const stColor = isFilled ? '#10b981' : '#f43f5e';
         const sideColor = String(o.side).toUpperCase() === 'BUY' ? '#38bdf8' : '#fb923c';
 
+        const sigTime = o.signal_time || o.dispatch_time || '-';
+        const bSentTime = o.broker_sent_time || o.dispatch_time || '-';
+        const bSendMsVal = (o.broker_send_ms !== undefined && o.broker_send_ms !== null)
+            ? Number(o.broker_send_ms)
+            : Number(o.broker_ack_ms !== undefined ? o.broker_ack_ms : (o.broker_latency_ms || 0));
+        const exFillTime = o.exchange_filled_time || o.broker_fill_time || '-';
+        const exFillMsVal = (o.exchange_fill_ms !== undefined && o.exchange_fill_ms !== null)
+            ? Number(o.exchange_fill_ms)
+            : null;
+        const exFillBracket = exFillMsVal !== null ? `<span style="color:${_msColor(exFillMsVal)}; font-weight:700;">(${exFillMsVal.toFixed(0)} ms)</span>` : '';
+
         html += `
             <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-                <td style="padding:6px 4px; color:#94a3b8;">${o.dispatch_time || '-'}</td>
+                <td style="padding:6px 4px; color:#94a3b8; white-space:nowrap;">${sigTime}</td>
+                <td style="padding:6px 4px; color:#cbd5e1; white-space:nowrap;">${bSentTime} <span style="color:${_msColor(bSendMsVal)}; font-weight:700;">(${bSendMsVal.toFixed(0)} ms)</span></td>
+                <td style="padding:6px 4px; color:#cbd5e1; white-space:nowrap;">${exFillTime} ${exFillBracket}</td>
                 <td style="padding:6px 4px; font-weight:700; color:#f8fafc;">${formatSymbolColorCoded(o.symbol)}</td>
                 <td style="padding:6px 4px;"><span style="color:${sideColor}; font-weight:800;">${o.side}</span></td>
                 <td style="padding:6px 4px; color:#cbd5e1;">${o.action || 'ENTRY'}</td>
                 <td style="padding:6px 4px; text-align:right; color:#94a3b8;">₹${Number(o.paper_price || 0).toFixed(2)}</td>
                 <td style="padding:6px 4px; text-align:right; font-weight:700; color:#f8fafc;">₹${Number(o.broker_price || 0).toFixed(2)}</td>
-                <td style="padding:6px 4px; text-align:right; color:#38bdf8; font-weight:700;">${Number(o.broker_latency_ms || 0).toFixed(0)} ms</td>
+                <td style="padding:6px 4px; text-align:right; color:${_msColor(Number(o.broker_latency_ms || 0))}; font-weight:700;">${Number(o.broker_latency_ms || 0).toFixed(0)} ms</td>
                 <td style="padding:6px 4px; text-align:right; color:${sColor}; font-weight:700;">${sPts >= 0 ? '+' : ''}${sPts.toFixed(2)}</td>
                 <td style="padding:6px 4px; text-align:right; color:${sColor}; font-weight:700;">₹${sInr >= 0 ? '+' : ''}${sInr.toFixed(2)}</td>
                 <td style="padding:6px 4px; text-align:center;"><span style="color:${stColor}; font-weight:800;">${o.status || 'FILLED'}</span></td>

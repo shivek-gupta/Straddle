@@ -775,7 +775,8 @@ def api_straddle_download_benchmark_report():
         # Orders Table Headers
         table_headers = [
             "Order ID", "Strategy", "Symbol", "Side", "Action", "Qty",
-            "Dispatch IST", "Paper Fill (₹)", "Broker Ack (ms)", "Broker Fill (₹)",
+            "Signal Sent IST", "Broker Sent IST (ms)", "Exchange Filled IST (ms)",
+            "Paper Fill (₹)", "Broker Ack (ms)", "Broker Fill (₹)",
             "Broker Latency (ms)", "Slippage (pts)", "Slippage (₹)", "Status", "Broker Order ID / Error"
         ]
 
@@ -791,6 +792,13 @@ def api_straddle_download_benchmark_report():
 
         curr_row = start_row + 1
         for o in reversed(orders):
+            sig_t = str(o.get("signal_time") or o.get("dispatch_time") or "-")
+            b_sent_t = str(o.get("broker_sent_time") or o.get("dispatch_time") or "-")
+            b_sent_ms = float(o.get("broker_send_ms") if o.get("broker_send_ms") is not None else (o.get("broker_ack_ms") or o.get("broker_latency_ms") or 0.0))
+            ex_fill_t = str(o.get("exchange_filled_time") or o.get("broker_fill_time") or "-")
+            ex_fill_ms = o.get("exchange_fill_ms")
+            ex_fill_str = f"{ex_fill_t} ({float(ex_fill_ms):.0f} ms)" if ex_fill_ms is not None else ex_fill_t
+
             row_data = [
                 str(o.get("id") or ""),
                 str(o.get("strategy_name") or ""),
@@ -798,7 +806,9 @@ def api_straddle_download_benchmark_report():
                 str(o.get("side") or "").upper(),
                 str(o.get("action") or "ENTRY").upper(),
                 int(o.get("quantity") or 0),
-                str(o.get("dispatch_time") or ""),
+                sig_t,
+                f"{b_sent_t} ({b_sent_ms:.0f} ms)",
+                ex_fill_str,
                 float(o.get("paper_price") or 0.0),
                 float(o.get("broker_ack_ms") or 0.0),
                 float(o.get("broker_price") or 0.0),
@@ -822,24 +832,26 @@ def api_straddle_download_benchmark_report():
             ws.cell(row=curr_row, column=5).alignment = Alignment(horizontal="center", vertical="center")
             ws.cell(row=curr_row, column=6).alignment = Alignment(horizontal="right", vertical="center")
             ws.cell(row=curr_row, column=7).alignment = Alignment(horizontal="center", vertical="center")
-            ws.cell(row=curr_row, column=8).alignment = Alignment(horizontal="right", vertical="center")
-            ws.cell(row=curr_row, column=9).alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=curr_row, column=8).alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(row=curr_row, column=9).alignment = Alignment(horizontal="center", vertical="center")
             ws.cell(row=curr_row, column=10).alignment = Alignment(horizontal="right", vertical="center")
             ws.cell(row=curr_row, column=11).alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=curr_row, column=12).alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=curr_row, column=13).alignment = Alignment(horizontal="right", vertical="center")
 
-            slip_pts_c = ws.cell(row=curr_row, column=12)
+            slip_pts_c = ws.cell(row=curr_row, column=14)
             slip_pts_c.font = Font(name="Segoe UI", size=10, bold=True, color=slip_color)
             slip_pts_c.alignment = Alignment(horizontal="right", vertical="center")
 
-            slip_inr_c = ws.cell(row=curr_row, column=13)
+            slip_inr_c = ws.cell(row=curr_row, column=15)
             slip_inr_c.font = Font(name="Segoe UI", size=10, bold=True, color=slip_color)
             slip_inr_c.alignment = Alignment(horizontal="right", vertical="center")
 
-            st_c = ws.cell(row=curr_row, column=14)
+            st_c = ws.cell(row=curr_row, column=16)
             st_c.font = Font(name="Segoe UI", size=10, bold=True, color=status_color)
             st_c.alignment = Alignment(horizontal="center", vertical="center")
 
-            ws.cell(row=curr_row, column=15).alignment = Alignment(horizontal="left", vertical="center")
+            ws.cell(row=curr_row, column=17).alignment = Alignment(horizontal="left", vertical="center")
 
             for c in range(1, len(table_headers) + 1):
                 ws.cell(row=curr_row, column=c).border = thin_border
@@ -847,7 +859,7 @@ def api_straddle_download_benchmark_report():
             curr_row += 1
 
         # Adjust widths
-        col_widths = {"A": 16, "B": 20, "C": 26, "D": 10, "E": 12, "F": 10, "G": 14, "H": 16, "I": 16, "J": 16, "K": 18, "L": 14, "M": 14, "N": 12, "O": 35}
+        col_widths = {"A": 16, "B": 20, "C": 26, "D": 10, "E": 12, "F": 10, "G": 16, "H": 24, "I": 24, "J": 16, "K": 16, "L": 16, "M": 18, "N": 14, "O": 14, "P": 12, "Q": 35}
         for col_letter, width in col_widths.items():
             ws.column_dimensions[col_letter].width = width
 

@@ -4647,7 +4647,7 @@
     <!-- MODAL: EXECUTION BENCHMARK (KOTAK NEO LIVE BROKER vs PARALLEL PAPER)      -->
     <!-- ========================================================================= -->
     <div id="modalExecutionBenchmark" class="straddle-modal-backdrop" style="display:none; z-index:200000;" onclick="if(event.target === this) closeExecutionBenchmarkModal()">
-        <div class="straddle-modal-card" style="max-width:1050px; width:95%; background:#090d16; border:1px solid #161822; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.85); overflow:hidden;">
+        <div class="straddle-modal-card" style="max-width:1280px; width:97%; background:#090d16; border:1px solid #161822; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.85); overflow:hidden;">
             <!-- Header -->
             <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:#0c0d12; border-bottom:1px solid #161822;">
                 <div style="display:flex; align-items:center; gap:10px;">
@@ -4693,7 +4693,9 @@
                 <table style="width:100%; border-collapse:collapse; font-size:11px; font-family:var(--font-mono);">
                     <thead>
                         <tr style="border-bottom:1px solid #252836; color:#94a3b8; text-transform:uppercase; font-size:9.5px; text-align:left;">
-                            <th style="padding:6px 4px;">Time IST</th>
+                            <th style="padding:6px 4px;">Signal Sent</th>
+                            <th style="padding:6px 4px;">Broker Sent</th>
+                            <th style="padding:6px 4px;">Exchange Filled</th>
                             <th style="padding:6px 4px;">Symbol</th>
                             <th style="padding:6px 4px;">Side</th>
                             <th style="padding:6px 4px;">Action</th>
@@ -4706,7 +4708,7 @@
                         </tr>
                     </thead>
                     <tbody id="bmkOrdersTbody">
-                        <tr><td colspan="10" style="text-align:center; padding:24px; color:#64748b;">No benchmark executions recorded yet. Start live trading to observe parallel benchmark comparison.</td></tr>
+                        <tr><td colspan="12" style="text-align:center; padding:24px; color:#64748b;">No benchmark executions recorded yet. Start live trading to observe parallel benchmark comparison.</td></tr>
                     </tbody>
                 </table>
             </div>

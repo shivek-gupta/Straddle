@@ -61,8 +61,19 @@ def warm_up_connection(client: Optional[NeoAPI] = None) -> bool:
             return False
         session = getattr(c.api_client.rest_client, "session", None)
         if session and isinstance(session, httpx.Client):
-            # Keep both gateway endpoints perpetually hot
-            session.head("https://mis.kotaksecurities.com/", timeout=httpx.Timeout(1.2))
+            urls = ["https://mis.kotaksecurities.com/"]
+            for cfg_obj in (getattr(c, "configuration", None), getattr(c.api_client, "configuration", None)):
+                if cfg_obj is not None:
+                    b_url = getattr(cfg_obj, "base_url", None) or getattr(cfg_obj, "host", None)
+                    if b_url and str(b_url).startswith("http"):
+                        clean_u = str(b_url).rstrip("/") + "/"
+                        if clean_u not in urls:
+                            urls.append(clean_u)
+            for u in urls:
+                try:
+                    session.head(u, timeout=httpx.Timeout(1.2))
+                except Exception:
+                    pass
             return True
     except Exception as e:
         logger.debug(f"[Kotak Auth] Connection warm-up notice: {e}")
@@ -345,6 +356,7 @@ def get_authenticated_client(force: bool = False) -> Optional[NeoAPI]:
 
             _ACTIVE_CLIENT = client
             _LAST_AUTH_ERROR = ""
+            threading.Thread(target=warm_up_connection, args=(client,), daemon=True).start()
             _start_connection_warmup_daemon()
 
             session_data = {
