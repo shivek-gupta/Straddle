@@ -6164,6 +6164,7 @@ class StraddleManager:
             strat["last_trade_date"] = today_ist_str()
             self._state["status"] = "TRADE_ACTIVE"
             strat["status"] = "TRADE_ACTIVE"
+            strat["_trade_active_ts"] = time.time()
             strat["entry_error"] = "-"
             self._save_strategies()
             self._save_state()
@@ -7210,18 +7211,40 @@ class StraddleManager:
                 for b_idx, b_item in enumerate(buy_legs):
                     if b_idx > 0:
                         time.sleep(0.20)
-                    res_p = _place_single(b_item)
-                    # If buy hedge failed with a transient error (e.g. error from core), AUTO-RETRY it immediately!
-                    if (not res_p or res_p.get("status") == "ERROR") and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
-                        err_txt = (res_p.get("error_message") or res_p.get("error") or "").lower()
-                        if any(k in err_txt for k in ("core", "try again", "lock", "concurrency", "timeout", "timed out")):
-                            self._log_event(f"[{strat.get('name')}] Transient broker error on hedge ({err_txt}). Pausing 0.5s and auto-retrying hedge placement...", level="WARNING")
-                            time.sleep(0.5)
-                            res_p = _place_single(b_item)
+                    try:
+                        res_p = _place_single(b_item)
+                        # If buy hedge failed with a transient error (e.g. error from core), AUTO-RETRY it immediately!
+                        if (not res_p or res_p.get("status") == "ERROR") and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
+                            err_txt = (res_p.get("error_message") or res_p.get("error") or "").lower() if res_p else ""
+                            if any(k in err_txt for k in ("core", "try again", "lock", "concurrency", "timeout", "timed out")):
+                                self._log_event(f"[{strat.get('name')}] Transient broker error on hedge ({err_txt}). Pausing 0.5s and auto-retrying hedge placement...", level="WARNING")
+                                time.sleep(0.5)
+                                res_p = _place_single(b_item)
+                    except Exception as e_b:
+                        logger.error(f"[{strat.get('name')}] Exception placing buy leg {b_item['contract'].get('trading_symbol')}: {e_b}", exc_info=True)
+                        b_cfg = b_item["cfg"]
+                        b_con = b_item["contract"]
+                        res_p = {
+                            "id": b_cfg.get("id"),
+                            "symbol": b_con.get("trading_symbol", ""),
+                            "instrument_key": b_con.get("instrument_key", ""),
+                            "side": b_cfg.get("side", "Buy").upper(),
+                            "product": b_cfg.get("product", "NRML"),
+                            "lots": int(b_cfg.get("lots", 1)),
+                            "strike_price": float(b_con.get("strike_price", 0.0)),
+                            "option_type": b_cfg.get("option_type", "CE"),
+                            "status": "ERROR",
+                            "error": str(e_b),
+                            "error_message": str(e_b),
+                            "is_associated_hedge": bool(b_cfg.get("is_associated_hedge")),
+                            "parent_leg_id": b_cfg.get("parent_leg_id"),
+                            "hedge_parent_type": b_cfg.get("hedge_parent_type"),
+                            "underlying": und,
+                            "expiry": b_cfg.get("expiry", "Weekly"),
+                        }
                     buy_results.append(res_p)
-                for pos in buy_results:
-                    if pos:
-                        new_positions.append(pos)
+                    if res_p:
+                        new_positions.append(res_p)
 
                 # Check if any buy order failed to place
                 failed_buys = [p for p in buy_results if not p or p.get("status") == "ERROR"]
@@ -7321,17 +7344,36 @@ class StraddleManager:
                 for s_idx, s_item in enumerate(sell_legs):
                     if s_idx > 0:
                         time.sleep(0.06)
-                    res_s = _place_single(s_item)
-                    if (not res_s or res_s.get("status") == "ERROR") and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
-                        err_txt = (res_s.get("error_message") or res_s.get("error") or "").lower() if res_s else ""
-                        if any(k in err_txt for k in ("core", "try again", "lock", "concurrency", "timeout", "timed out")):
-                            self._log_event(f"[{strat.get('name')}] Transient broker error on sell leg ({err_txt}). Pausing 0.4s and auto-retrying...", level="WARNING")
-                            time.sleep(0.4)
-                            res_s = _place_single(s_item)
+                    try:
+                        res_s = _place_single(s_item)
+                        if (not res_s or res_s.get("status") == "ERROR") and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
+                            err_txt = (res_s.get("error_message") or res_s.get("error") or "").lower() if res_s else ""
+                            if any(k in err_txt for k in ("core", "try again", "lock", "concurrency", "timeout", "timed out")):
+                                self._log_event(f"[{strat.get('name')}] Transient broker error on sell leg ({err_txt}). Pausing 0.4s and auto-retrying...", level="WARNING")
+                                time.sleep(0.4)
+                                res_s = _place_single(s_item)
+                    except Exception as e_s:
+                        logger.error(f"[{strat.get('name')}] Exception placing sell leg {s_item['contract'].get('trading_symbol')}: {e_s}", exc_info=True)
+                        s_cfg = s_item["cfg"]
+                        s_con = s_item["contract"]
+                        res_s = {
+                            "id": s_cfg.get("id"),
+                            "symbol": s_con.get("trading_symbol", ""),
+                            "instrument_key": s_con.get("instrument_key", ""),
+                            "side": s_cfg.get("side", "Sell").upper(),
+                            "product": s_cfg.get("product", "NRML"),
+                            "lots": int(s_cfg.get("lots", 1)),
+                            "strike_price": float(s_con.get("strike_price", 0.0)),
+                            "option_type": s_cfg.get("option_type", "CE"),
+                            "status": "ERROR",
+                            "error": str(e_s),
+                            "error_message": str(e_s),
+                            "underlying": und,
+                            "expiry": s_cfg.get("expiry", "Weekly"),
+                        }
                     sell_results.append(res_s)
-                for pos in sell_results:
-                    if pos:
-                        new_positions.append(pos)
+                    if res_s:
+                        new_positions.append(res_s)
 
             with _ENGINE_LOCK:
                 # Discard ONLY if strategy was reset anew while orders were executing
@@ -7709,7 +7751,6 @@ class StraddleManager:
         if order_res.get("success") and exec_mode == "LIVE_BROKER" and placed_oid and not placed_oid.startswith("PAPER_") and not placed_oid.startswith("ORD_"):
             # Generous timeout for live Kotak Neo fills: 8.0s for BUY hedges, 12.0s for main SELL legs
             timeout_sec = 8.0 if is_buy_hedge else 12.0
-            fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.15)
             fill_res = broker.wait_for_order_fill(placed_oid, timeout_sec=timeout_sec, poll_interval_sec=0.025)
             t_fill_perf = time.perf_counter()
 
@@ -12713,7 +12754,7 @@ class StraddleManager:
                     continue
                 if strat.get("_entry_in_progress") or strat.get("status") == "ENTERING":
                     continue
-                if (time.time() - float(strat.get("_trade_active_ts") or 0.0)) < 10.0:
+                if (time.time() - float(strat.get("_trade_active_ts") or 0.0)) < 15.0:
                     continue
                 strat_positions = strat.get("positions", [])
                 if not strat_positions:
@@ -12808,6 +12849,20 @@ class StraddleManager:
                     )
 
                     if not matching_open and not has_pending_re_entry and not has_remaining_re_entries and not has_error_short:
+                        # Grace period for newly entered/adopted hedges (never exit within 15s of hedge entry)
+                        if (time.time() - float(h.get("_entry_epoch_ts") or 0.0)) < 15.0:
+                            continue
+                        # Never auto-exit a manually adopted hedge unless an actual parent short leg existed & closed in this strategy
+                        if h.get("is_adopted"):
+                            all_closed_shorts = [
+                                p for p in (strat_positions + strat.get("closed_positions", []))
+                                if (p.get("option_type") or ("CE" if "CE" in str(p.get("symbol", "")).upper() else "PE")).upper() == h_opt
+                                and str(p.get("side", "SELL")).upper() == "SELL"
+                                and not p.get("is_associated_hedge")
+                                and p.get("status") in ("COMPLETE", "CLOSED", "EXITED")
+                            ]
+                            if not all_closed_shorts:
+                                continue
                         self._log_event(
                             f"[Orphan Hedge Cleanup] ⚡ Auto-exiting orphaned hedge '{h.get('symbol')}' (no open short leg of {h_opt} remains and re-entries exhausted in strategy '{strat.get('name')}')...",
                             level="INFO"
@@ -15583,6 +15638,7 @@ class StraddleManager:
                     if cand_strat:
                         cand_strat["enabled"] = True
                         cand_strat["status"] = "TRADE_ACTIVE"
+                        cand_strat["_trade_active_ts"] = time.time()
                         self._state["algo_running"] = True
                         if self._state.get("status") not in ("TERMINATED",):
                             self._state["status"] = "RUNNING"
