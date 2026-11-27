@@ -261,44 +261,42 @@ def _json_default_serializer(obj):
     return str(obj)
 
 
-def _safe_write_json(file_path: Path, data: Any, retries: int = 5):
-    """Lossless atomic JSON write with unique temp filename and Windows file-lock retry backoff."""
+def _safe_write_json(file_path: Path, data: Any, retries: int = 6):
+    """Lossless atomic JSON write with unique temp filename and Windows/Drive file-lock retry backoff."""
     pid = os.getpid()
     tid = threading.get_ident()
     ns = time.time_ns()
     temp_file = file_path.parent / f"{file_path.name}.{pid}_{tid}_{ns}.tmp"
     try:
+        payload = json.dumps(data, indent=2, default=_json_default_serializer)
         if not file_path.parent.exists():
             try:
                 file_path.parent.mkdir(parents=True, exist_ok=True)
             except OSError:
                 pass
         with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=_json_default_serializer)
-        
+            f.write(payload)
+
         for attempt in range(retries):
             try:
                 temp_file.replace(file_path)
                 return
             except (PermissionError, OSError):
-                time.sleep(0.04 * (attempt + 1))
-        
-        # Fallback to direct write if replace is locked
+                time.sleep(0.05 * (attempt + 1))
+
+        # Fallback to direct write only with pre-serialized payload
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=_json_default_serializer)
+            f.write(payload)
     except Exception as e:
         logger.error(f"Failed to safe-write JSON to {file_path}: {e}")
-        try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, default=_json_default_serializer)
-        except Exception:
-            pass
     finally:
         if temp_file.exists():
-            try:
-                temp_file.unlink()
-            except Exception:
-                pass
+            for _ in range(3):
+                try:
+                    temp_file.unlink()
+                    break
+                except Exception:
+                    time.sleep(0.03)
 
 
 # Strike step by underlying index & commodity
@@ -1042,6 +1040,17 @@ class StraddleManager:
     def _init_storage(self):
         STRADDLE_DIR.mkdir(parents=True, exist_ok=True)
         STRADDLE_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+        # Clean up any stale orphaned .tmp files left behind by transient OS/Drive locks
+        try:
+            cutoff = time.time() - 60.0
+            for tmp_p in STRADDLE_DIR.glob("*.tmp"):
+                try:
+                    if tmp_p.is_file() and tmp_p.stat().st_mtime < cutoff:
+                        tmp_p.unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _load_deleted_strategies(self):
         with _ENGINE_LOCK:
@@ -5959,10 +5968,12 @@ class StraddleManager:
             strat = self.get_strategy(strategy_id)
             if not strat:
                 return {"success": False, "error": "Strategy not found"}
+            changed = (self._active_strategy_id != strategy_id)
             self._active_strategy_id = strategy_id
             self._state["active_strategy_id"] = strategy_id
             self._save_state()
-            self._log_event(f"Active strategy set to '{strat.get('name')}'.")
+            if changed:
+                self._log_event(f"Active strategy set to '{strat.get('name')}'.")
             return {"success": True, "active_strategy_id": strategy_id, "strategy": strat}
 
     def create_preset_strategy(
@@ -10113,14 +10124,26 @@ class StraddleManager:
                             self._place_advance_sl_order(broker, pos, delay_sec=0)
                             logger.info(f"[Benchmark Sync] Cancelled & re-placed broker SL order for {pos.get('symbol')} @ trigger ₹{pos['sl_price']:.2f}")
                         else:
-                            broker.modify_order(
+                            m_res = broker.modify_order(
                                 order_id=str(adv_sl_oid),
                                 order_type="SL",
                                 trigger_price=pos["sl_price"],
                                 price=lim_p,
                                 quantity=pos.get("quantity")
                             )
-                            logger.info(f"[Benchmark Sync] Auto-modified broker SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}, limit to ₹{lim_p:.2f}")
+                            if isinstance(m_res, dict) and not m_res.get("success"):
+                                logger.warning(f"[Benchmark Sync] modify_order rejected for SL {adv_sl_oid} ({m_res.get('error')}); attempting cancel-replace if still open.")
+                                try:
+                                    st_chk = broker.get_order_status(str(adv_sl_oid))
+                                    st_u = str((st_chk or {}).get("status") or "").upper()
+                                    if st_u in ("OPEN", "PENDING", "TRIGGER PENDING"):
+                                        broker.cancel_order(str(adv_sl_oid))
+                                        time.sleep(0.12)
+                                        self._place_advance_sl_order(broker, pos, delay_sec=0, force=True)
+                                except Exception as e_fb:
+                                    logger.warning(f"[Benchmark Sync] Fallback cancel-replace failed for SL {adv_sl_oid}: {e_fb}")
+                            else:
+                                logger.info(f"[Benchmark Sync] Auto-modified broker SL order {adv_sl_oid} trigger to ₹{pos['sl_price']:.2f}, limit to ₹{lim_p:.2f}")
                     except Exception as e_m:
                         logger.warning(f"[Benchmark Sync] Failed to sync broker SL order {adv_sl_oid}: {e_m}")
             threading.Thread(target=_handle_sl_broker_bg, daemon=True).start()
@@ -10140,13 +10163,25 @@ class StraddleManager:
                             self._place_advance_target_order(broker, pos, delay_sec=0)
                             logger.info(f"[Benchmark Sync] Cancelled & re-placed broker Target order for {pos.get('symbol')} @ ₹{pos['target_price']:.2f}")
                         else:
-                            broker.modify_order(
+                            m_res = broker.modify_order(
                                 order_id=str(adv_tgt_oid),
                                 order_type="LIMIT",
                                 price=pos["target_price"],
                                 quantity=pos.get("quantity")
                             )
-                            logger.info(f"[Benchmark Sync] Auto-modified broker Target order {adv_tgt_oid} price to ₹{pos['target_price']:.2f}")
+                            if isinstance(m_res, dict) and not m_res.get("success"):
+                                logger.warning(f"[Benchmark Sync] modify_order rejected for Target {adv_tgt_oid} ({m_res.get('error')}); attempting cancel-replace if still open.")
+                                try:
+                                    st_chk = broker.get_order_status(str(adv_tgt_oid))
+                                    st_u = str((st_chk or {}).get("status") or "").upper()
+                                    if st_u in ("OPEN", "PENDING", "TRIGGER PENDING"):
+                                        broker.cancel_order(str(adv_tgt_oid))
+                                        time.sleep(0.12)
+                                        self._place_advance_target_order(broker, pos, delay_sec=0, force=True)
+                                except Exception as e_fb:
+                                    logger.warning(f"[Benchmark Sync] Fallback cancel-replace failed for Target {adv_tgt_oid}: {e_fb}")
+                            else:
+                                logger.info(f"[Benchmark Sync] Auto-modified broker Target order {adv_tgt_oid} price to ₹{pos['target_price']:.2f}")
                     except Exception as e_m:
                         logger.warning(f"[Benchmark Sync] Failed to sync broker Target order {adv_tgt_oid}: {e_m}")
             threading.Thread(target=_handle_tgt_broker_bg, daemon=True).start()
@@ -10746,7 +10781,7 @@ class StraddleManager:
                 "message": f"Position {sym} detached from algorithm. (Broker trade was NOT closed)."
             }
 
-    def reset_algo(self, strategy_id: Optional[str] = None, strategy_name: Optional[str] = None) -> Dict[str, Any]:
+    def reset_algo(self, strategy_id: Optional[str] = None, strategy_name: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
         """Reset failed/unfilled/filled positions, errors, and orders completely, re-initializing strategy to clean READY state."""
         with _ENGINE_LOCK:
             # Build set of candidate search keys
@@ -10781,6 +10816,44 @@ class StraddleManager:
 
             if not matched_strats:
                 return {"success": False, "error": f"Strategy '{strategy_id or strategy_name}' not found"}
+
+            # Pre-Reset Safety Guard: Prevent wiping state if live broker positions/hedges are still open
+            if not force and self._state.get("execution_mode", "LIVE_BROKER") == "LIVE_BROKER" and self.is_broker_connected():
+                open_syms = []
+                matched_unds = {str(s.get("underlying") or "").upper().replace(" ", "") for s in matched_strats if s.get("underlying")}
+                other_open_syms = set()
+                for s_other in self._strategies:
+                    if s_other not in matched_strats:
+                        for p_o in s_other.get("positions", []):
+                            if p_o.get("status") in ("OPEN", "LIVE OPEN") and int(p_o.get("quantity") or 0) > 0:
+                                other_open_syms.add(str(p_o.get("symbol") or p_o.get("trading_symbol") or "").upper())
+
+                for s_m in matched_strats:
+                    for p_m in s_m.get("positions", []):
+                        if p_m.get("status") in ("OPEN", "LIVE OPEN") and int(p_m.get("quantity") or 0) > 0:
+                            sym_m = str(p_m.get("symbol") or p_m.get("trading_symbol") or "")
+                            if sym_m and sym_m not in open_syms:
+                                open_syms.append(sym_m)
+
+                try:
+                    broker_chk = get_broker_adapter("LIVE_BROKER")
+                    for bp in (broker_chk.get_positions(force=True) or []):
+                        b_net = int(bp.get("net_qty") or bp.get("quantity") or 0)
+                        if b_net != 0:
+                            bp_sym = str(bp.get("trading_symbol") or bp.get("symbol") or "")
+                            bp_sym_u = bp_sym.upper().replace(" ", "")
+                            if bp_sym.upper() in other_open_syms:
+                                continue
+                            if any(u and u in bp_sym_u for u in matched_unds):
+                                if bp_sym and bp_sym not in open_syms:
+                                    open_syms.append(f"{bp_sym} (qty: {b_net})")
+                except Exception as e_rst_chk:
+                    logger.debug(f"Pre-reset broker position check note: {e_rst_chk}")
+
+                if open_syms:
+                    err_msg = f"Cannot reset while live broker position(s) are open: {', '.join(open_syms[:4])}. Please square off first to avoid orphaned hedges/positions."
+                    self._log_event(f"[Reset Guard] {err_msg}", level="WARNING")
+                    return {"success": False, "error": err_msg}
 
             for strat in matched_strats:
                 strat_id = strat.get("strategy_id")
@@ -11108,10 +11181,15 @@ class StraddleManager:
             mode = self._state.get("execution_mode", "LIVE_BROKER")
             broker = get_broker_adapter(mode)
 
+        just_cancelled_oids = set()
+
         # 1. Cancel registered broker SL order
         if cancel_sl:
             adv_sl_oid = pos.get("sl_broker_order_id")
             if adv_sl_oid and not str(adv_sl_oid).startswith("ORD_") and not str(adv_sl_oid).startswith("PAPER_"):
+                for sub_o in str(adv_sl_oid).split(","):
+                    if sub_o.strip():
+                        just_cancelled_oids.add(sub_o.strip())
                 try:
                     broker.cancel_order(str(adv_sl_oid))
                     self._log_event(
@@ -11134,6 +11212,9 @@ class StraddleManager:
         if cancel_target:
             adv_tgt_oid = pos.get("target_broker_order_id")
             if adv_tgt_oid and not str(adv_tgt_oid).startswith("ORD_") and not str(adv_tgt_oid).startswith("PAPER_"):
+                for sub_o in str(adv_tgt_oid).split(","):
+                    if sub_o.strip():
+                        just_cancelled_oids.add(sub_o.strip())
                 try:
                     broker.cancel_order(str(adv_tgt_oid))
                     self._log_event(
@@ -11180,8 +11261,8 @@ class StraddleManager:
                     if any(w in o_st for w in ("TRIG", "TRIGGER", "OPEN", "PEND", "REQ", "SUBMIT")):
                         o_sym = str(ord_item.get("trading_symbol") or ord_item.get("trdSym") or ord_item.get("sym") or "").strip()
                         o_tok = str(ord_item.get("instrument_token") or ord_item.get("tok") or "")
-                        o_id = str(ord_item.get("order_id") or ord_item.get("nOrdNo") or "")
-                        if o_id and o_id not in other_open_oids and (_is_same_instrument(o_sym, o_tok, sym, ikey) or (tok and o_tok == tok)):
+                        o_id = str(ord_item.get("order_id") or ord_item.get("nOrdNo") or "").strip()
+                        if o_id and o_id not in other_open_oids and o_id not in just_cancelled_oids and (_is_same_instrument(o_sym, o_tok, sym, ikey) or (tok and o_tok == tok)):
                             try:
                                 broker.cancel_order(o_id)
                                 self._log_event(f"Swept & cancelled pending broker order #{o_id} for {o_sym} ({o_st})", level="INFO")
@@ -11262,14 +11343,11 @@ class StraddleManager:
             )
             return {"success": False, "error": "Kotak Neo is DISCONNECTED in Settings"}
 
-        # Cancel any active advance SL & Target orders placed with broker FIRST
-        self._cancel_leg_broker_orders(pos, broker)
-
         exit_side = "BUY" if pos.get("side") == "SELL" else "SELL"
         qty = pos.get("quantity", 0)
         ltp = float(pos.get("ltp", pos.get("avg_ent_price", 100.0)))
 
-        # Verify broker position before placing exit order to avoid duplicate naked exit attempts
+        # Verify broker position FIRST (force=True) before cancelling OCO orders or placing exit order
         mode = self._state.get("execution_mode", "LIVE_BROKER")
         if mode == "LIVE_BROKER":
             try:
@@ -11297,7 +11375,7 @@ class StraddleManager:
                     except Exception as e_st:
                         logger.debug(f"Note checking entry order status on square-off: {e_st}")
 
-                b_positions = broker.get_positions(force=False) or []
+                b_positions = broker.get_positions(force=True) or []
                 broker_pos = None
                 for bp in b_positions:
                     bp_sym = bp.get("symbol") or bp.get("trading_symbol") or ""
@@ -11309,10 +11387,42 @@ class StraddleManager:
                 if broker_pos is not None:
                     b_net_qty = int(broker_pos.get("net_qty") or broker_pos.get("quantity") or 0)
                     if b_net_qty == 0:
-                        exit_p = float(broker_pos.get("sell_avg") if pos.get("side") == "BUY" else (broker_pos.get("buy_avg") or ltp))
+                        # Resolve authentic fill price for THIS specific trade from orderbook/OCO IDs (not cumulative daily avg)
+                        exit_p = 0.0
+                        matched_exit_oid = ""
+                        oco_trigger = None
+                        tgt_oid_cand = str(pos.get("target_broker_order_id") or pos.get("last_target_broker_order_id") or "").strip()
+                        sl_oid_cand = str(pos.get("sl_broker_order_id") or pos.get("last_sl_broker_order_id") or "").strip()
+                        if tgt_oid_cand:
+                            tgt_fill = self._lookup_order_fill_price(broker, tgt_oid_cand)
+                            if tgt_fill > 0:
+                                exit_p = tgt_fill
+                                matched_exit_oid = tgt_oid_cand
+                                oco_trigger = "TARGET"
+                        if exit_p <= 0 and sl_oid_cand:
+                            sl_fill = self._lookup_order_fill_price(broker, sl_oid_cand)
+                            if sl_fill > 0:
+                                exit_p = sl_fill
+                                matched_exit_oid = sl_oid_cand
+                                oco_trigger = "STOPLOSS"
+                        if exit_p <= 0:
+                            exit_p = float(broker_pos.get("sell_avg") if pos.get("side") == "BUY" else (broker_pos.get("buy_avg") or ltp))
+
                         ent_p = float(pos.get("avg_ent_price", 0.0))
                         side = (pos.get("side") or "SELL").upper()
-                        pnl = float(broker_pos.get("pnl") or broker_pos.get("realized_pnl") or 0.0)
+                        qty_val = abs(int(pos.get("quantity") or qty or 1))
+                        if ent_p > 0 and exit_p > 0:
+                            pnl = round((exit_p - ent_p) * qty_val if side == "BUY" else (ent_p - exit_p) * qty_val, 2)
+                        else:
+                            pnl = float(broker_pos.get("pnl") or broker_pos.get("realized_pnl") or 0.0)
+
+                        # Cancel only the resting counterpart OCO order (never the already-filled order)
+                        if oco_trigger == "TARGET":
+                            self._cancel_leg_broker_orders(pos, broker, cancel_sl=True, cancel_target=False)
+                        elif oco_trigger == "STOPLOSS":
+                            self._cancel_leg_broker_orders(pos, broker, cancel_sl=False, cancel_target=True)
+                        else:
+                            self._cancel_leg_broker_orders(pos, broker, cancel_sl=True, cancel_target=True)
 
                         is_pos_hedge = bool(
                             pos.get("is_associated_hedge")
@@ -11324,21 +11434,25 @@ class StraddleManager:
                         is_profit = (side == "BUY" and exit_p > ent_p) or (side == "SELL" and exit_p < ent_p) or (pnl > 0)
                         if is_pos_hedge:
                             real_reason = f"HEDGE SQUARED OFF (₹{exit_p:.2f}) (Broker Exit)"
-                        elif is_loss:
+                        elif oco_trigger == "STOPLOSS" or is_loss:
                             real_reason = f"STOPLOSS HIT (₹{exit_p:.2f}) (Broker Exit)"
-                        elif is_profit:
+                        elif oco_trigger == "TARGET" or is_profit:
                             real_reason = f"TARGET HIT (₹{exit_p:.2f}) (Broker Exit)"
                         else:
                             real_reason = f"{reason} (Already closed on broker)"
 
-                        self._log_event(f"Position {sym_to_match} is already closed on broker (net quantity 0). Reason: {real_reason}.", level="INFO")
+                        self._log_event(f"Position {sym_to_match} is already closed on broker (net quantity 0). Reason: {real_reason}. P&L: ₹{pnl:.2f}", level="INFO")
                         pos["status"] = "COMPLETE"
                         pos["avg_exit_price"] = exit_p
+                        pos["exit_qty"] = qty_val
+                        if matched_exit_oid:
+                            pos["exit_order_id"] = matched_exit_oid
                         pos["exit_time"] = now_ist_str()
                         pos["exit_reason"] = real_reason
-                        pos["mtm"] = pnl if pnl != 0.0 else float(pos.get("mtm", 0.0))
+                        pos["mtm"] = pnl
+                        pos["realised_pnl"] = pnl
                         pos["_exit_in_progress"] = False
-                        return {"success": True, "order_id": "", "filled": True, "price": pos["avg_exit_price"], "pos": pos}
+                        return {"success": True, "order_id": matched_exit_oid, "filled": True, "price": pos["avg_exit_price"], "pos": pos}
                     else:
                         # Ensure exit quantity strictly matches broker actual open net quantity
                         actual_open = abs(b_net_qty)
@@ -11347,7 +11461,7 @@ class StraddleManager:
                             qty = actual_open
                             pos["quantity"] = actual_open
                 else:
-                    # broker_pos is None: position was not found in cached positions report.
+                    # broker_pos is None: position was not found in positions report.
                     # INVIOLABLE SAFETY DIRECTIVE:
                     # Never suppress the exit order if algo tracks this position as OPEN!
                     # Suppressing exit orders causes positions to be abandoned open on the exchange.
@@ -11356,12 +11470,12 @@ class StraddleManager:
             except Exception as e:
                 logger.warning(f"Error checking broker open quantity before exit: {e}")
 
+        # Cancel any active advance SL & Target orders placed with broker ONCE before dispatching exit order
+        self._cancel_leg_broker_orders(pos, broker)
+
         strat_name = pos.get("strategy_name") or "abc"
         strat_id = pos.get("strategy_id") or ""
         strat_tag = re.sub(r'[^a-zA-Z0-9]', '', str(strat_name))[:4] or "std"
-
-        # Ensure any active advance SL / Target orders are cleared
-        self._cancel_leg_broker_orders(pos, broker)
 
         if strat is None and strat_id:
             try:
@@ -12361,11 +12475,22 @@ class StraddleManager:
                         )
                         return
 
+                # If pre-shifting was executed ahead of time, wait until exact target_dt (e.g. candle close :00.000)
+                # BEFORE releasing margin on other open legs so broker-side SL protection stays active until T-0s!
+                if should_pre_shift:
+                    try:
+                        kotak_auth.warm_up_connection()
+                    except Exception:
+                        pass
+                    rem_wait = max(0.0, (target_dt - now_ist()).total_seconds())
+                    if rem_wait > 0:
+                        time.sleep(rem_wait)
+
                 # -----------------------------------------------------------------
-                # Margin Auto-Release for Re-Execution:
+                # Margin Auto-Release for Re-Execution (T-0s right before entry):
                 # Temporarily cancel resting advance broker orders on other open legs
-                # (across all sliced orders e.g. 100-150 lots) to release broker margin
-                # and avoid RMS margin shortfall rejection
+                # right before dispatching the new short order to release broker margin
+                # while keeping broker-side SL protection active during the pre-shift window.
                 # -----------------------------------------------------------------
                 auto_release_margin = bool(adv.get("auto_release_margin_reentry", True))
                 unblocked_items = []
@@ -12422,16 +12547,6 @@ class StraddleManager:
                                 p_cand["sl_broker_order_id"] = None
                             else:
                                 p_cand["target_broker_order_id"] = None
-
-                # If pre-shifting was executed ahead of time, now wait until exact target_dt (e.g. candle close :00.000)
-                if should_pre_shift:
-                    try:
-                        kotak_auth.warm_up_connection()
-                    except Exception:
-                        pass
-                    rem_wait = max(0.0, (target_dt - now_ist()).total_seconds())
-                    if rem_wait > 0:
-                        time.sleep(rem_wait)
 
                 new_pos = None
                 clean_opt = (opt_type or ("CE" if "CE" in str(pos.get("symbol", "")).upper() else "PE")).upper()

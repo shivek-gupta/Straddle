@@ -1103,6 +1103,8 @@ class KotakNeoBrokerAdapter(BaseBrokerAdapter):
         try:
             self._positions_cache = None
             self._positions_cache_ts = 0.0
+            self._order_book_cache = None
+            self._order_book_cache_ts = 0.0
             res = client.cancel_order(order_id=str(order_id))
             st = str(res.get("stat", "")).lower() if isinstance(res, dict) else ""
             if st in ("not_ok", "error", "failed"):
