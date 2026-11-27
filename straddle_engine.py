@@ -4319,6 +4319,7 @@ class StraddleManager:
 
                 # Ensure strat_dict points to the authoritative in-place dict
                 strat_dict = existing
+                strat_dict["config_updated_at"] = time.time()
                 if "positions" not in strat_dict:
                     strat_dict["positions"] = []
                 if "closed_positions" not in strat_dict:
@@ -6080,6 +6081,8 @@ class StraddleManager:
 
     def start_algo(self, strategy_id: Optional[str] = None, force_fresh: bool = False) -> Dict[str, Any]:
         """Activate the algorithm for live trading or simulation and punch entry orders immediately if allowed."""
+        th = None
+        sid = None
         with _ENGINE_LOCK:
             sid = strategy_id or self._active_strategy_id or (self._strategies[0]["strategy_id"] if self._strategies else None)
             strat = self.get_strategy(sid)
@@ -6092,43 +6095,58 @@ class StraddleManager:
                 strat["entry_error"] = f"Not scheduled for {chk['today_name']}"
                 self._save_strategies()
                 return {"success": False, "error": f"Cannot start: Strategy '{strat.get('name')}' is not scheduled for today ({chk['today_name']}). Scheduled days: {strat.get('schedule_days')}"}
-            if chk["is_before_start"]:
-                strat["entry_error"] = f"Waiting for Start Time ({chk['st_str']})"
-                self._save_strategies()
-                return {"success": False, "error": f"Cannot start: Current time ({chk['now_str']}) is before strategy start time ({chk['st_str']})"}
             if chk["is_after_end"]:
                 strat["entry_error"] = f"Trading hours ended ({chk['et_str']})"
                 self._save_strategies()
                 return {"success": False, "error": f"Cannot start: Trading hours ended for this strategy ({chk['et_str']})"}
 
-            # If all positions are complete/closed or force_fresh is requested, reset positions to start a clean new session!
+            # If all positions are complete/closed or force_fresh is requested, reset runtime positions to start a clean new session!
             strat_positions = strat.get("positions", [])
             has_open = any(p.get("status") == "OPEN" for p in strat_positions)
             if not has_open or force_fresh:
                 strat["positions"] = []
                 strat["closed_positions"] = []
                 strat["mtm"] = 0.0
-                strat["status"] = "TRADE_ACTIVE"
+                strat["group_mtm"] = 0.0
+                strat["total_mtm"] = 0.0
                 strat["entry_error"] = "-"
                 strat["_last_entry_attempt_ts"] = 0
                 strat["_entry_in_progress"] = False
+                strat["_reset_ignored_keys"] = []
                 strat["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
                 for leg in strat.get("legs", []):
                     if isinstance(leg, dict):
                         leg["re_execute_count"] = 0
                 self._state["re_execution_counts"] = {"ce_sl": 0, "ce_target": 0, "pe_sl": 0, "pe_target": 0}
-                self._save_strategies()
 
             strat["enabled"] = True
             strat["_manual_reset"] = False
-            strat["last_trade_date"] = today_ist_str()
             self._active_strategy_id = sid
             self._state["active_strategy_id"] = sid
             self._state["algo_running"] = True
 
+            # If started before configured Start Time, arm strategy in READY mode to auto-start immediately when Start Time is reached
+            if chk["is_before_start"]:
+                strat["last_trade_date"] = None
+                strat["status"] = "READY"
+                strat["entry_error"] = f"Waiting for Start Time ({chk['st_str']})"
+                self._state["status"] = "READY"
+                self._save_strategies()
+                self._save_state()
+                self._log_event(f"Strategy '{strat.get('name')}' armed in READY mode. Waiting for Start Time ({chk['st_str']}).")
+                return {
+                    "success": True,
+                    "status": "READY",
+                    "waiting_for_start": True,
+                    "start_time": chk["st_str"],
+                    "message": f"Algo '{strat.get('name')}' armed in READY mode. Waiting for Start Time ({chk['st_str']}).",
+                    "strategy": strat
+                }
+
             # If Premium Matching is enabled and condition not yet met, arm strategy in READY state to wait for condition
             is_pm_matched, pm_reason = self.check_premium_matching_condition(strat)
             if not is_pm_matched and not force_fresh:
+                strat["last_trade_date"] = None
                 strat["status"] = "READY"
                 strat["entry_error"] = f"Waiting for Premium Matching ({pm_reason})"
                 self._state["status"] = "READY"
@@ -6138,10 +6156,12 @@ class StraddleManager:
                 return {
                     "success": True,
                     "status": "READY",
+                    "waiting_for_start": True,
                     "message": f"Strategy armed. Waiting for Premium Matching: {pm_reason}",
                     "strategy": strat
                 }
 
+            strat["last_trade_date"] = today_ist_str()
             self._state["status"] = "TRADE_ACTIVE"
             strat["status"] = "TRADE_ACTIVE"
             strat["entry_error"] = "-"
@@ -6153,13 +6173,16 @@ class StraddleManager:
             th = threading.Thread(target=self._execute_strategy_entry, args=(strat,), daemon=True)
             th.start()
 
-            # Wait briefly (up to 1.0s) for entry execution so response includes immediate order outcome without blocking
-            th.join(timeout=1.0)
+        # Wait outside _ENGINE_LOCK so _execute_strategy_entry can acquire _ENGINE_LOCK immediately without deadlock
+        if th is not None:
+            th.join(timeout=1.5)
 
-            # Refresh strategy reference
+        with _ENGINE_LOCK:
             strat = self.get_strategy(sid)
+            if not strat:
+                return {"success": False, "error": "Strategy not found"}
             has_error = (strat.get("status") == "ENTRY_FAILED" or bool(strat.get("entry_error") and strat.get("entry_error") != "-"))
-            if has_error:
+            if has_error and not any(p.get("status") == "OPEN" for p in strat.get("positions", [])):
                 return {
                     "success": False,
                     "status": strat.get("status", "ENTRY_FAILED"),
@@ -7247,8 +7270,6 @@ class StraddleManager:
                 if buy_oids and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
                     all_buys_filled = True
                     unfilled_reasons = []
-                    # Safe 150ms polling for instant confirmation of filled hedge orders without hitting broker rate limit
-                    v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.15): oid for oid in buy_oids}
                     # Adaptive 25ms polling for ultra-fast confirmation of filled hedge orders
                     v_futs = {_PERSISTENT_LEG_POOL.submit(broker.wait_for_order_fill, oid, 8.0, 0.025): oid for oid in buy_oids}
                     for fut in concurrent.futures.as_completed(v_futs):
@@ -7300,7 +7321,14 @@ class StraddleManager:
                 for s_idx, s_item in enumerate(sell_legs):
                     if s_idx > 0:
                         time.sleep(0.06)
-                    sell_results.append(_place_single(s_item))
+                    res_s = _place_single(s_item)
+                    if (not res_s or res_s.get("status") == "ERROR") and mode.upper() in ("LIVE", "LIVE_BROKER", "KOTAK"):
+                        err_txt = (res_s.get("error_message") or res_s.get("error") or "").lower() if res_s else ""
+                        if any(k in err_txt for k in ("core", "try again", "lock", "concurrency", "timeout", "timed out")):
+                            self._log_event(f"[{strat.get('name')}] Transient broker error on sell leg ({err_txt}). Pausing 0.4s and auto-retrying...", level="WARNING")
+                            time.sleep(0.4)
+                            res_s = _place_single(s_item)
+                    sell_results.append(res_s)
                 for pos in sell_results:
                     if pos:
                         new_positions.append(pos)
@@ -7406,6 +7434,23 @@ class StraddleManager:
                         self._state["entry_error"] = strat["entry_error"]
                     self._save_strategies()
                     self._save_state()
+        except Exception as e_exec:
+            logger.error(f"[{strat.get('name')}] Unexpected error in _execute_strategy_entry: {e_exec}", exc_info=True)
+            with _ENGINE_LOCK:
+                if "new_positions" in locals() and new_positions:
+                    strat["positions"] = new_positions
+                    has_open = any(p.get("status") == "OPEN" for p in new_positions)
+                    strat["status"] = "TRADE_ACTIVE" if has_open else "ENTRY_FAILED"
+                    strat["entry_error"] = f"Partial/Error: {e_exec}"
+                    if self._active_strategy_id == strat.get("strategy_id"):
+                        self._state["positions"] = new_positions
+                        self._state["status"] = strat["status"]
+                        self._state["entry_error"] = strat["entry_error"]
+                else:
+                    strat["status"] = "ENTRY_FAILED"
+                    strat["entry_error"] = f"Entry error: {e_exec}"
+                self._save_strategies()
+                self._save_state()
         finally:
             with _ENGINE_LOCK:
                 strat["_entry_in_progress"] = False
@@ -10626,7 +10671,8 @@ class StraddleManager:
                 strat_id = strat.get("strategy_id")
                 strat_name = strat.get("name")
 
-                # Record all past instrument keys into _reset_ignored_keys so they are never adopted back into a clean reset strategy
+                # Record only past closed/reset instrument keys into _reset_ignored_keys so old closed trades are not re-adopted,
+                # while never blocking newly entered positions after a fresh start.
                 ignored_k = set(strat.get("_reset_ignored_keys", []))
                 for p in strat.get("positions", []) + strat.get("closed_positions", []):
                     for k in (p.get("instrument_key"), p.get("symbol"), p.get("trading_symbol")):
@@ -10635,9 +10681,10 @@ class StraddleManager:
                 try:
                     broker = get_broker_adapter(self._state.get("execution_mode", "LIVE_BROKER"))
                     for bp in (broker.get_positions() or []):
-                        for k in (bp.get("instrument_key"), bp.get("symbol"), bp.get("trading_symbol")):
-                            if k:
-                                ignored_k.add(str(k))
+                        if int(bp.get("net_qty") or bp.get("quantity") or 0) == 0:
+                            for k in (bp.get("instrument_key"), bp.get("symbol"), bp.get("trading_symbol")):
+                                if k:
+                                    ignored_k.add(str(k))
                 except Exception:
                     pass
                 strat["_reset_ignored_keys"] = list(ignored_k)

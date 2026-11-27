@@ -406,11 +406,13 @@ async function initStraddlePlatform() {
     if (settingsPanel && !settingsPanel._cloudSyncListenerAttached) {
         settingsPanel._cloudSyncListenerAttached = true;
         const onSettingsInputChanged = (e) => {
+            if (window._isPopulatingStraddleForm) return;
+            if (e && e.isTrusted === false) return;
             if (e && e.target && (e.target.id === "straddleAlgosSearch" || e.target.classList.contains("search-input"))) return;
             window._straddleSettingsDirty = true;
             if (window._straddleAutoSaveTimer) clearTimeout(window._straddleAutoSaveTimer);
             window._straddleAutoSaveTimer = setTimeout(() => {
-                if (window._straddleSettingsDirty && typeof saveStraddleStrategySettings === "function") {
+                if (window._straddleSettingsDirty && !window._isPopulatingStraddleForm && typeof saveStraddleStrategySettings === "function") {
                     saveStraddleStrategySettings({ silent: true });
                 }
             }, 1200);
@@ -419,12 +421,25 @@ async function initStraddlePlatform() {
         settingsPanel.addEventListener("change", onSettingsInputChanged);
     }
 
-    // Auto-save on page exit / unload so unsaved changes are never lost across devices
+    // Dedicated 1-minute (60s) cross-device configuration auto-sync
+    if (window._straddleCloudSyncTimer) clearInterval(window._straddleCloudSyncTimer);
+    window._straddleCloudSyncTimer = setInterval(() => {
+        if (typeof syncStraddleSettingsFromCloud === "function") {
+            syncStraddleSettingsFromCloud();
+        }
+    }, 60000);
+
+    // Auto-save on page exit / unload ONLY when user actually modified settings
     window.addEventListener("beforeunload", () => {
-        if (window._straddleSettingsDirty && typeof serializeCurrentStrategySettings === "function") {
+        if (window._straddleSettingsDirty && !window._isPopulatingStraddleForm && typeof serializeCurrentStrategySettings === "function") {
             try {
                 const strat = serializeCurrentStrategySettings();
-                navigator.sendBeacon("/api/straddle/strategy/save", new Blob([JSON.stringify({ strategy: strat })], { type: "application/json" }));
+                if (window._straddleFormPopulatedFor && strat.strategy_id === window._straddleFormPopulatedFor) {
+                    const payload = { ...strat };
+                    delete payload.positions;
+                    delete payload.closed_positions;
+                    navigator.sendBeacon("/api/straddle/strategy/save", new Blob([JSON.stringify({ strategy: payload })], { type: "application/json" }));
+                }
             } catch (_) {}
         }
     });
@@ -731,7 +746,10 @@ async function fetchStraddleState() {
                 const settingsPanel = document.getElementById("straddleSettingsPanel");
                 const isUserTyping = settingsPanel && settingsPanel.contains(document.activeElement);
                 const needsPopulate = (!window._straddleFormPopulatedFor || window._straddleFormPopulatedFor !== active.strategy_id);
-                if (!isUserTyping && (needsPopulate || (!window._straddleSettingsDirty && window._straddleState.currentSubView === "terminal"))) {
+                const serverCfgTs = Number(active.config_updated_at || 0);
+                const lastCfgTs = Number((window._lastSyncedConfigTs && window._lastSyncedConfigTs[active.strategy_id]) || 0);
+                const hasNewerCloudConfig = serverCfgTs > 0 && serverCfgTs > lastCfgTs;
+                if (!isUserTyping && !window._straddleSettingsDirty && (needsPopulate || hasNewerCloudConfig || window._straddleState.currentSubView === "terminal")) {
                     populateStraddleSettingsForm(active);
                 }
             }
@@ -755,39 +773,172 @@ async function fetchStraddleState() {
     }
 }
 
+/**
+ * Canonical single source of truth for strategy status across Algo List, Header, Action Bar, and Trades Section.
+ */
+function getAlgoDisplayState(s) {
+    if (!s) {
+        return {
+            code: "READY",
+            displayStatus: "Ready",
+            statusClass: "straddle-badge-ready",
+            dotColor: "#38bdf8",
+            subText: "-",
+            isArmedWaiting: false,
+            isRunning: false,
+            isFailedOrTerminated: false,
+            startTime: "09:15:56",
+            endTime: "15:29:50",
+        };
+    }
+    const rawStatus = String(s.status || "READY").toUpperCase();
+    const posList = Array.isArray(s.positions) ? s.positions : [];
+    const hasOpen = posList.some(p => {
+        const ps = String(p.status || "").toUpperCase();
+        return ps === "OPEN" || ps === "LIVE OPEN" || ps === "EXIT_PENDING";
+    });
+    const hasCompleted = posList.some(p => {
+        const ps = String(p.status || "").toUpperCase();
+        return ps === "COMPLETE" || ps === "CLOSED" || ps === "EXITED";
+    });
+    const hasError = posList.some(p => String(p.status || "").toUpperCase() === "ERROR");
+    const isAlgoEnabled = s.enabled !== false;
+    const entryErr = s.entry_error ? String(s.entry_error) : "-";
+    const startTime = s.start_time || "09:15:56";
+    const endTime = s.end_time || "15:29:50";
+
+    if (rawStatus === "TERMINATED") {
+        return {
+            code: "TERMINATED",
+            displayStatus: "Terminated",
+            statusClass: "straddle-badge-terminated",
+            dotColor: "#ef4444",
+            subText: entryErr !== "-" ? entryErr : "Terminated",
+            isArmedWaiting: false,
+            isRunning: false,
+            isFailedOrTerminated: true,
+            startTime,
+            endTime,
+        };
+    }
+    if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
+        return {
+            code: "ENTRY_FAILED",
+            displayStatus: "Entry Failed",
+            statusClass: "straddle-badge-terminated",
+            dotColor: "#f43f5e",
+            subText: entryErr !== "-" ? entryErr : "Order placement failed",
+            isArmedWaiting: false,
+            isRunning: false,
+            isFailedOrTerminated: true,
+            startTime,
+            endTime,
+        };
+    }
+    if (hasOpen) {
+        return {
+            code: "TRADE_ACTIVE",
+            displayStatus: "Trade Active",
+            statusClass: "straddle-badge-active",
+            dotColor: "#10b981",
+            subText: entryErr !== "-" ? entryErr : "Active Positions Running",
+            isArmedWaiting: false,
+            isRunning: true,
+            isFailedOrTerminated: false,
+            startTime,
+            endTime,
+        };
+    }
+    if (rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
+        return {
+            code: "STOPPED",
+            displayStatus: "Stopped",
+            statusClass: "straddle-badge-terminated",
+            dotColor: "#64748b",
+            subText: entryErr !== "-" ? entryErr : "Stopped",
+            isArmedWaiting: false,
+            isRunning: false,
+            isFailedOrTerminated: false,
+            startTime,
+            endTime,
+        };
+    }
+    if (isAlgoEnabled && (rawStatus === "READY" || rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY")) {
+        const isWaitingStart = entryErr.toLowerCase().includes("waiting for start time");
+        const isWaitingCond = entryErr.toLowerCase().includes("waiting");
+        const waitText = isWaitingCond ? entryErr : `Waiting for Start Time (${startTime})`;
+        return {
+            code: "READY",
+            displayStatus: isWaitingStart ? "Ready" : (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY" ? "Waiting Entry" : "Ready"),
+            statusClass: "straddle-badge-ready",
+            dotColor: "#38bdf8",
+            subText: waitText,
+            isArmedWaiting: true,
+            isRunning: true,
+            isFailedOrTerminated: false,
+            startTime,
+            endTime,
+        };
+    }
+    if (!isAlgoEnabled && s._manual_reset && rawStatus === "READY") {
+        return {
+            code: "READY",
+            displayStatus: "Ready",
+            statusClass: "straddle-badge-ready",
+            dotColor: "#38bdf8",
+            subText: "-",
+            isArmedWaiting: false,
+            isRunning: false,
+            isFailedOrTerminated: true,
+            startTime,
+            endTime,
+        };
+    }
+    return {
+        code: "STOPPED",
+        displayStatus: "Stopped",
+        statusClass: "straddle-badge-terminated",
+        dotColor: "#64748b",
+        subText: entryErr !== "-" ? entryErr : "Strategy is disabled",
+        isArmedWaiting: false,
+        isRunning: false,
+        isFailedOrTerminated: false,
+        startTime,
+        endTime,
+    };
+}
+window.getAlgoDisplayState = getAlgoDisplayState;
+
+async function syncStraddleSettingsFromCloud() {
+    try {
+        await fetchStraddleState();
+        const active = window._straddleState?.activeStrategy;
+        if (active) {
+            const settingsPanel = document.getElementById("straddleSettingsPanel");
+            const isUserTyping = settingsPanel && settingsPanel.contains(document.activeElement);
+            if (!isUserTyping && !window._straddleSettingsDirty && typeof populateStraddleSettingsForm === "function") {
+                populateStraddleSettingsForm(active);
+            }
+        }
+        renderStraddleAlgosTable(false);
+    } catch (e) {
+        console.debug("1-min cloud auto-sync notice:", e);
+    }
+}
+window.syncStraddleSettingsFromCloud = syncStraddleSettingsFromCloud;
+
 function renderStraddleHeader(state) {
     const activeStrat = state.active_strategy || window._straddleState.activeStrategy || (window._straddleState.allStrategies || []).find(s => s.strategy_id === window._straddleState.activeStrategyId);
 
     const statusBadge = document.getElementById("straddleStatusBadge");
     if (statusBadge) {
         if (activeStrat) {
-            const rawStatus = (activeStrat.status || "").toUpperCase();
-            const hasOpen = Array.isArray(activeStrat.positions) && activeStrat.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
-            const hasCompleted = Array.isArray(activeStrat.positions) && activeStrat.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
-            const isEnabled = activeStrat.enabled !== false;
-
-            if (rawStatus === "TERMINATED") {
-                statusBadge.textContent = "Terminated";
-                statusBadge.className = "straddle-pill-badge straddle-badge-terminated";
-            } else if (rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || activeStrat.has_traded_today) && !activeStrat._manual_reset)) {
-                statusBadge.textContent = "Stopped";
-                statusBadge.className = "straddle-pill-badge straddle-badge-terminated";
-            } else if (rawStatus === "ENTRY_FAILED") {
-                statusBadge.textContent = "Entry Failed";
-                statusBadge.className = "straddle-pill-badge straddle-badge-terminated";
-            } else if (hasOpen) {
-                statusBadge.textContent = "Trade Active";
-                statusBadge.className = "straddle-pill-badge straddle-badge-active";
-            } else if (!isEnabled) {
-                statusBadge.textContent = "Stopped";
-                statusBadge.className = "straddle-pill-badge straddle-badge-terminated";
-            } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
-                statusBadge.textContent = "Waiting Entry";
-                statusBadge.className = "straddle-pill-badge straddle-badge-ready";
-            } else {
-                statusBadge.textContent = "Ready";
-                statusBadge.className = "straddle-pill-badge straddle-badge-ready";
-            }
+            const stInfo = getAlgoDisplayState(activeStrat);
+            statusBadge.textContent = stInfo.isArmedWaiting && stInfo.subText.toLowerCase().includes("waiting for start time")
+                ? `Ready • ${stInfo.startTime}`
+                : stInfo.displayStatus;
+            statusBadge.className = `straddle-pill-badge ${stInfo.statusClass}`;
+            statusBadge.title = stInfo.subText || stInfo.displayStatus;
         } else {
             const st = state.engine_status || "READY";
             statusBadge.textContent = (st === "TRADE_ACTIVE" ? "Trade Active" : (st === "READY" ? "Ready" : "Terminated"));
@@ -840,25 +991,27 @@ function renderStraddleHeader(state) {
     }
     if (bAlgo) {
         const strat = activeStrat || state.activeStrategy;
-        const stratStatus = strat ? String(strat.status || "").toUpperCase() : String(state.status || "READY").toUpperCase();
-        const hasOpen = Array.isArray(strat?.positions) && strat.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
-        const isRunning = (state.algo_running && stratStatus === "TRADE_ACTIVE") || hasOpen;
-
-        if (isRunning) {
+        const stInfo = getAlgoDisplayState(strat);
+        if (stInfo.code === "TRADE_ACTIVE") {
             bAlgo.className = "straddle-running-badge badge-running";
             bAlgo.textContent = "● Algo: Running";
-        } else if (stratStatus === "TERMINATED") {
+        } else if (stInfo.code === "TERMINATED") {
             bAlgo.className = "straddle-running-badge badge-terminated";
             bAlgo.textContent = "■ Algo: Terminated";
-        } else if (stratStatus === "ENTRY_FAILED") {
+        } else if (stInfo.code === "ENTRY_FAILED") {
             bAlgo.className = "straddle-running-badge badge-failed";
             bAlgo.textContent = "⚠️ Algo: Entry Failed";
-        } else if (stratStatus === "STOPPED") {
+        } else if (stInfo.isArmedWaiting) {
+            bAlgo.className = "straddle-running-badge badge-ready";
+            bAlgo.textContent = stInfo.subText.toLowerCase().includes("waiting for start time")
+                ? `⏳ Algo: Ready (${stInfo.startTime})`
+                : "⏳ Algo: Armed (Ready)";
+        } else if (stInfo.code === "STOPPED") {
             bAlgo.className = "straddle-running-badge badge-stopped";
             bAlgo.textContent = "■ Algo: Stopped";
-        } else if (stratStatus === "READY") {
+        } else if (stInfo.code === "READY") {
             bAlgo.className = "straddle-running-badge badge-ready";
-            bAlgo.textContent = "⏳ Algo: Armed (Ready)";
+            bAlgo.textContent = "⏳ Algo: Ready";
         } else {
             bAlgo.className = "straddle-running-badge badge-off";
             bAlgo.textContent = "○ Algo: Offline";
@@ -1966,41 +2119,11 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                 // Update live numbers in place without touching DOM hierarchy
                 filtered.forEach(s => {
                     const sid = s.strategy_id;
-                    const rawStatus = (s.status || "").toUpperCase();
-                    const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
-                    const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
-                    const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.some(p => p.status === "ERROR") : false;
-
+                    const stInfo = getAlgoDisplayState(s);
                     const isAlgoEnabled = s.enabled !== false;
-                    let displayStatus = "Ready";
-                    let statusClass = "straddle-badge-ready";
-                    let dotColor = "#38bdf8";
-
-                    if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
-                        displayStatus = "Stopped";
-                        statusClass = "straddle-badge-terminated";
-                        dotColor = "#64748b";
-                    } else if (rawStatus === "TERMINATED") {
-                        displayStatus = "Terminated";
-                        statusClass = "straddle-badge-terminated";
-                        dotColor = "#ef4444";
-                    } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
-                        displayStatus = "Entry Failed";
-                        statusClass = "straddle-badge-terminated";
-                        dotColor = "#f43f5e";
-                    } else if (hasOpen) {
-                        displayStatus = "Trade Active";
-                        statusClass = "straddle-badge-active";
-                        dotColor = "#10b981";
-                    } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
-                        displayStatus = "Waiting Entry";
-                        statusClass = "straddle-badge-ready";
-                        dotColor = "#38bdf8";
-                    } else {
-                        displayStatus = "Ready";
-                        statusClass = "straddle-badge-ready";
-                        dotColor = "#38bdf8";
-                    }
+                    const displayStatus = stInfo.displayStatus;
+                    const statusClass = stInfo.statusClass;
+                    const dotColor = stInfo.dotColor;
 
                     const switchInput = document.querySelector(`input[data-enable-sid="${sid}"]`);
                     if (switchInput && switchInput !== document.activeElement) {
@@ -2047,10 +2170,12 @@ function renderStraddleAlgosTable(forceRebuild = false) {
                     }
 
                     const errCell = document.getElementById(`algo_entry_err_${sid}`);
-                    const err = s.entry_error ? String(s.entry_error) : "-";
+                    const err = stInfo.subText || (s.entry_error ? String(s.entry_error) : "-");
                     if (errCell) {
                         errCell.textContent = err;
-                        errCell.style.color = (err !== "-" && !err.toLowerCase().includes("waiting")) ? "#f43f5e" : "#64748b";
+                        const isWaiting = err.toLowerCase().includes("waiting");
+                        errCell.style.color = (err !== "-" && !isWaiting) ? "#f43f5e" : (isWaiting ? "#38bdf8" : "#64748b");
+                        errCell.style.fontWeight = (isWaiting || (err !== "-" && !isWaiting)) ? "700" : "400";
                     }
 
                     const errBadgeEl = document.getElementById(`algo_err_badge_${sid}`);
@@ -2086,42 +2211,13 @@ function renderStraddleAlgosTable(forceRebuild = false) {
         let rowsHtml = "";
         filtered.forEach(s => {
             const isSelected = window._selectedAlgoIds.has(s.strategy_id);
-            const rawStatus = (s.status || "").toUpperCase();
-            const hasOpen = Array.isArray(s.positions) && s.positions.some(p => p.status === "OPEN" || p.status === "LIVE OPEN");
-            const hasCompleted = Array.isArray(s.positions) && s.positions.length > 0 && s.positions.some(p => p.status === "COMPLETE" || p.status === "CLOSED" || p.status === "EXITED");
-            const hasError = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR") : false;
+            const stInfo = getAlgoDisplayState(s);
             const errCount = (s.positions && Array.isArray(s.positions)) ? s.positions.filter(p => p.status === "ERROR").length : ((s.entry_error && s.entry_error !== "-" && !s.entry_error.toLowerCase().includes("waiting")) ? 1 : 0);
 
             const isAlgoEnabled = s.enabled !== false;
-            let displayStatus = "Ready";
-            let statusClass = "straddle-badge-ready";
-            let dotColor = "#38bdf8";
-
-            if (!isAlgoEnabled || rawStatus === "STOPPED" || (!hasOpen && (hasCompleted || s.has_traded_today) && !s._manual_reset)) {
-                displayStatus = "Stopped";
-                statusClass = "straddle-badge-terminated";
-                dotColor = "#64748b";
-            } else if (rawStatus === "TERMINATED") {
-                displayStatus = "Terminated";
-                statusClass = "straddle-badge-terminated";
-                dotColor = "#ef4444";
-            } else if (rawStatus === "ENTRY_FAILED" || (!hasOpen && hasError)) {
-                displayStatus = "Entry Failed";
-                statusClass = "straddle-badge-terminated";
-                dotColor = "#f43f5e";
-            } else if (hasOpen) {
-                displayStatus = "Trade Active";
-                statusClass = "straddle-badge-active";
-                dotColor = "#10b981";
-            } else if (rawStatus === "TRADE_ACTIVE" || rawStatus === "WAITING_ENTRY") {
-                displayStatus = "Waiting Entry";
-                statusClass = "straddle-badge-ready";
-                dotColor = "#38bdf8";
-            } else {
-                displayStatus = "Ready";
-                statusClass = "straddle-badge-ready";
-                dotColor = "#38bdf8";
-            }
+            const displayStatus = stInfo.displayStatus;
+            const statusClass = stInfo.statusClass;
+            const dotColor = stInfo.dotColor;
 
             const multType = (s.multiplier_type || "MANUAL").toUpperCase();
             const isManual = (multType !== "AUTO");
@@ -2150,12 +2246,12 @@ function renderStraddleAlgosTable(forceRebuild = false) {
             const startTime = s.start_time || "09:15:56";
             const endTime = s.end_time || "15:29:50";
             const schedDays = s.schedule_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-            const entryErr = s.entry_error ? String(s.entry_error) : "-";
+            const entryErr = stInfo.subText || (s.entry_error ? String(s.entry_error) : "-");
             const adv = s.advanced || s.advanced_settings || {};
             const isAdvSl = (adv.sl_order_placement === "Place in advance");
             const isErrActive = (entryErr !== "-" && !entryErr.toLowerCase().includes("waiting"));
 
-            const isWaitingPrem = entryErr.toLowerCase().includes("waiting for premium");
+            const isWaitingPrem = entryErr.toLowerCase().includes("waiting");
             const entryErrColor = isErrActive ? '#f43f5e' : (isWaitingPrem ? '#38bdf8' : '#64748b');
             const entryErrWeight = (isErrActive || isWaitingPrem) ? '700' : '400';
 
@@ -2691,10 +2787,17 @@ async function startStraddleAlgoDirect(strategyId) {
         });
         const res = await resp.json();
         if (res.success) {
-            showStraddleToast(`✅ '${name}' started & orders punched!`, "success", 2500);
+            if (res.waiting_for_start) {
+                showStraddleToast(`⏳ ${res.message || `'${name}' armed in Ready mode. Waiting for Start Time.`}`, "info", 4000);
+            } else {
+                showStraddleToast(`✅ '${name}' started & orders punched!`, "success", 2500);
+            }
             await fetchStraddleState();
             await loadStraddleOpenPositions();
             renderStraddleAlgosTable(true);
+            if (typeof renderStraddlePositions === "function") {
+                renderStraddlePositions();
+            }
         } else {
             showStraddleToast("Notice: " + (res.error || "Order execution triggered"), "warning", 3500);
             await fetchStraddleState();
@@ -5346,9 +5449,9 @@ function updateTerminalActionBar(strat = null, positions = null) {
         return st === "COMPLETE" || st === "CLOSED" || (p.avg_exit_price && Number(p.avg_exit_price) > 0);
     });
 
-    const rawStatus = active ? String(active.status || "").toUpperCase() : "READY";
-    const isRunning = hasOpen || rawStatus === "TRADE_ACTIVE" || (active && active.enabled !== false && active.status !== "STOPPED" && active.status !== "TERMINATED" && active.status !== "ENTRY_FAILED");
-    const isFailedOrTerminated = rawStatus === "ENTRY_FAILED" || rawStatus === "TERMINATED" || (active && active._manual_reset);
+    const stInfo = getAlgoDisplayState(active);
+    const isRunning = hasOpen || stInfo.isRunning;
+    const isFailedOrTerminated = stInfo.isFailedOrTerminated;
 
     // 1. Contextual Start / Stop Algo (Only show the valid one)
     if (btnStart && btnStop) {
@@ -5667,6 +5770,30 @@ function renderStraddlePositions(positions, groupMtm, totalMtm) {
         const masterCb = document.getElementById("straddleSelectAllLegs");
         if (masterCb) masterCb.checked = false;
         onStraddlePositionCheckboxChange();
+        const stInfo = getAlgoDisplayState(strat);
+        if (strat && stInfo.isArmedWaiting) {
+            const legCnt = Array.isArray(strat.legs) ? strat.legs.length : 0;
+            const undDisp = canonicalUnderlying(strat.underlying || "NIFTY");
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="14" style="text-align:center; padding:32px 14px;">
+                        <div style="display:inline-flex; flex-direction:column; align-items:center; gap:8px; background:rgba(56,189,248,0.06); border:1px solid rgba(56,189,248,0.28); border-radius:10px; padding:18px 28px; max-width:560px;">
+                            <div style="display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:800; color:#38bdf8;">
+                                <span>⏳</span>
+                                <span>READY — ${escapeHtml(stInfo.subText)}</span>
+                            </div>
+                            <div style="font-size:12px; color:#cbd5e1;">
+                                <b>${escapeHtml(strat.name || "Algo")}</b> (${escapeHtml(undDisp)} • ${legCnt} leg${legCnt === 1 ? "" : "s"}) is armed and waiting.
+                            </div>
+                            <div style="font-size:11px; color:#94a3b8;">
+                                Window: <b>${escapeHtml(stInfo.startTime)}</b> – <b>${escapeHtml(stInfo.endTime)}</b> • Entry orders will punch automatically as soon as the condition is met.
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
         tbody.innerHTML = `
             <tr>
                 <td colspan="14" style="text-align:center; padding:36px 14px; color:#64748b;">
@@ -8077,14 +8204,21 @@ window.toggleStraddleSettingsPanel = toggleStraddleSettingsPanel;
 
 function populateStraddleSettingsForm(s) {
     if (!s) return;
+    window._isPopulatingStraddleForm = true;
     window._straddleFormPopulatedFor = s.strategy_id;
     window._straddleSettingsDirty = false;
+    if (!window._lastSyncedConfigTs) window._lastSyncedConfigTs = {};
+    if (s.strategy_id) {
+        window._lastSyncedConfigTs[s.strategy_id] = Number(s.config_updated_at || Date.now());
+    }
 
     // Attach dirty-tracking and debounced auto-save listener once to settings panel
     const panel = document.getElementById("straddleSettingsPanel");
     if (panel && !panel._dirtyListenersAttached) {
         panel._dirtyListenersAttached = true;
         const onSettingChanged = (e) => {
+            if (window._isPopulatingStraddleForm) return;
+            if (e && e.isTrusted === false) return;
             if (e && e.target && e.target.tagName === "BUTTON" && !e.target.classList.contains("day-pill-btn") && !e.target.classList.contains("time-step-btn")) {
                 return;
             }
@@ -8093,7 +8227,7 @@ function populateStraddleSettingsForm(s) {
                 clearTimeout(window._straddleAutoSaveTimer);
             }
             window._straddleAutoSaveTimer = setTimeout(() => {
-                if (window._straddleSettingsDirty && typeof saveStraddleStrategySettings === "function") {
+                if (window._straddleSettingsDirty && !window._isPopulatingStraddleForm && typeof saveStraddleStrategySettings === "function") {
                     saveStraddleStrategySettings({ silent: true });
                 }
             }, 1200);
@@ -8416,6 +8550,8 @@ function populateStraddleSettingsForm(s) {
             updateLegsCountBadge();
         }
     }
+    window._isPopulatingStraddleForm = false;
+    window._straddleSettingsDirty = false;
 }
 
 function addStraddleLegRow(leg = null) {
@@ -10873,14 +11009,15 @@ async function saveAsNewStraddlePreset() {
 
 async function saveAndStartStraddleTrade() {
     const strat = serializeCurrentStrategySettings();
-    strat.status = "TRADE_ACTIVE";
-    strat.enabled = true;
-    showStraddleToast(`💾 Saving settings and punching orders for '${strat.name}'...`, "info", 4000);
+    const stratPayload = { ...strat };
+    delete stratPayload.positions;
+    delete stratPayload.closed_positions;
+    showStraddleToast(`💾 Saving settings and starting '${strat.name}'...`, "info", 3000);
 
     const btn = document.getElementById("btnApplyAndStartTrade");
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = `⏳ Executing Trade...`;
+        btn.innerHTML = `⏳ Starting...`;
     }
 
     const errBanner = document.getElementById("stratSettingsErrorBanner");
@@ -10894,7 +11031,7 @@ async function saveAndStartStraddleTrade() {
         const saveResp = await fetch("/api/straddle/strategy/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy: strat })
+            body: JSON.stringify({ strategy: stratPayload })
         });
         const saveRes = await saveResp.json();
         if (!saveRes.success) {
@@ -10906,8 +11043,9 @@ async function saveAndStartStraddleTrade() {
             if (btn) { btn.disabled = false; btn.innerHTML = `▶ Apply & Start Trade`; }
             return;
         }
+        window._straddleSettingsDirty = false;
 
-        // Step 2: Now start the algo with fresh settings and wait for order execution outcome
+        // Step 2: Now start the algo with fresh settings (arms in READY mode if before start_time, or executes immediately if inside window)
         if (window._straddleState?.activeStrategy) {
             window._straddleState.activeStrategy.re_execution_counts = { ce_sl: 0, ce_target: 0, pe_sl: 0, pe_target: 0 };
             updateStraddleReexecBadges([]);
@@ -10915,16 +11053,23 @@ async function saveAndStartStraddleTrade() {
         const startResp = await fetch("/api/straddle/start", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ strategy_id: strat.strategy_id, force_fresh: true })
+            body: JSON.stringify({ strategy_id: (saveRes.strategy && saveRes.strategy.strategy_id) || strat.strategy_id, force_fresh: true })
         });
         const startRes = await startResp.json();
 
         await Promise.all([fetchStraddleState(), loadStraddleOpenPositions()]);
         updateStraddleReexecBadges(window._straddleState?.activeStrategy?.positions || []);
         renderStraddleAlgosTable(true);
+        if (typeof renderStraddlePositions === "function") {
+            renderStraddlePositions();
+        }
 
         if (startRes.success) {
-            showStraddleToast(`🚀 Trade Started! ${startRes.filled_count ? startRes.filled_count + ' leg(s) filled on Kotak Neo.' : 'Orders punched.'}`, "success", 4000);
+            if (startRes.waiting_for_start) {
+                showStraddleToast(`⏳ ${startRes.message || `Algo armed in Ready mode. Waiting for Start Time (${startRes.start_time || strat.start_time}).`}`, "info", 4500);
+            } else {
+                showStraddleToast(`🚀 Trade Started! ${startRes.filled_count ? startRes.filled_count + ' leg(s) filled on Kotak Neo.' : 'Orders punched.'}`, "success", 4000);
+            }
             toggleStraddleSettingsPanel(false);
         } else {
             const errMsg = startRes.error || "Broker rejected orders";
@@ -11063,9 +11208,16 @@ async function straddleStartAlgo() {
         await Promise.all([fetchStraddleState(), loadStraddleOpenPositions()]);
         updateStraddleReexecBadges(window._straddleState?.activeStrategy?.positions || []);
         renderStraddleAlgosTable(true);
+        if (typeof renderStraddlePositions === "function") {
+            renderStraddlePositions();
+        }
 
         if (res.success) {
-            showStraddleToast(`✅ Algorithm started! ${res.filled_count ? res.filled_count + ' leg(s) filled.' : 'Orders punched.'}`, "success", 4000);
+            if (res.waiting_for_start) {
+                showStraddleToast(`⏳ ${res.message || "Algo armed in Ready mode. Waiting for Start Time."}`, "info", 4500);
+            } else {
+                showStraddleToast(`✅ Algorithm started! ${res.filled_count ? res.filled_count + ' leg(s) filled.' : 'Orders punched.'}`, "success", 4000);
+            }
         } else {
             showStraddleToast(`❌ Order Placement Failed: ${res.error || "Broker rejected orders"}`, "error", 7000);
         }
