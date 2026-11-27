@@ -9973,8 +9973,82 @@ class StraddleManager:
             return
         now_t = now_ist()
         hh_mm = now_t.strftime("%H:%M")
-        if instrument_key not in self._minute_candles:
-            self._minute_candles[instrument_key] = {}
+        bars = self._minute_candles.setdefault(instrument_key, {})
+        for prev_hm, prev_bar in list(bars.items()):
+            if prev_hm < hh_mm and isinstance(prev_bar, dict):
+                prev_bar["closed"] = True
+        if hh_mm not in bars:
+            bars[hh_mm] = {
+                "open": float(ltp),
+                "high": float(ltp),
+                "low": float(ltp),
+                "close": float(ltp),
+                "ltp": float(ltp),
+                "ts": time.time(),
+                "closed": False,
+            }
+        else:
+            bar = bars[hh_mm]
+            bar["high"] = max(float(bar.get("high", ltp)), float(ltp))
+            bar["low"] = min(float(bar.get("low", ltp)), float(ltp))
+            bar["close"] = float(ltp)
+            bar["ltp"] = float(ltp)
+            bar["ts"] = time.time()
+        if len(bars) > 120:
+            for old_k in sorted(bars.keys())[:-120]:
+                bars.pop(old_k, None)
+
+    def get_minute_candle_close(
+        self,
+        instrument_key: str,
+        hh_mm: str,
+        contract_meta: Optional[Dict[str, Any]] = None,
+        require_closed: bool = False,
+    ) -> Optional[float]:
+        """Return the 1-minute candle close for instrument_key at HH:MM from live tick cache."""
+        if not instrument_key or not hh_mm:
+            return None
+        bars = self._minute_candles.get(instrument_key, {})
+        bar = bars.get(hh_mm)
+        if isinstance(bar, dict):
+            now_hm = now_ist().strftime("%H:%M")
+            is_closed = bool(bar.get("closed")) or (now_hm > hh_mm)
+            if require_closed and not is_closed:
+                return None
+            val = float(bar.get("close") or bar.get("ltp") or 0.0)
+            if val > 0:
+                return val
+        return None
+
+    def get_minute_candle_open(
+        self,
+        instrument_key: str,
+        hh_mm: str,
+        contract_meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[float]:
+        """Return the 1-minute candle open for instrument_key at HH:MM from live tick cache."""
+        if not instrument_key or not hh_mm:
+            return None
+        bars = self._minute_candles.get(instrument_key, {})
+        bar = bars.get(hh_mm)
+        if isinstance(bar, dict):
+            val = float(bar.get("open") or bar.get("ltp") or 0.0)
+            if val > 0:
+                return val
+        return None
+
+    def _get_underlying_minute_close(self, underlying: str, hh_mm: str) -> Optional[float]:
+        """Return the 1-minute candle close for an underlying index/commodity, falling back to current spot."""
+        und = str(underlying or "NIFTY").upper()
+        bars = self._spot_minute_candles.get(und, {})
+        bar = bars.get(hh_mm)
+        if isinstance(bar, dict):
+            val = float(bar.get("close") or bar.get("ltp") or 0.0)
+            if val > 0:
+                return val
+        spot = self._get_underlying_spot_price(und)
+        return float(spot) if spot and spot > 0 else None
+
     def _recalculate_pos_sl_target(self, strat: Dict[str, Any], pos: Dict[str, Any], broker: BaseBrokerAdapter, ref_price: float):
         """Recalculate SL and Target based on ref_price, update resting broker orders, and sync."""
         side = str(pos.get("side", "SELL")).upper()
